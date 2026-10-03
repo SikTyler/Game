@@ -24,6 +24,9 @@ const Tabs := preload("res://ui/MetaTabs.gd")
 const RunView := preload("res://ui/RunView.gd")
 const SfxScript := preload("res://Sfx.gd")
 const Menus := preload("res://ui/Menus.gd")
+const FxPool := preload("res://vfx/FxPool.gd")
+const Juice := preload("res://vfx/Juice.gd")
+const BurstsScript := preload("res://vfx/Bursts.gd")
 
 const W: float = 720.0
 const H: float = 1280.0
@@ -71,13 +74,17 @@ var fade: float = 0.0
 const FADE_TIME: float = 0.25
 
 # fx
-var tracers: Array = []    # {a, b, t, color, w}
-var rings: Array = []      # {pos, r, t, color}
-var pops: Array = []       # {pos, text, t, color, size}
+# Pooled fixed-size fx (vfx/FxPool.gd): no per-frame Array growth.
+var tracers: FxPool = FxPool.new(96)  # {a, b, t, color, w}
+var rings: FxPool = FxPool.new(48)    # {pos, r, t, color}
+var pops: FxPool = FxPool.new(24)     # {pos, text, t, color, size}
+var dmgnums: FxPool = FxPool.new(48)  # {pos, amt, eid, t, size} merged per enemy within DMG_MERGE
+const DMG_MERGE: float = 0.1
+var juice: Juice = Juice.new()        # trauma shake + hit-pause (view-only)
+var bursts: Node2D = null             # vfx/Bursts.gd pooled kill particles
 const BOUNTY_BANNER_DY: float = 3.4 * TowerState.CELL   # below the grid's bottom edge (2.5 cells)
-var bolts: Array = []      # {a, t}
+var bolts: FxPool = FxPool.new(24)    # {a, t}
 var slot_pop: Dictionary = {}
-var shake: float = 0.0
 var flash: float = 0.0
 var heal_flash: float = 0.0
 var level_burst: float = 0.0
@@ -91,6 +98,8 @@ func _ready() -> void:
 	ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.position = Vector2.ZERO
 	ui.size = Vector2(W, H)
+	bursts = BurstsScript.new()
+	add_child(bursts)   # before ui: particles under the HUD widgets
 	add_child(ui)
 	fader = ColorRect.new()
 	fader.color = Color(0.05, 0.06, 0.08, 1.0)
@@ -273,13 +282,70 @@ func cycle_speed() -> void:
 	_rebuild_ui()
 
 
+func _tracer(a: Vector2, b: Vector2, col: Color, w: float) -> void:
+	var d: Dictionary = tracers.take(0.12)
+	d["a"] = a
+	d["b"] = b
+	d["color"] = col
+	d["w"] = w
+
+
+func _ring(pos: Vector2, r: float, t: float, col: Color) -> void:
+	var d: Dictionary = rings.take(t)
+	d["pos"] = pos
+	d["r"] = r
+	d["color"] = col
+
+
+func _pop(pos: Vector2, text: String, t: float, col: Color, size: int) -> void:
+	var d: Dictionary = pops.take(t)
+	d["pos"] = pos
+	d["text"] = text
+	d["color"] = col
+	d["size"] = size
+
+
+## Floating damage number: hits on the same enemy within DMG_MERGE seconds
+## merge into one number; bigger hits draw bigger (log scale).
+func _dmg_num(eid: int, pos: Vector2, amt: float) -> void:
+	for d in dmgnums.items:
+		if float(d["t"]) > 0.0 and int(d.get("eid", -1)) == eid and float(d["life"]) - float(d["t"]) < DMG_MERGE:
+			d["amt"] = float(d["amt"]) + amt
+			d["pos"] = pos
+			d["size"] = dmg_size(float(d["amt"]))
+			return
+	var n: Dictionary = dmgnums.take(0.6)
+	n["eid"] = eid
+	n["pos"] = pos
+	n["amt"] = amt
+	n["size"] = dmg_size(amt)
+
+
+static func dmg_size(amt: float) -> int:
+	return clampi(int(13.0 + 4.0 * log(maxf(1.0, amt)) / log(10.0)), 14, 34)
+
+
+static func kill_color(kind: String) -> Color:
+	match kind:
+		"boss":
+			return GOLD
+		"elite":
+			return SHIELD
+		"skitter", "mite", "splitter":
+			return ENEMY2
+	return ENEMY
+
+
 func _clear_fx() -> void:
 	tracers.clear()
 	rings.clear()
 	pops.clear()
 	bolts.clear()
+	dmgnums.clear()
+	if bursts != null:
+		bursts.call("clear")
 	slot_pop.clear()
-	shake = 0.0
+	juice.reset()
 	flash = 0.0
 	heal_flash = 0.0
 	level_burst = 0.0
@@ -384,7 +450,7 @@ func _handle(events: Array) -> void:
 		for x in Missions.on_run_events(save, events):
 			if String((x as Dictionary)["t"]) == "mission_done":
 				run_missions += 1
-				pops.append({"pos": Vector2(360, 300), "text": "MISSION COMPLETE", "t": 1.4, "color": GEM, "size": 26})
+				_pop(Vector2(360, 300), "MISSION COMPLETE", 1.4, GEM, 26)
 	for e in events:
 		var ev: Dictionary = e
 		var clip: String = String(EVENT_CLIP.get(String(ev["t"]), ""))
@@ -398,52 +464,63 @@ func _handle(events: Array) -> void:
 				var col: Color = Color.WHITE if kind == "core" else BuildingDB.cat_color("weapon")
 				if kind == "tesla":
 					col = Color("b48cff")
-				tracers.append({"a": ev["from"], "b": ev["to"], "t": 0.12, "color": col, "w": 4.0 if kind == "mortar" else 2.0})
+				_tracer(ev["from"], ev["to"], col, 4.0 if kind == "mortar" else 2.0)
 				if kind == "mortar":
-					rings.append({"pos": ev["to"], "r": float(ev["radius"]), "t": 0.3, "color": RUST})
+					_ring(ev["to"], float(ev["radius"]), 0.3, RUST)
+			"dmg":
+				_dmg_num(int(ev["eid"]), ev["pos"], float(ev["amt"]))
+			"target_mode":
+				rebuild = true
 			"kill":
-				pops.append({"pos": ev["pos"], "text": "+$%d" % int(round(float(ev["cash"]))), "t": 0.7, "color": BuildingDB.cat_color("eco"), "size": 18})
-				rings.append({"pos": ev["pos"], "r": 18.0, "t": 0.2, "color": ENEMY})
+				var kk: String = String(ev["kind"])
+				if bursts != null:
+					bursts.call("burst", ev["pos"], kill_color(kk), kk == "boss")
+				if kk == "boss":
+					juice.hit_pause(0.06)
+					juice.add_trauma(0.5)
+				_pop((ev["pos"] as Vector2) + Vector2(26, 10), "+$%d" % int(round(float(ev["cash"]))), 0.7, BuildingDB.cat_color("eco"), 16)
+				_ring(ev["pos"], 18.0, 0.2, ENEMY)
 			"core_hit":
-				shake = minf(14.0, shake + 4.0)
+				juice.add_trauma(0.22)
 				flash = minf(0.45, flash + 0.18)
 			"enemy_shot":
-				bolts.append({"a": ev["pos"], "t": 0.25})
+				var bo: Dictionary = bolts.take(0.25)
+				bo["a"] = ev["pos"]
 				flash = minf(0.3, flash + 0.06)
 			"shield_hit":
-				rings.append({"pos": ev["pos"], "r": 26.0, "t": 0.2, "color": SHIELD})
+				_ring(ev["pos"], 26.0, 0.2, SHIELD)
 			"shield_break":
-				rings.append({"pos": ev["pos"], "r": 44.0, "t": 0.4, "color": SHIELD})
-				pops.append({"pos": ev["pos"], "text": "BREAK", "t": 0.7, "color": SHIELD, "size": 20})
+				_ring(ev["pos"], 44.0, 0.4, SHIELD)
+				_pop(ev["pos"], "BREAK", 0.7, SHIELD, 20)
 			"split":
-				rings.append({"pos": ev["pos"], "r": 30.0, "t": 0.3, "color": ENEMY2})
+				_ring(ev["pos"], 30.0, 0.3, ENEMY2)
 			"interest":
 				var ip: Vector2 = TowerState.slot_pos(int(ev["slot"]))
-				pops.append({"pos": ip, "text": "+$%d" % int(round(float(ev["amt"]))), "t": 1.0, "color": GOLD, "size": 20})
+				_pop(ip, "+$%d" % int(round(float(ev["amt"]))), 1.0, GOLD, 20)
 				slot_pop[int(ev["slot"])] = 0.3
 			"boss_bounty":
 				var bp: Vector2 = ev["pos"]
-				rings.append({"pos": bp, "r": 120.0, "t": 0.6, "color": GOLD})
+				_ring(bp, 120.0, 0.6, GOLD)
 				var bt: String = "BOUNTY +%d coins" % int(ev["coins"])
 				if int(ev["gems"]) > 0:
 					bt += "  +%d gems" % int(ev["gems"])
 				# Banner sits in the open band below the 5x5 grid (AC-37: never over slots).
-				pops.append({"pos": TowerState.CENTER + Vector2(0, BOUNTY_BANNER_DY), "text": bt, "t": 1.6, "color": GOLD, "size": 24})
+				_pop(TowerState.CENTER + Vector2(0, BOUNTY_BANNER_DY), bt, 1.6, GOLD, 24)
 			"revive":
 				heal_flash = 0.6
-				pops.append({"pos": TowerState.CENTER + Vector2(0, -200), "text": "SECOND WIND!", "t": 1.6, "color": Color("6bd46b"), "size": 34})
+				_pop(TowerState.CENTER + Vector2(0, -200), "SECOND WIND!", 1.6, Color("6bd46b"), 34)
 			"wave_skip":
-				pops.append({"pos": TowerState.CENTER + Vector2(0, -160), "text": "WAVE SKIP +%d" % int(ev["skipped"]), "t": 1.4, "color": GEM, "size": 28})
+				_pop(TowerState.CENTER + Vector2(0, -160), "WAVE SKIP +%d" % int(ev["skipped"]), 1.4, GEM, 28)
 			"wave":
-				pops.append({"pos": TowerState.CENTER + Vector2(0, -260), "text": "WAVE %d" % int(ev["wave"]), "t": 1.4, "color": TEXT, "size": 40})
+				_pop(TowerState.CENTER + Vector2(0, -260), "WAVE %d" % int(ev["wave"]), 1.4, TEXT, 40)
 			"boss":
-				pops.append({"pos": TowerState.CENTER + Vector2(0, -210), "text": "BOSS INBOUND", "t": 1.8, "color": ENEMY2, "size": 30})
-				shake = 10.0
+				_pop(TowerState.CENTER + Vector2(0, -210), "BOSS INBOUND", 1.8, ENEMY2, 30)
+				juice.add_trauma(0.55)
 			"levelup":
 				level_burst = 0.6
 				rebuild = true
 			"perk_taken":
-				pops.append({"pos": TowerState.CENTER + Vector2(0, -200), "text": String(ev["name"]), "t": 1.4, "color": GOLD, "size": 30})
+				_pop(TowerState.CENTER + Vector2(0, -200), String(ev["name"]), 1.4, GOLD, 30)
 				rebuild = true
 			"perk_offer", "draft_reroll", "speed":
 				rebuild = true
@@ -459,7 +536,7 @@ func _handle(events: Array) -> void:
 			"dead":
 				last_result = ev
 				screen = "results"
-				shake = 18.0
+				juice.add_trauma(0.9)
 				flash = 0.6
 				MetaSave.write(save)
 				rebuild = true
@@ -523,7 +600,7 @@ func _process(delta: float) -> void:
 	if screen == "run" and S != null and overlay != "":
 		pass   # paused: engine time frozen
 	elif screen == "run" and S != null:
-		_handle(S.tick(delta))
+		_handle(S.tick(juice.engine_delta(delta)))
 		ui_t += delta
 		if ui_t >= 0.25 and screen == "run":
 			ui_t = 0.0
@@ -544,20 +621,16 @@ func _process(delta: float) -> void:
 	elif not toast_queue.is_empty():
 		toast_text = String(toast_queue.pop_front())
 		toast_t = 2.4
-	for arr in [tracers, rings, pops, bolts]:
-		var keep: Array = []
-		for f in arr:
-			var fd: Dictionary = f
-			fd["t"] = float(fd["t"]) - delta
-			if float(fd["t"]) > 0.0:
-				keep.append(fd)
-		arr.clear()
-		arr.append_array(keep)
+	tracers.update(delta)
+	rings.update(delta)
+	pops.update(delta)
+	bolts.update(delta)
+	dmgnums.update(delta)
 	for k in slot_pop.keys():
 		slot_pop[k] = float(slot_pop[k]) - delta
 		if float(slot_pop[k]) <= 0.0:
 			slot_pop.erase(k)
-	shake = maxf(0.0, shake - 40.0 * delta)
+	juice.update(delta)
 	flash = maxf(0.0, flash - 1.5 * delta)
 	heal_flash = maxf(0.0, heal_flash - delta)
 	level_burst = maxf(0.0, level_burst - delta)
@@ -810,6 +883,9 @@ func _build_run_ui() -> void:
 		elif S.id_at(sel) != "":
 			var c2: int = S.upgrade_cost(sel)
 			_btn("Upgrade Lv%d -> %d  $%d" % [S.lvl_at(sel), S.lvl_at(sel) + 1, c2], Rect2(160, 960, 400, 90), func() -> void: _handle(S.upgrade(sel)), S.cash >= float(c2) and S.lvl_at(sel) < TowerState.lvl_cap(), BuildingDB.cat_color(BuildingDB.cat_of(S.id_at(sel))))
+	if sel >= 0 and S.is_weapon_slot(sel):
+		var tsel: int = sel
+		_btn("Target: %s" % String(S.target_modes[sel]).capitalize(), Rect2(200, 1180, 320, 70), func() -> void: _handle(S.cycle_target_mode(tsel)), true, BuildingDB.cat_color("weapon"))
 
 
 static func _speed_str(v: float) -> String:
@@ -852,7 +928,9 @@ func _bar(r: Rect2, frac: float, col: Color) -> void:
 
 func _draw() -> void:
 	draw_rect(Rect2(0, 0, W, H), BG)
-	var off: Vector2 = Vector2(randf_range(-shake, shake), randf_range(-shake, shake)) if shake > 0.0 else Vector2.ZERO
+	var off: Vector2 = juice.offset()
+	if bursts != null:
+		bursts.position = off
 	draw_set_transform(off)
 	_draw_background()
 	if screen != "base" or tab == "base":

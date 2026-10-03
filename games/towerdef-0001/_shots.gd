@@ -89,6 +89,14 @@ func _initialize() -> void:
 	main._handle([{"t": "boss_bounty", "coins": 120, "gems": 2, "pos": TowerState.CENTER + Vector2(40, 30)}])
 	await _wait(4)
 	await _shot("%s/2c_bounty.png" % outdir)
+	# Midgame juice: weapon selected (Target button), live damage numbers,
+	# hit flashes and pooled kill bursts from real engine events.
+	main.sel = 7 if S.is_weapon_slot(7) else TowerState.CORE_SLOT
+	main._rebuild_ui()
+	for e in S.enemies:
+		(e as Dictionary)["hp"] = minf(float((e as Dictionary)["hp"]), 30.0)
+	await _wait(9)
+	await _shot("%s/2j_juice.png" % outdir)
 	main.sel = -1
 	main._rebuild_ui()
 	S.perk_pending = 1

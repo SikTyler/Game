@@ -317,9 +317,16 @@ func _run() -> void:
 	_press("Overcharge")
 	await _frames()
 	_check("core cash upgrade button", S.core_run_lvl == 1)
+	# Targeting: selected weapon shows a "Target: X" cycle button (real click).
+	var tm0: String = String(S.target_modes[12])
+	_check("target button shown for selected weapon", _find("Target: Nearest") != null or _find("Target:") != null)
+	_press("Target:")
+	await _frames()
+	_check("target button cycles mode", String(S.target_modes[12]) != tm0 and String(S.target_modes[12]) == String(TowerState.TARGET_MODES[(TowerState.TARGET_MODES.find(tm0) + 1) % 4]))
+	_check("target button label updates", _find("Target: " + String(S.target_modes[12]).capitalize()) != null)
 	# AC-37 polish: the boss-bounty banner renders below the grid, never over a slot.
 	main._handle([{"t": "boss_bounty", "coins": 50, "gems": 1, "pos": TowerState.CENTER}])
-	var bpop: Dictionary = main.pops[main.pops.size() - 1]
+	var bpop: Dictionary = main.pops.last
 	var bpos: Vector2 = bpop["pos"]
 	_check("bounty banner clears the grid", String(bpop["text"]).begins_with("BOUNTY") and bpos.y - 30.0 > TowerState.CENTER.y + 2.5 * TowerState.CELL)
 

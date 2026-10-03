@@ -56,30 +56,46 @@ static func draw_world(m) -> void:
 				m.draw_arc(p, s * 1.2, 0, TAU, 24, SHIELD, 3.0)
 			for k in mini(sh, 8):
 				m.draw_circle(p + Vector2((float(k) - float(mini(sh, 8) - 1) * 0.5) * 9.0, -s - 10.0), 3.5, SHIELD)
+		var ht: float = float(ed.get("hit_t", 0.0))
+		if ht > 0.0:   # hit flash (engine stamps hit_t; view only draws it)
+			m.draw_circle(p, s * 0.75, Color(1, 1, 1, 0.75 * ht / TowerState.HIT_FLASH))
 		var frac: float = float(ed["hp"]) / float(ed["max_hp"])
 		if frac < 1.0:
 			m.draw_rect(Rect2(p + Vector2(-s * 0.6, s * 0.85), Vector2(s * 1.2, 4)), Color(0, 0, 0, 0.6))
 			m.draw_rect(Rect2(p + Vector2(-s * 0.6, s * 0.85), Vector2(s * 1.2 * frac, 4)), col.lightened(0.3))
-	for f in m.bolts:
-		var bd: Dictionary = f
+	for bd in m.bolts.items:
+		if float(bd["t"]) <= 0.0:
+			continue
 		var bp: Vector2 = (bd["a"] as Vector2).lerp(TowerState.CENTER, 1.0 - float(bd["t"]) / 0.25)
 		if not m._icon("bolt", Rect2(bp - Vector2(12, 12), Vector2(24, 24))):
 			m.draw_circle(bp, 5.0, ENEMY)
-	for f in m.tracers:
-		var fd: Dictionary = f
+	for fd in m.tracers.items:
+		if float(fd["t"]) <= 0.0:
+			continue
 		var a: float = float(fd["t"]) / 0.12
 		var tc: Color = fd["color"]
 		m.draw_line(fd["a"], fd["b"], Color(tc, 0.25 * a), float(fd["w"]) * 3.0)
 		m.draw_line(fd["a"], fd["b"], Color(tc, a), float(fd["w"]))
-	for f in m.rings:
-		var fd2: Dictionary = f
+	for fd2 in m.rings.items:
+		if float(fd2["t"]) <= 0.0:
+			continue
 		var rc: Color = fd2["color"]
 		m.draw_arc(fd2["pos"], float(fd2["r"]) * (1.3 - float(fd2["t"])), 0, TAU, 32, Color(rc, minf(1.0, float(fd2["t"]) * 4.0)), 3.0)
 	if m.level_burst > 0.0:
 		var k2: float = 1.0 - m.level_burst / 0.6
 		m.draw_arc(TowerState.CENTER, 40.0 + 420.0 * k2, 0, TAU, 96, Color(BuildingDB.cat_color("eco"), 1.0 - k2), 8.0)
-	for f in m.pops:
-		var fd3: Dictionary = f
+	for dn in m.dmgnums.items:
+		var dt: float = float(dn["t"])
+		if dt <= 0.0:
+			continue
+		var age: float = float(dn["life"]) - dt
+		var dsz: int = int(dn["size"])
+		var pun: float = 1.0 + maxf(0.0, 0.12 - age) * 3.0   # brief pop-in scale
+		var dc: Color = Color("fff2c0") if dsz >= 24 else Color(1, 1, 1)
+		m._text(m.fmt_num(int(round(float(dn["amt"])))), (dn["pos"] as Vector2) + Vector2(float(int(dn["eid"]) * 37 % 31) - 15.0, -18.0 - age * 50.0), int(float(dsz) * pun), Color(dc, minf(1.0, dt * 3.0)))
+	for fd3 in m.pops.items:
+		if float(fd3["t"]) <= 0.0:
+			continue
 		var pp: Vector2 = fd3["pos"]
 		var lift: float = (1.0 - float(fd3["t"])) * 30.0
 		var pc: Color = fd3["color"]
