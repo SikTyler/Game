@@ -37,6 +37,8 @@ static func lvl_cap() -> int:
 const MAX_ENEMIES: int = 220
 const SUBSTEP: float = 0.05
 const CORE_RING: Array = [6, 7, 8, 11, 13, 16, 17, 18]
+const TARGET_MODES: Array = ["nearest", "first", "strongest", "weakest"]
+const HIT_FLASH: float = 0.12   # view reads e["hit_t"] for the white hit flash
 const ECO_IDS: Array = ["mine", "oilmill", "bounty", "vault"]
 
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
@@ -44,6 +46,8 @@ var save: Dictionary = {}
 var slots: Array = []        # 25 × ({} | {id, perm, run})
 var unlocked: Array = []     # 25 × bool
 var cooldowns: Array = []    # 25 × float (core uses CORE_SLOT)
+var target_modes: Array = []  # 25 × String (TARGET_MODES); perm slots persist in save["target_modes"]
+var next_eid: int = 1
 var enemies: Array = []      # {pos, hp, max_hp, spd, dmg, kind, atk_cd, slow_t, cash, xp, coin, size}
 var stats: Dictionary = {}
 
@@ -128,6 +132,7 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0) -> Array:
 	slots.clear()
 	unlocked.clear()
 	cooldowns.clear()
+	target_modes.clear()
 	for i in 25:
 		var perm: Dictionary = BaseMeta.slot_of(save, i)
 		if perm.is_empty():
@@ -136,7 +141,10 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0) -> Array:
 			slots.append({"id": String(perm["id"]), "perm": int(perm["lvl"]), "run": 0})
 		unlocked.append(BaseMeta.is_unlocked(save, i))
 		cooldowns.append(0.0)
+		var tm: String = String((save.get("target_modes", {}) as Dictionary).get(str(i), "nearest")) if save.get("target_modes", {}) is Dictionary else "nearest"
+		target_modes.append(tm if TARGET_MODES.has(tm) else "nearest")
 	enemies.clear()
+	next_eid = 1
 	draft.clear()
 	pending_place = ""
 	wave = 1
@@ -588,7 +596,9 @@ func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF) -> void:
 		"cash": float(d["cash"]), "xp": float(d["xp"]), "coin": float(d["coin"]),
 		"size": float(d["size"]), "atk_cd": 0.0, "slow_t": 0.0,
 		"shield": 0, "fire_cd": 0.0, "shock_t": 0.0, "shock_src": -1,
+		"hit_t": 0.0, "eid": next_eid,
 	}
+	next_eid += 1
 	match kind:
 		"boss":
 			# Balance knob: boss HP relative to EnemyDB from Tier 2 up (softens the
@@ -625,6 +635,7 @@ func _move_enemies(dt: float, ev: Array) -> void:
 		var mult: float = 0.55 if slow_t > 0.0 else 1.0
 		ed["slow_t"] = maxf(0.0, slow_t - dt)
 		ed["shock_t"] = maxf(0.0, float(ed.get("shock_t", 0.0)) - dt)
+		ed["hit_t"] = maxf(0.0, float(ed.get("hit_t", 0.0)) - dt)
 		var ranged: bool = String(ed["kind"]) == "ranged"
 		var stop: float = r_stop if ranged else STOP_R
 		var to_c: Vector2 = CENTER - pos
@@ -642,6 +653,71 @@ func _move_enemies(dt: float, ev: Array) -> void:
 			if float(ed["atk_cd"]) <= 0.0:
 				ed["atk_cd"] = 1.0
 				_core_damage(float(ed["dmg"]), ev, "core_hit", pos)
+
+
+## Targeting (pattern adapted from ape1121/Godot-4-Tower-Defense-Template, MIT:
+## try_get_closest_target; first/strongest/weakest are in-house). Pure: picks
+## an index into `enemies` within `rng_lim` of `from`, or -1.
+##   nearest   – closest to the weapon
+##   first     – closest to the core (most dangerous)
+##   strongest – highest current hp (ties -> nearest)
+##   weakest   – lowest current hp (ties -> nearest)
+func pick_target(from: Vector2, rng_lim: float, mode: String) -> int:
+	if mode == "nearest":
+		return _nearest(from, rng_lim, {})
+	var best: int = -1
+	var best_key: float = INF
+	var best_d: float = INF
+	var lim2: float = rng_lim * rng_lim
+	for k in enemies.size():
+		var ed: Dictionary = enemies[k]
+		var hpv: float = float(ed["hp"])
+		if hpv <= 0.0:
+			continue
+		var p: Vector2 = ed["pos"]
+		var d2: float = from.distance_squared_to(p)
+		if d2 > lim2:
+			continue
+		var key: float = 0.0
+		match mode:
+			"first":
+				key = CENTER.distance_squared_to(p)
+			"strongest":
+				key = -hpv
+			_:
+				key = hpv
+		if key < best_key or (key == best_key and d2 < best_d):
+			best_key = key
+			best_d = d2
+			best = k
+	return best
+
+
+## Set a weapon slot's targeting mode (run-scoped; permanent buildings also
+## remember it in the save).
+func set_target_mode(i: int, mode: String) -> Array:
+	if i < 0 or i >= 25 or not TARGET_MODES.has(mode) or not is_weapon_slot(i):
+		return []
+	target_modes[i] = mode
+	if i == CORE_SLOT or int((slots[i] as Dictionary).get("perm", 0)) > 0:
+		if not (save.get("target_modes", null) is Dictionary):
+			save["target_modes"] = {}
+		(save["target_modes"] as Dictionary)[str(i)] = mode
+	return [{"t": "target_mode", "slot": i, "mode": mode}]
+
+
+func is_weapon_slot(i: int) -> bool:
+	for w in stats.get("weapons", []):
+		if int((w as Dictionary)["slot"]) == i:
+			return true
+	return false
+
+
+func cycle_target_mode(i: int) -> Array:
+	if i < 0 or i >= target_modes.size():
+		return []
+	var k: int = TARGET_MODES.find(String(target_modes[i]))
+	return set_target_mode(i, String(TARGET_MODES[(k + 1) % TARGET_MODES.size()]))
 
 
 func _nearest(from: Vector2, rng_lim: float, exclude: Dictionary) -> int:
@@ -672,6 +748,8 @@ func _hit(ed: Dictionary, dmg: float, ev: Array) -> void:
 			ev.append({"t": "shield_break", "pos": ed["pos"]})
 		return
 	ed["hp"] = float(ed["hp"]) - dmg
+	ed["hit_t"] = HIT_FLASH
+	ev.append({"t": "dmg", "eid": int(ed.get("eid", 0)), "pos": ed["pos"], "amt": dmg})
 
 
 func _fire(dt: float, ev: Array) -> void:
@@ -683,7 +761,7 @@ func _fire(dt: float, ev: Array) -> void:
 			cooldowns[si] = cd
 			continue
 		var from: Vector2 = slot_pos(si)
-		var tgt: int = _nearest(from, float(wd["range"]), {})
+		var tgt: int = pick_target(from, float(wd["range"]), String(target_modes[si]) if si < target_modes.size() else "nearest")
 		if tgt < 0:
 			cooldowns[si] = 0.0
 			continue

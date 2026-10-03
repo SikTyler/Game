@@ -219,6 +219,7 @@ func _initialize() -> void:
 	_meta_stages()
 	_engine_b_stages()
 	_fix_round_stages()
+	_juice_targeting_stages()
 
 	if fails.is_empty():
 		print("SELFTEST OK")
@@ -968,3 +969,72 @@ func _fix_round_stages() -> void:
 	var sev: Array = []
 	S._spawn("drone", sev)
 	_check("enemy dmg ramp 1.06^(w-1)", is_equal_approx(float((S.enemies[S.enemies.size() - 1] as Dictionary)["dmg"]), 4.0 * pow(1.06, 40.0)))
+
+
+## VFX/gameplay pass: per-weapon targeting modes, hit flash + dmg events,
+## tier-5 wave-60 enemy cap stress.
+func _juice_targeting_stages() -> void:
+	var S = _fresh()
+	S.enemies.clear()
+	var from: Vector2 = TowerState.slot_pos(7)
+	# a: nearest to weapon, low hp, far from core
+	var a: Dictionary = _enemy("drone", from + Vector2(0, -60), 5.0)
+	# b: closest to core, mid hp
+	var b: Dictionary = _enemy("drone", TowerState.CENTER + Vector2(-90, 0), 50.0)
+	# c: strongest, farther from weapon
+	var c: Dictionary = _enemy("drone", from + Vector2(150, -120), 500.0)
+	# d: out of range, would win every mode
+	var d: Dictionary = _enemy("drone", from + Vector2(0, -2000), 1.0)
+	S.enemies.append_array([a, b, c, d])
+	_check("target nearest", S.pick_target(from, 400.0, "nearest") == 0)
+	_check("target first (closest to core)", S.pick_target(from, 400.0, "first") == 1)
+	_check("target strongest", S.pick_target(from, 400.0, "strongest") == 2)
+	_check("target weakest", S.pick_target(from, 400.0, "weakest") == 0)
+	_check("target none in range", S.pick_target(from + Vector2(0, -5000), 50.0, "first") == -1)
+	# Per-slot modes: only weapon slots, cycle wraps, fire() uses the mode.
+	S = _fresh()
+	S.slots[7] = {"id": "gun", "perm": 1, "run": 0}
+	S.recompute()
+	_check("default target mode nearest", String(S.target_modes[7]) == "nearest")
+	_check("non-weapon slot rejects mode", S.set_target_mode(3, "first").is_empty())
+	var cev: Array = S.cycle_target_mode(7)
+	_check("cycle -> first + event", String(S.target_modes[7]) == "first" and cev.size() == 1 and String((cev[0] as Dictionary)["t"]) == "target_mode")
+	S.cycle_target_mode(7)
+	S.cycle_target_mode(7)
+	S.cycle_target_mode(7)
+	_check("cycle wraps to nearest", String(S.target_modes[7]) == "nearest")
+	S.set_target_mode(7, "strongest")
+	S.enemies.clear()
+	var from7: Vector2 = TowerState.slot_pos(7)
+	var weak: Dictionary = _enemy("drone", from7 + Vector2(0, -40), 10.0)
+	var strong: Dictionary = _enemy("drone", from7 + Vector2(0, -150), 900.0)
+	S.enemies.append_array([weak, strong])
+	for k in 25:
+		S.cooldowns[k] = 99.0
+	S.cooldowns[7] = 0.0
+	var fev: Array = []
+	S._fire(0.01, fev)
+	_check("fire() honours strongest mode", float(strong["hp"]) < 900.0 and float(weak["hp"]) == 10.0)
+	_check("hit sets hit_t flash + dmg event", float(strong["hit_t"]) > 0.0 and _evts(fev, "dmg").size() >= 1)
+	_check("perm weapon mode persists in save", String((S.save["target_modes"] as Dictionary)["7"]) == "strongest")
+	var S2 = TowerState.new()
+	S2.setup(77, S.save)
+	_check("persisted mode restored next run", String(S2.target_modes[7]) == "strongest")
+	# Stress: tier 5, wave 60, forced spawn flood for 10 s -> cap holds.
+	S = _fresh()
+	S.tier = 5
+	S.hp_mult = 50.0
+	S._enter_wave(60)
+	S.min_spawn = 0.001
+	S.spawn_base = 0.001
+	S.stats["max_hp"] = 1.0e15
+	S.hp = 1.0e15
+	var peak: int = 0
+	var t: float = 0.0
+	while t < 10.0 and not S.over:
+		S.tick(0.05)
+		peak = maxi(peak, S.enemies.size())
+		t += 0.05
+		S.draft.clear()
+		S.perk_offer.clear()
+	_check("T5 w60 10 s flood: enemy count capped (peak %d)" % peak, peak <= TowerState.MAX_ENEMIES and peak > 50)
