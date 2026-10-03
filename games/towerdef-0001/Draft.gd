@@ -7,7 +7,7 @@ extends RefCounted
 const BuildingDB := preload("res://data/BuildingDB.gd")
 
 
-static func offer(rng: RandomNumberGenerator, slots: Array, unlocked: Array) -> Array:
+static func offer(rng: RandomNumberGenerator, slots: Array, unlocked: Array, allow_new: bool = false) -> Array:
 	var has_free: bool = false
 	var owned: Dictionary = {}
 	for i in 25:
@@ -18,7 +18,7 @@ static func offer(rng: RandomNumberGenerator, slots: Array, unlocked: Array) -> 
 		else:
 			owned[String(s["id"])] = true
 	var cands: Array = []
-	for id in BuildingDB.ids():
+	for id in (BuildingDB.all_ids() if allow_new else BuildingDB.ids()):
 		if owned.has(id):
 			cands.append({"kind": "plus", "id": id})
 		if has_free:

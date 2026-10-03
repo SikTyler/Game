@@ -12,9 +12,18 @@ const DEFS: Dictionary = {
 	"mine":    {"name": "Mine",          "cat": "eco",     "coin": 15, "desc": "+$1.2/sec per lv"},
 	"oilmill": {"name": "Oil Mill",      "cat": "eco",     "coin": 15, "desc": "+25% XP /lv, +15% per adjacent Mine"},
 	"bounty":  {"name": "Bounty Office", "cat": "eco",     "coin": 18, "desc": "+40% cash per kill /lv"},
+	"vault":   {"name": "Vault",         "cat": "eco",     "coin": 20, "desc": "Wave end: +4%/lv interest on held cash (cap $40/lv)"},
+	"aegis":   {"name": "Aegis Pylon",   "cat": "support", "coin": 22, "desc": "-4%/lv core dmg; adj weapons +10%/lv rate; adj eco -15%"},
 }
 
 const IDS: Array = ["gun", "mortar", "tesla", "armory", "bulwark", "mine", "oilmill", "bounty"]
+
+## Run-3+ buildings (SYSTEMS §11): drafted only when run_mods.allow_new_bldg.
+const NEW_IDS: Array = ["vault", "aegis"]
+
+
+static func all_ids() -> Array:
+	return IDS + NEW_IDS
 
 
 static func ids() -> Array:
