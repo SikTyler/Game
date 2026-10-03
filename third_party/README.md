@@ -11,7 +11,7 @@ Every external source used by GameForge / Corehold. Licenses were verified by re
 | Godot-4-Tower-Defense-Template | https://github.com/ape1121/Godot-4-Tower-Defense-Template @ cfdbf5e | MIT | Planned: targeting logic (closest-target) adapted into TowerState | (c) 2024 Alp |
 | Maaack Godot-Game-Template | https://github.com/Maaack/Godot-Game-Template @ 6849d6c | MIT | Planned: options/audio menu, pause menu, credits, scene-loader fade patterns adapted (no autoloads) | (c) 2022-present Marek Belski |
 | game-icons.net | https://github.com/game-icons/icons @ 82d9488 | CC-BY 3.0 (some authors CC0) | Planned: selected SVGs for labs/cards/perks/coins/gems, recoloured | "Icons by <author> from game-icons.net, CC BY 3.0" — per icon, shown in in-game credits |
-| anthropics/skills theme-factory | https://github.com/anthropics/skills/tree/main/skills/theme-factory @ 8a1541c | Apache-2.0 | Planned: vendor folder to `.claude/skills/theme-factory/` with LICENSE | theme-factory (c) Anthropic, Apache-2.0 |
+| anthropics/skills theme-factory | https://github.com/anthropics/skills/tree/main/skills/theme-factory @ 8a1541c | Apache-2.0 | Vendored to `.claude/skills/theme-factory/` (LICENSE.txt + NOTICE); only the SKILL.md description changed | theme-factory (c) Anthropic, Apache-2.0 |
 | Idle-math references | Kongregate "The Math of Idle Games" (blog); ellisonleao/magictools (MIT); godotengine/awesome-godot (CC-BY 4.0) | — | Formulas/ideas only, no files copied | — |
 
 **Not obtainable:** kenney.nl (impact-sounds, interface-sounds, particle-pack) returned HTTP 000 (blocked by proxy); not used.
