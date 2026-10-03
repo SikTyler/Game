@@ -1,0 +1,110 @@
+{
+  "id": "towerdef-0001",
+  "name": "Corehold",
+  "created_at": "2026-10-03T00:58:54.944Z",
+  "updated_at": "2026-10-03T01:07:05.309Z",
+  "status": "validated",
+  "concept": {
+    "theme": {
+      "premise": "a lone frontier mining outpost whose drill-core tower holds out against endless waves of blocky scrap-machines, rebuilding a little stronger after every fall",
+      "tone": "tense, gritty, deeply satisfying — the steady grind of a base that keeps getting stronger",
+      "mood_keywords": [
+        "industrial",
+        "blocky",
+        "escalating",
+        "grind"
+      ],
+      "setting": "a scorched rust-and-slate frontier plateau under a dusty dusk sky"
+    },
+    "genre": "incremental roguelite tower defense",
+    "core_loop": "A central core tower auto-fires at continuous waves (~25s each) of machines that always walk to the center. Kills pay CASH (spent live on temporary in-run levels for any tapped building), XP (a full bar opens a seeded 3-card building DRAFT while time slows to 20% — place a new run-only building in a free slot or +1 an owned type) and COINS (banked at death to permanently place/upgrade buildings and core stats on the persistent 5x5 base between runs). The live decision every pick and every cash spend: the 24 base slots are scarce and each goes to eco OR defense — building eco (Mine, Oil Mill, Bounty Office) gains faster leveling and cash but gives up the firepower to survive the next spike; adjacency (Armory beside weapons, Oil Mill beside Mines) makes placement matter. Difficulty: enemy HP/damage x1.12 per wave, spawn rate ramps to a MAX cap, and every 10th wave is a boss spike that punishes greedy bases.",
+    "mechanics": [
+      "central core tower auto-targeting nearest enemy in range",
+      "continuous waves with Drone/Skitter/Hauler enemies and a boss every 10th wave; HP/damage scale per wave, spawn rate capped",
+      "fixed 5x5 base grid around the core (24 slots), outer ring locked until bought",
+      "8 buildings as stat modifiers: Gun Turret, Mortar (splash), Tesla Coil (chain+slow), Armory (adjacent weapon dmg), Bulwark (HP+regen), Mine (cash/sec), Oil Mill (XP gain, Mine adjacency), Bounty Office (cash per kill)",
+      "in-run cash: tap a building to buy temporary levels",
+      "XP bar + level-up 3-card building draft with 20% slow-mo",
+      "coins banked on death",
+      "Base screen: permanent placement/upgrade of buildings, slot unlocks, core stat upgrades with coins",
+      "persistent save of base layout, levels and coins",
+      "core HP, death -> results screen -> base screen -> new run"
+    ],
+    "art_direction": "flat blocky top-down primitives on dark slate (#1b2027) with rust-orange accents; category colour-coding — weapons cyan, eco amber, support green, enemies red/magenta squares & triangles, core white with a pulsing ring; background: faint build-grid with drifting dust motes so no dead space; feedback: muzzle flash + hit flash, floating cash pops, screen shake + red vignette on core damage, radial burst on level-up, squash-pop when a building is placed or upgraded",
+    "target_platforms": [
+      "android"
+    ],
+    "differentiation_notes": "The Tower's proven idle-TD loop, but every upgrade — in-run draft, in-run cash and permanent workshop — is a physical building competing for 24 scarce adjacency-sensitive slots, turning stat-button menus into a spatial eco-vs-defense base-building puzzle."
+  },
+  "build": {
+    "engine": "godot",
+    "engine_version": "4.6.3.stable",
+    "language": "gdscript",
+    "project_path": "games/towerdef-0001/",
+    "addons": [],
+    "export_presets": [
+      "android"
+    ],
+    "orientation": "portrait"
+  },
+  "assets": [
+    {
+      "type": "sprite",
+      "name": "core",
+      "source": "placeholder",
+      "origin": "primitive"
+    },
+    {
+      "type": "sprite",
+      "name": "base_grid",
+      "source": "placeholder",
+      "origin": "primitive"
+    },
+    {
+      "type": "sprite",
+      "name": "buildings_x8",
+      "source": "placeholder",
+      "origin": "primitive"
+    },
+    {
+      "type": "sprite",
+      "name": "enemies_x4",
+      "source": "placeholder",
+      "origin": "primitive"
+    },
+    {
+      "type": "sprite",
+      "name": "fx_tracers_rings_pops",
+      "source": "placeholder",
+      "origin": "primitive"
+    },
+    {
+      "type": "sprite",
+      "name": "background_grid_dust",
+      "source": "placeholder",
+      "origin": "primitive"
+    },
+    {
+      "type": "sprite",
+      "name": "hud",
+      "source": "placeholder",
+      "origin": "primitive"
+    }
+  ],
+  "validation": {
+    "issues": [
+      "playtest-audit (advisory): balanced campaign plateaus ~wave 30 by run 6 (18,20,28,29,29,30,30,30) — meta curve flattens; revisit costs in a deepen/run-meta pass",
+      "playtest-audit (advisory): pure-eco is far weaker (best wave 7) — eco only pays off mixed with weapons, as designed, but eco may feel like a trap to new players",
+      "builder (advisory): when all unlocked slots are full and only 2 types are owned, the draft offers 2 cards instead of 3"
+    ],
+    "opens_in_editor": true,
+    "runs": true,
+    "core_loop_functional": true,
+    "interaction_functional": true
+  },
+  "_reserved": {
+    "compliance": null,
+    "store": null,
+    "maintenance": null
+  }
+}
