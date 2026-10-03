@@ -535,6 +535,17 @@ func _on_death(ev: Array) -> void:
 	ev.append({"t": "dead", "wave": wave, "coins": coins, "kills": kills, "cash_earned": int(cash_earned), "breakdown": bd})
 
 
+## Player quit (pause menu "Abandon run"): skips any revive and banks coins
+## through the normal death path, so rewards/stats match a real death.
+func abandon() -> Array:
+	if over:
+		return []
+	wind_used = true
+	var ev: Array = [{"t": "abandon", "wave": wave}]
+	_on_death(ev)
+	return ev
+
+
 ## Weighted roll in SPEC order: hauler, splitter, elite, ranged, skitter, drone.
 func _roll_kind() -> String:
 	var r: float = rng.randf()

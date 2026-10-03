@@ -181,7 +181,28 @@ func _initialize() -> void:
 	MetaSave.write(save)
 	var back: Dictionary = BaseMeta.normalize(MetaSave.read())
 	_check("save round-trips", int(back["coins"]) == int(save["coins"]) and String(BaseMeta.slot_of(back, 7)["id"]) == "gun" and (back["unlocked"] as Array).has(0))
+	var aset: Dictionary = save.duplicate(true)
+	aset["settings"] = {"music": 0.25, "sfx": 0.5, "mute": true}
+	MetaSave.write(aset)
+	var aback: Dictionary = BaseMeta.normalize(MetaSave.read())
+	var ast: Dictionary = aback["settings"]
+	_check("audio settings survive save + normalize", absf(float(ast["music"]) - 0.25) < 0.001 and absf(float(ast["sfx"]) - 0.5) < 0.001 and bool(ast["mute"]))
+	var aclamp: Dictionary = BaseMeta.normalize({"settings": {"music": 7.0, "sfx": -1.0}})
+	_check("audio settings clamp + default mute", float(aclamp["settings"]["music"]) == 1.0 and float(aclamp["settings"]["sfx"]) == 0.0 and not bool(aclamp["settings"]["mute"]))
 	MetaSave.clear()
+
+	# --- Stage 10b: abandon banks coins via the death path -------------------
+	var SA = _fresh()
+	SA.coins_run = 40.0
+	SA.wind_hp = 0.5
+	var runs0: int = int(SA.save["runs"])
+	var coins0: int = int(SA.save["coins"])
+	var aev: Array = SA.abandon()
+	var akinds: Array = []
+	for x in aev:
+		akinds.append(String((x as Dictionary)["t"]))
+	_check("abandon ends run + banks coins (no revive)", SA.over and akinds.has("abandon") and akinds.has("dead") and not akinds.has("revive") and int(SA.save["runs"]) == runs0 + 1 and int(SA.save["coins"]) >= coins0 + 40)
+	_check("abandon twice is a no-op", SA.abandon().is_empty())
 
 	# --- Stage 11: a full idle run terminates (endless ramp is lethal) -------
 	S = _fresh()
