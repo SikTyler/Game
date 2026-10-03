@@ -23,6 +23,7 @@ const Art := preload("res://ArtDB.gd")
 const Tabs := preload("res://ui/MetaTabs.gd")
 const RunView := preload("res://ui/RunView.gd")
 const SfxScript := preload("res://Sfx.gd")
+const Menus := preload("res://ui/Menus.gd")
 
 const W: float = 720.0
 const H: float = 1280.0
@@ -64,6 +65,10 @@ var chest_msg: String = ""
 var run_missions: int = 0
 var meta_rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var sfx: Node = null   # Sfx.gd (owned child, not an autoload)
+var overlay: String = ""  # "", "options", "pause", "credits" (ui/Menus.gd)
+var fader: ColorRect      # screen-transition fade (above ui, ignores input)
+var fade: float = 0.0
+const FADE_TIME: float = 0.25
 
 # fx
 var tracers: Array = []    # {a, b, t, color, w}
@@ -87,6 +92,12 @@ func _ready() -> void:
 	ui.position = Vector2.ZERO
 	ui.size = Vector2(W, H)
 	add_child(ui)
+	fader = ColorRect.new()
+	fader.color = Color(0.05, 0.06, 0.08, 1.0)
+	fader.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fader.size = Vector2(W, H)
+	fader.modulate = Color(1, 1, 1, 0)
+	add_child(fader)
 	sfx = SfxScript.new()
 	sfx.name = "Sfx"
 	add_child(sfx)
@@ -112,6 +123,7 @@ func boot(raw: Dictionary, t: int) -> void:
 	screen = "base"
 	tab = "base"
 	sel = -1
+	overlay = ""
 	_queue_toasts(ev)
 	MetaSave.write(save)
 	if sfx != null:
@@ -155,6 +167,8 @@ func start_run() -> void:
 	_handle(S.setup(TuneRef.seed_of(int(Time.get_ticks_usec() % 1000000)), save, now()))
 	screen = "run"
 	sel = -1
+	overlay = ""
+	_fade_in()
 	_rebuild_ui()
 
 
@@ -162,11 +176,46 @@ func go_base() -> void:
 	screen = "base"
 	tab = "base"
 	sel = -1
+	overlay = ""
+	_fade_in()
 	_clear_fx()
 	view_tier = int(save["tier"])
 	var lev: Array = Labs.claim(save, now())
 	_queue_toasts(lev)
 	_meta_sfx(lev)
+	_rebuild_ui()
+
+
+## Short fade-from-dark on screen changes (Maaack scene-loader fade, inlined).
+func _fade_in() -> void:
+	fade = FADE_TIME
+
+
+## Options / pause / credits modal. While a modal is up on the run screen the
+## engine is not ticked (game time frozen).
+func set_overlay(id: String) -> void:
+	overlay = id
+	sel = -1
+	_rebuild_ui()
+
+
+func is_paused() -> bool:
+	return screen == "run" and overlay != ""
+
+
+## Pause menu "Abandon run": the engine banks coins via its normal death path
+## and emits game_over / dead, which the view replays like a real death.
+func abandon_run() -> void:
+	if S == null or screen != "run":
+		return
+	overlay = ""
+	_handle(S.abandon())
+	_fade_in()
+	_rebuild_ui()
+
+
+func toggle_mute_ui() -> void:
+	toggle_mute()
 	_rebuild_ui()
 
 
@@ -451,7 +500,7 @@ func slot_at(pos: Vector2) -> int:
 
 
 func tap_at(pos: Vector2) -> void:
-	if screen == "results" or not offline_offer.is_empty():
+	if screen == "results" or not offline_offer.is_empty() or overlay != "":
 		return
 	if screen == "base" and (tab != "base" or pos.y < 150.0 or pos.y > 640.0):
 		return
@@ -468,7 +517,12 @@ func tap_at(pos: Vector2) -> void:
 # ---------------------------------------------------------------- update
 func _process(delta: float) -> void:
 	t_anim += delta
-	if screen == "run" and S != null:
+	if fade > 0.0:
+		fade = maxf(0.0, fade - delta)
+		fader.modulate = Color(1, 1, 1, 0.9 * fade / FADE_TIME)
+	if screen == "run" and S != null and overlay != "":
+		pass   # paused: engine time frozen
+	elif screen == "run" and S != null:
 		_handle(S.tick(delta))
 		ui_t += delta
 		if ui_t >= 0.25 and screen == "run":
@@ -624,6 +678,9 @@ func _rebuild_ui() -> void:
 	for c in ui.get_children():
 		ui.remove_child(c)
 		c.queue_free()
+	if overlay != "":
+		Menus.build(self)
+		return
 	match screen:
 		"base":
 			if not offline_offer.is_empty():
@@ -650,6 +707,7 @@ func _build_meta_chrome() -> void:
 	# tier selector (1010-1090), START (1090-1180), tab bar (1180-1280)
 	_btn("<", Rect2(16, 1012, 120, 76), func() -> void: shift_tier(-1), view_tier > 1, DIM).add_theme_font_size_override("font_size", 34)
 	_btn(">", Rect2(584, 1012, 120, 76), func() -> void: shift_tier(1), view_tier < mini(Tiers.tier_max(), Tiers.highest(save) + 1), DIM).add_theme_font_size_override("font_size", 34)
+	_card(Rect2(624, 1, 94, 88), [], "icon_gear", func() -> void: set_overlay("options"), true, Color("4a525c"), "GEAR", "tall", 64.0).get_child(0).position.y = 12.0
 	var sb := _btn("START RUN", Rect2(110, 1094, 500, 82), start_run, Tiers.is_unlocked(save, view_tier), RUST)
 	sb.add_theme_font_size_override("font_size", 34)
 	var t: int = now()
@@ -714,6 +772,7 @@ func _base_act(ok: bool, clip: String = "upgrade") -> void:
 
 func _build_run_ui() -> void:
 	var steps: Array = Labs.speed_steps(save)
+	_card(Rect2(590, 194, 118, 88), [], "icon_pause", func() -> void: set_overlay("pause"), true, Color("4a525c"), "PAUSE", "tall", 64.0).get_child(0).position.y = 12.0
 	_card(Rect2(590, 124, 118, 60), [["%sx" % _speed_str(S.speed), 22, TEXT]], "", cycle_speed, steps.size() > 1, GEM, "SPD", "tall")
 	if S.perk_offer.size() > 0:
 		for k in S.perk_offer.size():
@@ -810,6 +869,8 @@ func _draw() -> void:
 		_draw_meta()
 	else:
 		RunView.draw_hud(self)
+	if overlay != "":
+		Menus.draw(self)
 
 
 func _draw_background() -> void:
@@ -924,8 +985,8 @@ func _draw_meta() -> void:
 	_counter("icon_coin", fmt_num(int(save["coins"])), Vector2(14, 58), 28, GOLD, 46.0)
 	_counter("icon_gem", str(int(save["gems"])), Vector2(216, 58), 28, GEM, 46.0)
 	var st: Dictionary = save["streak"]
-	_counter("icon_streak", "Streak %d" % int(st["day_idx"]), Vector2(360, 58), 24, Color("ff9f5a"), 46.0)
-	_text("Best w%d" % int(save["best_wave"]), Vector2(704, 56), 22, DIM, HORIZONTAL_ALIGNMENT_RIGHT, 160.0)
+	_counter("icon_streak", "Streak %d" % int(st["day_idx"]), Vector2(330, 58), 24, Color("ff9f5a"), 46.0)
+	_text("Best w%d" % int(save["best_wave"]), Vector2(610, 56), 22, DIM, HORIZONTAL_ALIGNMENT_RIGHT, 120.0)
 	# banner
 	if toast_t > 0.0 and toast_text != "":
 		var a: float = clampf(toast_t * 3.0, 0.0, 1.0)
