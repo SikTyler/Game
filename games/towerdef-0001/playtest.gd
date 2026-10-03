@@ -9,6 +9,11 @@ extends SceneTree
 #   - NO DEATH SPIRAL: no run regresses badly vs the previous one,
 #   - NO TRIVIAL DOMINANT: neither a pure-eco nor a pure-weapon policy beats
 #     the balanced policy by > 15% — the eco-vs-defense split is a real decision.
+# Campaign gates (ECONOMY.md / BRIEF AC-38..41): eco-mix >= 1.10x pure weapon
+# waves (AC-38), mono-building permanent boards < 70% of balanced (AC-39; the
+# probe may still place drafted run-only buildings, which makes it stricter),
+# T2 on day 3-5 + day-1 best wave 18-32 (AC-40), no post-T3 plateau, and the
+# week-1 checks repeated on EXTRA_SEEDS.
 # Prints per-run lines + "PLAYTEST METRICS {json}" + exactly "PLAYTEST OK" (exit 0)
 # or "PLAYTEST FAIL: ..." (exit 1). Clears user:// saves at start and end.
 
@@ -25,18 +30,22 @@ const RUNS: int = 8
 const FIRST_GOAL_WAVE: int = 5
 const PROGRESS_GAIN: int = 5
 const SEED_DEFAULT: int = 4242
+const OC_VALUE: float = 6.0
+const MIX_ECO_UNTIL: int = 15
 
 var fail_count: int = 0
 const GATES: Array = ["solvent", "first_goal_reachable", "progressable", "no_death_spiral", "no_trivial_dominant",
 	"t2_by_day5", "tier3_by_day30", "no_plateau_before_t3", "early_3day_rise",
-	"gems_per_day_ok", "gem_sources_ok", "offline_below_active", "mix_beats_weapon", "mix_beats_eco", "no_dominant_perk"]
+	"gems_per_day_ok", "gem_sources_ok", "offline_below_active", "mix_beats_weapon", "mix_beats_eco", "no_dominant_perk",
+	"ac38_eco_mix", "ac39_no_mono", "day1_band", "no_plateau_after_t3", "seeds_ok"]
+const EXTRA_SEEDS: Array = [5151, 6262]   # AC-38/AC-40 re-checked on more seeds (thin margins)
 
 
 func _initialize() -> void:
 	MetaSave.clear()
 	var seed0: int = TuneRef.seed_of(SEED_DEFAULT)
 	var camp: Dictionary = {}
-	for pol in ["balanced", "eco", "weapon"]:
+	for pol in ["balanced", "eco", "weapon", "mono:gun", "mono:mortar", "mono:tesla"]:
 		camp[pol] = campaign(pol, seed0)
 	var bal: Array = camp["balanced"]["waves"]
 	var eco: Array = camp["eco"]["waves"]
@@ -46,6 +55,14 @@ func _initialize() -> void:
 	var bal_best: int = int(bal.max())
 	var eco_best: int = int(eco.max())
 	var wpn_best: int = int(wpn.max())
+	# AC-39: from a fresh save, a mono-building board reaches < 70% of balanced.
+	var mono8: Dictionary = {}
+	var mono8_ok: bool = true
+	for mid in ["gun", "mortar", "tesla"]:
+		var mb8: int = int((camp["mono:" + mid]["waves"] as Array).max())
+		mono8[mid] = mb8
+		if float(mb8) >= 0.70 * float(bal_best):
+			mono8_ok = false
 	var spiral: bool = false
 	for k in range(1, bal.size()):
 		if int(bal[k]) < int(bal[k - 1]) - 2:
@@ -60,6 +77,7 @@ func _initialize() -> void:
 		"progressable": bal_best >= first_wave + PROGRESS_GAIN,
 		"no_death_spiral": not spiral,
 		"no_trivial_dominant": float(maxi(eco_best, wpn_best)) <= float(bal_best) * 1.15,
+		"mono_best": mono8, "ac39_no_mono": mono8_ok,
 	}
 	m.merge(campaign_checks(seed0))
 	print("PLAYTEST METRICS " + JSON.stringify(m))
@@ -75,7 +93,7 @@ func _initialize() -> void:
 		quit(1)
 
 
-func campaign(policy: String, seed0: int) -> Dictionary:
+static func campaign(policy: String, seed0: int) -> Dictionary:
 	var save: Dictionary = BaseMeta.default_save()
 	var waves: Array = []
 	var first: Dictionary = {}
@@ -91,6 +109,9 @@ func campaign(policy: String, seed0: int) -> Dictionary:
 
 static func _prefers(policy: String, id: String, weapons: int, ecos: int) -> int:
 	var cat: String = BuildingDB.cat_of(id)
+	if policy.begins_with("mono:"):
+		# AC-39 probe: one building id everywhere (plus the core).
+		return 3 if id == policy.substr(5) else 0
 	match policy:
 		"eco":
 			return 3 if cat == "eco" else (1 if cat == "support" else 0)
@@ -102,6 +123,26 @@ static func _prefers(policy: String, id: String, weapons: int, ecos: int) -> int
 	if cat == "eco":
 		return 3 if ecos < weapons else 1
 	return 2
+
+
+## The competent eco-mix draft: weapon feeders (Bounty / Oil Mill, S6/S7) are
+## the best +1s; Mines only while their cash still has time to compound
+## (early waves); otherwise weapons.
+static func _mix_draft_score(S, id: String, kind: String) -> int:
+	var cat: String = BuildingDB.cat_of(id)
+	var cnt: Vector2i = _counts(S)
+	var sc: int = 2
+	if cnt.x < 3:
+		sc = 7 if cat == "weapon" else 1   # nothing to feed yet: guns first
+	elif id == "bounty" or id == "oilmill":
+		sc = 6
+	elif id == "mine" or id == "vault":
+		sc = 5 if S.wave < MIX_ECO_UNTIL and cnt.x > cnt.y else 1
+	elif cat == "weapon":
+		sc = 4
+	elif cat == "support":
+		sc = 3
+	return sc * 2 + (1 if kind == "new" else 0)
 
 
 static func _counts(S) -> Vector2i:
@@ -154,6 +195,8 @@ static func bot_step(S, policy: String, perk_pref: String = "") -> Array:
 		for k in S.draft.size():
 			var c: Dictionary = S.draft[k]
 			var sc: int = _prefers(policy, String(c["id"]), cnt.x, cnt.y) * 2 + (1 if String(c["kind"]) == "new" else 0)
+			if policy == "balanced":
+				sc = _mix_draft_score(S, String(c["id"]), String(c["kind"]))
 			if sc > best_score:
 				best_score = sc
 				best = k
@@ -167,16 +210,20 @@ static func bot_step(S, policy: String, perk_pref: String = "") -> Array:
 	var cost: int = 1 << 30
 	for i in 25:
 		var id: String = S.id_at(i)
-		if i != TowerState.CORE_SLOT and id == "":
+		if i != TowerState.CORE_SLOT and (id == "" or S.lvl_at(i) >= TowerState.lvl_cap()):
 			continue
 		var pref: int = 3 if i == TowerState.CORE_SLOT and policy != "eco" else (_prefers(policy, id, 0, 0) if id != "" else 1)
 		if pref < 2:
 			continue
 		var c2: int = S.upgrade_cost(i)
+		# Core Overcharge compounds every weapon, so a competent player values a
+		# core level like OC_VALUE building levels.
+		if i == TowerState.CORE_SLOT:
+			c2 = int(float(c2) / OC_VALUE)
 		if c2 < cost:
 			cost = c2
 			target = i
-	if target >= 0 and S.cash >= float(cost):
+	if target >= 0 and S.cash >= float(S.upgrade_cost(target)):
 		ev.append_array(S.upgrade(target))
 	return ev
 
@@ -237,7 +284,7 @@ static func spend_meta(save: Dictionary, policy: String) -> void:
 			for k in core_order:
 				if int(core[k]) < int(core[stat]):
 					stat = k
-			if int(core[stat]) < BaseMeta.MAX_LVL and BaseMeta.core_cost(int(core[stat])) <= cheapest_cost:
+			if int(core[stat]) < BaseMeta.core_cap(save) and BaseMeta.core_cost(int(core[stat])) <= cheapest_cost:
 				did = BaseMeta.try_core(save, stat)
 			if not did and cheapest >= 0:
 				did = BaseMeta.try_upgrade(save, cheapest)
@@ -475,6 +522,16 @@ func campaign_checks(seed0: int) -> Dictionary:
 	for d in range(5, stop):
 		if int(keys[d]) <= int(keys[d - 5]):
 			stall_days.append(d + 1)
+	# Post-T3 (fix round): the late game keeps climbing — no 5-day stall from
+	# T3 to day 30, and the best wave climbs >= 8 past the T3 day.
+	var late_stall: Array = []
+	if t3 > 0:
+		for d in range(maxi(5, t3 + 4), DAYS):
+			if int(keys[d]) <= int(keys[d - 5]):
+				late_stall.append(d + 1)
+	var bw_t3: int = int((days[t3 - 1] as Dictionary)["best_wave"]) if t3 > 0 else 0
+	var bw_30: int = int((days[DAYS - 1] as Dictionary)["best_wave"])
+	var late_ok: bool = t3 > 0 and late_stall.is_empty() and bw_30 >= bw_t3 + 8
 	# AC-40: in week 1 every 3-day window shows a gain
 	var early: bool = true
 	for d in range(3, mini(7, DAYS)):
@@ -508,6 +565,42 @@ func campaign_checks(seed0: int) -> Dictionary:
 	var mix_w: bool = int(sb["key"]) >= int(sw["key"]) and int(sb["coins"]) > int(sw["coins"])
 	var mix_e: bool = int(sb["key"]) > int(se["key"]) and int(sb["coins"]) > int(se["coins"])
 	var ac38: bool = float(sb["best_wave"]) >= 1.10 * float(sw["best_wave"]) and float(sb["coins"]) >= 1.25 * float(sw["coins"])
+	# AC-39: a mono-building board reaches < 70% of the balanced best wave. Same
+	# frozen day-7 / day-20 save (same coins invested, same slot levels) with every
+	# permanent slot rebuilt as one id, played by a bot that only upgrades that id.
+	var mono: Dictionary = {}
+	var mono_ok: bool = true
+	var mseeds: Array = [seed0 + 11, seed0 + 23]
+	for mday in [7, 20]:
+		var msnap: Dictionary = (C["snaps"] as Dictionary)[mday]
+		var mb: float = float(snap_eval(msnap, "balanced", mseeds)["wave"])
+		var row: Dictionary = {"balanced": snappedf(mb, 0.1)}
+		for mid in ["gun", "mortar", "tesla"]:
+			var ms: Dictionary = msnap.duplicate(true)
+			var sl: Dictionary = ms["slots"]
+			for k in sl.keys():
+				(sl[k] as Dictionary)["id"] = String(mid)
+			var mw: float = float(snap_eval(ms, "mono:" + String(mid), mseeds)["wave"])
+			row[mid] = snappedf(mw, 0.1)
+			if mw >= 0.70 * mb:
+				mono_ok = false   # report only (same-save probe); gate is the fresh-save AC-39
+		mono["d%d" % mday] = row
+	print("AC-39 mono boards (same save): " + JSON.stringify(mono))
+	# AC-38 / AC-40 on extra seeds (the eco-mix margin and early pace are seed-sensitive).
+	var seed_rows: Dictionary = {}
+	var seeds_ok: bool = true
+	for xs in EXTRA_SEEDS:
+		var sd: int = seed0 + int(xs)
+		var Cb: Dictionary = campaign_days(sd, "balanced", wk)
+		var Cw: Dictionary = campaign_days(sd, "weapon", wk)
+		var db: Dictionary = (Cb["days"] as Array)[wk - 1]
+		var dw: Dictionary = (Cw["days"] as Array)[wk - 1]
+		var d1: int = int(((Cb["days"] as Array)[0] as Dictionary)["best_wave"])
+		var row: Dictionary = {"bal_wave": int(db["best_wave"]), "wpn_wave": int(dw["best_wave"]), "bal_coins": int(db["coins_gross"]), "wpn_coins": int(dw["coins_gross"]), "t2_day": int(Cb["t2_day"]), "day1": d1}
+		row["ok"] = float(row["bal_wave"]) >= 1.10 * float(row["wpn_wave"]) and float(row["bal_coins"]) >= 1.25 * float(row["wpn_coins"]) and int(row["t2_day"]) >= 3 and int(row["t2_day"]) <= 5 and d1 >= 18 and d1 <= 32
+		seeds_ok = seeds_ok and bool(row["ok"])
+		seed_rows[str(sd)] = row
+	print("SEEDS week 1: " + JSON.stringify(seed_rows))
 	# In-run policy on the SAME frozen save (report): what drafting eco vs weapons does mid-run
 	var seeds: Array = [seed0 + 11, seed0 + 23, seed0 + 37]
 	var pol: Dictionary = {}
@@ -554,7 +647,8 @@ func campaign_checks(seed0: int) -> Dictionary:
 		"active_coin_rate": snappedf(active_rate, 0.1), "offline_coin_rate": snappedf(off_rate, 0.1),
 		"strategy_week1": strat, "ac38_strict": ac38, "inrun_policy": pol,
 		"perks_d20": perk_rows, "perk_top_coin_ratio": snappedf(top_ratio, 0.01), "dominant_perks": dominant,
-		"t2_by_day5": int(C["t2_day"]) > 0 and int(C["t2_day"]) <= 5,
+		"t2_by_day5": int(C["t2_day"]) >= 3 and int(C["t2_day"]) <= 5,
+		"day1_band": day1 >= 18 and day1 <= 32,
 		"tier3_by_day30": t3 > 0,
 		"no_plateau_before_t3": stall_days.is_empty(),
 		"early_3day_rise": early,
@@ -563,4 +657,7 @@ func campaign_checks(seed0: int) -> Dictionary:
 		"offline_below_active": off_rate <= 0.2 * active_rate,
 		"mix_beats_weapon": mix_w, "mix_beats_eco": mix_e,
 		"no_dominant_perk": dominant.is_empty(),
+		"ac38_eco_mix": ac38, "mono_same_save": mono, "mono_same_save_below_70": mono_ok,
+		"late_stall_days": late_stall, "best_wave_at_t3": bw_t3, "no_plateau_after_t3": late_ok,
+		"seed_runs": seed_rows, "seeds_ok": seeds_ok,
 	}

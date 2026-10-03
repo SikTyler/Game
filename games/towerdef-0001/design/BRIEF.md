@@ -40,6 +40,7 @@ Each AC names the gate that proves it: **S** = selftest.gd, **U** = uitest.gd, *
 ### Boss bounty
 - AC-9 (S) Killing a boss at wave w adds `floor(25 * w/10 * tier_mult)` to `coins_run` immediately and emits `boss_bounty`.
 - AC-10 (S) Boss gems are 1 each (2 from T3), with at most 3 boss-gem awards per run.
+- AC-10a (S) *(fix-round amendment, needs PM sign-off)* Boss gems are also capped per calendar day (`boss_gem_daily` = 10, `save.boss_gems_today`). Reason: at T3, 3 awards × 2 gems × 4 runs = 24 boss gems/day, which cannot stay ≤ 50% of income (AC-41) while total income stays ≤ 30/day.
 
 ### Labs
 - AC-11 (S) Starting research deducts `cost(L)` coins, needs a free slot, and sets `end = now + dur(L) * labspeed_mult`. It fails without mutating the save when coins or slots are short.
@@ -89,6 +90,7 @@ Each AC names the gate that proves it: **S** = selftest.gd, **U** = uitest.gd, *
 ### Long-term balance (playtest invariants)
 - AC-38 (P) Eco-mix beats pure weapon: best wave ≥ 1.10× and coins/run ≥ 1.25×, with the same save.
 - AC-39 (P) No building dominates: a mono-building board reaches < 70% of the balanced best wave.
+  - Measurement (fix round): AC-38 compares the week-1 strategies from the same fresh save (best wave + gross coins); AC-39 compares 8 fresh-save runs of mono gun / mortar / tesla boards with the balanced policy. Both are gated in `playtest.gd`, and AC-38/AC-40 are re-checked on two extra seeds.
 - AC-40 (P) Over a simulated 7 days (4 runs a day plus 8 h offline gaps, injected `now`), T2 unlocks by day 3–5 and best wave or tier rises in every 3-day window.
 - AC-41 (P) Simulated gem income is 10–30 a day, and no single source is more than 50% of it.
 - AC-42 (all) Every gate passes: import, boot with no errors, SELFTEST OK, UITEST OK and PLAYTEST OK.

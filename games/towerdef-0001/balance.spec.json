@@ -1,27 +1,128 @@
 {
-  "_comment": "Corehold long-term balance search. playtest.gd runs a 30-day CAMPAIGN (2 sessions x 2 runs/day, injected clock: streak, missions, offline, labs, cards, perks, tier pushing), 7-day pure-weapon / pure-eco strategy campaigns, and day-7/day-20 snapshot policy + always-take-perk comparisons. Knobs are the UN-pinned levers only (selftest pins tier hp 1.5x, offline 15%, cash-out 2%, tier unlock waves, gun rate cap, lab dmg cost). Shipped defaults: hp_growth_hi 1.11, boss_hp_hi 0.5, run_upgrade_growth 1.3, greed_enemy_hp 1.25, perm 45/30/90. ~3.5 min per seed: keep --seeds at 2-3.",
+  "_comment": "Corehold long-term balance search. playtest.gd runs a 30-day CAMPAIGN (2 sessions x 2 runs/day, injected clock: streak, missions, offline, labs, cards, perks, tier pushing), 7-day pure-weapon / pure-eco strategy campaigns, fresh-save mono-weapon boards (AC-39), week-1 checks on 2 extra seeds, and day-7/day-20 snapshot policy + always-take-perk comparisons. Shipped defaults (fix round): hp_growth 1.17 (T1), hp_growth_t2 1.18, hp_growth_hi 1.155, boss_hp_t1 3.0, boss_hp_hi 0.5, overcharge 0.02 + overcharge_per_core 0.006, run_upgrade_growth 1.3, greed_enemy_hp 1.25, perm 45/30/90. ~5.5 min per seed.",
   "timeout_ms": 600000,
   "search_space": {
-    "hp_growth_hi":       { "choices": [1.105, 1.11, 1.115] },
-    "boss_hp_hi":         { "choices": [0.4, 0.5, 0.6] },
-    "run_upgrade_growth": { "choices": [1.25, 1.3, 1.4] },
-    "greed_enemy_hp":     { "choices": [1.15, 1.25, 1.4] },
-    "perm_upgrade_base":  { "choices": [30, 45, 60] }
+    "hp_growth": {
+      "choices": [
+        1.165,
+        1.17,
+        1.175
+      ]
+    },
+    "hp_growth_t2": {
+      "choices": [
+        1.175,
+        1.18,
+        1.185
+      ]
+    },
+    "hp_growth_hi": {
+      "choices": [
+        1.15,
+        1.155,
+        1.16
+      ]
+    },
+    "boss_hp_t1": {
+      "choices": [
+        2.5,
+        3.0
+      ]
+    },
+    "overcharge_per_core": {
+      "choices": [
+        0.005,
+        0.006,
+        0.007
+      ]
+    }
   },
   "objective": {
-    "invariants": ["solvent", "first_goal_reachable", "progressable", "no_death_spiral", "no_trivial_dominant",
-      "t2_by_day5", "tier3_by_day30", "no_plateau_before_t3", "early_3day_rise", "gems_per_day_ok", "gem_sources_ok",
-      "offline_below_active", "mix_beats_weapon", "mix_beats_eco", "no_dominant_perk"],
-    "require": { "clear_rate": 0.66, "no_death_spiral": true, "no_trivial_dominant": true, "tier3_by_day30": true },
-    "bands": {
-      "t2_day":                  { "band": [3, 5],   "weight": 2 },
-      "t3_day":                  { "band": [12, 24], "weight": 2 },
-      "day1_best_wave":          { "band": [18, 32], "weight": 1 },
-      "day30_best_wave_hi_tier": { "band": [48, 60], "weight": 1 },
-      "gems_per_day":            { "band": [15, 30], "weight": 1 },
-      "perk_top_coin_ratio":     { "band": [1.0, 1.15], "weight": 1 }
+    "invariants": [
+      "solvent",
+      "first_goal_reachable",
+      "progressable",
+      "no_death_spiral",
+      "no_trivial_dominant",
+      "t2_by_day5",
+      "tier3_by_day30",
+      "no_plateau_before_t3",
+      "early_3day_rise",
+      "gems_per_day_ok",
+      "gem_sources_ok",
+      "offline_below_active",
+      "mix_beats_weapon",
+      "mix_beats_eco",
+      "no_dominant_perk",
+      "ac38_eco_mix",
+      "ac39_no_mono",
+      "day1_band",
+      "no_plateau_after_t3",
+      "seeds_ok"
+    ],
+    "require": {
+      "clear_rate": 0.66,
+      "no_death_spiral": true,
+      "no_trivial_dominant": true,
+      "tier3_by_day30": true
     },
-    "aggregators": { "t2_day": "max", "t3_day": "max", "day1_best_wave": "mean", "day30_best_wave_hi_tier": "mean", "gems_per_day": "mean", "perk_top_coin_ratio": "max" },
-    "focus_points": ["t2_day", "t3_day", "day1_best_wave", "day30_best_wave_hi_tier"]
+    "bands": {
+      "t2_day": {
+        "band": [
+          3,
+          5
+        ],
+        "weight": 2
+      },
+      "t3_day": {
+        "band": [
+          12,
+          24
+        ],
+        "weight": 2
+      },
+      "day1_best_wave": {
+        "band": [
+          18,
+          32
+        ],
+        "weight": 1
+      },
+      "day30_best_wave_hi_tier": {
+        "band": [
+          48,
+          60
+        ],
+        "weight": 1
+      },
+      "gems_per_day": {
+        "band": [
+          15,
+          30
+        ],
+        "weight": 1
+      },
+      "perk_top_coin_ratio": {
+        "band": [
+          1.0,
+          1.15
+        ],
+        "weight": 1
+      }
+    },
+    "aggregators": {
+      "t2_day": "max",
+      "t3_day": "max",
+      "day1_best_wave": "mean",
+      "day30_best_wave_hi_tier": "mean",
+      "gems_per_day": "mean",
+      "perk_top_coin_ratio": "max"
+    },
+    "focus_points": [
+      "t2_day",
+      "t3_day",
+      "day1_best_wave",
+      "day30_best_wave_hi_tier"
+    ]
   }
 }

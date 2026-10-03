@@ -161,3 +161,46 @@ at ≥ its best wave, no dominant perk (top coin ratio 1.06). Known gaps (report
 gated): day-1 best wave 39 (target 18–32) and T2 on day 2 (AC-40 wants 3–5) — the early
 game is faster than the brief; after T3 the best wave creeps 47 → 48 over days 13–30
 (a post-T3 plateau: T4 at w60 in T3 is out of reach within 30 days).
+
+## 9. Fix round (PM acceptance review) — eco as a live decision, pacing, late game
+
+New systems (all in `TowerState.compute_stats()` / `BaseMeta`, every number a Tune knob):
+- **Core Overcharge** (in-run cash sink). A cash level on the core now compounds **all**
+  weapon damage by `overcharge + overcharge_per_core × perm Core DMG` per level
+  (0.02 + 0.006·L; cost `8 × core_run_growth(1.4)^n`). Cash = eco income, so an eco slot
+  now buys wave survival all run long, and a built-up permanent core converts it harder.
+- **S6 Bounty Hunters / S7 Oil Shells.** Bounty Office feeds adjacent weapons, Oil Mill
+  feeds adjacent Mortar/Tesla: +5%/lvl damage (cap +200%, Aegis eco penalty applies).
+- **Core Overdrive** (late coin sink). Core stat caps rise +5 per tier
+  (`BaseMeta.core_cap`, 15 at T1 → 25 at T3 → 30 at T4); each level above 15 compounds
+  ×1.1 on all weapon damage / max HP / regen.
+- **Run level ceiling** 25 → 40 (`run_lvl_cap`), so late cash keeps converting.
+- **Enemy damage ramp** 1.08 → 1.06/wave: late deaths are now a boss-wave attrition over
+  a ~3k-HP pool (HP lab, Reinforced Core / Fortress and HP Overdrive all move the death
+  point) instead of a single 1.5k hit on a 700-HP core.
+- **AC-10a daily boss-gem allowance** (`boss_gem_daily` 10, stored as
+  `save.boss_gems_today`). T3+ boss awards are 2 gems again (AC-10), and the per-day cap
+  keeps boss gems < 50% of income — at ≤ 30 gems/day the per-run rule alone could not
+  (24 boss gems/day at T3 needs ≥ 48 gems/day total). See BRIEF AC-10a.
+
+Retune: T1 ramp `hp_growth` 1.17, T2 `hp_growth_t2` 1.18, T3+ `hp_growth_hi` 1.155,
+T1 boss toughness `boss_hp_t1` 3.0 phased in from w10 (×1) to w30 (×3), `perk_cash` 0.2.
+
+Gate changes in `playtest.gd` (none weakened; three added, two tightened):
+- `ac38_eco_mix` (gated): week-1 strategy, same fresh save — eco-mix best wave ≥ 1.10×
+  and coins ≥ 1.25× pure weapon.
+- `ac39_no_mono` (gated, AC-39 restored): from a fresh save, each mono-weapon board
+  (gun / mortar / tesla) reaches < 70% of the balanced best wave (the 1.15× gate stays).
+  A same-save mono probe on days 7/20 is reported (`mono_same_save`).
+- `t2_by_day5` now requires day 3–5; `day1_band` gates day-1 best wave 18–32.
+- `no_plateau_after_t3`: no 5-day stall from T3 to day 30, and +8 best wave past T3.
+- `seeds_ok`: the week-1 AC-38 / AC-40 checks repeat on two extra seeds.
+
+Result (seed 4242; extra seeds 9393 / 10504 in brackets): day-1 best w30 [20, 30],
+T2 day 4 [4, 3], T3 day 11, T4 day 15, best wave 50 → 65 from day 11 to 30, week-1
+eco-mix w44 vs pure weapon w30 = 1.47× [1.47, 1.43], coins 4.7× [4.2, 5.3]; fresh-save
+mono boards gun/mortar/tesla w20/20/10 vs balanced w30; 23.9 gems/day, boss 41%.
+Known limits (reported): on a *full* permanent board the in-run draft choice itself moves
+little (same-save d7: balanced 41.3 vs weapon 41.7) — the eco decision lives in the
+board and in what cash buys (Overcharge), not in late +1 cards; the fresh-save AC-39
+gun/mortar margin is thin (w20 against a < 21 limit); bank still grows after the core caps at day ~25.

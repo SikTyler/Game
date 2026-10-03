@@ -96,6 +96,10 @@ New synergies:
 | S3 | **Bulwark on the core ring** (slots 6,7,8,11,13,16,17,18) | +3% damage reduction per lvl (cap 30%) | the inner ring is the most valuable real estate for eco (Armory reach), so this is a real choice |
 | S4 | **Vault + Bounty** (new bldg, §11) | Vault interest cap +50% | links the two new eco pieces |
 | S5 | **Aegis + weapon** (new bldg, §11) | adjacent weapons +10% fire rate per Aegis lvl, but adjacent **eco** buildings -15% output | the explicit eco-vs-defense spatial conflict |
+| S6 | **Bounty Office + weapon** (fix round) | adjacent weapons +5% dmg per Bounty lvl (cap +200% with S7) | an eco slot that also defends — pulls eco into the weapon ring |
+| S7 | **Oil Mill + Mortar/Tesla** (fix round) | adjacent Mortar/Tesla +5% dmg per Oil Mill lvl | rewards mixing splash weapons with eco instead of mono-gun boards |
+
+Fix-round run economy: the core's cash upgrade is **Overcharge** (every level compounds all weapon damage by 2% + 0.6% × permanent Core DMG level), and core stat levels above 15 (unlocked +5 per tier) are **Overdrive** levels (×1.1 each on weapon damage / max HP / regen). See ECONOMY §9.
 
 - All bonuses are computed in `compute_stats()`. Its output adds `"links": [[a,b,"S1"],...]`, which the view draws as thin coloured lines (the cat colour of the bonus receiver).
 
