@@ -17,6 +17,7 @@ const BaseMeta := preload("res://BaseMeta.gd")
 const BuildingDB := preload("res://data/BuildingDB.gd")
 const MetaSave := preload("res://MetaSave.gd")
 const TuneRef := preload("res://Tune.gd")
+const PerkDB := preload("res://data/PerkDB.gd")
 
 const DT: float = 0.1
 const MAX_SIM_S: float = 3600.0
@@ -111,8 +112,32 @@ static func _counts(S) -> Vector2i:
 	return Vector2i(w, e)
 
 
+## Perk pick: policy family first, pure perks over tradeoffs.
+static func _perk_score(policy: String, id: String) -> int:
+	var d: Dictionary = PerkDB.get_def(id)
+	var fam: String = String(d.get("fam", ""))
+	var sc: int = 0 if bool(d.get("tradeoff", false)) else 2
+	match policy:
+		"eco":
+			sc += 3 if fam == "economy" else 0
+		"weapon":
+			sc += 3 if fam == "offense" else 0
+		_:
+			sc += 3 if fam != "economy" else 1
+	return sc
+
+
 ## Competent in-run policy; also used as a library by selftest.
 static func bot_step(S, policy: String) -> void:
+	if S.perk_offer.size() > 0:
+		var bp: int = 0
+		var bs: int = -99
+		for k in S.perk_offer.size():
+			var ps: int = _perk_score(policy, String(S.perk_offer[k]))
+			if ps > bs:
+				bs = ps
+				bp = k
+		S.choose_perk(bp)
 	if S.draft.size() > 0:
 		var cnt: Vector2i = _counts(S)
 		var best: int = 0
