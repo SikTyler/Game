@@ -62,6 +62,11 @@ func _initialize() -> void:
 	main.set_tab("missions")
 	await _shot("%s/1d_missions.png" % outdir)
 	main.set_tab("base")
+	main.set_overlay("options")
+	await _shot("%s/1e_options.png" % outdir)
+	main.set_overlay("credits")
+	await _shot("%s/1f_credits.png" % outdir)
+	main.set_overlay("")
 	main.start_run()
 	var S = main.S
 	for k in 6000:
@@ -75,6 +80,9 @@ func _initialize() -> void:
 	main._rebuild_ui()
 	await _wait(20)
 	await _shot("%s/2_run.png" % outdir)
+	main.set_overlay("pause")
+	await _shot("%s/2p_pause.png" % outdir)
+	main.set_overlay("")
 	# Boss bounty banner (below the grid) + the core's Overcharge button.
 	main.sel = TowerState.CORE_SLOT
 	main._rebuild_ui()

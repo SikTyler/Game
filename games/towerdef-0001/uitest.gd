@@ -50,6 +50,13 @@ func _label(b: Button) -> String:
 	return b.text
 
 
+func _find_ctl(key: String) -> Control:
+	for c in main.ui.get_children():
+		if (c as Control).has_meta("key") and String((c as Control).get_meta("key")) == key and not c.is_queued_for_deletion():
+			return c
+	return null
+
+
 func _find(prefix: String) -> Button:
 	for c in main.ui.get_children():
 		if c is Button and _label(c as Button).begins_with(prefix) and not (c as Button).is_queued_for_deletion():
@@ -213,6 +220,43 @@ func _run() -> void:
 	_check("back to base tab", main.tab == "base")
 	main.save["labs"]["lvls"]["speed"] = 1
 
+	# ---- OPTIONS / CREDITS (gear) ---------------------------------------------
+	_press("GEAR")
+	await _frames()
+	_check("gear opens options", main.overlay == "options" and _find_ctl("SLIDER music") != null and _find("MUTE") != null)
+	var ms: Control = _find_ctl("SLIDER music")
+	if ms != null:
+		var mr: Rect2 = ms.get_global_rect()
+		_click(Vector2(mr.position.x + mr.size.x * 0.25, mr.get_center().y))
+		await _frames()
+	var mus: float = float(main.save["settings"]["music"])
+	_check("music slider click sets volume", mus > 0.1 and mus < 0.4, str(mus))
+	var ss: Control = _find_ctl("SLIDER sfx")
+	if ss != null:
+		var sr: Rect2 = ss.get_global_rect()
+		_click(Vector2(sr.position.x + sr.size.x * 0.6, sr.get_center().y))
+		await _frames()
+	var sv: float = float(main.save["settings"]["sfx"])
+	_check("sfx slider click sets volume", sv > 0.45 and sv < 0.75, str(sv))
+	_check("music volume applied to bus", absf(AudioServer.get_bus_volume_db(AudioServer.get_bus_index("Music")) - (main.sfx.lin_db(mus) - 4.0)) < 0.5)
+	var m0: bool = bool(main.save["settings"]["mute"])
+	_press("MUTE")
+	await _frames()
+	_check("mute button toggles + applies", bool(main.save["settings"]["mute"]) != m0 and AudioServer.is_bus_mute(AudioServer.get_bus_index("SFX")) != m0)
+	var disk: Dictionary = BaseMeta.normalize(MetaSave.read())
+	_check("audio settings persisted to save file", absf(float(disk["settings"]["music"]) - mus) < 0.001 and absf(float(disk["settings"]["sfx"]) - sv) < 0.001 and bool(disk["settings"]["mute"]) != m0)
+	_press("MUTE")
+	await _frames()
+	_press("Credits")
+	await _frames()
+	_check("credits open from options", main.overlay == "credits" and _find_ctl("CREDITS_SCROLL") != null)
+	_press("Back")
+	await _frames()
+	_check("credits back -> options", main.overlay == "options")
+	_press("Back")
+	await _frames()
+	_check("options close to base", main.overlay == "" and _find("START RUN") != null)
+
 	# ---- RUN -----------------------------------------------------------------
 	main.sfx.clear_log()
 	_press("START RUN")
@@ -303,6 +347,24 @@ func _run() -> void:
 	await _frames()
 	_check("perk tap takes perk", S.perks_taken.size() == 1 and S.perk_offer.is_empty() and _find("PERK") == null, pid)
 
+	# ---- PAUSE / RESUME --------------------------------------------------------
+	S.spawn_t = 999.0
+	_press("PAUSE")
+	await _frames()
+	var ta: float = S.time_alive
+	var wt: float = S.wave_t
+	await _frames(10)
+	_check("pause opens menu + freezes engine time", main.overlay == "pause" and main.is_paused() and S.time_alive == ta and S.wave_t == wt)
+	_press("Options")
+	await _frames(4)
+	_check("pause -> options keeps time frozen", main.overlay == "options" and S.time_alive == ta)
+	_press("Back")
+	await _frames()
+	_check("options back -> pause", main.overlay == "pause")
+	_press("Resume")
+	await _frames(4)
+	_check("resume unfreezes engine time", main.overlay == "" and S.time_alive > ta)
+
 	# ---- DEATH -> RESULTS -> BASE -> RUN (loop seam) -------------------------
 	S.wind_used = true   # a chest may have equipped Second Wind; this check is about the death seam
 	S.hp = -1.0
@@ -323,6 +385,20 @@ func _run() -> void:
 	_press("START RUN")
 	await _frames()
 	_check("second run starts fresh", main.screen == "run" and main.S != S and main.S.wave == 1 and main.S.id_at(8) == "")
+
+	# ---- ABANDON (pause menu) -> coins banked --------------------------------
+	var S2 = main.S
+	S2.coins_run = 33.0
+	var runs_b: int = int(main.save["runs"])
+	var coins_b: int = int(main.save["coins"])
+	_press("PAUSE")
+	await _frames()
+	_press("Abandon")
+	await _frames(3)
+	_check("abandon ends run -> results", S2.over and main.screen == "results" and _find("BACK TO BASE") != null)
+	_check("abandon banks coins", int(main.save["runs"]) == runs_b + 1 and int(main.save["coins"]) >= coins_b + 33, "%d -> %d" % [coins_b, int(main.save["coins"])])
+	var disk2: Dictionary = BaseMeta.normalize(MetaSave.read())
+	_check("abandon bank persisted", int(disk2["coins"]) == int(main.save["coins"]))
 
 	MetaSave.clear()
 	if fail_count == 0:
