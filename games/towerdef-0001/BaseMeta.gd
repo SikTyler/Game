@@ -342,3 +342,19 @@ static func bank(s: Dictionary, coins: int, wave: int, tier: int = 1, run_minute
 			Missions.add_gems(s, "tier", g)
 			ev.append({"t": "tier_unlocked", "tier": n, "gems": g})
 	return ev
+
+
+## Tier selector (Base screen): only unlocked tiers may be chosen.
+static func select_tier(s: Dictionary, n: int) -> bool:
+	if not Tiers.is_unlocked(s, n):
+		return false
+	s["tier"] = n
+	return true
+
+
+## Speed pill: persists the chosen game speed if it is an unlocked step.
+static func set_speed(s: Dictionary, v: float) -> bool:
+	if not Labs.speed_steps(s).has(v):
+		return false
+	s["speed"] = v
+	return true
