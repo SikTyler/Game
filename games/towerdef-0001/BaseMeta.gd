@@ -44,6 +44,7 @@ static func default_save() -> Dictionary:
 		"last_seen": 0, "stats": {"kills": 0, "bosses": 0},
 		"gem_log": {"boss": 0, "mission": 0, "streak": 0, "tier": 0},
 		"boss_gems_today": {"day": -1, "n": 0},
+		"settings": {"music": 0.8, "sfx": 1.0, "mute": false},
 	}
 
 
@@ -185,6 +186,8 @@ static func normalize(s_in: Dictionary) -> Dictionary:
 	d["gem_log"] = _int_dict(s.get("gem_log", {}), GEM_SOURCES)
 	var bg_in: Dictionary = s.get("boss_gems_today", {})
 	d["boss_gems_today"] = {"day": int(bg_in.get("day", -1)), "n": maxi(0, int(bg_in.get("n", 0)))}
+	var se_in: Dictionary = s.get("settings", {})
+	d["settings"] = {"music": clampf(float(se_in.get("music", 0.8)), 0.0, 1.0), "sfx": clampf(float(se_in.get("sfx", 1.0)), 0.0, 1.0), "mute": bool(se_in.get("mute", false))}
 	# speed snaps to an unlocked step
 	var steps: Array = Labs.speed_steps(d)
 	var sp: float = float(s.get("speed", 1.0))

@@ -22,6 +22,7 @@ const Tiers := preload("res://Tiers.gd")
 const Art := preload("res://ArtDB.gd")
 const Tabs := preload("res://ui/MetaTabs.gd")
 const RunView := preload("res://ui/RunView.gd")
+const SfxScript := preload("res://Sfx.gd")
 
 const W: float = 720.0
 const H: float = 1280.0
@@ -62,6 +63,7 @@ var view_tier: int = 1
 var chest_msg: String = ""
 var run_missions: int = 0
 var meta_rng: RandomNumberGenerator = RandomNumberGenerator.new()
+var sfx: Node = null   # Sfx.gd (owned child, not an autoload)
 
 # fx
 var tracers: Array = []    # {a, b, t, color, w}
@@ -85,6 +87,9 @@ func _ready() -> void:
 	ui.position = Vector2.ZERO
 	ui.size = Vector2(W, H)
 	add_child(ui)
+	sfx = SfxScript.new()
+	sfx.name = "Sfx"
+	add_child(sfx)
 	var r := RandomNumberGenerator.new()
 	r.seed = 7
 	for k in 40:
@@ -109,6 +114,9 @@ func boot(raw: Dictionary, t: int) -> void:
 	sel = -1
 	_queue_toasts(ev)
 	MetaSave.write(save)
+	if sfx != null:
+		sfx.apply_settings(save["settings"])
+		sfx.music_play()
 	_rebuild_ui()
 
 
@@ -156,7 +164,9 @@ func go_base() -> void:
 	sel = -1
 	_clear_fx()
 	view_tier = int(save["tier"])
-	_queue_toasts(Labs.claim(save, now()))
+	var lev: Array = Labs.claim(save, now())
+	_queue_toasts(lev)
+	_meta_sfx(lev)
 	_rebuild_ui()
 
 
@@ -176,6 +186,7 @@ func _save() -> void:
 func meta_act(ev: Array) -> void:
 	if not ev.is_empty():
 		_queue_toasts(ev)
+		_meta_sfx(ev)
 		_save()
 	_rebuild_ui()
 
@@ -267,11 +278,55 @@ func ev_text(e: Dictionary) -> String:
 	return ""
 
 
+## Audio for meta (base-screen) events. Rules stay in the engines; this only maps event -> clip.
+func _meta_sfx(ev: Array) -> void:
+	for x in ev:
+		match String((x as Dictionary)["t"]):
+			"lab_done":
+				sfx_play("lab_done")
+			"chest_opened":
+				sfx_play("card_open")
+			"lab_started", "lab_rushed", "lab_slot", "card_slot":
+				sfx_play("upgrade")
+			"tier_unlocked":
+				sfx_play("levelup")
+			"offline", "mission_claimed", "streak_claimed", "mission_bonus":
+				sfx_play("coin")
+
+
+func sfx_play(clip: String) -> void:
+	if sfx != null:
+		sfx.play(clip)
+
+
+## Volume / mute API: persists in save["settings"] and re-applies to the buses.
+func set_audio(key: String, v: Variant) -> void:
+	var st: Dictionary = save["settings"]
+	st[key] = v
+	if sfx != null:
+		sfx.apply_settings(st)
+	_save()
+
+
+func toggle_mute() -> void:
+	set_audio("mute", not bool((save["settings"] as Dictionary)["mute"]))
+
+
 func _queue_toasts(ev: Array) -> void:
 	for x in ev:
 		var s: String = ev_text(x as Dictionary)
 		if s != "":
 			toast_queue.append(s)
+
+
+## Run-event -> clip map ("shot" picks shot_<weapon kind>).
+const EVENT_CLIP: Dictionary = {
+	"kill": "kill", "shield_hit": "hit", "shield_break": "shield_break", "boss": "boss_spawn",
+	"boss_bounty": "boss_kill", "wave": "wave_start", "run_start": "wave_start", "wave_skip": "wave_start", "levelup": "levelup",
+	"perk_taken": "perk", "placed": "place", "upgraded": "upgrade", "unlocked": "place",
+	"core_hit": "core_hit", "interest": "coin", "revive": "levelup", "dead": "game_over",
+	"tier_unlocked": "levelup",
+}
 
 
 func _handle(events: Array) -> void:
@@ -283,6 +338,11 @@ func _handle(events: Array) -> void:
 				pops.append({"pos": Vector2(360, 300), "text": "MISSION COMPLETE", "t": 1.4, "color": GEM, "size": 26})
 	for e in events:
 		var ev: Dictionary = e
+		var clip: String = String(EVENT_CLIP.get(String(ev["t"]), ""))
+		if String(ev["t"]) == "shot":
+			clip = "shot_" + String(ev["kind"])
+		if clip != "":
+			sfx_play(clip)
 		match String(ev["t"]):
 			"shot":
 				var kind: String = ev["kind"]
@@ -487,6 +547,7 @@ func _btn(text: String, rect: Rect2, cb: Callable, enabled: bool = true, col: Co
 	b.add_theme_stylebox_override("disabled", sbd)
 	b.add_theme_color_override("font_color", TEXT)
 	b.add_theme_color_override("font_disabled_color", DIM)
+	b.pressed.connect(func() -> void: sfx_play("click"))
 	b.pressed.connect(cb)
 	ui.add_child(b)
 	return b
@@ -625,7 +686,7 @@ func _build_base_ui() -> void:
 	var e: Dictionary = BaseMeta.slot_of(save, sel)
 	if not BaseMeta.is_unlocked(save, sel):
 		var c: int = BaseMeta.unlock_cost(save)
-		_btn("Unlock slot  %s coins" % fmt_num(c), Rect2(160, 790, 400, 96), func() -> void: _base_act(BaseMeta.try_unlock(save, sel)), coins >= c)
+		_btn("Unlock slot  %s coins" % fmt_num(c), Rect2(160, 790, 400, 96), func() -> void: _base_act(BaseMeta.try_unlock(save, sel), "place"), coins >= c)
 	elif e.is_empty():
 		var ids: Array = BuildingDB.all_ids()
 		for k in ids.size():
@@ -633,7 +694,7 @@ func _build_base_ui() -> void:
 			var pc: int = BaseMeta.place_cost(id)
 			var d: Dictionary = BuildingDB.get_def(id)
 			var rect := Rect2(8 + (k % 5) * 141, 768 + (k / 5) * 118, 136, 112)
-			_card(rect, [[String(d["name"]), 18, TEXT], ["%d coins" % pc, 18, GOLD]], id, func() -> void: _base_act(BaseMeta.try_place(save, sel, id)), coins >= pc, BuildingDB.cat_color(String(d["cat"])), String(d["name"]), "tall", 40.0)
+			_card(rect, [[String(d["name"]), 18, TEXT], ["%d coins" % pc, 18, GOLD]], id, func() -> void: _base_act(BaseMeta.try_place(save, sel, id), "place"), coins >= pc, BuildingDB.cat_color(String(d["cat"])), String(d["name"]), "tall", 40.0)
 	else:
 		var lvl: int = int(e["lvl"])
 		var uc: int = BaseMeta.upgrade_cost(lvl)
@@ -643,8 +704,9 @@ func _build_base_ui() -> void:
 		_btn("Demolish", Rect2(484, 790, 222, 96), func() -> void: _base_act(BaseMeta.demolish(save, sel)), true, ENEMY)
 
 
-func _base_act(ok: bool) -> void:
+func _base_act(ok: bool, clip: String = "upgrade") -> void:
 	if ok:
+		sfx_play(clip)
 		slot_pop[sel] = 0.3
 		_save()
 	_rebuild_ui()
