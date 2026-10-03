@@ -16,6 +16,9 @@ const Offline := preload("res://Offline.gd")
 const Missions := preload("res://Missions.gd")
 const Cards := preload("res://Cards.gd")
 const CardDB := preload("res://data/CardDB.gd")
+const Perks := preload("res://Perks.gd")
+const PerkDB := preload("res://data/PerkDB.gd")
+const EnemyDB := preload("res://data/EnemyDB.gd")
 
 var fails: Array = []
 
@@ -193,6 +196,7 @@ func _initialize() -> void:
 	_check("unattended run ends in death", S.over and S.wave >= 3)
 
 	_meta_stages()
+	_engine_b_stages()
 
 	if fails.is_empty():
 		print("SELFTEST OK")
@@ -465,3 +469,385 @@ func _meta_stages() -> void:
 	_check("A8 run_mods tier + mults", int(rm["tier"]) == 3 and is_equal_approx(float(rm["hp_mult"]), 2.25) and is_equal_approx(float(rm["coin_mult"]), 2.2) and int(rm["boss_every"]) == 10)
 	_check("A8 run_mods labs", is_equal_approx(float(rm["lab_dmg"]), 0.2) and int(rm["start_cash"]) == 30 and int(rm["rerolls"]) == 1 and is_equal_approx(float(rm["speed"]), 1.0))
 	_check("A8 run_mods cards + new bldgs", is_equal_approx(float((rm["cards"] as Dictionary)["hp"]), 0.15) and bool(rm["allow_new_bldg"]) and not bool(BaseMeta.run_mods(BaseMeta.default_save())["allow_new_bldg"]))
+
+
+func _enemy(kind: String, pos: Vector2, hp: float = 999.0) -> Dictionary:
+	var d: Dictionary = EnemyDB.get_def(kind)
+	return {"kind": kind, "pos": pos, "hp": hp, "max_hp": hp, "spd": float(d["spd"]), "dmg": float(d["dmg"]), "cash": float(d["cash"]), "xp": float(d["xp"]), "coin": float(d["coin"]), "size": float(d["size"]), "atk_cd": 0.0, "slow_t": 0.0, "shield": 0, "fire_cd": 0.0, "shock_t": 0.0, "shock_src": -1}
+
+
+func _weapon(S, kind: String) -> Dictionary:
+	for w in S.stats["weapons"]:
+		if String(w["kind"]) == kind:
+			return w
+	return {}
+
+
+func _has_link(S, a: int, b: int, tag: String) -> bool:
+	for l in S.stats["links"]:
+		var la: Array = l
+		if int(la[0]) == a and int(la[1]) == b and String(la[2]) == tag:
+			return true
+	return false
+
+
+## ENGINE-B run systems (SPEC B1-B8).
+func _engine_b_stages() -> void:
+	# --- Stage 19: B1 meta modifiers applied at setup (AC-14, AC-32) ----------
+	var sv: Dictionary = BaseMeta.default_save()
+	var S0 = TowerState.new()
+	S0.setup(7, sv)
+	var core0: float = float(_weapon(S0, "core")["dmg"])
+	sv["labs"]["lvls"]["dmg"] = 4
+	sv["labs"]["lvls"]["hp"] = 2
+	sv["labs"]["lvls"]["startcash"] = 2
+	sv["labs"]["lvls"]["reroll"] = 1
+	sv["cards"]["owned"] = {"c_dmg": {"lvl": 1, "copies": 0}, "c_reroll": {"lvl": 1, "copies": 0}, "c_hp": {"lvl": 1, "copies": 0}}
+	sv["cards"]["equipped"] = ["c_dmg", "c_reroll"]
+	var S = TowerState.new()
+	S.setup(7, sv)
+	_check("B1 dmg x (1+lab)(1+card)", is_equal_approx(float(_weapon(S, "core")["dmg"]), core0 * 1.2 * 1.1))
+	_check("B1 max hp x (1+lab_hp), unequipped card ignored", is_equal_approx(float(S.stats["max_hp"]), 110.0) and is_equal_approx(S.hp, 110.0))
+	_check("B1 start cash + rerolls", is_equal_approx(S.cash, 30.0) and S.rerolls_left == 2)
+	sv["best_wave_by_tier"] = {"1": 60, "2": 0}
+	sv["tier"] = 2
+	S = TowerState.new()
+	S.setup(7, sv)
+	_check("B1 tier 2 multipliers", S.tier == 2 and is_equal_approx(S.hp_mult, 1.5) and is_equal_approx(S.coin_mult, 1.6))
+	S.spawn_t = 999.0
+	S._spawn("drone", [])
+	_check("B1 enemy hp x tier hp_mult", is_equal_approx(float(S.enemies[0]["hp"]), 6.0 * 1.5))
+	S.enemies.clear()
+	S.wave_t = S.wave_time - 0.001
+	S.tick(0.01)
+	_check("B1 wave coins x coin_mult", is_equal_approx(S.coins_run, 2.0 * 1.6))
+	S.draft = [{"kind": "new", "id": "gun"}]
+	var rr: Array = S.reroll_draft()
+	_check("reroll spends a reroll", rr.size() == 1 and S.rerolls_left == 1 and S.draft.size() == 3)
+
+	# --- Stage 20: B2 speed + sub-steps (AC-15) ------------------------------
+	var res: Array = []
+	for sp in [1.0, 2.5]:
+		var R = _fresh()
+		R.set_speed(sp)
+		var real: float = 0.0
+		while real * sp < 180.0 and not R.over:
+			R.tick(0.05)
+			real += 0.05
+			if R.draft.size() > 0:
+				R.choose_card(0)
+			if R.pending_place != "" and R.free_slots().size() > 0:
+				R.place(int(R.free_slots()[0]))
+			if R.perk_offer.size() > 0:
+				R.choose_perk(0)
+		res.append([R.wave, R.kills, R.coins_run])
+	_check("AC-15 speed-invariant wave/kills/coins", int(res[0][0]) == int(res[1][0]) and absi(int(res[0][1]) - int(res[1][1])) <= 1 and absf(float(res[0][2]) - float(res[1][2])) <= 1.0)
+	S = _fresh()
+	S.set_speed(2.5)
+	S.spawn_t = 999.0
+	S.tick(0.1)
+	_check("B2 speed scales game time", is_equal_approx(S.time_alive, 0.25))
+
+	# --- Stage 21: B3 boss bounty, mine scaling, cash-out (AC-10, AC-22) -----
+	var sv3: Dictionary = BaseMeta.default_save()
+	S = TowerState.new()
+	S.setup(9, sv3)
+	S.spawn_t = 999.0
+	S.wave = 20
+	var bev: Array = []
+	for k in 4:
+		var b: Dictionary = _enemy("boss", TowerState.CENTER + Vector2(100, 0), 0.0)
+		S.enemies.append(b)
+		S._reap(bev)
+	var bb: Array = _evts(bev, "boss_bounty")
+	_check("boss bounty coins 25*w/10", bb.size() == 4 and int(bb[0]["coins"]) == 50)
+	_check("AC-10 boss gems capped at 3 awards", S.gems_run == 3 and int(bb[3]["gems"]) == 0)
+	S.slots[7] = {"id": "mine", "perm": 1, "run": 0}
+	S.wave = 11
+	S.recompute()
+	_check("mine scales 1.2*L*(1+0.03*(w-1))", is_equal_approx(float(S.stats["cash_ps"]), 1.2 * 1.3))
+	S.cash_earned = 1000.0
+	var c_before: int = int(S.coins_run)
+	S.hp = -1.0
+	S.stats["regen"] = 0.0
+	var dev: Array = S.tick(0.01)
+	var go: Array = _evts(dev, "game_over")
+	_check("AC-22 game_over itemises cash-out", go.size() == 1 and int(go[0]["breakdown"]["cashout"]) == 20 and int(go[0]["coins"]) == c_before + 20 and int(go[0]["breakdown"]["gems"]) == 3)
+	_check("death banks coins + boss gems", int(sv3["coins"]) == c_before + 20 and int(sv3["gems"]) == 3 and int(sv3["gem_log"]["boss"]) == 3)
+	_check("dead stays the last event", String(dev.back()["t"]) == "dead")
+
+	# --- Stage 22: B4 enemy roster (AC-25..27) --------------------------------
+	_check("ranged gated to wave 8", not Tiers.allows("ranged", 1, 7) and Tiers.allows("ranged", 1, 8))
+	S = _fresh()
+	var seen: Dictionary = {}
+	S.wave = 30
+	for k in 3000:
+		seen[S._roll_kind()] = true
+	_check("T1 rolls ranged but never elite/splitter/mite", seen.has("ranged") and not seen.has("elite") and not seen.has("splitter") and not seen.has("mite"))
+	S.tier = 3
+	seen.clear()
+	for k in 3000:
+		seen[S._roll_kind()] = true
+	_check("T3 rolls elite + splitter, never mite", seen.has("elite") and seen.has("splitter") and not seen.has("mite"))
+	S = _fresh()
+	S.spawn_t = 999.0
+	S.stats["weapons"] = []
+	S.stats["regen"] = 0.0
+	S.enemies.append(_enemy("ranged", TowerState.CENTER + Vector2(240, 0)))
+	S.enemies[0]["fire_cd"] = 2.0
+	var shots: int = 0
+	for k in 100:
+		shots += _evts(S.tick(0.05), "enemy_shot").size()
+	var rpos: Vector2 = S.enemies[0]["pos"]
+	_check("AC-25 ranged stops at 230", absf(rpos.distance_to(TowerState.CENTER) - 230.0) < 0.5)
+	_check("AC-25 ranged fires every 2s", shots == 2 and S.hp < 100.0)
+	S = _fresh()
+	S.spawn_t = 999.0
+	S.wave = 20
+	S._spawn("elite", [])
+	var el: Dictionary = S.enemies[0]
+	_check("AC-26 elite shield 3+floor(w/10)", int(el["shield"]) == 5)
+	var sev: Array = []
+	for k in 5:
+		S._hit(el, 1.0e6, sev)
+	_check("AC-26 shield absorbs exactly N hits", float(el["hp"]) > 0.0 and _evts(sev, "shield_hit").size() == 5 and _evts(sev, "shield_break").size() == 1)
+	S._hit(el, 1.0e6, sev)
+	_check("elite takes damage after shield breaks", float(el["hp"]) <= 0.0)
+	S = _fresh()
+	S.spawn_t = 999.0
+	S.slots[7] = {"id": "tesla", "perm": 3, "run": 0}
+	S.recompute()
+	S.stats["weapons"] = [_weapon(S, "tesla")]
+	S._spawn("elite", [])
+	S.enemies[0]["pos"] = TowerState.slot_pos(7) + Vector2(60, 0)
+	S.enemies[0]["spd"] = 0.0
+	var tev: Array = S.tick(0.05)
+	_check("AC-26 tesla chain hit counts as a shield hit", _evts(tev, "shield_hit").size() == 1 and int(S.enemies[0]["shield"]) == 2)
+	S = _fresh()
+	S.spawn_t = 999.0
+	S.enemies.append(_enemy("splitter", TowerState.CENTER + Vector2(300, 0), 0.0))
+	var spv: Array = []
+	S._reap(spv)
+	var mites: int = 0
+	for e in S.enemies:
+		if String(e["kind"]) == "mite":
+			mites += 1
+	_check("AC-27 splitter spawns 2 mites once", mites == 2 and _evts(spv, "split").size() == 1)
+	for e in S.enemies:
+		e["hp"] = 0.0
+	spv.clear()
+	S._reap(spv)
+	_check("AC-27 mites do not split", S.enemies.is_empty() and _evts(spv, "split").is_empty())
+
+	# --- Stage 23: B5/B6 buildings + synergies (AC-19..21) --------------------
+	S = _fresh()
+	S.slots[7] = {"id": "gun", "perm": 1, "run": 0}
+	S.recompute()
+	var gr: float = float(_weapon(S, "gun")["rate"])
+	S.slots[8] = {"id": "mine", "perm": 3, "run": 0}
+	S.recompute()
+	_check("S1 mine+gun +5%/mine lvl", is_equal_approx(float(_weapon(S, "gun")["rate"]), gr * 1.15) and _has_link(S, 8, 7, "S1"))
+	S.slots[8] = {"id": "mine", "perm": 20, "run": 0}
+	S.recompute()
+	_check("S1 capped at +50%", is_equal_approx(float(_weapon(S, "gun")["rate"]), gr * 1.5))
+	S.slots[8] = {}
+	S.slots[0] = {"id": "mine", "perm": 3, "run": 0}
+	S.recompute()
+	_check("S1 needs adjacency", is_equal_approx(float(_weapon(S, "gun")["rate"]), gr) and not _has_link(S, 0, 7, "S1"))
+	S = _fresh()
+	S.slots[7] = {"id": "gun", "perm": 25, "run": 0}
+	S.slots[6] = {"id": "armory", "perm": 10, "run": 0}
+	S.recompute()
+	_check("AC-21 gun rate cap 2.5", is_equal_approx(float(_weapon(S, "gun")["rate"]), 2.5))
+	_check("AC-21 armory per-target cap +100%", is_equal_approx(float(_weapon(S, "gun")["dmg"]), (3.0 + 2.0 * 25.0) * 2.0))
+	S = _fresh()
+	S.slots[6] = {"id": "bulwark", "perm": 2, "run": 0}
+	S.slots[0] = {"id": "bulwark", "perm": 2, "run": 0}
+	S.recompute()
+	_check("S3 bulwark on core ring +3%/lvl dr", is_equal_approx(float(S.stats["dr"]), 0.06) and _has_link(S, 6, 12, "S3") and not _has_link(S, 0, 12, "S3"))
+	S.slots[11] = {"id": "bulwark", "perm": 20, "run": 0}
+	S.slots[13] = {"id": "aegis", "perm": 20, "run": 0}
+	S.recompute()
+	_check("dr caps: bulwark 30% + aegis 32% -> total 60%", is_equal_approx(float(S.stats["dr_bulwark"]), 0.3) and is_equal_approx(float(S.stats["dr_aegis"]), 0.32) and is_equal_approx(float(S.stats["dr"]), 0.6))
+	S = _fresh()
+	S.spawn_t = 999.0
+	S.stats["weapons"] = []
+	S.slots[13] = {"id": "aegis", "perm": 2, "run": 0}
+	S.recompute()
+	S.stats["weapons"] = []
+	S.stats["regen"] = 0.0
+	S.enemies.append(_enemy("hauler", TowerState.CENTER + Vector2(140, 0)))
+	S.enemies[0]["dmg"] = 10.0
+	S.tick(0.01)
+	_check("AC-20 aegis core damage reduction", is_equal_approx(S.hp, 100.0 - 10.0 * 0.92))
+	S = _fresh()
+	S.slots[7] = {"id": "gun", "perm": 1, "run": 0}
+	S.slots[17] = {"id": "mine", "perm": 1, "run": 0}
+	S.recompute()
+	var g0: float = float(_weapon(S, "gun")["rate"])
+	var m0: float = float(S.stats["cash_ps"])
+	S.slots[8] = {"id": "aegis", "perm": 1, "run": 0}
+	S.slots[16] = {"id": "aegis", "perm": 1, "run": 0}
+	S.recompute()
+	_check("AC-20 aegis +10% rate to adjacent weapon", is_equal_approx(float(_weapon(S, "gun")["rate"]), g0 * 1.1) and _has_link(S, 8, 7, "S5"))
+	_check("AC-20 aegis -15% adjacent eco", is_equal_approx(float(S.stats["cash_ps"]), m0 * 0.85) and _has_link(S, 16, 17, "S5"))
+	S = _fresh()
+	S.spawn_t = 999.0
+	S.slots[7] = {"id": "vault", "perm": 2, "run": 0}
+	S.recompute()
+	S.cash = 100.0
+	S.wave_t = S.wave_time - 0.001
+	var vev: Array = S.tick(0.01)
+	_check("AC-20 vault interest 4%*L", _evts(vev, "interest").size() == 1 and is_equal_approx(float(_evts(vev, "interest")[0]["amt"]), 8.0))
+	S.cash = 5000.0
+	vev = []
+	S._wave_end(vev)
+	_check("vault cap 40*L", is_equal_approx(float(vev[0]["amt"]), 80.0))
+	S.slots[8] = {"id": "bounty", "perm": 1, "run": 0}
+	S.recompute()
+	vev = []
+	S._wave_end(vev)
+	_check("S4 vault+bounty cap x1.5", is_equal_approx(float(vev[0]["amt"]), 120.0) and _has_link(S, 8, 7, "S4"))
+	S = _fresh()
+	S.slots[7] = {"id": "mortar", "perm": 1, "run": 0}
+	S.slots[8] = {"id": "tesla", "perm": 1, "run": 0}
+	S.recompute()
+	_check("S2 link tesla->mortar", _has_link(S, 8, 7, "S2"))
+	S.spawn_t = 999.0
+	S.stats["weapons"] = [_weapon(S, "mortar")]
+	var mdmg: float = float(_weapon(S, "mortar")["dmg"])
+	var shocked: Dictionary = _enemy("drone", TowerState.slot_pos(7) + Vector2(100, 0))
+	shocked["spd"] = 0.0
+	shocked["shock_t"] = 1.0
+	shocked["shock_src"] = 8
+	var plain: Dictionary = _enemy("drone", TowerState.slot_pos(7) + Vector2(100, 5))
+	plain["spd"] = 0.0
+	S.enemies.append(shocked)
+	S.enemies.append(plain)
+	S.tick(0.01)
+	_check("S2 shocked enemy takes mortar splash x1.3", is_equal_approx(999.0 - float(shocked["hp"]), mdmg * 1.3) and is_equal_approx(999.0 - float(plain["hp"]), mdmg))
+	var rng5 := RandomNumberGenerator.new()
+	var sl: Array = []
+	var un: Array = []
+	for i in 25:
+		sl.append({})
+		un.append(i != 12)
+	var any_new: bool = false
+	for k in 200:
+		for c in Draft.offer(rng5, sl, un, false):
+			if BuildingDB.NEW_IDS.has(String(c["id"])):
+				any_new = true
+	var got_new: bool = false
+	for k in 200:
+		for c in Draft.offer(rng5, sl, un, true):
+			if BuildingDB.NEW_IDS.has(String(c["id"])):
+				got_new = true
+	_check("vault/aegis drafted only when allow_new_bldg", not any_new and got_new)
+	var sv5: Dictionary = BaseMeta.default_save()
+	sv5["runs"] = 2
+	S = TowerState.new()
+	S.setup(1, sv5)
+	_check("allow_new_bldg from run 3", S.allow_new_bldg)
+
+	# --- Stage 24: B7 perks (AC-23, AC-24) -------------------------------------
+	var ra := RandomNumberGenerator.new()
+	ra.seed = 5
+	var rb := RandomNumberGenerator.new()
+	rb.seed = 5
+	var o1: Array = Perks.offer(ra, [])
+	_check("AC-23 perk offer deterministic", o1 == Perks.offer(rb, []))
+	var fams: Dictionary = {}
+	for id in o1:
+		fams[String(PerkDB.DEFS[id]["fam"])] = true
+	_check("AC-23 3 distinct ids, one per family", o1.size() == 3 and fams.size() == 3)
+	var taken: Array = ["p_hp", "p_fort"]
+	var ok_untaken: bool = true
+	for k in 50:
+		var o: Array = Perks.offer(ra, taken)
+		if o.has("p_hp") or o.has("p_fort") or o.size() != 3:
+			ok_untaken = false
+	_check("AC-23 never offers a maxed perk", ok_untaken)
+	var full: Array = []
+	for id in PerkDB.IDS:
+		for k in int(PerkDB.DEFS[id]["stack"]):
+			full.append(id)
+	_check("no offer when every perk is maxed", Perks.offer(ra, full).is_empty())
+	S = _fresh()
+	S.spawn_t = 999.0
+	S.wave = 4
+	S.wave_t = S.wave_time - 0.001
+	var pev: Array = S.tick(0.01)
+	_check("AC-23 perk_offer at wave 5", _evts(pev, "perk_offer").size() == 1 and S.perk_offer.size() == 3 and is_equal_approx(S.time_scale(), 0.2))
+	S = _fresh()
+	S.spawn_t = 999.0
+	S.xp = S.xp_need()
+	S.wave = 4
+	S.wave_t = S.wave_time - 0.001
+	pev = S.tick(0.01)
+	_check("AC-23 perk queues behind the building draft", S.draft.size() == 3 and S.perk_offer.is_empty() and S.perk_pending == 1)
+	S.choose_card(0)
+	pev = S.place(int(S.free_slots()[0]))
+	_check("queued perk opens after the draft closes", _evts(pev, "perk_offer").size() == 1 and S.perk_offer.size() == 3)
+	var pick: String = S.perk_offer[0]
+	pev = S.choose_perk(0)
+	_check("choose_perk emits perk_taken", _evts(pev, "perk_taken").size() == 1 and S.perks_taken == [pick] and S.perk_offer.is_empty())
+	S = _fresh()
+	var base_core: float = float(_weapon(S, "core")["dmg"])
+	var base_rate: float = float(_weapon(S, "core")["rate"])
+	S.perks_taken = ["p_dmg", "p_dmg"]
+	S.recompute()
+	_check("AC-24 Overcharge +20%/stack", is_equal_approx(float(_weapon(S, "core")["dmg"]), base_core * 1.4))
+	S.perks_taken = ["p_glass"]
+	S.recompute()
+	_check("AC-24 Glass Cannon +40% dmg -25% hp", is_equal_approx(float(_weapon(S, "core")["dmg"]), base_core * 1.4) and is_equal_approx(float(S.stats["max_hp"]), 75.0))
+	S.perks_taken = ["p_fort"]
+	S.recompute()
+	_check("AC-24 Fortress", is_equal_approx(float(S.stats["max_hp"]), 160.0) and is_equal_approx(float(S.stats["regen"]), 1.0) and is_equal_approx(float(_weapon(S, "core")["dmg"]), base_core * 0.8))
+	S.perks_taken = ["p_frenzy", "p_rate"]
+	S.recompute()
+	_check("AC-24 Frenzy + Hair Trigger rate, regen 0", is_equal_approx(float(_weapon(S, "core")["rate"]), base_rate * 1.45) and is_equal_approx(float(S.stats["regen"]), 0.0))
+	S.perks_taken = ["p_greed", "p_miser", "p_bloodmoon"]
+	S.recompute()
+	_check("AC-24 economy tradeoffs", is_equal_approx(S.run_coin_mult(), 1.5 * 1.75) and is_equal_approx(S.run_cash_mult(), 1.5) and is_equal_approx(float(S.stats["xp_mult"]), 0.7) and S.upgrade_cost(TowerState.CORE_SLOT) == 5)
+	var worst: bool = true
+	var tr: Array = ["p_glass", "p_greed", "p_fort", "p_frenzy", "p_miser", "p_bloodmoon"]
+	for mask in 64:
+		var tk: Array = []
+		for b in 6:
+			if mask & (1 << b):
+				tk.append(tr[b])
+		S.perks_taken = tk
+		S.recompute()
+		if float(S.stats["max_hp"]) < 50.0 - 0.001 or float(S.stats["regen"]) < 0.0:
+			worst = false
+	_check("AC-24 no tradeoff combo below 50% hp or negative regen", worst)
+	S = _fresh()
+	S.hp = 10.0
+	S.perk_offer = ["p_hp"]
+	S.choose_perk(0)
+	_check("Reinforced Core heals to full", is_equal_approx(S.hp, 125.0))
+
+	# --- Stage 25: B8 cards in-run (AC-33) ------------------------------------
+	var sv8: Dictionary = BaseMeta.default_save()
+	sv8["cards"]["owned"] = {"c_wind": {"lvl": 2, "copies": 0}, "c_skip": {"lvl": 1, "copies": 0}}
+	sv8["cards"]["equipped"] = ["c_wind", "c_skip"]
+	S = TowerState.new()
+	S.setup(3, sv8)
+	S.spawn_t = 999.0
+	S.hp = -1.0
+	var wev: Array = S.tick(0.01)
+	_check("AC-33 Second Wind revives at card %", _evts(wev, "revive").size() == 1 and not S.over and S.hp > 20.0 and S.hp <= 25.5)
+	S.hp = -1.0
+	wev = S.tick(0.01)
+	_check("AC-33 Second Wind only once", S.over and _evts(wev, "revive").is_empty())
+	S = TowerState.new()
+	S.setup(3, sv8)
+	S.skip_chance = 1.0
+	S.spawn_t = 999.0
+	S.wave = 3
+	S.wave_t = S.wave_time - 0.001
+	var kv: int = S.kills
+	wev = S.tick(0.01)
+	var sk: Array = _evts(wev, "wave_skip")
+	_check("AC-33 Wave Skip jumps 2 waves with 50% coins", S.wave == 5 and sk.size() == 1 and int(sk[0]["skipped"]) == 4 and is_equal_approx(S.coins_run, 4.0 * 0.5 + 5.0) and S.kills == kv)
+	_check("skip landing on a perk wave still queues a perk", S.perk_offer.size() == 3 or S.perk_pending > 0)
