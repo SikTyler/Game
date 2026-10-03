@@ -2,7 +2,7 @@
   "id": "towerdef-0001",
   "name": "Corehold",
   "created_at": "2026-10-03T00:58:54.944Z",
-  "updated_at": "2026-10-03T01:07:05.309Z",
+  "updated_at": "2026-10-03T21:24:52.190Z",
   "status": "validated",
   "concept": {
     "theme": {
@@ -106,5 +106,24 @@
     "compliance": null,
     "store": null,
     "maintenance": null
+  },
+  "depth_pass": {
+    "axis": "run-meta",
+    "systems_added": [
+      "save v2 + migration",
+      "tiers 1-8",
+      "boss bounty",
+      "labs (real-time research, 12 tracks, 4 slots)",
+      "game speed",
+      "offline earnings",
+      "daily missions + login streak",
+      "cards (gems, slots, dupes)",
+      "perks every 5 waves incl. tradeoffs",
+      "ranged/elite/splitter enemies",
+      "Vault + Aegis buildings",
+      "7 adjacency synergies"
+    ],
+    "selftest_assertions_added": 25,
+    "notes": "Built by studio workflow (designer, theorist, PM, 2 engine, art, UI, balance, visual-audit, PM acceptance, fix round). 30-day campaign sim: T2 by day 4, T3 by day 11, best wave climbs 30 -> 55+; eco-mix beats pure weapon. Spec in games/towerdef-0001/design/."
   }
 }
