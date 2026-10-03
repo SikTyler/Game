@@ -67,6 +67,7 @@ var meta_rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var tracers: Array = []    # {a, b, t, color, w}
 var rings: Array = []      # {pos, r, t, color}
 var pops: Array = []       # {pos, text, t, color, size}
+const BOUNTY_BANNER_DY: float = 3.4 * TowerState.CELL   # below the grid's bottom edge (2.5 cells)
 var bolts: Array = []      # {a, t}
 var slot_pop: Dictionary = {}
 var shake: float = 0.0
@@ -317,7 +318,8 @@ func _handle(events: Array) -> void:
 				var bt: String = "BOUNTY +%d coins" % int(ev["coins"])
 				if int(ev["gems"]) > 0:
 					bt += "  +%d gems" % int(ev["gems"])
-				pops.append({"pos": bp, "text": bt, "t": 1.6, "color": GOLD, "size": 24})
+				# Banner sits in the open band below the 5x5 grid (AC-37: never over slots).
+				pops.append({"pos": TowerState.CENTER + Vector2(0, BOUNTY_BANNER_DY), "text": bt, "t": 1.6, "color": GOLD, "size": 24})
 			"revive":
 				heal_flash = 0.6
 				pops.append({"pos": TowerState.CENTER + Vector2(0, -200), "text": "SECOND WIND!", "t": 1.6, "color": Color("6bd46b"), "size": 34})
@@ -615,7 +617,7 @@ func _build_base_ui() -> void:
 		var lv: int = int(core[stat])
 		var cc: int = BaseMeta.core_cost(lv)
 		var st: String = stat
-		var b2 := _btn("%s Lv%d\n%s coins" % [String(labels[stat]), lv, fmt_num(cc)], Rect2(14 + k2 * 235, 664, 222, 88), func() -> void: _base_act(BaseMeta.try_core(save, st)), coins >= cc and lv < BaseMeta.MAX_LVL, Color.WHITE)
+		var b2 := _btn("%s Lv%d/%d\n%s coins" % [String(labels[stat]), lv, BaseMeta.core_cap(save), fmt_num(cc)], Rect2(14 + k2 * 235, 664, 222, 88), func() -> void: _base_act(BaseMeta.try_core(save, st)), coins >= cc and lv < BaseMeta.core_cap(save), Color.WHITE)
 		b2.add_theme_font_size_override("font_size", 20)
 		k2 += 1
 	if sel < 0 or sel == BaseMeta.CORE_SLOT:
@@ -678,14 +680,15 @@ func _build_run_ui() -> void:
 		return
 	if sel == TowerState.CORE_SLOT:
 		var c: int = S.upgrade_cost(sel)
-		_btn("Core DMG +25%%  $%d" % c, Rect2(160, 960, 400, 90), func() -> void: _handle(S.upgrade(sel)), S.cash >= float(c), Color.WHITE)
+		var ocp: float = float(S.stats.get("overcharge_step", 0.02)) * 100.0
+		_btn("Overcharge: all dmg +%.1f%%  $%d" % [ocp, c], Rect2(130, 960, 460, 90), func() -> void: _handle(S.upgrade(sel)), S.cash >= float(c), Color.WHITE)
 	elif sel >= 0:
 		if not bool(S.unlocked[sel]):
 			var uc: int = S.unlock_cost()
 			_btn("Unlock plot (this run)  $%d" % uc, Rect2(110, 960, 500, 90), func() -> void: _handle(S.unlock_plot(sel)), S.cash >= float(uc))
 		elif S.id_at(sel) != "":
 			var c2: int = S.upgrade_cost(sel)
-			_btn("Upgrade Lv%d -> %d  $%d" % [S.lvl_at(sel), S.lvl_at(sel) + 1, c2], Rect2(160, 960, 400, 90), func() -> void: _handle(S.upgrade(sel)), S.cash >= float(c2) and S.lvl_at(sel) < TowerState.MAX_LVL, BuildingDB.cat_color(BuildingDB.cat_of(S.id_at(sel))))
+			_btn("Upgrade Lv%d -> %d  $%d" % [S.lvl_at(sel), S.lvl_at(sel) + 1, c2], Rect2(160, 960, 400, 90), func() -> void: _handle(S.upgrade(sel)), S.cash >= float(c2) and S.lvl_at(sel) < TowerState.lvl_cap(), BuildingDB.cat_color(BuildingDB.cat_of(S.id_at(sel))))
 
 
 static func _speed_str(v: float) -> String:

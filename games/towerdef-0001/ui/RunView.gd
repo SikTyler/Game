@@ -21,7 +21,7 @@ const SHIELD: Color = Color("7fd8ff")
 const W: float = 720.0
 const H: float = 1280.0
 const ARENA_BOTTOM: float = 860.0
-const LINK_COLORS: Dictionary = {"S1": Color("f2a93b"), "S2": Color("b48cff"), "S3": Color("6bd46b"), "S4": Color("3fd8e8"), "S5": Color("ff8a5c")}
+const LINK_COLORS: Dictionary = {"S1": Color("f2a93b"), "S2": Color("b48cff"), "S3": Color("6bd46b"), "S4": Color("3fd8e8"), "S5": Color("ff8a5c"), "S6": Color("ffd166"), "S7": Color("e07a5f")}
 
 
 ## Synergy links (TowerState.compute_stats().links): flowing dots src -> dst.

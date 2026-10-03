@@ -258,9 +258,14 @@ func _run() -> void:
 	_check("run unlock button", bool(S.unlocked[4]))
 	_click(TowerState.slot_pos(12))
 	await _frames()
-	_press("Core DMG")
+	_press("Overcharge")
 	await _frames()
 	_check("core cash upgrade button", S.core_run_lvl == 1)
+	# AC-37 polish: the boss-bounty banner renders below the grid, never over a slot.
+	main._handle([{"t": "boss_bounty", "coins": 50, "gems": 1, "pos": TowerState.CENTER}])
+	var bpop: Dictionary = main.pops[main.pops.size() - 1]
+	var bpos: Vector2 = bpop["pos"]
+	_check("bounty banner clears the grid", String(bpop["text"]).begins_with("BOUNTY") and bpos.y - 30.0 > TowerState.CENTER.y + 2.5 * TowerState.CELL)
 
 	# ---- REROLL + PERK OVERLAY -----------------------------------------------
 	S.xp = S.xp_need()
@@ -287,6 +292,7 @@ func _run() -> void:
 	_check("perk tap takes perk", S.perks_taken.size() == 1 and S.perk_offer.is_empty() and _find("PERK") == null, pid)
 
 	# ---- DEATH -> RESULTS -> BASE -> RUN (loop seam) -------------------------
+	S.wind_used = true   # a chest may have equipped Second Wind; this check is about the death seam
 	S.hp = -1.0
 	S.stats["regen"] = 0.0
 	await _frames(3)

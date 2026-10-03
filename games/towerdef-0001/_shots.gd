@@ -8,6 +8,7 @@ const MetaSave := preload("res://MetaSave.gd")
 const Labs := preload("res://Labs.gd")
 const Cards := preload("res://Cards.gd")
 const Missions := preload("res://Missions.gd")
+const TowerState := preload("res://TowerState.gd")
 const Bot := preload("res://playtest.gd")
 const T0: int = 1800000000
 
@@ -74,6 +75,14 @@ func _initialize() -> void:
 	main._rebuild_ui()
 	await _wait(20)
 	await _shot("%s/2_run.png" % outdir)
+	# Boss bounty banner (below the grid) + the core's Overcharge button.
+	main.sel = TowerState.CORE_SLOT
+	main._rebuild_ui()
+	main._handle([{"t": "boss_bounty", "coins": 120, "gems": 2, "pos": TowerState.CENTER + Vector2(40, 30)}])
+	await _wait(4)
+	await _shot("%s/2c_bounty.png" % outdir)
+	main.sel = -1
+	main._rebuild_ui()
 	S.perk_pending = 1
 	await _wait(6)
 	await _shot("%s/2b_perk.png" % outdir)
