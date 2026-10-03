@@ -103,7 +103,7 @@ static func draw_hud(m) -> void:
 	m._counter("icon_coin", m.fmt_num(int(m.S.coins_run)), Vector2(572, 50), 26, GOLD, 44.0)
 	var mhp: float = float(m.S.stats["max_hp"])
 	m._bar(Rect2(160, 88, 400, 24), m.S.hp / mhp, Color("e8434f"))
-	m._text("%d / %d" % [int(m.S.hp), int(mhp)], Vector2(360, 108), 18, TEXT)
+	m._text("%d / %d" % [clampi(int(ceil(m.S.hp)), 0, int(mhp)), int(mhp)], Vector2(360, 108), 18, TEXT)
 	# perk icon row (under the HP bar) + gems
 	for k in m.S.perks_taken.size():
 		var pid: String = m.S.perks_taken[k]

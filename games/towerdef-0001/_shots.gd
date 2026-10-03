@@ -101,7 +101,8 @@ func _wait(n: int) -> void:
 		await process_frame
 
 func _shot(path: String) -> void:
-	await _wait(4)
+	# xvfb/opengl3 presents a few frames late; give the view time to catch up.
+	await _wait(16)
 	await RenderingServer.frame_post_draw
 	get_root().get_texture().get_image().save_png(path)
 	print("shot ", path)

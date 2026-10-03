@@ -3,7 +3,7 @@ extends RefCounted
 ## duration(L) = dur_base*dur_growth^L seconds (× Lab Speed).
 
 const DEFS: Dictionary = {
-	"speed":     {"name": "Game Speed",    "max": 3,  "base": 400.0, "growth": 4.0,  "dur_base": 1800.0, "dur_growth": 3.0,  "effect": "Unlocks the next game speed step"},
+	"speed":     {"name": "Game Speed",    "max": 3,  "base": 400.0, "growth": 4.0,  "dur_base": 1800.0, "dur_growth": 3.0,  "effect": "Unlocks a faster game speed"},
 	"dmg":       {"name": "Damage",        "max": 30, "base": 80.0,  "growth": 1.8,  "dur_base": 300.0,  "dur_growth": 1.45, "effect": "+5% damage (core & weapons)"},
 	"hp":        {"name": "Health",        "max": 30, "base": 80.0,  "growth": 1.8,  "dur_base": 300.0,  "dur_growth": 1.45, "effect": "+5% core max HP"},
 	"coin":      {"name": "Coin Bonus",    "max": 20, "base": 60.0,  "growth": 1.35, "dur_base": 300.0,  "dur_growth": 1.30, "effect": "+5% coins"},
