@@ -23,6 +23,8 @@ const VERSION: int = 2
 const CORE_SLOT: int = 12
 const CORE_STATS: Array = ["dmg", "hp", "regen"]
 const MAX_LVL: int = 15
+## Hard ceiling for migrated core levels; the live cap is core_cap(s).
+const CORE_HARD_MAX: int = 60
 const GEM_SOURCES: Array = ["boss", "mission", "streak", "tier"]
 
 
@@ -41,6 +43,7 @@ static func default_save() -> Dictionary:
 		"streak": {"day_idx": 0, "last_day": -1, "loops": 0},
 		"last_seen": 0, "stats": {"kills": 0, "bosses": 0},
 		"gem_log": {"boss": 0, "mission": 0, "streak": 0, "tier": 0},
+		"boss_gems_today": {"day": -1, "n": 0},
 	}
 
 
@@ -105,7 +108,7 @@ static func normalize(s_in: Dictionary) -> Dictionary:
 	var core_in: Dictionary = s.get("core", {})
 	var core: Dictionary = {}
 	for k in CORE_STATS:
-		core[k] = clampi(int(core_in.get(k, 0)), 0, MAX_LVL)
+		core[k] = clampi(int(core_in.get(k, 0)), 0, CORE_HARD_MAX)
 	d["core"] = core
 	var cap: int = perm_lvl_cap(d)
 	var slots_in: Dictionary = s.get("slots", {})
@@ -180,6 +183,8 @@ static func normalize(s_in: Dictionary) -> Dictionary:
 	d["streak"] = {"day_idx": clampi(int(st_in.get("day_idx", 0)), 0, 7), "last_day": int(st_in.get("last_day", -1)), "loops": maxi(0, int(st_in.get("loops", 0)))}
 	d["stats"] = _int_dict(s.get("stats", {}), ["kills", "bosses"])
 	d["gem_log"] = _int_dict(s.get("gem_log", {}), GEM_SOURCES)
+	var bg_in: Dictionary = s.get("boss_gems_today", {})
+	d["boss_gems_today"] = {"day": int(bg_in.get("day", -1)), "n": maxi(0, int(bg_in.get("n", 0)))}
 	# speed snaps to an unlocked step
 	var steps: Array = Labs.speed_steps(d)
 	var sp: float = float(s.get("speed", 1.0))
@@ -189,6 +194,13 @@ static func normalize(s_in: Dictionary) -> Dictionary:
 			snap = float(v)
 	d["speed"] = snap
 	return d
+
+
+## Late coin sink (fix round): every tier above 1 lifts the core stat cap by
+## core_cap_step levels, so banked coins keep converting into HP / damage /
+## regen after the base grid is saturated.
+static func core_cap(s: Dictionary) -> int:
+	return mini(CORE_HARD_MAX, MAX_LVL + TuneRef.int_of("core_cap_step", 5) * (Tiers.highest(s) - 1))
 
 
 static func perm_lvl_cap(s: Dictionary) -> int:
@@ -301,7 +313,7 @@ static func try_core(s: Dictionary, stat: String) -> bool:
 	if not core.has(stat):
 		return false
 	var lvl: int = int(core[stat])
-	if lvl >= MAX_LVL:
+	if lvl >= core_cap(s):
 		return false
 	var c: int = core_cost(lvl)
 	if int(s["coins"]) < c:
@@ -310,6 +322,16 @@ static func try_core(s: Dictionary, stat: String) -> bool:
 	core[stat] = lvl + 1
 	Missions.progress(s, "upgrade", 1)
 	return true
+
+
+## AC-10a: boss gems are capped per calendar day (boss_gem_daily) on top of
+## the 3-awards-per-run cap, so the T3 doubling cannot dominate gem income.
+static func boss_gem_allowance(s: Dictionary, now: int) -> int:
+	var cap: int = TuneRef.int_of("boss_gem_daily", 10)
+	var bg: Dictionary = s.get("boss_gems_today", {})
+	if int(bg.get("day", -1)) != Missions.day_of(now):
+		return cap
+	return maxi(0, cap - int(bg.get("n", 0)))
 
 
 ## Bank a finished run: coins + gems, per-tier record, best coin rate,
@@ -331,6 +353,10 @@ static func bank(s: Dictionary, coins: int, wave: int, tier: int = 1, run_minute
 		s["last_seen"] = now
 	if gems > 0:
 		Missions.add_gems(s, "boss", gems)
+		var day: int = Missions.day_of(now)
+		var bg: Dictionary = s.get("boss_gems_today", {})
+		var used: int = int(bg.get("n", 0)) if int(bg.get("day", -1)) == day else 0
+		s["boss_gems_today"] = {"day": day, "n": used + gems}
 	if not s.has("tiers_rewarded"):
 		s["tiers_rewarded"] = []
 	var tr: Array = s["tiers_rewarded"]

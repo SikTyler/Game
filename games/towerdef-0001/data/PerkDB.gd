@@ -11,7 +11,7 @@ const DEFS: Dictionary = {
 	"p_frenzy":    {"name": "Frenzy",          "fam": "offense", "stack": 1, "tradeoff": true,  "desc": "+30% fire rate", "cost": "Regen disabled"},
 	"p_hp":        {"name": "Reinforced Core", "fam": "defense", "stack": 1, "tradeoff": false, "desc": "+25% max HP, heal to full", "cost": ""},
 	"p_fort":      {"name": "Fortress",        "fam": "defense", "stack": 1, "tradeoff": true,  "desc": "+60% max HP, +100% regen", "cost": "-20% damage"},
-	"p_cash":      {"name": "Prospector",      "fam": "economy", "stack": 2, "tradeoff": false, "desc": "+25% Mine cash/s", "cost": ""},
+	"p_cash":      {"name": "Prospector",      "fam": "economy", "stack": 2, "tradeoff": false, "desc": "+20% Mine cash/s", "cost": ""},
 	"p_xp":        {"name": "Scholar",         "fam": "economy", "stack": 1, "tradeoff": false, "desc": "+30% XP", "cost": ""},
 	"p_greed":     {"name": "Greed",           "fam": "economy", "stack": 1, "tradeoff": true,  "desc": "+50% cash & coins", "cost": "Enemies +15% speed, +25% HP"},
 	"p_miser":     {"name": "Miser",           "fam": "economy", "stack": 1, "tradeoff": true,  "desc": "Cash upgrades -30% cost", "cost": "-30% XP"},

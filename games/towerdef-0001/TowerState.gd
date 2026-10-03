@@ -27,7 +27,13 @@ const CORE_SLOT: int = 12
 const SPAWN_R: float = 420.0
 const STOP_R: float = 150.0
 const SLOWMO: float = 0.2
-const MAX_LVL: int = 25
+const MAX_LVL: int = 40          # default per-building level ceiling in a run (perm + run)
+
+
+## Run level ceiling (GF_TUNE run_lvl_cap). Raised from 25 in the fix round so
+## late in-run cash (eco income) keeps converting into building levels.
+static func lvl_cap() -> int:
+	return TuneRef.int_of("run_lvl_cap", MAX_LVL)
 const MAX_ENEMIES: int = 220
 const SUBSTEP: float = 0.05
 const CORE_RING: Array = [6, 7, 8, 11, 13, 16, 17, 18]
@@ -83,6 +89,7 @@ var coins_kill: float = 0.0
 var coins_boss: float = 0.0
 var gems_run: int = 0
 var boss_gem_awards: int = 0
+var boss_gem_left: int = 0       # AC-10a daily allowance left for this run
 
 # Perks (B7).
 var perks_taken: Array = []
@@ -91,8 +98,8 @@ var perk_pending: int = 0
 
 # Tunables (GF_TUNE overridable; defaults = shipped balance).
 var wave_time: float = 25.0
-var hp_growth: float = 1.12
-var dmg_growth: float = 1.08
+var hp_growth: float = 1.17     # Tier 1 ramp (fix round: slower early pace, AC-40)
+var dmg_growth: float = 1.06
 var spawn_base: float = 1.8
 var spawn_decay: float = 0.93
 var min_spawn: float = 0.45   # MAX spawn rate cap (≈2.2/s)
@@ -107,9 +114,11 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0) -> Array:
 	_apply_mods(BaseMeta.run_mods(save))
 	wave_time = TuneRef.num("wave_time", wave_time)
 	hp_growth = TuneRef.num("hp_growth", hp_growth)
-	# Balance knob: enemy HP ramp from Tier 2 up (T1 keeps the classic 1.12 wall).
-	if tier >= 2:
-		hp_growth = TuneRef.num("hp_growth_hi", 1.11)
+	# Balance knobs: per-tier enemy HP ramp (T1 1.17, T2 1.18, T3+ 1.155).
+	if tier == 2:
+		hp_growth = TuneRef.num("hp_growth_t2", 1.18)
+	elif tier >= 3:
+		hp_growth = TuneRef.num("hp_growth_hi", 1.155)
 	dmg_growth = TuneRef.num("dmg_growth", dmg_growth)
 	spawn_base = TuneRef.num("spawn_base", spawn_base)
 	spawn_decay = TuneRef.num("spawn_decay", spawn_decay)
@@ -149,6 +158,7 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0) -> Array:
 	coins_boss = 0.0
 	gems_run = 0
 	boss_gem_awards = 0
+	boss_gem_left = BaseMeta.boss_gem_allowance(save, now)
 	perks_taken.clear()
 	perk_offer.clear()
 	perk_pending = 0
@@ -203,7 +213,7 @@ func lvl_at(i: int) -> int:
 	var s: Dictionary = slots[i]
 	if s.is_empty():
 		return 0
-	return mini(MAX_LVL, int(s["perm"]) + int(s["run"]))
+	return mini(lvl_cap(), int(s["perm"]) + int(s["run"]))
 
 
 func id_at(i: int) -> String:
@@ -264,6 +274,30 @@ func compute_stats() -> Dictionary:
 			elif ECO_IDS.has(nid) and float(eco_pen[n]) >= 1.0:
 				eco_pen[n] = 1.0 - pen
 				links.append([i, n, "S5"])
+	# S6 Bounty Hunters / S7 Oil Shells (fix round): eco buildings feed their
+	# adjacent weapons, so an eco slot also buys wave survival (AC-38) and a
+	# mono-weapon board leaves damage on the table (AC-39).
+	var eco_dmg: Array = []
+	for i in 25:
+		eco_dmg.append(0.0)
+	var b_adj: float = TuneRef.num("bounty_adj", 0.05)
+	var o_adj: float = TuneRef.num("oil_adj", 0.05)
+	for i in 25:
+		var sid: String = id_at(i)
+		if sid != "bounty" and sid != "oilmill":
+			continue
+		var Ls: float = float(lvl_at(i)) * float(eco_pen[i])
+		for n in neighbors(i):
+			var nid2: String = id_at(n)
+			if sid == "bounty" and BuildingDB.cat_of(nid2) == "weapon":
+				eco_dmg[n] = float(eco_dmg[n]) + b_adj * Ls
+				links.append([i, n, "S6"])
+			elif sid == "oilmill" and (nid2 == "mortar" or nid2 == "tesla"):
+				eco_dmg[n] = float(eco_dmg[n]) + o_adj * Ls
+				links.append([i, n, "S7"])
+	var e_cap: float = TuneRef.num("eco_adj_cap", 2.0)
+	for i in 25:
+		eco_dmg[i] = 1.0 + minf(e_cap, float(eco_dmg[i]))
 	var bulwark_dr: float = 0.0
 	var mine_scale: float = 1.0 + TuneRef.num("mine_wave_scale", 0.03) * float(wave - 1)
 	for i in 25:
@@ -302,25 +336,43 @@ func compute_stats() -> Dictionary:
 						mine_lv += lvl_at(n)
 						links.append([n, i, "S1"])
 				var ammo: float = minf(0.5, 0.05 * float(mine_lv))
-				(st["weapons"] as Array).append({"slot": i, "kind": "gun", "dmg": (3.0 + 2.0 * L) * float(arm[i]), "rate": (1.0 + 0.12 * L) * (1.0 + ammo + float(aeg_rate[i])), "range": 220.0})
+				(st["weapons"] as Array).append({"slot": i, "kind": "gun", "dmg": (3.0 + 2.0 * L) * float(arm[i]) * float(eco_dmg[i]), "rate": (1.0 + 0.12 * L) * (1.0 + ammo + float(aeg_rate[i])), "range": 220.0})
 			"mortar":
 				var teslas: Array = []
 				for n in neighbors(i):
 					if id_at(n) == "tesla":
 						teslas.append(n)
 						links.append([n, i, "S2"])
-				(st["weapons"] as Array).append({"slot": i, "kind": "mortar", "dmg": (8.0 + 5.0 * L) * float(arm[i]), "rate": 0.45 * (1.0 + float(aeg_rate[i])), "range": 320.0, "splash": 55.0 + 4.0 * L, "teslas": teslas})
+				(st["weapons"] as Array).append({"slot": i, "kind": "mortar", "dmg": (8.0 + 5.0 * L) * float(arm[i]) * float(eco_dmg[i]), "rate": 0.45 * (1.0 + float(aeg_rate[i])), "range": 320.0, "splash": 55.0 + 4.0 * L, "teslas": teslas})
 			"tesla":
-				(st["weapons"] as Array).append({"slot": i, "kind": "tesla", "dmg": (2.0 + 1.2 * L) * float(arm[i]), "rate": 0.9 * (1.0 + float(aeg_rate[i])), "range": 190.0, "chains": mini(6, 2 + int(L) / 2)})
-	var core_dmg: float = 5.0 * (1.0 + 0.25 * float(core.get("dmg", 0))) * (1.0 + 0.25 * float(core_run_lvl)) * float(arm[CORE_SLOT])
+				(st["weapons"] as Array).append({"slot": i, "kind": "tesla", "dmg": (2.0 + 1.2 * L) * float(arm[i]) * float(eco_dmg[i]), "rate": 0.9 * (1.0 + float(aeg_rate[i])), "range": 190.0, "chains": mini(6, 2 + int(L) / 2)})
+	var core_dmg: float = 5.0 * (1.0 + 0.25 * float(core.get("dmg", 0))) * float(arm[CORE_SLOT])
 	(st["weapons"] as Array).append({"slot": CORE_SLOT, "kind": "core", "dmg": core_dmg, "rate": 1.4, "range": 280.0})
+	# Core Overdrive (late sink): core stat levels above BaseMeta.MAX_LVL —
+	# opened by tiers via BaseMeta.core_cap — compound x overdrive_mult each,
+	# on ALL weapon damage / max HP / regen, so late coins (and the HP lab
+	# multiplying a bigger pool) keep mattering against exponential waves.
+	var odm: float = TuneRef.num("overdrive_mult", 1.1)
+	var od_dmg: float = pow(odm, float(maxi(0, int(core.get("dmg", 0)) - BaseMeta.MAX_LVL)))
+	var od_hp: float = pow(odm, float(maxi(0, int(core.get("hp", 0)) - BaseMeta.MAX_LVL)))
+	var od_regen: float = pow(odm, float(maxi(0, int(core.get("regen", 0)) - BaseMeta.MAX_LVL)))
+	st["overdrive"] = {"dmg": od_dmg, "hp": od_hp, "regen": od_regen}
+	# Core Overcharge (in-run cash sink): each cash level on the core compounds
+	# ALL weapon damage, so eco income converts into wave survival all run long.
+	# Its strength grows with the permanent Core DMG level (a meta hook: early
+	# runs convert cash weakly, a built-up core converts it hard).
+	var oc_step: float = TuneRef.num("overcharge", 0.02) + TuneRef.num("overcharge_per_core", 0.006) * float(core.get("dmg", 0))
+	st["overcharge_step"] = oc_step
+	var oc: float = pow(1.0 + oc_step, float(core_run_lvl))
+	st["overcharge"] = oc
 	# Meta multipliers (B1), then perks (B7), then hard caps.
-	st["max_hp"] = float(st["max_hp"]) * max_hp_mult
+	st["max_hp"] = float(st["max_hp"]) * max_hp_mult * od_hp
+	st["regen"] = float(st["regen"]) * od_regen
 	st["cash_ps"] = float(st["cash_ps"]) * cash_mult
 	st["xp_mult"] = float(st["xp_mult"]) * xp_mod
 	for w in st["weapons"]:
 		var wd: Dictionary = w
-		wd["dmg"] = float(wd["dmg"]) * dmg_mult
+		wd["dmg"] = float(wd["dmg"]) * dmg_mult * od_dmg * oc
 	Perks.apply(st, perks_taken)
 	st["cash_ps"] = float(st["cash_ps"]) * float(st["perk_cash"])
 	var gun_cap: float = TuneRef.num("gun_rate_cap", 2.5)
@@ -360,7 +412,7 @@ func xp_need() -> float:
 func upgrade_cost(i: int) -> int:
 	var pm: float = float(stats.get("perk_upgrade_cost", 1.0))
 	if i == CORE_SLOT:
-		return int(8.0 * pow(1.5, float(core_run_lvl)) * pm)
+		return int(8.0 * pow(TuneRef.num("core_run_growth", 1.4), float(core_run_lvl)) * pm)
 	return int(8.0 * pow(TuneRef.num("run_upgrade_growth", 1.3), float(maxi(0, lvl_at(i) - 1))) * pm)
 
 
@@ -530,7 +582,10 @@ func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF) -> void:
 		"boss":
 			# Balance knob: boss HP relative to EnemyDB from Tier 2 up (softens the
 			# every-10-waves wall once the base is maxed; T1 keeps the classic spike).
-			var bm: float = TuneRef.num("boss_hp_hi", 0.5) if tier >= 2 else 1.0
+			# T1: the first boss (w10) stays gentle for new players; the extra
+			# boss_hp_t1 toughness phases in to full by wave 30 (the T1 wall).
+			var ramp: float = clampf(float(wave - 10) / 20.0, 0.0, 1.0)
+			var bm: float = TuneRef.num("boss_hp_hi", 0.5) if tier >= 2 else 1.0 + (TuneRef.num("boss_hp_t1", 3.0) - 1.0) * ramp
 			e["hp"] = float(e["hp"]) * bm
 			e["max_hp"] = float(e["max_hp"]) * bm
 		"elite":
@@ -701,7 +756,8 @@ func _boss_bounty(pos: Vector2, ev: Array) -> void:
 	var g: int = 0
 	if boss_gem_awards < TuneRef.int_of("boss_gem_cap", 3):
 		boss_gem_awards += 1
-		g = TuneRef.int_of("boss_gem_t3", 1) if tier >= 3 else 1
+		g = mini(boss_gem_left, TuneRef.int_of("boss_gem_t3", 2) if tier >= 3 else 1)
+		boss_gem_left -= g
 		gems_run += g
 	ev.append({"t": "boss_bounty", "coins": c, "gems": g, "pos": pos})
 
@@ -809,7 +865,7 @@ func upgrade(i: int) -> Array:
 	var ev: Array = []
 	if over or i < 0 or i > 24:
 		return ev
-	if i != CORE_SLOT and (id_at(i) == "" or lvl_at(i) >= MAX_LVL):
+	if i != CORE_SLOT and (id_at(i) == "" or lvl_at(i) >= lvl_cap()):
 		return ev
 	var c: int = upgrade_cost(i)
 	if cash < float(c):

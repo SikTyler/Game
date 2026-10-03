@@ -64,7 +64,7 @@ static func mults(taken: Array) -> Dictionary:
 		"range": 1.2 if taken.has("p_range") else 1.0,
 		"hp": maxf(0.5, hp),
 		"regen": 0.0 if taken.has("p_frenzy") else (2.0 if fort else 1.0),
-		"mine": 1.0 + 0.25 * float(count(taken, "p_cash")),
+		"mine": 1.0 + TuneRef.num("perk_cash", 0.2) * float(count(taken, "p_cash")),
 		"xp": (1.3 if taken.has("p_xp") else 1.0) * (0.7 if taken.has("p_miser") else 1.0),
 		"cash": 1.5 if taken.has("p_greed") else 1.0,
 		"coin": (1.5 if taken.has("p_greed") else 1.0) * (1.75 if taken.has("p_bloodmoon") else 1.0),

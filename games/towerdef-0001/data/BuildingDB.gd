@@ -10,8 +10,8 @@ const DEFS: Dictionary = {
 	"armory":  {"name": "Armory",        "cat": "support", "coin": 18, "desc": "+25%/lv dmg to adjacent weapons & core"},
 	"bulwark": {"name": "Bulwark",       "cat": "support", "coin": 15, "desc": "+40 max HP & +0.5 regen /lv"},
 	"mine":    {"name": "Mine",          "cat": "eco",     "coin": 15, "desc": "+$1.2/sec per lv"},
-	"oilmill": {"name": "Oil Mill",      "cat": "eco",     "coin": 15, "desc": "+25% XP /lv, +15% per adjacent Mine"},
-	"bounty":  {"name": "Bounty Office", "cat": "eco",     "coin": 18, "desc": "+40% cash per kill /lv"},
+	"oilmill": {"name": "Oil Mill",      "cat": "eco",     "coin": 15, "desc": "+25% XP/lv (+15%/adj Mine); adj Mortar/Tesla +5% dmg/lv"},
+	"bounty":  {"name": "Bounty Office", "cat": "eco",     "coin": 18, "desc": "+40% kill cash /lv; adj weapons +5% dmg /lv"},
 	"vault":   {"name": "Vault",         "cat": "eco",     "coin": 20, "desc": "Wave end: +4%/lv interest on held cash (cap $40/lv)"},
 	"aegis":   {"name": "Aegis Pylon",   "cat": "support", "coin": 22, "desc": "-4%/lv core dmg; adj weapons +10%/lv rate; adj eco -15%"},
 }

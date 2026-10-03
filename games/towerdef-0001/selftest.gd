@@ -197,6 +197,7 @@ func _initialize() -> void:
 
 	_meta_stages()
 	_engine_b_stages()
+	_fix_round_stages()
 
 	if fails.is_empty():
 		print("SELFTEST OK")
@@ -562,6 +563,30 @@ func _engine_b_stages() -> void:
 	var bb: Array = _evts(bev, "boss_bounty")
 	_check("boss bounty coins 25*w/10", bb.size() == 4 and int(bb[0]["coins"]) == 50)
 	_check("AC-10 boss gems capped at 3 awards", S.gems_run == 3 and int(bb[3]["gems"]) == 0)
+	# AC-10: 2 gems per award from T3; AC-10a: daily boss-gem allowance.
+	var sv3b: Dictionary = BaseMeta.default_save()
+	sv3b["best_wave_by_tier"] = {"1": 40, "2": 50}
+	BaseMeta.select_tier(sv3b, 3)
+	var T3S = TowerState.new()
+	T3S.setup(9, sv3b, 1767225600)
+	T3S.spawn_t = 999.0
+	T3S.wave = 20
+	var b3ev: Array = []
+	for k in 4:
+		T3S.enemies.append(_enemy("boss", TowerState.CENTER + Vector2(100, 0), 0.0))
+		T3S._reap(b3ev)
+	_check("AC-10 T3 boss gems = 2 per award, 3 awards", T3S.tier == 3 and T3S.gems_run == 6 and int(_evts(b3ev, "boss_bounty")[0]["gems"]) == 2)
+	BaseMeta.bank(sv3b, 0, 20, 3, 1.0, 1767225600 + 60, 6)
+	_check("AC-10a daily allowance 10 -> 4 left same day", BaseMeta.boss_gem_allowance(sv3b, 1767225600 + 120) == 4 and BaseMeta.boss_gem_allowance(sv3b, 1767225600 + 86400) == 10)
+	T3S = TowerState.new()
+	T3S.setup(10, sv3b, 1767225600 + 120)
+	T3S.spawn_t = 999.0
+	T3S.wave = 20
+	for k in 3:
+		T3S.enemies.append(_enemy("boss", TowerState.CENTER + Vector2(100, 0), 0.0))
+		T3S._reap(b3ev)
+	_check("AC-10a run gems clipped by the daily allowance", T3S.gems_run == 4)
+	_check("AC-10a allowance survives normalize", int(BaseMeta.normalize(JSON.parse_string(JSON.stringify(sv3b)))["boss_gems_today"]["n"]) == 6)
 	S.slots[7] = {"id": "mine", "perm": 1, "run": 0}
 	S.wave = 11
 	S.recompute()
@@ -851,3 +876,74 @@ func _engine_b_stages() -> void:
 	var sk: Array = _evts(wev, "wave_skip")
 	_check("AC-33 Wave Skip jumps 2 waves with 50% coins", S.wave == 5 and sk.size() == 1 and int(sk[0]["skipped"]) == 4 and is_equal_approx(S.coins_run, 4.0 * 0.5 + 5.0) and S.kills == kv)
 	_check("skip landing on a perk wave still queues a perk", S.perk_offer.size() == 3 or S.perk_pending > 0)
+
+
+## Fix-round systems: Core Overcharge (in-run cash sink), Core Overdrive (late
+## coin sink via tier-raised core caps), S6/S7 eco->weapon feeders, run level cap.
+func _fix_round_stages() -> void:
+	# Core caps rise with tiers (late sink).
+	var cs: Dictionary = BaseMeta.default_save()
+	cs["coins"] = 1 << 40
+	cs["core"]["hp"] = 15
+	_check("core cap 15 at T1", BaseMeta.core_cap(cs) == 15 and not BaseMeta.try_core(cs, "hp"))
+	cs["best_wave_by_tier"] = {"1": 40, "2": 50}
+	_check("core cap +5 per tier (T3 = 25)", BaseMeta.core_cap(cs) == 25 and BaseMeta.try_core(cs, "hp") and int(cs["core"]["hp"]) == 16)
+	# Overdrive: core levels above 15 compound max HP / regen / weapon dmg x1.1.
+	var od: Dictionary = BaseMeta.default_save()
+	od["best_wave_by_tier"] = {"1": 40, "2": 50}
+	od["core"] = {"dmg": 0, "hp": 20, "regen": 0}
+	var S = TowerState.new()
+	S.setup(5, od)
+	_check("Overdrive: hp lvl 20 -> (100+25*20) x 1.1^5", is_equal_approx(float(S.stats["max_hp"]), 600.0 * pow(1.1, 5.0)))
+	od["core"] = {"dmg": 17, "hp": 0, "regen": 0}
+	S = TowerState.new()
+	S.setup(5, od)
+	_check("Overdrive: dmg lvl 17 -> core dmg x 1.1^2", is_equal_approx(float(_weapon(S, "core")["dmg"]), 5.0 * (1.0 + 0.25 * 17.0) * pow(1.1, 2.0)))
+	# Overcharge: each cash level on the core compounds ALL weapon damage.
+	S = _fresh()
+	S.slots[7] = {"id": "gun", "perm": 1, "run": 0}
+	S.recompute()
+	var g0: float = float(_weapon(S, "gun")["dmg"])
+	var c0: float = float(_weapon(S, "core")["dmg"])
+	S.cash = 1000.0
+	S.upgrade(TowerState.CORE_SLOT)
+	S.upgrade(TowerState.CORE_SLOT)
+	_check("Overcharge: 2 core cash levels -> all weapons x1.02^2 (core dmg 0)", S.core_run_lvl == 2 and is_equal_approx(float(_weapon(S, "gun")["dmg"]), g0 * 1.0404) and is_equal_approx(float(_weapon(S, "core")["dmg"]), c0 * 1.0404))
+	_check("Overcharge cost 8 * 1.4^n", S.upgrade_cost(TowerState.CORE_SLOT) == int(8.0 * pow(1.4, 2.0)))
+	var oc: Dictionary = BaseMeta.default_save()
+	oc["core"] = {"dmg": 10, "hp": 0, "regen": 0}
+	S = TowerState.new()
+	S.setup(5, oc)
+	_check("Overcharge step grows with perm Core DMG (0.02 + 0.006*L)", is_equal_approx(float(S.stats["overcharge_step"]), 0.08))
+	# S6 Bounty Hunters / S7 Oil Shells.
+	S = _fresh()
+	S.slots[7] = {"id": "gun", "perm": 1, "run": 0}
+	S.recompute()
+	g0 = float(_weapon(S, "gun")["dmg"])
+	S.slots[6] = {"id": "bounty", "perm": 2, "run": 0}
+	S.recompute()
+	_check("S6 Bounty L2 feeds adjacent gun +10% dmg", is_equal_approx(float(_weapon(S, "gun")["dmg"]), g0 * 1.1) and _has_link(S, 6, 7, "S6"))
+	S = _fresh()
+	S.slots[17] = {"id": "mortar", "perm": 1, "run": 0}
+	S.recompute()
+	var m0: float = float(_weapon(S, "mortar")["dmg"])
+	S.slots[16] = {"id": "oilmill", "perm": 3, "run": 0}
+	S.slots[18] = {"id": "oilmill", "perm": 1, "run": 0}
+	S.recompute()
+	_check("S7 Oil Mills feed adjacent mortar +5%/lvl (3+1 -> +20%)", is_equal_approx(float(_weapon(S, "mortar")["dmg"]), m0 * 1.2) and _has_link(S, 16, 17, "S7"))
+	S.slots[12 - 5] = {"id": "gun", "perm": 1, "run": 0}
+	S.recompute()
+	_check("S7 Oil Mill does not feed guns", not _has_link(S, 16, 7, "S7"))
+	# Run level ceiling raised to 40 (late cash keeps converting).
+	S = _fresh()
+	S.slots[7] = {"id": "gun", "perm": 39, "run": 0}
+	S.recompute()
+	S.cash = 1.0e9
+	S.upgrade(7)
+	_check("run level cap 40", S.lvl_at(7) == 40 and S.upgrade(7).is_empty())
+	# Enemy damage ramp 1.06/wave so HP (labs, perks, Overdrive) matters late.
+	S = _fresh()
+	S.wave = 41
+	var sev: Array = []
+	S._spawn("drone", sev)
+	_check("enemy dmg ramp 1.06^(w-1)", is_equal_approx(float((S.enemies[S.enemies.size() - 1] as Dictionary)["dmg"]), 4.0 * pow(1.06, 40.0)))
