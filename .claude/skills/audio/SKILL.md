@@ -5,6 +5,8 @@ description: Use when giving a playable Godot game a coherent, prompt-derived au
 
 # Audio re-skin (local generative SFX + music)
 
+> **No GPU / ComfyUI unavailable?** Use the `chiptune-audio` skill instead — a GPU-free procedural path (jsfxr/ZzFX SFX + ZzFXM music via `tools/sfx.mjs` / `tools/music.mjs`) that records `audio_pass.method: "procedural"`.
+
 Give a `playable`-or-better game an audio identity. Audio is orthogonal to the visual pass: a game may be `playable`, `styled`, or `scored` going in. The terminal status is `scored`; the `audio_pass` block — not the status string — is the source of truth for what was produced.
 
 **Failure attribution (the POC value, same as `asset`):** a bad or absent clip is always attributable — a wrong event→SFX map, an unwired `AudioStreamPlayer`/signal, a clip that ignores `concept.theme`, or an *infra* failure in `comfy.mjs` (ComfyUI down) — never an unattributable gap. Each is a specific, fixable prose/recipe cause.
