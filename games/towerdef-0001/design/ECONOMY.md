@@ -128,3 +128,36 @@ Implement as asserts in `playtest.gd` (simulated clock via injectable `now`; 4 r
 `tier_hp_base 1.5`, `tier_coin_step 0.6`, `boss_bounty 25`, `boss_gem_cap 3`, `lab_cost_growth 1.8`,
 `lab_time_growth 1.6`, `offline_frac 0.15`, `offline_cap_h 4`, `cashout_frac 0.02`,
 `armory_cap 1.0`, `gun_rate_cap 2.5`, `mine_wave_scale 0.03`, `perm_lvl_cap 10`, `chest_gems 40`.
+
+## 8. Balance pass (playtest CAMPAIGN sim) — what was measured and tuned
+
+`playtest.gd` now runs, after the legacy 8-run T1 audit, a **30-day campaign** with an
+injected clock (2 sessions × 2 runs per day, 8 h / 16 h offline gaps): login streak →
+missions roll/claim → offline claim → gems (lab slot 3/4, card slots, chests, equip) →
+labs (start ≤ 50% of the bank, then the base, then research with the rest) → base →
+fastest unlocked speed → tier pick (push the highest tier; farm T−1 on alternate runs
+only if the top tier pays < 80% of its coins/min) → run (bot chases the tradeoff-perk
+mission). Plus: 7-day pure-weapon / pure-eco campaigns from the same fresh save, and
+same-save snapshot comparisons (in-run policy, always-take-perk-X) on days 7 and 20.
+
+Findings that drove the tuning (all via data tables / Tune knobs; SPEC-pinned values untouched):
+- **Hard ceiling at T2 w48 for ~25 days, T3 only on day 29.** Late power is additive
+  (+5%/lab level, linear building stats) against a 1.12^w ramp, and the boss every 10
+  waves was a deterministic wall (every policy and perk died on the same boss).
+  → `hp_growth_hi` 1.11 (T2+ only; T1 keeps the classic 1.12/w30 wall the legacy audit
+  relies on), `boss_hp_hi` 0.5 (T2+ only), labs Damage/Health `dur_growth` 1.6 → 1.45.
+- **Coins saturated the base by day 4.** → perm costs ×3 (`perm_upgrade_base` 45,
+  `perm_core_base` 30, `perm_unlock_base` 90).
+- **Eco-mix lost to pure weapon** (half-mine boards bought almost nothing with cash late,
+  because in-run level cost compounds on the *total* level). → `run_upgrade_growth` 1.3
+  (was 1.55): cash now buys real in-run levels, so the eco half of a board pays in waves.
+- **Greed was a free +50% coins** (its "+15% enemy speed" cost never bit). → new cost
+  `greed_enemy_hp` 1.25 (Greed: enemies +15% speed, +25% HP).
+- **Boss gems would pass 50% of gem income once T3 doubled them.** → `boss_gem_t3` 1.
+
+Result (seed 4242): T2 day 2, T3 day 12, no 5-day stall before T3, 25.5 gems/day
+(boss 46%), offline ≈ 11% of active coins/min, eco-mix week-1 = 2.4× pure-weapon coins
+at ≥ its best wave, no dominant perk (top coin ratio 1.06). Known gaps (reported, not
+gated): day-1 best wave 39 (target 18–32) and T2 on day 2 (AC-40 wants 3–5) — the early
+game is faster than the brief; after T3 the best wave creeps 47 → 48 over days 13–30
+(a post-T3 plateau: T4 at w60 in T3 is out of reach within 30 days).

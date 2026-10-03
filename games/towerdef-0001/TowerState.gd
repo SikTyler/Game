@@ -107,6 +107,9 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0) -> Array:
 	_apply_mods(BaseMeta.run_mods(save))
 	wave_time = TuneRef.num("wave_time", wave_time)
 	hp_growth = TuneRef.num("hp_growth", hp_growth)
+	# Balance knob: enemy HP ramp from Tier 2 up (T1 keeps the classic 1.12 wall).
+	if tier >= 2:
+		hp_growth = TuneRef.num("hp_growth_hi", 1.11)
 	dmg_growth = TuneRef.num("dmg_growth", dmg_growth)
 	spawn_base = TuneRef.num("spawn_base", spawn_base)
 	spawn_decay = TuneRef.num("spawn_decay", spawn_decay)
@@ -358,7 +361,7 @@ func upgrade_cost(i: int) -> int:
 	var pm: float = float(stats.get("perk_upgrade_cost", 1.0))
 	if i == CORE_SLOT:
 		return int(8.0 * pow(1.5, float(core_run_lvl)) * pm)
-	return int(8.0 * pow(1.55, float(maxi(0, lvl_at(i) - 1))) * pm)
+	return int(8.0 * pow(TuneRef.num("run_upgrade_growth", 1.3), float(maxi(0, lvl_at(i) - 1))) * pm)
 
 
 func unlock_cost() -> int:
@@ -509,7 +512,7 @@ func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF) -> void:
 	if enemies.size() >= MAX_ENEMIES:
 		return
 	var d: Dictionary = EnemyDB.get_def(kind)
-	var sc: float = scale() * hp_mult
+	var sc: float = scale() * hp_mult * float(stats.get("perk_enemy_hp", 1.0))
 	var pos: Vector2 = at
 	if at == Vector2.INF:
 		var a: float = rng.randf() * TAU
@@ -524,6 +527,12 @@ func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF) -> void:
 		"shield": 0, "fire_cd": 0.0, "shock_t": 0.0, "shock_src": -1,
 	}
 	match kind:
+		"boss":
+			# Balance knob: boss HP relative to EnemyDB from Tier 2 up (softens the
+			# every-10-waves wall once the base is maxed; T1 keeps the classic spike).
+			var bm: float = TuneRef.num("boss_hp_hi", 0.5) if tier >= 2 else 1.0
+			e["hp"] = float(e["hp"]) * bm
+			e["max_hp"] = float(e["max_hp"]) * bm
 		"elite":
 			e["shield"] = TuneRef.int_of("elite_shield_base", 3) + wave / 10
 			e["max_shield"] = int(e["shield"])
@@ -692,7 +701,7 @@ func _boss_bounty(pos: Vector2, ev: Array) -> void:
 	var g: int = 0
 	if boss_gem_awards < TuneRef.int_of("boss_gem_cap", 3):
 		boss_gem_awards += 1
-		g = TuneRef.int_of("boss_gem_t3", 2) if tier >= 3 else 1
+		g = TuneRef.int_of("boss_gem_t3", 1) if tier >= 3 else 1
 		gems_run += g
 	ev.append({"t": "boss_bounty", "coins": c, "gems": g, "pos": pos})
 

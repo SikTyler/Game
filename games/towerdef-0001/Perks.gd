@@ -3,6 +3,7 @@ extends RefCounted
 ## (a stacking perk appears once per take).
 
 const PerkDB := preload("res://data/PerkDB.gd")
+const TuneRef := preload("res://Tune.gd")
 
 
 static func count(taken: Array, id: String) -> int:
@@ -68,6 +69,7 @@ static func mults(taken: Array) -> Dictionary:
 		"cash": 1.5 if taken.has("p_greed") else 1.0,
 		"coin": (1.5 if taken.has("p_greed") else 1.0) * (1.75 if taken.has("p_bloodmoon") else 1.0),
 		"enemy_spd": 1.15 if taken.has("p_greed") else 1.0,
+		"enemy_hp": TuneRef.num("greed_enemy_hp", 1.25) if taken.has("p_greed") else 1.0,
 		"upgrade_cost": 0.7 if taken.has("p_miser") else 1.0,
 		"spawn": 0.8 if taken.has("p_bloodmoon") else 1.0,
 	}
@@ -87,6 +89,6 @@ static func apply(st: Dictionary, taken: Array) -> Dictionary:
 		wd["dmg"] = float(wd["dmg"]) * float(m["dmg"])
 		wd["rate"] = float(wd["rate"]) * float(m["rate"])
 		wd["range"] = float(wd["range"]) * float(m["range"])
-	for k in ["cash", "coin", "enemy_spd", "upgrade_cost", "spawn"]:
+	for k in ["cash", "coin", "enemy_spd", "enemy_hp", "upgrade_cost", "spawn"]:
 		st["perk_" + String(k)] = float(m[k])
 	return st

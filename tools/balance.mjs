@@ -261,6 +261,7 @@ function main(argv) {
     seeds: flag("--seeds", 5),
     invariants: obj.invariants || [],
     aggregators: obj.aggregators || {},
+    timeout: spec.timeout_ms || 60000,   // long campaign sims (e.g. towerdef) need minutes per seed
   });
   const res = runSearch(spec, evalFn, { seed: flag("--seed", 1), random: flag("--budget", 8) });
 

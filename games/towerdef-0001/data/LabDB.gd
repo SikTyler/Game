@@ -4,8 +4,8 @@ extends RefCounted
 
 const DEFS: Dictionary = {
 	"speed":     {"name": "Game Speed",    "max": 3,  "base": 400.0, "growth": 4.0,  "dur_base": 1800.0, "dur_growth": 3.0,  "effect": "Unlocks the next game speed step"},
-	"dmg":       {"name": "Damage",        "max": 30, "base": 80.0,  "growth": 1.8,  "dur_base": 300.0,  "dur_growth": 1.6,  "effect": "+5% damage (core & weapons)"},
-	"hp":        {"name": "Health",        "max": 30, "base": 80.0,  "growth": 1.8,  "dur_base": 300.0,  "dur_growth": 1.6,  "effect": "+5% core max HP"},
+	"dmg":       {"name": "Damage",        "max": 30, "base": 80.0,  "growth": 1.8,  "dur_base": 300.0,  "dur_growth": 1.45, "effect": "+5% damage (core & weapons)"},
+	"hp":        {"name": "Health",        "max": 30, "base": 80.0,  "growth": 1.8,  "dur_base": 300.0,  "dur_growth": 1.45, "effect": "+5% core max HP"},
 	"coin":      {"name": "Coin Bonus",    "max": 20, "base": 60.0,  "growth": 1.35, "dur_base": 300.0,  "dur_growth": 1.30, "effect": "+5% coins"},
 	"xp":        {"name": "XP Bonus",      "max": 20, "base": 50.0,  "growth": 1.35, "dur_base": 240.0,  "dur_growth": 1.30, "effect": "+4% run XP"},
 	"startcash": {"name": "Starting Cash", "max": 15, "base": 40.0,  "growth": 1.40, "dur_base": 180.0,  "dur_growth": 1.30, "effect": "+$15 cash at run start"},

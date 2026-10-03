@@ -237,7 +237,7 @@ static func slot_of(s: Dictionary, i: int) -> Dictionary:
 
 static func unlock_cost(s: Dictionary) -> int:
 	var un: Array = s["unlocked"]
-	return int(TuneRef.num("perm_unlock_base", 30.0) * pow(1.45, un.size()))
+	return int(TuneRef.num("perm_unlock_base", 90.0) * pow(1.45, un.size()))
 
 
 static func place_cost(id: String) -> int:
@@ -246,11 +246,11 @@ static func place_cost(id: String) -> int:
 
 
 static func upgrade_cost(lvl: int) -> int:
-	return int(TuneRef.num("perm_upgrade_base", 15.0) * pow(1.55, lvl))
+	return int(TuneRef.num("perm_upgrade_base", 45.0) * pow(1.55, lvl))
 
 
 static func core_cost(lvl: int) -> int:
-	return int(TuneRef.num("perm_core_base", 10.0) * pow(1.5, lvl))
+	return int(TuneRef.num("perm_core_base", 30.0) * pow(1.5, lvl))
 
 
 static func try_unlock(s: Dictionary, i: int) -> bool:

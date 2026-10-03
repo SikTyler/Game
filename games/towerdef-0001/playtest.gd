@@ -27,6 +27,9 @@ const PROGRESS_GAIN: int = 5
 const SEED_DEFAULT: int = 4242
 
 var fail_count: int = 0
+const GATES: Array = ["solvent", "first_goal_reachable", "progressable", "no_death_spiral", "no_trivial_dominant",
+	"t2_by_day5", "tier3_by_day30", "no_plateau_before_t3", "early_3day_rise",
+	"gems_per_day_ok", "gem_sources_ok", "offline_below_active", "mix_beats_weapon", "mix_beats_eco", "no_dominant_perk"]
 
 
 func _initialize() -> void:
@@ -58,8 +61,9 @@ func _initialize() -> void:
 		"no_death_spiral": not spiral,
 		"no_trivial_dominant": float(maxi(eco_best, wpn_best)) <= float(bal_best) * 1.15,
 	}
+	m.merge(campaign_checks(seed0))
 	print("PLAYTEST METRICS " + JSON.stringify(m))
-	for key in ["solvent", "first_goal_reachable", "progressable", "no_death_spiral", "no_trivial_dominant"]:
+	for key in GATES:
 		if not bool(m[key]):
 			fail_count += 1
 			print("PLAYTEST FAIL: " + key)
@@ -128,16 +132,21 @@ static func _perk_score(policy: String, id: String) -> int:
 
 
 ## Competent in-run policy; also used as a library by selftest.
-static func bot_step(S, policy: String) -> void:
+static func bot_step(S, policy: String, perk_pref: String = "") -> Array:
+	var ev: Array = []
 	if S.perk_offer.size() > 0:
 		var bp: int = 0
 		var bs: int = -99
 		for k in S.perk_offer.size():
 			var ps: int = _perk_score(policy, String(S.perk_offer[k]))
+			if perk_pref != "" and String(S.perk_offer[k]) == perk_pref:
+				ps = 100
+			elif perk_pref == "tradeoff" and PerkDB.is_tradeoff(String(S.perk_offer[k])):
+				ps += 10
 			if ps > bs:
 				bs = ps
 				bp = k
-		S.choose_perk(bp)
+		ev.append_array(S.choose_perk(bp))
 	if S.draft.size() > 0:
 		var cnt: Vector2i = _counts(S)
 		var best: int = 0
@@ -148,11 +157,11 @@ static func bot_step(S, policy: String) -> void:
 			if sc > best_score:
 				best_score = sc
 				best = k
-		S.choose_card(best)
+		ev.append_array(S.choose_card(best))
 	if S.pending_place != "":
 		var free: Array = S.free_slots()
 		if free.size() > 0:
-			S.place(int(free[0]))
+			ev.append_array(S.place(int(free[0])))
 	# Spend cash: cheapest preferred upgrade (core counts as a weapon).
 	var target: int = -1
 	var cost: int = 1 << 30
@@ -168,7 +177,8 @@ static func bot_step(S, policy: String) -> void:
 			cost = c2
 			target = i
 	if target >= 0 and S.cash >= float(cost):
-		S.upgrade(target)
+		ev.append_array(S.upgrade(target))
+	return ev
 
 
 static func run_once(save: Dictionary, policy: String, seed_value: int) -> Dictionary:
@@ -189,7 +199,7 @@ static func run_once(save: Dictionary, policy: String, seed_value: int) -> Dicti
 static func spend_meta(save: Dictionary, policy: String) -> void:
 	var guard: int = 0
 	var core_order: Array = ["dmg", "hp", "regen"]
-	while guard < 60:
+	while guard < 200:
 		guard += 1
 		var w: int = 0
 		var e: int = 0
@@ -208,7 +218,7 @@ static func spend_meta(save: Dictionary, policy: String) -> void:
 			elif c == "eco":
 				e += 1
 			var uc: int = BaseMeta.upgrade_cost(int(s["lvl"]))
-			if uc < cheapest_cost:
+			if uc < cheapest_cost and int(s["lvl"]) < BaseMeta.perm_lvl_cap(save):
 				cheapest_cost = uc
 				cheapest = i
 		var did: bool = false
@@ -227,9 +237,9 @@ static func spend_meta(save: Dictionary, policy: String) -> void:
 			for k in core_order:
 				if int(core[k]) < int(core[stat]):
 					stat = k
-			if BaseMeta.core_cost(int(core[stat])) <= cheapest_cost:
+			if int(core[stat]) < BaseMeta.MAX_LVL and BaseMeta.core_cost(int(core[stat])) <= cheapest_cost:
 				did = BaseMeta.try_core(save, stat)
-			elif cheapest >= 0:
+			if not did and cheapest >= 0:
 				did = BaseMeta.try_upgrade(save, cheapest)
 		if not did and free < 0:
 			for i in 25:
@@ -238,3 +248,319 @@ static func spend_meta(save: Dictionary, policy: String) -> void:
 					break
 		if not did:
 			break
+
+
+# ======================================================================
+# CAMPAIGN SIM — ~30 simulated days of the full retention loop with an
+# injected clock: login streak, missions, offline earnings, labs (real-time
+# research that completes between sessions), cards (chests/equip/slots),
+# perks, permanent base spending and tier selection. The balanced bot plays
+# every run; policy / perk comparisons replay a frozen snapshot save.
+# ======================================================================
+const Labs := preload("res://Labs.gd")
+const Cards := preload("res://Cards.gd")
+const Missions := preload("res://Missions.gd")
+const Offline := preload("res://Offline.gd")
+const Tiers := preload("res://Tiers.gd")
+const LabDB := preload("res://data/LabDB.gd")
+
+const DAYS: int = 30
+const SESSION_H: Array = [8, 8, 16, 16]        # 2 sessions x 2 runs; 8 h / 16 h offline gaps (AC-40)
+const NOW0: int = 1767225600                   # 2026-01-01 00:00 UTC (a day boundary)
+const LAB_PRIO: Array = ["dmg", "hp", "coin", "speed", "startcash", "labspeed", "xp", "offrate", "offcap", "reroll"]
+const LAB_W: Dictionary = {"dmg": 1.0, "hp": 1.0, "coin": 1.0, "speed": 0.6, "startcash": 1.6, "labspeed": 1.4, "xp": 1.8, "offrate": 2.0, "offcap": 2.0, "reroll": 2.5}
+const CARD_PRIO: Array = ["c_dmg", "c_hp", "c_wind", "c_coin", "c_cash", "c_xp", "c_skip", "c_reroll"]
+
+
+## One run on `save` (mutated: banks, missions). Returns run facts.
+static func camp_run(save: Dictionary, policy: String, seed_value: int, now: int, perk_pref: String = "", feed_missions: bool = true) -> Dictionary:
+	var S = TowerState.new()
+	S.setup(seed_value, save, now)
+	var t: float = 0.0
+	var acc: float = 0.0
+	var res: Dictionary = {}
+	while not S.over and t < MAX_SIM_S:
+		var ev: Array = S.tick(DT)
+		t += DT
+		acc += DT
+		if acc >= 0.5:
+			acc = 0.0
+			ev.append_array(bot_step(S, policy, perk_pref))
+		if feed_missions:
+			Missions.on_run_events(save, ev)
+		for x in ev:
+			var e: Dictionary = x
+			if String(e.get("t", "")) == "game_over":
+				res = e
+	var coins: int = int(res.get("coins", int(S.coins_run)))
+	return {"wave": S.wave, "tier": S.tier, "coins": coins, "real_s": t, "gems": S.gems_run, "perks": S.perks_taken.duplicate()}
+
+
+static func _gems_spend(save: Dictionary, rng: RandomNumberGenerator) -> void:
+	var guard: int = 0
+	while guard < 40:
+		guard += 1
+		var own: int = Cards.owned(save).size()
+		var want: String = "chest"
+		if Labs.slots(save) < 3:
+			want = "lab"
+		elif Cards.slots(save) < 3 and own >= 3:
+			want = "card"
+		elif own >= 4 and Labs.slots(save) < 4:
+			want = "lab"
+		elif Cards.slots(save) < 5 and own > Cards.slots(save) + 1:
+			want = "card"
+		var ev: Array = []
+		match want:
+			"lab":
+				ev = Labs.buy_slot(save)
+			"card":
+				ev = Cards.buy_slot(save)
+			_:
+				ev = Cards.open_chest(save, rng)
+		if ev.is_empty():
+			break
+	# equip the best loadout by priority
+	for id in Cards.equipped(save).duplicate():
+		Cards.unequip(save, String(id))
+	for id in CARD_PRIO:
+		if Cards.owned(save).has(id):
+			Cards.equip(save, String(id))
+
+
+static func _labs_spend(save: Dictionary, now: int, frac: float = 0.5) -> void:
+	while Labs.running(save).size() < Labs.slots(save):
+		var best: String = ""
+		var best_sc: float = INF
+		for idv in LAB_PRIO:
+			var id: String = idv
+			if Labs.is_running(save, id) or Labs.level(save, id) >= LabDB.max_of(id):
+				continue
+			var sc: float = float(Labs.cost(id, Labs.level(save, id))) * float(LAB_W[id])
+			if sc < best_sc:
+				best_sc = sc
+				best = id
+		if best == "" or float(Labs.cost(best, Labs.level(save, best))) > frac * float(save["coins"]):
+			break
+		Labs.start(save, best, now)
+
+
+## Start-of-session chores, in the order a player meets them on the Base screen.
+static func session_open(save: Dictionary, now: int, rng: RandomNumberGenerator, led: Dictionary, policy: String = "balanced") -> void:
+	Labs.claim(save, now)
+	Missions.roll(save, now)
+	var c0: int = int(save["coins"])
+	for x in Offline.claim(save, now):
+		var oe: Dictionary = x
+		led["offline_coins"] = int(led["offline_coins"]) + int(oe["coins"])
+		led["offline_min"] = int(led["offline_min"]) + int(oe["minutes"])
+	Missions.streak_claim(save, now)
+	led["gross_coins"] = int(led["gross_coins"]) + int(save["coins"]) - c0
+	_claim_missions(save)
+	_gems_spend(save, rng)
+	_labs_spend(save, now)
+	spend_meta(save, policy)
+	_labs_spend(save, now, 1.0)   # base saturated: the rest goes to research
+	var steps: Array = Labs.speed_steps(save)
+	BaseMeta.set_speed(save, float(steps[steps.size() - 1]))
+
+
+## A competent player chases the "take tradeoff perks" daily while it is open.
+static func _mission_perk(save: Dictionary) -> String:
+	for x in Missions.list(save):
+		var e: Dictionary = x
+		if String(e["tpl"]) == "perk" and not bool(e["claimed"]) and not Missions.is_done(e):
+			return "tradeoff"
+	return ""
+
+
+static func _claim_missions(save: Dictionary) -> void:
+	for k in Missions.list(save).size():
+		Missions.claim(save, k)
+	Missions.claim_bonus(save)
+
+
+## Tier choice: push the highest unlocked tier; when it pays < 80% of the tier
+## below (coins per real minute), farm the lower tier on alternate runs.
+static func pick_tier(save: Dictionary, rate: Dictionary, run_idx: int) -> int:
+	var h: int = Tiers.highest(save)
+	if h > 1 and rate.has(h) and rate.has(h - 1) and float(rate[h]) < 0.8 * float(rate[h - 1]) and run_idx % 2 == 1:
+		return h - 1
+	return h
+
+
+static func campaign_days(seed0: int, policy: String = "balanced", n_days: int = DAYS) -> Dictionary:
+	var save: Dictionary = BaseMeta.default_save()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed0 + 7
+	var led: Dictionary = {"offline_coins": 0, "offline_min": 0, "gross_coins": 0, "run_coins": 0, "run_min": 0.0}
+	var rate: Dictionary = {}          # tier -> latest coins / real minute
+	var days: Array = []
+	var snaps: Dictionary = {}
+	var run_idx: int = 0
+	var t2_day: int = -1
+	var t3_day: int = -1
+	for d in n_days:
+		for h in SESSION_H:
+			var now: int = maxi(NOW0 + d * 86400 + int(h) * 3600, int(save["last_seen"]) + 60)
+			session_open(save, now, rng, led, policy)
+			var t: int = pick_tier(save, rate, run_idx)
+			BaseMeta.select_tier(save, t)
+			var r: Dictionary = camp_run(save, policy, seed0 + 1000 + run_idx * 131, now, _mission_perk(save))
+			run_idx += 1
+			var mins: float = maxf(0.1, float(r["real_s"]) / 60.0)
+			rate[t] = float(r["coins"]) / mins
+			led["run_coins"] = int(led["run_coins"]) + int(r["coins"])
+			led["run_min"] = float(led["run_min"]) + mins
+			led["gross_coins"] = int(led["gross_coins"]) + int(r["coins"])
+			save["last_seen"] = now + int(r["real_s"])
+			_claim_missions(save)
+		var hi: int = Tiers.highest(save)
+		if hi >= 2 and t2_day < 0:
+			t2_day = d + 1
+		if hi >= 3 and t3_day < 0:
+			t3_day = d + 1
+		var lab_sum: int = 0
+		for id in LabDB.IDS:
+			lab_sum += Labs.level(save, String(id))
+		var bit: int = Tiers.best_in(save, hi)
+		var row: Dictionary = {
+			"day": d + 1, "tier": hi, "best_wave_hi_tier": bit, "best_wave": int(save["best_wave"]),
+			"coins_gross": int(led["gross_coins"]), "bank": int(save["coins"]), "gems": int(save["gems"]),
+			"gems_earned": _gems_total(save), "labs": lab_sum, "cards": Cards.owned(save).size(),
+			"progress_key": hi * 1000 + bit,
+		}
+		days.append(row)
+		print("CAMPAIGN " + policy + " day %2d: T%d best@T%d w%d best w%d | coins gross %d bank %d | gems %d (earned %d) | labs %d cards %d" % [d + 1, hi, hi, bit, row["best_wave"], row["coins_gross"], row["bank"], row["gems"], row["gems_earned"], lab_sum, row["cards"]])
+		if d + 1 == 7 or d + 1 == 20:
+			snaps[d + 1] = save.duplicate(true)
+	return {"days": days, "save": save, "led": led, "rate": rate, "t2_day": t2_day, "t3_day": t3_day, "snaps": snaps}
+
+
+static func _gems_total(save: Dictionary) -> int:
+	var gl: Dictionary = save["gem_log"]
+	var n: int = 0
+	for k in gl.keys():
+		n += int(gl[k])
+	return n
+
+
+## Replays a frozen snapshot with an in-run policy (and optional forced perk).
+static func snap_eval(snap: Dictionary, policy: String, seeds: Array, perk_pref: String = "") -> Dictionary:
+	var w: float = 0.0
+	var c: float = 0.0
+	for sv in seeds:
+		var s: Dictionary = snap.duplicate(true)
+		BaseMeta.select_tier(s, Tiers.highest(s))
+		var r: Dictionary = camp_run(s, policy, int(sv), NOW0, perk_pref, false)
+		w += float(r["wave"])
+		c += float(r["coins"])
+	var n: float = float(seeds.size())
+	return {"wave": w / n, "coins": c / n}
+
+
+## The campaign-level invariants (ECONOMY.md §6 / BRIEF AC-38..41).
+func campaign_checks(seed0: int) -> Dictionary:
+	var C: Dictionary = campaign_days(seed0)
+	var days: Array = C["days"]
+	var led: Dictionary = C["led"]
+	var save: Dictionary = C["save"]
+	var keys: Array = []
+	for r in days:
+		keys.append(int((r as Dictionary)["progress_key"]))
+	var t3: int = int(C["t3_day"])
+	# I-7: no 5-day window without a gain in (tier, best wave in highest tier) until T3
+	var stall_days: Array = []
+	var stop: int = t3 if t3 > 0 else DAYS
+	for d in range(5, stop):
+		if int(keys[d]) <= int(keys[d - 5]):
+			stall_days.append(d + 1)
+	# AC-40: in week 1 every 3-day window shows a gain
+	var early: bool = true
+	for d in range(3, mini(7, DAYS)):
+		if int(keys[d]) <= int(keys[d - 3]):
+			early = false
+	# AC-41 / I-10: gems
+	var gl: Dictionary = save["gem_log"]
+	var gtot: int = _gems_total(save)
+	var gmax: int = 0
+	var gsrc: String = ""
+	for k in gl.keys():
+		if int(gl[k]) > gmax:
+			gmax = int(gl[k])
+			gsrc = String(k)
+	var gpd: float = float(gtot) / float(DAYS)
+	# I-6: offline vs active coins/min
+	var active_rate: float = float(led["run_coins"]) / maxf(0.1, float(led["run_min"]))
+	var off_rate: float = float(led["offline_coins"]) / maxf(1.0, float(led["offline_min"]))
+	# AC-38 (strategy level): a week of pure-weapon / pure-eco play from the same fresh save
+	var wk: int = 7
+	var bal7: Dictionary = days[wk - 1]
+	var strat: Dictionary = {"balanced": {"key": int(bal7["progress_key"]), "coins": int(bal7["coins_gross"]), "best_wave": int(bal7["best_wave"])}}
+	for p in ["weapon", "eco"]:
+		var Cp: Dictionary = campaign_days(seed0, String(p), wk)
+		var dp: Dictionary = (Cp["days"] as Array)[wk - 1]
+		strat[p] = {"key": int(dp["progress_key"]), "coins": int(dp["coins_gross"]), "best_wave": int(dp["best_wave"])}
+	var sb: Dictionary = strat["balanced"]
+	var sw: Dictionary = strat["weapon"]
+	var se: Dictionary = strat["eco"]
+	print("STRATEGY week 1: balanced %s | weapon %s | eco %s" % [JSON.stringify(sb), JSON.stringify(sw), JSON.stringify(se)])
+	var mix_w: bool = int(sb["key"]) >= int(sw["key"]) and int(sb["coins"]) > int(sw["coins"])
+	var mix_e: bool = int(sb["key"]) > int(se["key"]) and int(sb["coins"]) > int(se["coins"])
+	var ac38: bool = float(sb["best_wave"]) >= 1.10 * float(sw["best_wave"]) and float(sb["coins"]) >= 1.25 * float(sw["coins"])
+	# In-run policy on the SAME frozen save (report): what drafting eco vs weapons does mid-run
+	var seeds: Array = [seed0 + 11, seed0 + 23, seed0 + 37]
+	var pol: Dictionary = {}
+	for day in [7, 20]:
+		var snap: Dictionary = (C["snaps"] as Dictionary)[day]
+		for p in ["balanced", "weapon", "eco"]:
+			pol["d%d_%s" % [day, p]] = snap_eval(snap, String(p), seeds)
+		print("IN-RUN POLICY day %d (same save): balanced %s | weapon %s | eco %s" % [day, JSON.stringify(pol["d%d_balanced" % day]), JSON.stringify(pol["d%d_weapon" % day]), JSON.stringify(pol["d%d_eco" % day])])
+	# I-4: no dominant perk — always-take-X policies on the day-20 save. A perk
+	# dominates when it out-earns the median by > 20% WITHOUT costing waves.
+	var snap20: Dictionary = (C["snaps"] as Dictionary)[20]
+	var perk_rows: Dictionary = {}
+	var cv: Array = []
+	var wv: Array = []
+	for pid in PerkDB.IDS:
+		var r: Dictionary = snap_eval(snap20, "balanced", [seed0 + 11, seed0 + 23], String(pid))
+		perk_rows[pid] = {"wave": snappedf(float(r["wave"]), 0.1), "coins": int(r["coins"])}
+		cv.append(float(r["coins"]))
+		wv.append(float(r["wave"]))
+	cv.sort()
+	wv.sort()
+	var c_med: float = (float(cv[5]) + float(cv[6])) / 2.0
+	var w_med: float = (float(wv[5]) + float(wv[6])) / 2.0
+	var dominant: Array = []
+	var top_ratio: float = 0.0
+	for pid in perk_rows.keys():
+		var pr: Dictionary = perk_rows[pid]
+		var ratio: float = float(pr["coins"]) / maxf(1.0, c_med)
+		top_ratio = maxf(top_ratio, ratio)
+		if ratio > 1.2 and float(pr["wave"]) >= w_med:
+			dominant.append(pid)
+	print("PERKS day 20 (always-take-X): " + JSON.stringify(perk_rows))
+	var per_day: Array = []
+	for r in days:
+		var rd: Dictionary = r
+		per_day.append({"day": rd["day"], "tier": rd["tier"], "best_wave_hi_tier": rd["best_wave_hi_tier"], "best_wave": rd["best_wave"], "coins": rd["coins_gross"], "gems": rd["gems_earned"], "labs": rd["labs"], "cards": rd["cards"]})
+	var day1: int = int((days[0] as Dictionary)["best_wave"])
+	var last: Dictionary = days[DAYS - 1]
+	return {
+		"campaign_days": per_day, "t2_day": C["t2_day"], "t3_day": t3, "final_tier": int(last["tier"]),
+		"day1_best_wave": day1, "day1_in_target_band": day1 >= 18 and day1 <= 32,
+		"day30_best_wave_hi_tier": int(last["best_wave_hi_tier"]), "stall_days": stall_days,
+		"gems_total": gtot, "gems_per_day": snappedf(gpd, 0.1), "gem_log": gl, "gem_top_source": gsrc,
+		"active_coin_rate": snappedf(active_rate, 0.1), "offline_coin_rate": snappedf(off_rate, 0.1),
+		"strategy_week1": strat, "ac38_strict": ac38, "inrun_policy": pol,
+		"perks_d20": perk_rows, "perk_top_coin_ratio": snappedf(top_ratio, 0.01), "dominant_perks": dominant,
+		"t2_by_day5": int(C["t2_day"]) > 0 and int(C["t2_day"]) <= 5,
+		"tier3_by_day30": t3 > 0,
+		"no_plateau_before_t3": stall_days.is_empty(),
+		"early_3day_rise": early,
+		"gems_per_day_ok": gpd >= 10.0 and gpd <= 30.0,
+		"gem_sources_ok": float(gmax) <= 0.5 * float(gtot),
+		"offline_below_active": off_rate <= 0.2 * active_rate,
+		"mix_beats_weapon": mix_w, "mix_beats_eco": mix_e,
+		"no_dominant_perk": dominant.is_empty(),
+	}
