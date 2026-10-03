@@ -5,6 +5,8 @@ description: Use when growing an already-playable Godot game along a depth axis 
 
 # deepen
 
+> Optional reference for incremental/idle economies (cost curves, bulk buy, multipliers, prestige, offline, pacing): `games/towerdef-0001/design/IDLE_MATH.md`.
+
 Take an already-playable game and grow it along ONE depth axis — systemic (new
 interacting mechanics), content (more of the same), or run-meta (map / events /
 economy / progression) — without regressing what already works, and **prove** the new
