@@ -72,7 +72,7 @@ func _initialize() -> void:
 	# --- Stage 3: combat — core kills an enemy, rewards land ------------------
 	S = _fresh()
 	S.enemies.append({"kind": "drone", "pos": TowerState.CENTER + Vector2(200, 0), "hp": 4.0, "max_hp": 4.0, "spd": 0.0, "dmg": 4.0, "cash": 1.0, "xp": 1.0, "coin": 0.2, "size": 16.0, "atk_cd": 0.0, "slow_t": 0.0})
-	S.spawn_t = 999.0
+	S.spawn_hold = true
 	var ev: Array = S.tick(0.05)
 	var kinds: Array = ev.map(func(e): return e["t"])
 	_check("core fires a shot", kinds.has("shot"))
@@ -80,7 +80,7 @@ func _initialize() -> void:
 
 	# --- Stage 4: enemy reaches the core and damages it ----------------------
 	S = _fresh()
-	S.spawn_t = 999.0
+	S.spawn_hold = true
 	S.stats["weapons"] = []   # disarm to isolate
 	S.enemies.append({"kind": "hauler", "pos": TowerState.CENTER + Vector2(140, 0), "hp": 999.0, "max_hp": 999.0, "spd": 28.0, "dmg": 10.0, "cash": 3.0, "xp": 3.0, "coin": 0.6, "size": 26.0, "atk_cd": 0.0, "slow_t": 0.0})
 	ev = S.tick(0.1)
@@ -106,7 +106,7 @@ func _initialize() -> void:
 	# --- Stage 6: level-up draft → place, plus-card, determinism -------------
 	S = _fresh()
 	S.xp = S.xp_need()
-	S.spawn_t = 999.0
+	S.spawn_hold = true
 	ev = S.tick(0.01)
 	_check("level-up opens 3-card draft", S.level == 2 and S.draft.size() == 3)
 	var cats: Array = []
@@ -160,7 +160,7 @@ func _initialize() -> void:
 	S.setup(5, save)
 	S.coins_run = 42.7
 	S.hp = -1.0
-	S.spawn_t = 999.0
+	S.spawn_hold = true
 	S.stats["regen"] = 0.0
 	ev = S.tick(0.01)
 	_check("death event + over", S.over and String(ev.back()["t"]) == "dead")
@@ -544,7 +544,7 @@ func _engine_b_stages() -> void:
 	S = TowerState.new()
 	S.setup(7, sv)
 	_check("B1 tier 2 multipliers", S.tier == 2 and is_equal_approx(S.hp_mult, 1.5) and is_equal_approx(S.coin_mult, 1.6))
-	S.spawn_t = 999.0
+	S.spawn_hold = true
 	S._spawn("drone", [])
 	_check("B1 enemy hp x tier hp_mult", is_equal_approx(float(S.enemies[0]["hp"]), 6.0 * 1.5))
 	S.enemies.clear()
@@ -571,10 +571,10 @@ func _engine_b_stages() -> void:
 			if R.perk_offer.size() > 0:
 				R.choose_perk(0)
 		res.append([R.wave, R.kills, R.coins_run])
-	_check("AC-15 speed-invariant wave/kills/coins", int(res[0][0]) == int(res[1][0]) and absi(int(res[0][1]) - int(res[1][1])) <= 1 and absf(float(res[0][2]) - float(res[1][2])) <= 1.0)
+	_check("AC-15 speed-invariant wave/kills/coins %s" % str(res), int(res[0][0]) == int(res[1][0]) and absi(int(res[0][1]) - int(res[1][1])) <= 1 and absf(float(res[0][2]) - float(res[1][2])) <= 1.0)
 	S = _fresh()
 	S.set_speed(2.5)
-	S.spawn_t = 999.0
+	S.spawn_hold = true
 	S.tick(0.1)
 	_check("B2 speed scales game time", is_equal_approx(S.time_alive, 0.25))
 
@@ -582,7 +582,7 @@ func _engine_b_stages() -> void:
 	var sv3: Dictionary = BaseMeta.default_save()
 	S = TowerState.new()
 	S.setup(9, sv3)
-	S.spawn_t = 999.0
+	S.spawn_hold = true
 	S.wave = 20
 	var bev: Array = []
 	for k in 4:
@@ -598,7 +598,7 @@ func _engine_b_stages() -> void:
 	BaseMeta.select_tier(sv3b, 3)
 	var T3S = TowerState.new()
 	T3S.setup(9, sv3b, 1767225600)
-	T3S.spawn_t = 999.0
+	T3S.spawn_hold = true
 	T3S.wave = 20
 	var b3ev: Array = []
 	for k in 4:
@@ -609,7 +609,7 @@ func _engine_b_stages() -> void:
 	_check("AC-10a daily allowance 10 -> 4 left same day", BaseMeta.boss_gem_allowance(sv3b, 1767225600 + 120) == 4 and BaseMeta.boss_gem_allowance(sv3b, 1767225600 + 86400) == 10)
 	T3S = TowerState.new()
 	T3S.setup(10, sv3b, 1767225600 + 120)
-	T3S.spawn_t = 999.0
+	T3S.spawn_hold = true
 	T3S.wave = 20
 	for k in 3:
 		T3S.enemies.append(_enemy("boss", TowerState.CENTER + Vector2(100, 0), 0.0))
@@ -644,7 +644,7 @@ func _engine_b_stages() -> void:
 		seen[S._roll_kind()] = true
 	_check("T3 rolls elite + splitter, never mite", seen.has("elite") and seen.has("splitter") and not seen.has("mite"))
 	S = _fresh()
-	S.spawn_t = 999.0
+	S.spawn_hold = true
 	S.stats["weapons"] = []
 	S.stats["regen"] = 0.0
 	S.enemies.append(_enemy("ranged", TowerState.CENTER + Vector2(240, 0)))
@@ -656,7 +656,7 @@ func _engine_b_stages() -> void:
 	_check("AC-25 ranged stops at 230", absf(rpos.distance_to(TowerState.CENTER) - 230.0) < 0.5)
 	_check("AC-25 ranged fires every 2s", shots == 2 and S.hp < 100.0)
 	S = _fresh()
-	S.spawn_t = 999.0
+	S.spawn_hold = true
 	S.wave = 20
 	S._spawn("elite", [])
 	var el: Dictionary = S.enemies[0]
@@ -668,7 +668,7 @@ func _engine_b_stages() -> void:
 	S._hit(el, 1.0e6, sev)
 	_check("elite takes damage after shield breaks", float(el["hp"]) <= 0.0)
 	S = _fresh()
-	S.spawn_t = 999.0
+	S.spawn_hold = true
 	S.slots[_c(7)] = {"id": "tesla", "perm": 3, "run": 0}
 	S.recompute()
 	S.stats["weapons"] = [_weapon(S, "tesla")]
@@ -678,7 +678,7 @@ func _engine_b_stages() -> void:
 	var tev: Array = S.tick(0.05)
 	_check("AC-26 tesla chain hit counts as a shield hit", _evts(tev, "shield_hit").size() == 1 and int(S.enemies[0]["shield"]) == 2)
 	S = _fresh()
-	S.spawn_t = 999.0
+	S.spawn_hold = true
 	S.enemies.append(_enemy("splitter", TowerState.CENTER + Vector2(300, 0), 0.0))
 	var spv: Array = []
 	S._reap(spv)
@@ -724,7 +724,7 @@ func _engine_b_stages() -> void:
 	S.recompute()
 	_check("dr caps: bulwark 30% + aegis 32% -> total 60%", is_equal_approx(float(S.stats["dr_bulwark"]), 0.3) and is_equal_approx(float(S.stats["dr_aegis"]), 0.32) and is_equal_approx(float(S.stats["dr"]), 0.6))
 	S = _fresh()
-	S.spawn_t = 999.0
+	S.spawn_hold = true
 	S.stats["weapons"] = []
 	S.slots[_c(13)] = {"id": "aegis", "perm": 2, "run": 0}
 	S.recompute()
@@ -746,7 +746,7 @@ func _engine_b_stages() -> void:
 	_check("AC-20 aegis +10% rate to adjacent weapon", is_equal_approx(float(_weapon(S, "gun")["rate"]), g0 * 1.1) and _has_link(S, _c(8), _c(7), "S5"))
 	_check("AC-20 aegis -15% adjacent eco", is_equal_approx(float(S.stats["cash_ps"]), m0 * 0.85) and _has_link(S, _c(16), _c(17), "S5"))
 	S = _fresh()
-	S.spawn_t = 999.0
+	S.spawn_hold = true
 	S.slots[_c(7)] = {"id": "vault", "perm": 2, "run": 0}
 	S.recompute()
 	S.cash = 100.0
@@ -767,7 +767,7 @@ func _engine_b_stages() -> void:
 	S.slots[_c(8)] = {"id": "tesla", "perm": 1, "run": 0}
 	S.recompute()
 	_check("S2 link tesla->mortar", _has_link(S, _c(8), _c(7), "S2"))
-	S.spawn_t = 999.0
+	S.spawn_hold = true
 	S.stats["weapons"] = [_weapon(S, "mortar")]
 	var mdmg: float = float(_weapon(S, "mortar")["dmg"])
 	var shocked: Dictionary = _enemy("drone", TowerState.slot_pos(_c(7)) + Vector2(100, 0))
@@ -827,13 +827,13 @@ func _engine_b_stages() -> void:
 			full.append(id)
 	_check("no offer when every perk is maxed", Perks.offer(ra, full).is_empty())
 	S = _fresh()
-	S.spawn_t = 999.0
+	S.spawn_hold = true
 	S.wave = 4
 	S.wave_t = S.wave_time - 0.001
 	var pev: Array = S.tick(0.01)
 	_check("AC-23 perk_offer at wave 5", _evts(pev, "perk_offer").size() == 1 and S.perk_offer.size() == 3 and is_equal_approx(S.time_scale(), 0.2))
 	S = _fresh()
-	S.spawn_t = 999.0
+	S.spawn_hold = true
 	S.xp = S.xp_need()
 	S.wave = 4
 	S.wave_t = S.wave_time - 0.001
@@ -887,7 +887,7 @@ func _engine_b_stages() -> void:
 	sv8["cards"]["equipped"] = ["c_wind", "c_skip"]
 	S = TowerState.new()
 	S.setup(3, sv8)
-	S.spawn_t = 999.0
+	S.spawn_hold = true
 	S.hp = -1.0
 	var wev: Array = S.tick(0.01)
 	_check("AC-33 Second Wind revives at card %", _evts(wev, "revive").size() == 1 and not S.over and S.hp > 20.0 and S.hp <= 25.5)
@@ -897,7 +897,7 @@ func _engine_b_stages() -> void:
 	S = TowerState.new()
 	S.setup(3, sv8)
 	S.skip_chance = 1.0
-	S.spawn_t = 999.0
+	S.spawn_hold = true
 	S.wave = 3
 	S.wave_t = S.wave_time - 0.001
 	var kv: int = S.kills
@@ -1050,6 +1050,7 @@ func _juice_targeting_stages() -> void:
 ## PC ENGINE package (design/PC_SPEC.md §10 ENGINE, PC-E1..E9).
 func _pc_engine_stages() -> void:
 	_pc_board_stages()
+	_pc_spawn_stages()
 
 
 ## PC-E1 7x7 ring unlocks, PC-E2 build cap.
@@ -1126,3 +1127,128 @@ func _pc_board_stages() -> void:
 		if BaseMeta.try_place(ps, int(i), "mine"):
 			pn += 1
 	_check("PC-E2 permanent base also capped at 12", pn == 12 and BaseMeta.building_count(ps) == 12)
+
+
+## Strong run for long wave sims: huge core damage + HP so nothing dies.
+func _godmode(S) -> void:
+	S.dmg_mult = 1.0e6
+	S.max_hp_mult = 1.0e9
+	S.recompute()
+	S.hp = float(S.stats["max_hp"])
+
+
+## Ticks S through `waves` waves, returning every event in order with the
+## game time it was emitted at (ev["_t"]).
+func _sim_waves(S, waves: int, ev0: Array = []) -> Array:
+	var out: Array = []
+	for e in ev0:
+		var d: Dictionary = (e as Dictionary).duplicate()
+		d["_t"] = 0.0
+		out.append(d)
+	var guard: int = 0
+	while S.wave <= waves and not S.over and guard < 200000:
+		guard += 1
+		for e in S.tick(0.05):
+			var d2: Dictionary = (e as Dictionary).duplicate()
+			d2["_t"] = S.time_alive
+			out.append(d2)
+		S.draft.clear()
+		S.pending_place = ""
+		S.perk_offer.clear()
+	return out
+
+
+## PC-E5 multi-direction spawns + telegraph.
+func _pc_spawn_stages() -> void:
+	var S = _fresh()
+	var sched: bool = true
+	for w in range(1, 120):
+		var want: int = 1 if w < 10 else (2 if w < 25 else (3 if w < 50 else 4))
+		sched = sched and S.quad_count(w) == want
+	_check("PC-E5 quadrant schedule 1/2/3/4 at w1/10/25/50", sched)
+	_check("PC-E5 quad_of sectors N/NE=0 E/SE=1 S/SW=2 W/NW=3", TowerState.quad_of(TowerState.CENTER + Vector2(0, -100)) == 0 and TowerState.quad_of(TowerState.CENTER + Vector2(70, -70)) == 0 and TowerState.quad_of(TowerState.CENTER + Vector2(100, 0)) == 1 and TowerState.quad_of(TowerState.CENTER + Vector2(70, 70)) == 1 and TowerState.quad_of(TowerState.CENTER + Vector2(0, 100)) == 2 and TowerState.quad_of(TowerState.CENTER + Vector2(-70, 70)) == 2 and TowerState.quad_of(TowerState.CENTER + Vector2(-100, 0)) == 3 and TowerState.quad_of(TowerState.CENTER + Vector2(-70, -70)) == 3)
+	var runs: Array = []
+	for rep in 2:
+		var R = TowerState.new()
+		var ev0: Array = R.setup(4321, BaseMeta.default_save())
+		_godmode(R)
+		runs.append({"S": R, "ev": _sim_waves(R, 26, ev0)})
+	var evs: Array = runs[0]["ev"]
+	var tele: Dictionary = {}
+	var start_t: Dictionary = {}
+	var quads_ok: bool = true
+	var lead_ok: bool = true
+	var order_ok: bool = true
+	var counts_ok: bool = true
+	var boss_ok: bool = false
+	var dir_ok: bool = true
+	for e in evs:
+		var d: Dictionary = e
+		match String(d["t"]):
+			"wave_telegraph":
+				var w: int = int(d["wave"])
+				tele[w] = d
+				quads_ok = quads_ok and (d["quadrants"] as Array).size() == runs[0]["S"].quad_count(w)
+			"wave_start":
+				var w2: int = int(d["wave"])
+				start_t[w2] = float(d["_t"])
+				if not tele.has(w2):
+					order_ok = false
+				else:
+					var lead: float = float(d["_t"]) - float((tele[w2] as Dictionary)["_t"])
+					lead_ok = lead_ok and absf(lead - TowerState.telegraph_s()) <= 0.06
+			"boss":
+				var bw: int = 0
+				for k in start_t.keys():
+					bw = maxi(bw, int(k))
+				boss_ok = tele.has(bw) and int((tele[bw] as Dictionary)["boss_dir"]) == int(d["quad"]) and int(d["quad"]) >= 0
+	# Spawned enemies of a wave all come from that wave's telegraphed quadrants.
+	var S2 = TowerState.new()
+	var e2: Array = S2.setup(99, BaseMeta.default_save())
+	_godmode(S2)
+	var last_tele: Dictionary = {}
+	var seen_counts: Dictionary = {}
+	for e in e2:
+		if String((e as Dictionary)["t"]) == "wave_telegraph":
+			last_tele[int((e as Dictionary)["wave"])] = e
+	var guard: int = 0
+	while S2.wave <= 12 and guard < 100000:
+		guard += 1
+		var n0: int = S2.enemies.size()
+		for e in S2.tick(0.05):
+			var d3: Dictionary = e
+			if String(d3["t"]) == "wave_telegraph":
+				last_tele[int(d3["wave"])] = d3
+		S2.draft.clear()
+		S2.pending_place = ""
+		S2.perk_offer.clear()
+		var aq: Array = S2.active_quads
+		for k in range(n0, S2.enemies.size()):
+			var en: Dictionary = S2.enemies[k]
+			if String(en["kind"]) != "mite" and not aq.has(int(en["quad"])):
+				dir_ok = false
+		var lw: Dictionary = S2.last_wave_spawned
+		if not lw.is_empty() and not seen_counts.has(int(lw["wave"])):
+			seen_counts[int(lw["wave"])] = true
+			var tc: Dictionary = (last_tele[int(lw["wave"])] as Dictionary)["counts"]
+			var sc: Dictionary = lw["counts"]
+			for q in tc.keys():
+				counts_ok = counts_ok and int(tc[q]) == int(sc.get(int(q), 0))
+			for q2 in sc.keys():
+				counts_ok = counts_ok and tc.has(q2)
+	_check("PC-E5 telegraph quadrant count follows the schedule", quads_ok and tele.has(1) and tele.has(10) and tele.has(25))
+	_check("PC-E5 wave_telegraph precedes wave_start by pc_telegraph_s", order_ok and lead_ok and start_t.size() >= 25)
+	_check("PC-E5 telegraph counts == actual spawns per quadrant", counts_ok and seen_counts.size() >= 10)
+	_check("PC-E5 spawns come only from active quadrants", dir_ok)
+	_check("PC-E5 boss comes from the telegraphed boss_dir", boss_ok)
+	var a_dirs: Array = []
+	var b_dirs: Array = []
+	for e in runs[0]["ev"]:
+		if String((e as Dictionary)["t"]) == "wave_telegraph":
+			a_dirs.append([(e as Dictionary)["quadrants"], (e as Dictionary)["counts"], (e as Dictionary)["boss_dir"]])
+	for e in runs[1]["ev"]:
+		if String((e as Dictionary)["t"]) == "wave_telegraph":
+			b_dirs.append([(e as Dictionary)["quadrants"], (e as Dictionary)["counts"], (e as Dictionary)["boss_dir"]])
+	_check("PC-E5 same seed -> same directions", a_dirs.size() >= 25 and JSON.stringify(a_dirs) == JSON.stringify(b_dirs))
+	S = _fresh()
+	_check("PC-E5 lane focus", S.set_focus(2).size() == 1 and S.focus_quad == 2 and S.set_focus(7).is_empty() and S.focus_quad == 2)

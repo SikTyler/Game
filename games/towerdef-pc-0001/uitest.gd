@@ -276,7 +276,7 @@ func _run() -> void:
 	_press("SPD")
 	await _frames()
 	_check("speed pill wraps to 1x", absf(S.speed - 1.0) < 0.01)
-	S.spawn_t = 999.0
+	S.spawn_hold = true
 	S.xp = S.xp_need()
 	await _frames(3)
 	_check("level-up shows draft cards", S.draft.size() == 3 and (_find("NEW") != null or _find("+1") != null))
@@ -360,7 +360,7 @@ func _run() -> void:
 	_check("perk tap takes perk", S.perks_taken.size() == 1 and S.perk_offer.is_empty() and _find("PERK") == null, pid)
 
 	# ---- PAUSE / RESUME --------------------------------------------------------
-	S.spawn_t = 999.0
+	S.spawn_hold = true
 	_press("PAUSE")
 	await _frames()
 	var ta: float = S.time_alive

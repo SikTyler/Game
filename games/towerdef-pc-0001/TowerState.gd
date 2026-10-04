@@ -58,7 +58,21 @@ var stats: Dictionary = {}
 
 var wave: int = 1
 var wave_t: float = 0.0
-var spawn_t: float = 0.5
+var spawn_t: float = 0.5        # legacy (mobile timer); PC waves spawn from `plan`
+# PC multi-direction waves (PC_SPEC §2.3). 8 spawn points (N, NE, E, SE, S, SW,
+# W, NW) in 4 quadrants: 0 = N/NE, 1 = E/SE, 2 = S/SW, 3 = W/NW. Each wave is
+# planned (kind + quadrant + time per spawn) when it is telegraphed, so the
+# telegraph counts are exactly what spawns.
+var plan: Array = []              # [{t, kind, quad}] for `plan_wave`, sorted by t
+var plan_idx: int = 0
+var plan_wave: int = 0
+var next_plan: Dictionary = {}    # telegraphed plan for wave+1
+var active_quads: Array = []      # quadrants of the current wave
+var boss_dir: int = -1            # boss quadrant of the current wave (-1 none)
+var wave_spawned: Dictionary = {} # quad -> planned enemies actually spawned this wave
+var last_wave_spawned: Dictionary = {}  # {wave, counts} of the wave that just ended
+var wave_started: bool = false    # wave 1 starts after the opening telegraph lead
+var focus_quad: int = 0           # lane focus (Beacon + abilities target it)
 var time_alive: float = 0.0
 var hp: float = 100.0
 var cash: float = 0.0
@@ -69,7 +83,8 @@ var kills: int = 0
 var core_run_lvl: int = 0
 var run_unlocks: int = 0
 var spawn_hold: bool = false      # test/tool hook: suppress wave spawns (bosses included)
-var build_cap: int = 40           # PC_SPEC §2.1 max buildings on the board this run
+var build_cap: int = 40
+var count_mult: float = 1.0       # enemy count multiplier (Swarm modifier, mutations)           # PC_SPEC §2.1 max buildings on the board this run
 var draft: Array = []
 var pending_place: String = ""
 var over: bool = false
@@ -158,6 +173,16 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0) -> Array:
 	wave = 1
 	wave_t = 0.0
 	spawn_t = 0.5
+	plan.clear()
+	plan_idx = 0
+	plan_wave = 0
+	next_plan = {}
+	active_quads.clear()
+	boss_dir = -1
+	wave_spawned = {}
+	last_wave_spawned = {}
+	wave_started = false
+	focus_quad = 0
 	time_alive = 0.0
 	cash = float(int(mods.get("start_cash", 0)))
 	xp = 0.0
@@ -181,7 +206,10 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0) -> Array:
 	stats = {}
 	recompute()
 	hp = float(stats["max_hp"])
-	return [{"t": "run_start", "tier": tier, "speed": speed}]
+	var ev0: Array = [{"t": "run_start", "tier": tier, "speed": speed}]
+	# Wave 1 is telegraphed at t=0 and starts pc_telegraph_s later.
+	_adopt_plan(_build_plan(1, telegraph_s()), ev0, true)
+	return ev0
 
 
 ## SPEC B1: fold the meta bundle into run multipliers. TowerState never reads
@@ -410,6 +438,15 @@ func compute_stats() -> Dictionary:
 	for w in st["weapons"]:
 		var wd: Dictionary = w
 		wd["dmg"] = float(wd["dmg"]) * dmg_mult * od_dmg * oc
+	# PC arena geometry: the 7x7 board pushes the enemy stop ring out from 150
+	# to 200 px, so every weapon's reach scales with it (pc_range_scale), and
+	# weapons on outer rings reach further still (+8% per ring past ring 1).
+	var rs: float = TuneRef.num("pc_range_scale", STOP_R / 150.0)
+	var rr: float = TuneRef.num("pc_ring_range", 0.08)
+	for w in st["weapons"]:
+		var wr: Dictionary = w
+		var ring: int = ring_of(int(wr["slot"]))
+		wr["range"] = float(wr["range"]) * rs * (1.0 + rr * float(maxi(0, ring - 1)))
 	Perks.apply(st, perks_taken)
 	st["cash_ps"] = float(st["cash_ps"]) * float(st["perk_cash"])
 	var gun_cap: float = TuneRef.num("gun_rate_cap", 2.5)
@@ -434,8 +471,7 @@ func recompute() -> void:
 
 # ------------------------------------------------------------------ curves
 func spawn_interval() -> float:
-	var pm: float = float(stats.get("perk_spawn", 1.0))
-	return maxf(min_spawn, spawn_base * pow(spawn_decay, float(wave - 1))) * pm
+	return interval_for(wave)
 
 
 func scale() -> float:
@@ -491,15 +527,19 @@ func _step(sub: float, ev: Array) -> void:
 	var dt: float = sub * time_scale()
 	time_alive += dt
 	wave_t += dt
+	_spawn_due(ev)   # every planned spawn has t < wave_time: none is lost at rollover
 	if wave_t >= wave_time:
 		wave_t -= wave_time
 		_wave_end(ev)
 		_advance_wave(ev)
-	if not spawn_hold:
-		spawn_t -= dt
-		if spawn_t <= 0.0:
-			spawn_t += spawn_interval()
-			_spawn(_roll_kind(), ev)
+		_spawn_due(ev)
+	if not wave_started and wave == 1 and wave_t >= telegraph_s():
+		wave_started = true
+		ev.append({"t": "wave_start", "wave": wave, "quadrants": active_quads.duplicate(), "boss_dir": boss_dir})
+	if next_plan.is_empty() and wave_t >= wave_time - telegraph_s():
+		next_plan = _build_plan(wave + 1, 0.0)
+		ev.append(_telegraph_event(next_plan))
+	_spawn_due(ev)
 	var cg: float = float(stats["cash_ps"]) * dt
 	cash += cg
 	cash_earned += cg
@@ -550,8 +590,12 @@ func _advance_wave(ev: Array) -> void:
 	_wave_coins(wave, 1.0)
 	recompute()   # mine output scales with wave
 	ev.append({"t": "wave", "wave": wave})
+	if next_plan.is_empty() or int(next_plan["wave"]) != wave:
+		next_plan = _build_plan(wave, 0.0)
+		ev.append(_telegraph_event(next_plan))   # late telegraph (skipped wave)
+	_adopt_plan(next_plan, ev, false)
 	if wave % boss_every == 0:
-		_spawn("boss", ev)
+		_spawn("boss", ev, Vector2.INF, boss_dir)
 
 
 func _on_death(ev: Array) -> void:
@@ -584,8 +628,127 @@ func abandon() -> Array:
 	return ev
 
 
+# ------------------------------------------------------- PC wave directions
+static func telegraph_s() -> float:
+	return TuneRef.num("pc_telegraph_s", 3.0)
+
+
+## PC_SPEC §2.3 schedule: waves 1-9 one quadrant, 10-24 two, 25-49 three, 50+ four.
+func quad_count(w: int) -> int:
+	if w >= 50:
+		return 4
+	if w >= 25:
+		return 3
+	if w >= 10:
+		return 2
+	return 1
+
+
+## Quadrant of a battlefield point: sectors [-112.5 + 90q, -22.5 + 90q) deg.
+static func quad_of(p: Vector2) -> int:
+	var d: Vector2 = p - CENTER
+	var deg: float = rad_to_deg(atan2(d.y, d.x))
+	return posmod(int(floor((deg + 112.5) / 90.0)), 4)
+
+
+## Quadrant of a base cell (Barricade lanes); the core cell has none.
+static func cell_quad(i: int) -> int:
+	if i == CORE_SLOT:
+		return -1
+	return quad_of(slot_pos(i))
+
+
+## Spawn interval for wave w (the mobile curve, then perks / modifiers).
+func interval_for(w: int) -> float:
+	var pm: float = float(stats.get("perk_spawn", 1.0))
+	return maxf(min_spawn, spawn_base * pow(spawn_decay, float(w - 1))) * pm / maxf(0.01, count_mult)
+
+
+## Seeded plan for wave w: n distinct quadrants (manual Fisher-Yates), then
+## one entry per spawn tick, round-robin over the quadrants. `lead` delays
+## the first spawn (wave 1 opens with the telegraph lead).
+func _build_plan(w: int, lead: float) -> Dictionary:
+	var all_q: Array = [0, 1, 2, 3]
+	for i in range(all_q.size() - 1, 0, -1):
+		var j: int = rng.randi_range(0, i)
+		var tmp: Variant = all_q[i]
+		all_q[i] = all_q[j]
+		all_q[j] = tmp
+	var qs: Array = all_q.slice(0, quad_count(w))
+	qs.sort()
+	var iv: float = interval_for(w)
+	var t: float = lead + 0.5 * iv if lead > 0.0 else 0.5 * iv
+	var entries: Array = []
+	var counts: Dictionary = {}
+	for q in qs:
+		counts[int(q)] = 0
+	var elites: int = 0
+	var start: int = rng.randi_range(0, qs.size() - 1)
+	var k: int = 0
+	var cap: int = TuneRef.int_of("pc_plan_max", 400)
+	while t < wave_time - 0.001 and entries.size() < cap:
+		var kind: String = _roll_kind(w)
+		var q2: int = int(qs[(start + k) % qs.size()])
+		entries.append({"t": t, "kind": kind, "quad": q2})
+		counts[q2] = int(counts[q2]) + 1
+		if kind == "elite":
+			elites += 1
+		t += iv
+		k += 1
+	var bd: int = -1
+	if w % boss_every == 0:
+		bd = int(qs[rng.randi_range(0, qs.size() - 1)])
+	return {"wave": w, "entries": entries, "quads": qs, "counts": counts, "elites": elites, "boss_dir": bd}
+
+
+func _telegraph_event(p: Dictionary) -> Dictionary:
+	return {"t": "wave_telegraph", "wave": int(p["wave"]), "quadrants": (p["quads"] as Array).duplicate(), "counts": (p["counts"] as Dictionary).duplicate(), "total": (p["entries"] as Array).size(), "elites": int(p["elites"]), "boss_dir": int(p["boss_dir"]), "lead": telegraph_s()}
+
+
+## Make `p` the current wave's plan. The opening wave telegraphs here (it has
+## no previous wave to do it); later waves emit wave_start here.
+func _adopt_plan(p: Dictionary, ev: Array, opening: bool) -> void:
+	if plan_wave > 0:
+		last_wave_spawned = {"wave": plan_wave, "counts": wave_spawned}
+	plan = p["entries"]
+	plan_idx = 0
+	plan_wave = int(p["wave"])
+	active_quads = (p["quads"] as Array).duplicate()
+	boss_dir = int(p["boss_dir"])
+	wave_spawned = {}
+	next_plan = {}
+	if opening:
+		ev.append(_telegraph_event(p))
+	else:
+		ev.append({"t": "wave_start", "wave": wave, "quadrants": active_quads.duplicate(), "boss_dir": boss_dir})
+
+
+func _spawn_due(ev: Array) -> void:
+	if plan_wave != wave:
+		# The wave was entered without a telegraph (tests / tools jump waves).
+		_adopt_plan(_build_plan(wave, 0.0), ev, true)
+	if spawn_hold:
+		return
+	while plan_idx < plan.size() and float((plan[plan_idx] as Dictionary)["t"]) <= wave_t:
+		var pe: Dictionary = plan[plan_idx]
+		plan_idx += 1
+		var q: int = int(pe["quad"])
+		if _spawn(String(pe["kind"]), ev, Vector2.INF, q):
+			wave_spawned[q] = int(wave_spawned.get(q, 0)) + 1
+
+
+## Lane focus (Beacon bonus + abilities): one of the 4 quadrants.
+func set_focus(q: int) -> Array:
+	if q < 0 or q > 3:
+		return []
+	focus_quad = q
+	return [{"t": "lane_focus", "quad": q}]
+
+
 ## Weighted roll in SPEC order: hauler, splitter, elite, ranged, skitter, drone.
-func _roll_kind() -> String:
+## `w` defaults to the current wave (plans roll the upcoming wave's roster).
+func _roll_kind(for_wave: int = -1) -> String:
+	var wv: int = wave if for_wave < 0 else for_wave
 	var r: float = rng.randf()
 	var acc: float = 0.0
 	for kind in EnemyDB.ROLL_ORDER:
@@ -593,14 +756,14 @@ func _roll_kind() -> String:
 		var w: float = 0.0
 		match k:
 			"hauler":
-				w = float(EnemyDB.WEIGHTS["hauler"]) if wave >= 5 else 0.0
+				w = float(EnemyDB.WEIGHTS["hauler"]) if wv >= 5 else 0.0
 			"skitter":
-				if wave >= 3:
-					w = float(EnemyDB.WEIGHTS["skitter"]) + (0.0 if wave >= 5 else float(EnemyDB.WEIGHTS["hauler"]))
+				if wv >= 3:
+					w = float(EnemyDB.WEIGHTS["skitter"]) + (0.0 if wv >= 5 else float(EnemyDB.WEIGHTS["hauler"]))
 			"elite":
-				w = Tiers.elite_weight(tier) if Tiers.allows(k, tier, wave) else 0.0
+				w = Tiers.elite_weight(tier) if Tiers.allows(k, tier, wv) else 0.0
 			_:
-				w = float(EnemyDB.WEIGHTS[k]) if Tiers.allows(k, tier, wave) else 0.0
+				w = float(EnemyDB.WEIGHTS[k]) if Tiers.allows(k, tier, wv) else 0.0
 		if w <= 0.0:
 			continue
 		acc += w
@@ -609,14 +772,18 @@ func _roll_kind() -> String:
 	return "drone"
 
 
-func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF) -> void:
+func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF, quad: int = -1) -> bool:
 	if enemies.size() >= MAX_ENEMIES:
-		return
+		return false
 	var d: Dictionary = EnemyDB.get_def(kind)
 	var sc: float = scale() * hp_mult * float(stats.get("perk_enemy_hp", 1.0))
 	var pos: Vector2 = at
 	if at == Vector2.INF:
-		var a: float = rng.randf() * TAU
+		var q: int = quad
+		if q < 0:
+			q = int(active_quads[rng.randi_range(0, active_quads.size() - 1)]) if active_quads.size() > 0 else rng.randi_range(0, 3)
+		var pt: int = 2 * q + rng.randi_range(0, 1)
+		var a: float = deg_to_rad(-90.0 + 45.0 * float(pt)) + rng.randf_range(-0.2, 0.2)
 		pos = CENTER + Vector2.from_angle(a) * SPAWN_R
 	var e: Dictionary = {
 		"kind": kind, "pos": pos,
@@ -644,9 +811,11 @@ func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF) -> void:
 			e["max_shield"] = int(e["shield"])
 		"ranged":
 			e["fire_cd"] = TuneRef.num("ranged_fire", 2.0)
+	e["quad"] = quad_of(pos)
 	enemies.append(e)
 	if kind == "boss":
-		ev.append({"t": "boss", "pos": e["pos"]})
+		ev.append({"t": "boss", "pos": e["pos"], "quad": int(e["quad"])})
+	return true
 
 
 func _core_damage(amt: float, ev: Array, kind: String, from: Vector2) -> void:
