@@ -20,6 +20,13 @@ spends shards, reforges when its spec says). Prints `PLAYTEST METRICS {...}` (ke
 | `rd_no_dominant_part` / `rd_no_dominant_set` | part / 4-set pick-rate over day≥3 loadouts below the dominance cap |
 | `rd_outpost_share` | Outpost production / active coins per hour, median from day 3, in [0.15, 0.35] (PM-6 / AC-27) |
 | `rd_gems_sane` | 10–30 gems/day, earn-only, no source > 50% |
+| `ac25_fresh_wall` | 16 fresh balanced first runs (own save + seed each): median death wave in [12, 25], ≤ 25% reach the w30 boss, median R(w*/2) ≥ 2, median R(w*+5) < 0.6 (AC-25) |
+| `fresh_median_first_goal` | the same 16 fresh runs: median ≥ the first goal and none below it (the strong partner of `no_death_spiral`) |
+| `rd_ac27_storage_fill` | every spec-day snapshot: each built Mill / Refinery fills its storage from empty in 6–16 h at its live rate (AC-27) |
+| `ac29_spec_identity` | same-save probe (day-20 save, part levels refunded into one Scrap pool, spec parts first): eco ≥ 1.20× balanced coins per run, single-weapon ≥ 1.25× balanced boss DPS (single-target × boss multiplier) (AC-29) |
+| `ac29_wave_gap` | same probe: every spec's median wave within 3 of the best spec (AC-29). **Currently FAILS**: single-weapon (Lancer) 92 vs balanced 80 / eco 79 / damage 82.5 — boss walls make boss / Core-damage parts outperform their PowerModel budget. Needs a balance pass; not loosened. |
+
+AC-28 loop speed now also reports the per-spec maximum: loop 3 median 0.65 (limit 0.70, margin 0.05) but eco 0.71 and single 0.80 are individually over the limit.
 
 ## Before → after
 
