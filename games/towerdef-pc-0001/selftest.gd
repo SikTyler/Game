@@ -1051,6 +1051,8 @@ func _juice_targeting_stages() -> void:
 func _pc_engine_stages() -> void:
 	_pc_board_stages()
 	_pc_spawn_stages()
+	_pc_building_stages()
+	_pc_move_stages()
 
 
 ## PC-E1 7x7 ring unlocks, PC-E2 build cap.
@@ -1252,3 +1254,216 @@ func _pc_spawn_stages() -> void:
 	_check("PC-E5 same seed -> same directions", a_dirs.size() >= 25 and JSON.stringify(a_dirs) == JSON.stringify(b_dirs))
 	S = _fresh()
 	_check("PC-E5 lane focus", S.set_focus(2).size() == 1 and S.focus_quad == 2 and S.set_focus(7).is_empty() and S.focus_quad == 2)
+
+
+## A run with every cell unlocked and nothing firing on its own.
+func _open_run():
+	var S = _fresh()
+	for i in TowerState.N:
+		S.unlocked[i] = i != TowerState.CORE_SLOT
+	S.spawn_hold = true
+	return S
+
+
+func _rc(r: int, c: int) -> int:
+	return r * TowerState.SIDE + c
+
+
+## PC-E3 new buildings + synergies S8-S11.
+func _pc_building_stages() -> void:
+	var r2: int = _rc(1, 3)     # ring 2, north lane
+	var r1: int = _rc(2, 3)     # ring 1, north
+	var S = _open_run()
+	S.pending_place = "railgun"
+	_check("PC-E3 railgun rejected on ring 1", S.place(r1).is_empty() and S.id_at(r1) == "")
+	_check("PC-E3 railgun placed on ring 2", not S.place(r2).is_empty() and S.id_at(r2) == "railgun")
+	var bs: Dictionary = BaseMeta.default_save()
+	bs["coins"] = 1000
+	_check("PC-E3 perm railgun rejected on ring 1", not BaseMeta.try_place(bs, r1, "railgun") and int(bs["coins"]) == 1000)
+	# S8 Capacitor Bank: +20% per 5 Tesla levels, capped at +60%.
+	S = _open_run()
+	S.slots[r2] = {"id": "railgun", "perm": 1, "run": 0}
+	S.recompute()
+	var rd0: float = float(_weapon(S, "railgun")["dmg"])
+	_check("PC-E3 railgun base dmg 30+18L", is_equal_approx(rd0, 48.0))
+	S.slots[_rc(5, 3)] = {"id": "tesla", "perm": 10, "run": 0}
+	S.recompute()
+	_check("PC-E3 S8 needs adjacency (+0)", is_equal_approx(float(_weapon(S, "railgun")["dmg"]), rd0) and not _has_link(S, _rc(5, 3), r2, "S8"))
+	S.slots[_rc(1, 4)] = {"id": "tesla", "perm": 5, "run": 0}
+	S.recompute()
+	_check("PC-E3 S8 Tesla L5 adjacent: +20%", is_equal_approx(float(_weapon(S, "railgun")["dmg"]), rd0 * 1.2) and _has_link(S, _rc(1, 4), r2, "S8"))
+	S.slots[_rc(1, 2)] = {"id": "tesla", "perm": 10, "run": 0}
+	S.recompute()
+	_check("PC-E3 S8 capped at +60%", is_equal_approx(float(_weapon(S, "railgun")["dmg"]), rd0 * 1.6))
+	# Railgun pierces along its line.
+	S = _open_run()
+	S.slots[r2] = {"id": "railgun", "perm": 1, "run": 0}
+	S.recompute()
+	S.stats["weapons"] = [_weapon(S, "railgun")]
+	var rpos: Vector2 = TowerState.slot_pos(r2)
+	var on1: Dictionary = _enemy("hauler", rpos + Vector2(0, -100))
+	var on2: Dictionary = _enemy("hauler", rpos + Vector2(0, -200))
+	var off: Dictionary = _enemy("hauler", rpos + Vector2(80, -150))
+	S.enemies.append_array([on1, on2, off])
+	var fev: Array = []
+	S._fire(0.01, fev)
+	_check("PC-E3 railgun pierces the line, misses off-line", float(on1["hp"]) < 999.0 and float(on2["hp"]) < 999.0 and is_equal_approx(float(off["hp"]), 999.0))
+	# Flak: splash, x1.5 vs light prey.
+	S = _open_run()
+	S.slots[r1] = {"id": "flak", "perm": 2, "run": 0}
+	S.recompute()
+	var fl: Dictionary = _weapon(S, "flak")
+	_check("PC-E3 flak dmg 2+1L, no crit alone", is_equal_approx(float(fl["dmg"]), 4.0) and is_equal_approx(float(fl["crit"]), 0.0))
+	S.stats["weapons"] = [fl]
+	var fpos: Vector2 = TowerState.slot_pos(r1) + Vector2(0, -120)
+	var prey: Dictionary = _enemy("drone", fpos)
+	var heavy: Dictionary = _enemy("hauler", fpos + Vector2(10, 0))
+	S.enemies.append_array([prey, heavy])
+	S.focus_quad = 2
+	fev = []
+	S._fire(0.01, fev)
+	_check("PC-E3 flak splash x1.5 vs drone, x1 vs hauler", is_equal_approx(999.0 - float(prey["hp"]), 6.0) and is_equal_approx(999.0 - float(heavy["hp"]), 4.0))
+	# S9 Crossfire: Flak next to a Gun -> both +10% crit.
+	S = _open_run()
+	S.slots[r1] = {"id": "flak", "perm": 1, "run": 0}
+	S.slots[_rc(2, 2)] = {"id": "gun", "perm": 1, "run": 0}
+	S.slots[_rc(5, 5)] = {"id": "gun", "perm": 1, "run": 0}
+	S.recompute()
+	var gun_adj: float = -1.0
+	var gun_far: float = -1.0
+	for w in S.stats["weapons"]:
+		if String(w["kind"]) == "gun":
+			if int(w["slot"]) == _rc(2, 2):
+				gun_adj = float(w["crit"])
+			else:
+				gun_far = float(w["crit"])
+	_check("PC-E3 S9 Crossfire +10% crit both, 0 when apart", is_equal_approx(float(_weapon(S, "flak")["crit"]), 0.1) and is_equal_approx(gun_adj, 0.1) and is_equal_approx(gun_far, 0.0) and _has_link(S, r1, _rc(2, 2), "S9"))
+	var cw: Dictionary = _weapon(S, "flak").duplicate()
+	cw["crit"] = 1.0
+	S.stats["weapons"] = [cw]
+	var ce: Dictionary = _enemy("hauler", TowerState.slot_pos(r1) + Vector2(0, -100))
+	S.enemies = [ce]
+	fev = []
+	S._fire(0.01, fev)
+	var dm: Array = _evts(fev, "dmg")
+	_check("PC-E3 crit hit doubles dmg + flags the event", dm.size() == 1 and bool((dm[0] as Dictionary).get("crit", false)) and is_equal_approx(999.0 - float(ce["hp"]), 2.0 * float(cw["dmg"])))
+	# Beacon: +15%/lv vs the focused lane; S10 Spotter on an adjacent Mortar.
+	S = _open_run()
+	S.slots[_rc(4, 4)] = {"id": "beacon", "perm": 2, "run": 0}
+	S.slots[_rc(2, 2)] = {"id": "mortar", "perm": 1, "run": 0}
+	S.recompute()
+	var mr0: float = float(_weapon(S, "mortar")["range"])
+	_check("PC-E3 beacon +15%/lv", is_equal_approx(float(S.stats["beacon"]), 0.30) and not _has_link(S, _rc(4, 4), _rc(2, 2), "S10"))
+	var fq: Dictionary = _enemy("hauler", TowerState.CENTER + Vector2(0, -250))
+	var oq: Dictionary = _enemy("hauler", TowerState.CENTER + Vector2(0, 250))
+	S.set_focus(0)
+	var hev: Array = []
+	S._hit(fq, 10.0, hev)
+	S._hit(oq, 10.0, hev)
+	_check("PC-E3 beacon bonus only on the focused lane", is_equal_approx(999.0 - float(fq["hp"]), 13.0) and is_equal_approx(999.0 - float(oq["hp"]), 10.0))
+	S.slots[_rc(2, 1)] = {"id": "beacon", "perm": 1, "run": 0}
+	S.recompute()
+	_check("PC-E3 S10 Spotter: adjacent mortar +25% range", is_equal_approx(float(_weapon(S, "mortar")["range"]), mr0 * 1.25) and _has_link(S, _rc(2, 1), _rc(2, 2), "S10"))
+	# Refinery: 10% of the wave's cash income -> coins (cap 5/lv); S11 Smelter.
+	S = _open_run()
+	S.slots[r1] = {"id": "refinery", "perm": 2, "run": 0}
+	S.slots[_rc(5, 5)] = {"id": "mine", "perm": 1, "run": 0}
+	S.recompute()
+	var m_far: float = float(S.stats["cash_ps"])
+	S.wave_cash0 = 0.0
+	S.cash_earned = 30.0
+	var c0: float = S.coins_run
+	var rev: Array = []
+	S._wave_end(rev)
+	_check("PC-E3 refinery converts 10% of wave income", is_equal_approx(S.coins_run - c0, 3.0) and _evts(rev, "refined").size() == 1)
+	S.cash_earned = 1000.0
+	c0 = S.coins_run
+	S._wave_end([])
+	_check("PC-E3 refinery cap 5 coins/lv/wave", is_equal_approx(S.coins_run - c0, 10.0))
+	S.slots[_rc(5, 5)] = {}
+	S.slots[_rc(2, 2)] = {"id": "mine", "perm": 1, "run": 0}
+	S.recompute()
+	_check("PC-E3 S11 Smelter: adjacent mine +20%", is_equal_approx(float(S.stats["cash_ps"]), m_far * 1.2) and _has_link(S, r1, _rc(2, 2), "S11"))
+	S.slots[_rc(1, 3)] = {"id": "aegis", "perm": 1, "run": 0}
+	S.recompute()
+	_check("PC-E3 aegis -15% hits the refinery", is_equal_approx(float((S.stats["refineries"] as Array)[0]["rate"]), 0.085))
+	# Barricade: lane wall, -30% speed, 60 HP/lv, rebuilt each wave.
+	S = _open_run()
+	S.stats["weapons"] = []
+	S.slots[r2] = {"id": "barricade", "perm": 2, "run": 0}
+	S.recompute()
+	S.stats["weapons"] = []
+	_check("PC-E3 barricade wall on its lane, 60 HP/lv", TowerState.cell_quad(r2) == 0 and S.walls.has(0) and is_equal_approx(float(S.walls[0]["hp"]), 120.0))
+	var wn: Dictionary = _enemy("drone", TowerState.CENTER + Vector2(0, -260))
+	wn["quad"] = 0
+	var ws: Dictionary = _enemy("drone", TowerState.CENTER + Vector2(0, 260))
+	ws["quad"] = 2
+	S.enemies = [wn, ws]
+	S._move_enemies(0.1, [])
+	var dn: float = 260.0 - (wn["pos"] as Vector2).distance_to(TowerState.CENTER)
+	var ds: float = 260.0 - (ws["pos"] as Vector2).distance_to(TowerState.CENTER)
+	_check("PC-E3 wall slows its lane 30%, other lanes free", is_equal_approx(dn, ds * 0.7) and float(S.walls[0]["hp"]) < 120.0)
+	wn["dmg"] = 5000.0
+	var wev: Array = []
+	S._move_enemies(0.1, wev)
+	_check("PC-E3 wall breaks under damage", _evts(wev, "wall_broken").size() == 1 and float(S.walls[0]["hp"]) == 0.0)
+	S.enemies.clear()
+	S.wave_t = S.wave_time - 0.001
+	wev = S.tick(0.01)
+	_check("PC-E3 wall rebuilt next wave", _evts(wev, "wall_up").size() == 1 and is_equal_approx(float(S.walls[0]["hp"]), 120.0))
+	# Outer rings reach further (+8% per ring past 1).
+	S = _open_run()
+	S.slots[r1] = {"id": "gun", "perm": 1, "run": 0}
+	S.slots[_rc(0, 3)] = {"id": "gun", "perm": 1, "run": 0}
+	S.recompute()
+	var rg1: float = 0.0
+	var rg3: float = 0.0
+	for w in S.stats["weapons"]:
+		if String(w["kind"]) == "gun":
+			if int(w["slot"]) == r1:
+				rg1 = float(w["range"])
+			else:
+				rg3 = float(w["range"])
+	_check("PC-E3 ring range bonus +8%/ring", rg1 > 0.0 and is_equal_approx(rg3, rg1 * 1.16))
+	var ids_ok: bool = true
+	for id in ["railgun", "flak", "beacon", "refinery", "barricade"]:
+		ids_ok = ids_ok and BuildingDB.all_ids().has(id) and String(BuildingDB.get_def(id).get("desc", "")) != ""
+	_check("PC-E3 15 buildings in the DB", ids_ok and BuildingDB.all_ids().size() == 15)
+
+
+## PC-E4 move / swap buildings.
+func _pc_move_stages() -> void:
+	var S = _open_run()
+	var a: int = _rc(2, 3)
+	var b: int = _rc(2, 2)
+	var c: int = _rc(2, 4)
+	S.slots[a] = {"id": "gun", "perm": 0, "run": 3}
+	S.slots[c] = {"id": "mine", "perm": 0, "run": 1}
+	S.recompute()
+	S.cash = 100.0
+	var mev: Array = S.move_building(a, b)
+	_check("PC-E4 free move between waves + event", mev.size() == 1 and String(mev[0]["t"]) == "building_moved" and S.id_at(b) == "gun" and S.id_at(a) == "" and S.lvl_at(b) == 3 and is_equal_approx(S.cash, 100.0))
+	mev = S.move_building(b, c)
+	_check("PC-E4 move onto a building swaps", mev.size() == 1 and S.id_at(c) == "gun" and S.id_at(b) == "mine" and String(mev[0]["swapped"]) == "mine")
+	S.enemies.append(_enemy("drone", TowerState.CENTER + Vector2(0, -300)))
+	var val: int = S.building_value(c)
+	var cost: int = S.move_cost(c, a)
+	_check("PC-E4 in-wave move costs 10% of value", cost == int(ceil(0.1 * float(val))) and cost > 0)
+	var cash0: float = S.cash
+	S.move_building(c, a)
+	_check("PC-E4 in-wave move charges cash", S.id_at(a) == "gun" and is_equal_approx(S.cash, cash0 - float(cost)))
+	cash0 = S.cash
+	S.move_building(a, c, true)
+	_check("PC-E4 paused move is free", S.id_at(c) == "gun" and is_equal_approx(S.cash, cash0))
+	S.cash = 0.0
+	_check("PC-E4 broke in-wave move refused", S.move_building(c, a).is_empty() and S.id_at(c) == "gun")
+	S.enemies.clear()
+	S.slots[_rc(1, 3)] = {"id": "railgun", "perm": 1, "run": 0}
+	S.recompute()
+	_check("PC-E4 railgun cannot move inside ring 2", S.move_building(_rc(1, 3), _rc(3, 2)).is_empty() and S.move_building(_rc(1, 3), b).is_empty())
+	_check("PC-E4 core / locked cells refused", S.move_building(c, TowerState.CORE_SLOT).is_empty())
+	var bs: Dictionary = BaseMeta.default_save()
+	bs["coins"] = 1000
+	BaseMeta.try_place(bs, a, "gun")
+	BaseMeta.try_place(bs, c, "mine")
+	_check("PC-E4 base move + swap", BaseMeta.try_move(bs, a, b) and String(BaseMeta.slot_of(bs, b)["id"]) == "gun" and BaseMeta.try_move(bs, b, c) and String(BaseMeta.slot_of(bs, c)["id"]) == "gun" and String(BaseMeta.slot_of(bs, b)["id"]) == "mine" and not BaseMeta.try_move(bs, c, _rc(0, 0)))

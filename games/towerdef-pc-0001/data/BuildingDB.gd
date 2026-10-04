@@ -14,6 +14,12 @@ const DEFS: Dictionary = {
 	"bounty":  {"name": "Bounty Office", "cat": "eco",     "coin": 18, "desc": "+40% kill cash /lv; adj weapons +5% dmg /lv"},
 	"vault":   {"name": "Vault",         "cat": "eco",     "coin": 20, "desc": "Wave end: +4%/lv interest on held cash (cap $40/lv)"},
 	"aegis":   {"name": "Aegis Pylon",   "cat": "support", "coin": 22, "desc": "-4%/lv core dmg; adj weapons +10%/lv rate; adj eco -15%"},
+	# PC roster (PC_SPEC §2.2).
+	"railgun":   {"name": "Railgun",       "cat": "weapon",  "coin": 28, "desc": "Piercing line shot every 2.5 s; outer rings only (ring 2+). Adj Tesla: +20% dmg per 5 Tesla lv (max +60%)"},
+	"flak":      {"name": "Flak Battery",  "cat": "weapon",  "coin": 22, "desc": "Fast splash, x1.5 vs skitter/mite/drone. Adj Gun: both +10% crit"},
+	"beacon":    {"name": "Lane Beacon",   "cat": "support", "coin": 20, "desc": "+15%/lv weapon dmg vs the focused lane. Adj Mortar: +25% range"},
+	"refinery":  {"name": "Refinery",      "cat": "eco",     "coin": 24, "desc": "Wave end: 10% of the wave's cash income -> coins (cap 5/lv). Adj Mine: +20% output"},
+	"barricade": {"name": "Barricade",     "cat": "support", "coin": 16, "desc": "Wall on its lane: -30% enemy speed, 60 HP/lv, rebuilt each wave"},
 }
 
 const IDS: Array = ["gun", "mortar", "tesla", "armory", "bulwark", "mine", "oilmill", "bounty"]
@@ -21,9 +27,12 @@ const IDS: Array = ["gun", "mortar", "tesla", "armory", "bulwark", "mine", "oilm
 ## Run-3+ buildings (SYSTEMS §11): drafted only when run_mods.allow_new_bldg.
 const NEW_IDS: Array = ["vault", "aegis"]
 
+## PC-only buildings; drafted with the run-3+ set.
+const PC_IDS: Array = ["railgun", "flak", "beacon", "refinery", "barricade"]
+
 
 static func all_ids() -> Array:
-	return IDS + NEW_IDS
+	return IDS + NEW_IDS + PC_IDS
 
 
 static func ids() -> Array:

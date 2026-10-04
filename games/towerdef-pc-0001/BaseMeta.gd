@@ -405,6 +405,26 @@ static func try_upgrade(s: Dictionary, i: int) -> bool:
 	return true
 
 
+## Base-screen rearrange (free): move a permanent building to an empty
+## unlocked cell, or swap two buildings. Respects the Railgun ring rule.
+static func try_move(s: Dictionary, a: int, b: int) -> bool:
+	if a == b or a < 0 or b < 0 or a >= N or b >= N or a == CORE_SLOT or b == CORE_SLOT:
+		return false
+	var ea: Dictionary = slot_of(s, a)
+	var eb: Dictionary = slot_of(s, b)
+	if ea.is_empty() or not is_unlocked(s, b) or not place_ok(b, String(ea["id"])):
+		return false
+	if not eb.is_empty() and not place_ok(a, String(eb["id"])):
+		return false
+	var slots: Dictionary = s["slots"]
+	slots.erase(str(a))
+	slots.erase(str(b))
+	slots[str(b)] = ea
+	if not eb.is_empty():
+		slots[str(a)] = eb
+	return true
+
+
 static func demolish(s: Dictionary, i: int) -> bool:
 	var slots: Dictionary = s["slots"]
 	return slots.erase(str(i))

@@ -44,7 +44,8 @@ const SUBSTEP: float = 0.05
 const CORE_RING: Array = [16, 17, 18, 23, 25, 30, 31, 32]
 const TARGET_MODES: Array = ["nearest", "first", "strongest", "weakest"]
 const HIT_FLASH: float = 0.12   # view reads e["hit_t"] for the white hit flash
-const ECO_IDS: Array = ["mine", "oilmill", "bounty", "vault"]
+const ECO_IDS: Array = ["mine", "oilmill", "bounty", "vault", "refinery"]
+const FLAK_PREY: Array = ["skitter", "mite", "drone"]
 
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var save: Dictionary = {}
@@ -73,6 +74,10 @@ var wave_spawned: Dictionary = {} # quad -> planned enemies actually spawned thi
 var last_wave_spawned: Dictionary = {}  # {wave, counts} of the wave that just ended
 var wave_started: bool = false    # wave 1 starts after the opening telegraph lead
 var focus_quad: int = 0           # lane focus (Beacon + abilities target it)
+var walls: Dictionary = {}        # quad -> {hp, max}: Barricade lane walls
+var wave_cash0: float = 0.0       # cash_earned at wave start (Refinery input)
+var coins_refinery: float = 0.0
+var ironclad: float = 0.0         # Ironclad modifier: non-crit hits deal this much less
 var time_alive: float = 0.0
 var hp: float = 100.0
 var cash: float = 0.0
@@ -183,6 +188,9 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0) -> Array:
 	last_wave_spawned = {}
 	wave_started = false
 	focus_quad = 0
+	walls = {}
+	wave_cash0 = 0.0
+	coins_refinery = 0.0
 	time_alive = 0.0
 	cash = float(int(mods.get("start_cash", 0)))
 	xp = 0.0
@@ -305,6 +313,9 @@ func compute_stats() -> Dictionary:
 		"vaults": [],
 		"links": [],
 		"dr": 0.0,
+		"refineries": [],
+		"walls": {},
+		"beacon": 0.0,
 	}
 	var links: Array = st["links"]
 	var arm_cap: float = TuneRef.num("armory_cap", 1.0)
@@ -377,7 +388,13 @@ func compute_stats() -> Dictionary:
 					bulwark_dr += 0.03 * L
 					links.append([i, CORE_SLOT, "S3"])
 			"mine":
-				st["cash_ps"] = float(st["cash_ps"]) + 1.2 * L * mine_scale * ep
+				var smelt: float = 1.0
+				for n in neighbors(i):
+					if id_at(n) == "refinery":
+						smelt = 1.0 + TuneRef.num("pc_smelter", 0.20)
+						links.append([n, i, "S11"])
+						break
+				st["cash_ps"] = float(st["cash_ps"]) + 1.2 * L * mine_scale * ep * smelt
 			"oilmill":
 				var adj_mines: int = 0
 				for n in neighbors(i):
@@ -411,6 +428,7 @@ func compute_stats() -> Dictionary:
 				(st["weapons"] as Array).append({"slot": i, "kind": "mortar", "dmg": (8.0 + 5.0 * L) * float(arm[i]) * float(eco_dmg[i]), "rate": 0.45 * (1.0 + float(aeg_rate[i])), "range": 320.0, "splash": 55.0 + 4.0 * L, "teslas": teslas})
 			"tesla":
 				(st["weapons"] as Array).append({"slot": i, "kind": "tesla", "dmg": (2.0 + 1.2 * L) * float(arm[i]) * float(eco_dmg[i]), "rate": 0.9 * (1.0 + float(aeg_rate[i])), "range": 190.0, "chains": mini(6, 2 + int(L) / 2)})
+	_pc_buildings(st, arm, eco_dmg, aeg_rate, eco_pen)
 	var core_dmg: float = 5.0 * (1.0 + 0.25 * float(core.get("dmg", 0))) * float(arm[CORE_SLOT])
 	(st["weapons"] as Array).append({"slot": CORE_SLOT, "kind": "core", "dmg": core_dmg, "rate": 1.4, "range": 280.0})
 	# Core Overdrive (late sink): core stat levels above BaseMeta.MAX_LVL —
@@ -460,13 +478,97 @@ func compute_stats() -> Dictionary:
 	return st
 
 
+## PC roster (PC_SPEC §2.2) and its synergies. Link tags continue the mobile
+## S1-S7 numbering: S8 Capacitor Bank, S9 Crossfire, S10 Spotter, S11 Smelter.
+func _pc_buildings(st: Dictionary, arm: Array, eco_dmg: Array, aeg_rate: Array, eco_pen: Array) -> void:
+	var links: Array = st["links"]
+	var weapons: Array = st["weapons"]
+	var crit_x: float = TuneRef.num("pc_crossfire", 0.10)
+	for i in N:
+		var id: String = id_at(i)
+		if id == "":
+			continue
+		var L: float = float(lvl_at(i))
+		match id:
+			"railgun":
+				var capb: float = 0.0
+				for n in neighbors(i):
+					if id_at(n) == "tesla":
+						capb += TuneRef.num("pc_capacitor", 0.20) * float(lvl_at(n)) / 5.0
+						links.append([n, i, "S8"])
+				capb = minf(TuneRef.num("pc_capacitor_cap", 0.60), capb)
+				weapons.append({"slot": i, "kind": "railgun", "dmg": (30.0 + 18.0 * L) * float(arm[i]) * float(eco_dmg[i]) * (1.0 + capb), "rate": 0.4 * (1.0 + float(aeg_rate[i])), "range": 380.0, "pierce": 14.0, "capacitor": capb, "crit": 0.0})
+			"flak":
+				var fc: float = 0.0
+				for n in neighbors(i):
+					if id_at(n) == "gun":
+						fc = crit_x
+						links.append([i, n, "S9"])
+						links.append([n, i, "S9"])
+						break
+				weapons.append({"slot": i, "kind": "flak", "dmg": (2.0 + 1.0 * L) * float(arm[i]) * float(eco_dmg[i]), "rate": 2.0 * (1.0 + float(aeg_rate[i])), "range": 200.0, "splash": 40.0, "crit": fc})
+			"beacon":
+				st["beacon"] = float(st["beacon"]) + TuneRef.num("pc_beacon", 0.15) * L
+			"refinery":
+				var ep: float = float(eco_pen[i])
+				(st["refineries"] as Array).append({"slot": i, "rate": TuneRef.num("pc_refinery_rate", 0.10) * ep, "cap": TuneRef.num("pc_refinery_cap", 5.0) * L * ep})
+			"barricade":
+				var q: int = cell_quad(i)
+				var wl: Dictionary = st["walls"]
+				wl[q] = float(wl.get(q, 0.0)) + TuneRef.num("pc_wall_hp", 60.0) * L
+	# Crossfire crit on guns + Spotter range on mortars (set after all weapons exist).
+	for w in weapons:
+		var wd: Dictionary = w
+		var si: int = int(wd["slot"])
+		if not wd.has("crit"):
+			wd["crit"] = 0.0
+		match String(wd["kind"]):
+			"gun":
+				for n in neighbors(si):
+					if id_at(n) == "flak":
+						wd["crit"] = float(wd["crit"]) + crit_x
+						break
+			"mortar":
+				for n in neighbors(si):
+					if id_at(n) == "beacon":
+						wd["range"] = float(wd["range"]) * (1.0 + TuneRef.num("pc_spotter", 0.25))
+						links.append([n, si, "S10"])
+						break
+
+
 func recompute() -> void:
 	var old_max: float = float(stats.get("max_hp", 0.0))
 	stats = compute_stats()
+	_sync_walls()
 	var new_max: float = float(stats["max_hp"])
 	if old_max > 0.0 and new_max > old_max:
 		hp += new_max - old_max   # a new Bulwark heals by its bonus
 	hp = minf(hp, new_max)
+
+
+## Barricade walls follow the board: a new/upgraded Barricade adds its HP now,
+## a sold one removes its lane's wall.
+func _sync_walls() -> void:
+	var want: Dictionary = stats.get("walls", {})
+	for q in walls.keys():
+		if not want.has(q):
+			walls.erase(q)
+	for q in want.keys():
+		var mx: float = float(want[q])
+		if not walls.has(q):
+			walls[q] = {"hp": mx, "max": mx}
+		else:
+			var wd: Dictionary = walls[q]
+			var grow: float = maxf(0.0, mx - float(wd["max"]))
+			wd["max"] = mx
+			wd["hp"] = minf(mx, float(wd["hp"]) + grow)
+
+
+func _rebuild_walls(ev: Array) -> void:
+	for q in walls.keys():
+		var wd: Dictionary = walls[q]
+		wd["hp"] = float(wd["max"])
+		ev.append({"t": "wall_up", "quad": int(q), "hp": float(wd["hp"])})
 
 
 # ------------------------------------------------------------------ curves
@@ -554,6 +656,15 @@ func _step(sub: float, ev: Array) -> void:
 
 ## Vault interest on held cash (B5), paid before the next wave starts.
 func _wave_end(ev: Array) -> void:
+	var income: float = maxf(0.0, cash_earned - wave_cash0)
+	for r in stats.get("refineries", []):
+		var rd: Dictionary = r
+		var c: float = minf(income * float(rd["rate"]), float(rd["cap"]))
+		if c <= 0.0:
+			continue
+		coins_run += c
+		coins_refinery += c
+		ev.append({"t": "refined", "slot": int(rd["slot"]), "coins": c, "income": income})
 	var held: float = cash
 	for v in stats.get("vaults", []):
 		var vd: Dictionary = v
@@ -717,6 +828,8 @@ func _adopt_plan(p: Dictionary, ev: Array, opening: bool) -> void:
 	boss_dir = int(p["boss_dir"])
 	wave_spawned = {}
 	next_plan = {}
+	wave_cash0 = cash_earned
+	_rebuild_walls(ev)
 	if opening:
 		ev.append(_telegraph_event(p))
 	else:
@@ -827,6 +940,8 @@ func _core_damage(amt: float, ev: Array, kind: String, from: Vector2) -> void:
 func _move_enemies(dt: float, ev: Array) -> void:
 	var r_stop: float = TuneRef.num("ranged_stop", 230.0)
 	var r_fire: float = TuneRef.num("ranged_fire", 2.0)
+	var wall_r: float = TuneRef.num("pc_wall_r", STOP_R + 50.0)
+	var wall_slow: float = 1.0 - TuneRef.num("pc_wall_slow", 0.30)
 	for e in enemies:
 		var ed: Dictionary = e
 		var pos: Vector2 = ed["pos"]
@@ -840,6 +955,17 @@ func _move_enemies(dt: float, ev: Array) -> void:
 		var to_c: Vector2 = CENTER - pos
 		var dist: float = to_c.length()
 		if dist > stop + 0.001:
+			# Barricade (PC_SPEC §2.2): a standing wall on this lane slows enemies
+			# pressing on it, and they wear it down with their contact damage.
+			var wq: int = int(ed.get("quad", -1))
+			if not walls.is_empty() and dist <= wall_r + 15.0 and walls.has(wq):
+				var wd: Dictionary = walls[wq]
+				if float(wd["hp"]) > 0.0:
+					mult *= wall_slow
+					wd["hp"] = float(wd["hp"]) - float(ed["dmg"]) * dt
+					if float(wd["hp"]) <= 0.0:
+						wd["hp"] = 0.0
+						ev.append({"t": "wall_broken", "quad": wq})
 			var step: float = minf(dist - stop, float(ed["spd"]) * mult * dt)
 			ed["pos"] = pos + to_c.normalized() * step
 		elif ranged:
@@ -936,8 +1062,15 @@ func _nearest(from: Vector2, rng_lim: float, exclude: Dictionary) -> int:
 	return best
 
 
-## Every weapon hit goes through here: an elite's shield absorbs whole hits.
-func _hit(ed: Dictionary, dmg: float, ev: Array) -> void:
+## Every weapon hit goes through here: Lane Beacon bonus vs the focused lane,
+## then an elite's shield absorbs whole hits.
+func _hit(ed: Dictionary, dmg_in: float, ev: Array, crit: bool = false) -> void:
+	var dmg: float = dmg_in
+	var bb: float = float(stats.get("beacon", 0.0))
+	if bb > 0.0 and int(ed.get("quad", quad_of(ed["pos"]))) == focus_quad:
+		dmg *= 1.0 + bb
+	if not crit and ironclad > 0.0:
+		dmg *= 1.0 - ironclad
 	var sh: int = int(ed.get("shield", 0))
 	if sh > 0:
 		sh -= 1
@@ -948,7 +1081,10 @@ func _hit(ed: Dictionary, dmg: float, ev: Array) -> void:
 		return
 	ed["hp"] = float(ed["hp"]) - dmg
 	ed["hit_t"] = HIT_FLASH
-	ev.append({"t": "dmg", "eid": int(ed.get("eid", 0)), "pos": ed["pos"], "amt": dmg})
+	if crit:
+		ev.append({"t": "dmg", "eid": int(ed.get("eid", 0)), "pos": ed["pos"], "amt": dmg, "crit": true})
+	else:
+		ev.append({"t": "dmg", "eid": int(ed.get("eid", 0)), "pos": ed["pos"], "amt": dmg})
 
 
 func _fire(dt: float, ev: Array) -> void:
@@ -969,7 +1105,37 @@ func _fire(dt: float, ev: Array) -> void:
 		var dmg: float = float(wd["dmg"])
 		var te: Dictionary = enemies[tgt]
 		var tpos: Vector2 = te["pos"]
+		# Crit (Crossfire): one seeded roll per shot, only when the weapon can crit.
+		var crit: bool = false
+		if float(wd.get("crit", 0.0)) > 0.0 and rng.randf() < float(wd["crit"]):
+			crit = true
+			dmg *= TuneRef.num("pc_crit_mult", 2.0)
 		match kind:
+			"railgun":
+				# Pierces every enemy on the line from the gun through the target.
+				var dir: Vector2 = (tpos - from).normalized()
+				var reach: float = float(wd["range"])
+				for e in enemies:
+					var ed: Dictionary = e
+					if float(ed["hp"]) <= 0.0:
+						continue
+					var rel: Vector2 = (ed["pos"] as Vector2) - from
+					var along: float = rel.dot(dir)
+					if along < 0.0 or along > reach:
+						continue
+					if absf(rel.cross(dir)) <= float(wd["pierce"]) + float(ed["size"]) * 0.5:
+						_hit(ed, dmg, ev, crit)
+				ev.append({"t": "shot", "kind": kind, "from": from, "to": from + dir * reach})
+			"flak":
+				var frad: float = float(wd["splash"])
+				for e in enemies:
+					var ed: Dictionary = e
+					if float(ed["hp"]) <= 0.0:
+						continue
+					if (ed["pos"] as Vector2).distance_to(tpos) <= frad:
+						var fm: float = TuneRef.num("pc_flak_prey", 1.5) if FLAK_PREY.has(String(ed["kind"])) else 1.0
+						_hit(ed, dmg * fm, ev, crit)
+				ev.append({"t": "shot", "kind": kind, "from": from, "to": tpos, "radius": frad})
 			"mortar":
 				var rad: float = float(wd["splash"])
 				var teslas: Array = wd.get("teslas", [])
@@ -1000,7 +1166,7 @@ func _fire(dt: float, ev: Array) -> void:
 					prev = cpos
 					cur = _nearest(cpos, 90.0, hit)
 			_:
-				_hit(te, dmg, ev)
+				_hit(te, dmg, ev, crit)
 				ev.append({"t": "shot", "kind": kind, "from": from, "to": tpos})
 
 
@@ -1190,3 +1356,51 @@ func free_slots() -> Array:
 		if is_free(i):
 			out.append(i)
 	return out
+
+
+## Cash a building represents: its base price plus every run level bought.
+func building_value(i: int) -> int:
+	if id_at(i) == "":
+		return 0
+	var v: int = 8
+	for k in maxi(0, lvl_at(i) - 1):
+		v += int(8.0 * pow(TuneRef.num("run_upgrade_growth", 1.3), float(k)))
+	return v
+
+
+## PC_SPEC §1.5 drag-move: move the building on `a` to `b` (empty unlocked
+## cell) or swap it with the building on `b`. Free while paused or when the
+## field is clear between waves; during an active wave it costs
+## pc_move_cost_frac of the moved building(s) value in cash.
+func move_cost(a: int, b: int, paused: bool = false) -> int:
+	if paused or enemies.is_empty():
+		return 0
+	var f: float = TuneRef.num("pc_move_cost_frac", 0.1)
+	return int(ceil(f * float(building_value(a) + building_value(b))))
+
+
+func move_building(a: int, b: int, paused: bool = false) -> Array:
+	if over or a == b or a < 0 or b < 0 or a >= N or b >= N or a == CORE_SLOT or b == CORE_SLOT:
+		return []
+	var ida: String = id_at(a)
+	var idb: String = id_at(b)
+	if ida == "" or not bool(unlocked[b]) or not BaseMeta.place_ok(b, ida):
+		return []
+	if idb != "" and not BaseMeta.place_ok(a, idb):
+		return []
+	var c: int = move_cost(a, b, paused)
+	if cash < float(c):
+		return []
+	cash -= float(c)
+	var sa: Dictionary = slots[a]
+	slots[a] = slots[b]
+	slots[b] = sa
+	var cd: float = float(cooldowns[a])
+	cooldowns[a] = cooldowns[b]
+	cooldowns[b] = cd
+	var tm: String = String(target_modes[a])
+	target_modes[a] = target_modes[b]
+	target_modes[b] = tm
+	recompute()
+	return [{"t": "building_moved", "from": a, "to": b, "id": ida, "swapped": idb, "cost": c}]
+
