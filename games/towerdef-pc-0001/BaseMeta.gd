@@ -49,6 +49,7 @@ static func default_save() -> Dictionary:
 		"gem_log": {"boss": 0, "mission": 0, "streak": 0, "tier": 0},
 		"boss_gems_today": {"day": -1, "n": 0},
 		"settings": {"music": 0.8, "sfx": 1.0, "mute": false},
+		"endless": {"best": 0},
 	}
 
 
@@ -232,6 +233,8 @@ static func normalize(s_in: Dictionary) -> Dictionary:
 	var bg_in: Dictionary = s.get("boss_gems_today", {})
 	d["boss_gems_today"] = {"day": int(bg_in.get("day", -1)), "n": maxi(0, int(bg_in.get("n", 0)))}
 	var se_in: Dictionary = s.get("settings", {})
+	var en_in: Dictionary = s.get("endless", {}) if s.get("endless", {}) is Dictionary else {}
+	d["endless"] = {"best": maxi(0, int(en_in.get("best", 0)))}
 	d["settings"] = {"music": clampf(float(se_in.get("music", 0.8)), 0.0, 1.0), "sfx": clampf(float(se_in.get("sfx", 1.0)), 0.0, 1.0), "mute": bool(se_in.get("mute", false))}
 	# speed snaps to an unlocked step
 	var steps: Array = Labs.speed_steps(d)
@@ -458,17 +461,18 @@ static func boss_gem_allowance(s: Dictionary, now: int) -> int:
 
 ## Bank a finished run: coins + gems, per-tier record, best coin rate,
 ## last_seen, and first-time tier unlock rewards. Returns events.
-static func bank(s: Dictionary, coins: int, wave: int, tier: int = 1, run_minutes: float = 0.0, now: int = 0, gems: int = 0) -> Array:
+static func bank(s: Dictionary, coins: int, wave: int, tier: int = 1, run_minutes: float = 0.0, now: int = 0, gems: int = 0, record: bool = true) -> Array:
 	var ev: Array = []
 	var hi_before: int = Tiers.highest(s)
 	s["coins"] = int(s["coins"]) + maxi(0, coins)
 	s["runs"] = int(s["runs"]) + 1
-	s["best_wave"] = maxi(int(s["best_wave"]), wave)
 	if not s.has("best_wave_by_tier"):
 		s["best_wave_by_tier"] = {"1": 0}
-	var bw: Dictionary = s["best_wave_by_tier"]
-	var tk: String = str(maxi(1, tier))
-	bw[tk] = maxi(int(bw.get(tk, 0)), wave)
+	if record:
+		s["best_wave"] = maxi(int(s["best_wave"]), wave)
+		var bw: Dictionary = s["best_wave_by_tier"]
+		var tk: String = str(maxi(1, tier))
+		bw[tk] = maxi(int(bw.get(tk, 0)), wave)
 	if tier >= hi_before and run_minutes > 0.0:
 		s["best_coin_rate"] = maxf(float(s.get("best_coin_rate", 0.0)), float(coins) / run_minutes)
 	if now > 0:
@@ -490,6 +494,18 @@ static func bank(s: Dictionary, coins: int, wave: int, tier: int = 1, run_minute
 			Missions.add_gems(s, "tier", g)
 			ev.append({"t": "tier_unlocked", "tier": n, "gems": g})
 	return ev
+
+
+## PC_SPEC §3.1: endless unlocks once any run reached wave 50.
+static func endless_unlocked(s: Dictionary) -> bool:
+	return int(s.get("best_wave", 0)) >= TuneRef.int_of("pc_endless_unlock", 50)
+
+
+static func record_endless(s: Dictionary, wave: int) -> void:
+	if not (s.get("endless", null) is Dictionary):
+		s["endless"] = {"best": 0}
+	var e: Dictionary = s["endless"]
+	e["best"] = maxi(int(e.get("best", 0)), wave)
 
 
 ## Tier selector (Base screen): only unlocked tiers may be chosen.

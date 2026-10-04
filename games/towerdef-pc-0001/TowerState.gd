@@ -20,6 +20,7 @@ const TuneRef := preload("res://Tune.gd")
 const Tiers := preload("res://Tiers.gd")
 const Perks := preload("res://Perks.gd")
 const PerkDB := preload("res://data/PerkDB.gd")
+const ModifierDB := preload("res://data/ModifierDB.gd")
 
 const CENTER: Vector2 = Vector2(360, 470)
 const CELL: float = 52.0
@@ -78,6 +79,21 @@ var walls: Dictionary = {}        # quad -> {hp, max}: Barricade lane walls
 var wave_cash0: float = 0.0       # cash_earned at wave start (Refinery input)
 var coins_refinery: float = 0.0
 var ironclad: float = 0.0         # Ironclad modifier: non-crit hits deal this much less
+
+# PC modes (PC_SPEC §3): "normal" | "endless", challenge modifiers, mutations.
+var mode: String = "normal"
+var modifiers: Array = []         # ModifierDB ids picked for this run
+var mod_coin: float = 1.0         # min(3, 1 + sum of modifier coin rewards)
+var mode_coin: float = 1.0        # endless banks coins x pc_endless_coin_mult
+var mutations_taken: Array = []
+var mutation_offer: Array = []
+var mutation_pending: int = 0
+var enemy_hp_mod: float = 1.0
+var enemy_spd_mod: float = 1.0
+var enemy_dmg_mod: float = 1.0
+var elite_shield_add: int = 0
+var kill_cash_mod: float = 1.0
+var run_seed: int = 0
 var time_alive: float = 0.0
 var hp: float = 100.0
 var cash: float = 0.0
@@ -138,11 +154,21 @@ var xp_base: float = 6.0
 var xp_growth: float = 1.3
 
 
-func setup(seed_value: int, save_data: Dictionary, now: int = 0) -> Array:
+## opts (PC): {mode: "normal"|"endless", modifiers: [ModifierDB ids]}.
+func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionary = {}) -> Array:
 	rng.seed = seed_value
+	run_seed = seed_value
 	save = save_data
 	now_unix = now
-	_apply_mods(BaseMeta.run_mods(save))
+	var pre: Array = _apply_run_opts(opts)
+	var rm: Dictionary = BaseMeta.run_mods(save)
+	if modifiers.has("nolabs"):
+		for k in ["lab_dmg", "lab_hp", "lab_coin", "lab_xp"]:
+			rm[k] = 0.0
+		rm["start_cash"] = 0
+		rm["rerolls"] = 0
+	_apply_mods(rm)
+	_apply_challenge()
 	wave_time = TuneRef.num("wave_time", wave_time)
 	hp_growth = TuneRef.num("hp_growth", hp_growth)
 	# Balance knobs: per-tier enemy HP ramp (T1 1.17, T2 1.18, T3+ 1.155).
@@ -192,7 +218,7 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0) -> Array:
 	wave_cash0 = 0.0
 	coins_refinery = 0.0
 	time_alive = 0.0
-	cash = float(int(mods.get("start_cash", 0)))
+	cash = 0.0 if modifiers.has("poverty") else float(int(mods.get("start_cash", 0)))
 	xp = 0.0
 	level = 1
 	coins_run = 0.0
@@ -214,10 +240,51 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0) -> Array:
 	stats = {}
 	recompute()
 	hp = float(stats["max_hp"])
-	var ev0: Array = [{"t": "run_start", "tier": tier, "speed": speed}]
+	var ev0: Array = [{"t": "run_start", "tier": tier, "speed": speed, "mode": mode, "modifiers": modifiers.duplicate(), "coin_mult": mod_coin * mode_coin, "seed": run_seed}]
+	ev0.append_array(pre)
 	# Wave 1 is telegraphed at t=0 and starts pc_telegraph_s later.
 	_adopt_plan(_build_plan(1, telegraph_s()), ev0, true)
 	return ev0
+
+
+## Mode + modifier selection (validated). Endless needs best wave >= 50.
+func _apply_run_opts(opts: Dictionary) -> Array:
+	var ev: Array = []
+	modifiers = ModifierDB.clean(opts.get("modifiers", []))
+	mode = String(opts.get("mode", "normal"))
+	if mode == "endless" and not BaseMeta.endless_unlocked(save):
+		ev.append({"t": "endless_locked", "need": TuneRef.int_of("pc_endless_unlock", 50)})
+		mode = "normal"
+	if mode != "endless":
+		mode = "normal"
+	mod_coin = ModifierDB.coin_mult(modifiers)
+	mode_coin = TuneRef.num("pc_endless_coin_mult", 0.8) if mode == "endless" else 1.0
+	mutations_taken = []
+	mutation_offer = []
+	mutation_pending = 0
+	return ev
+
+
+## Challenge modifiers on top of the meta bundle (PC_SPEC §3.2).
+func _apply_challenge() -> void:
+	ironclad = 0.2 if modifiers.has("ironclad") else 0.0
+	kill_cash_mod = 0.7 if modifiers.has("poverty") else 1.0
+	if modifiers.has("glass"):
+		max_hp_mult *= 0.5
+	coin_mult *= mod_coin * mode_coin
+	_refresh_enemy_mods()
+
+
+## Enemy-side multipliers from modifiers x endless mutations.
+func _refresh_enemy_mods() -> void:
+	var n: Dictionary = {}
+	for m in mutations_taken:
+		n[m] = int(n.get(m, 0)) + 1
+	enemy_hp_mod = (0.7 if modifiers.has("swarm") else 1.0) * (1.0 + 0.2 * float(n.get("m_vigor", 0)))
+	count_mult = (1.6 if modifiers.has("swarm") else 1.0) * (1.0 + 0.2 * float(n.get("m_horde", 0)))
+	enemy_spd_mod = (1.25 if modifiers.has("haste") else 1.0) * (1.0 + 0.1 * float(n.get("m_rush", 0)))
+	enemy_dmg_mod = 1.0 + 0.25 * float(n.get("m_fangs", 0))
+	elite_shield_add = 2 * int(n.get("m_plating", 0))
 
 
 ## SPEC B1: fold the meta bundle into run multipliers. TowerState never reads
@@ -577,6 +644,10 @@ func spawn_interval() -> float:
 
 
 func scale() -> float:
+	var cap_w: int = TuneRef.int_of("pc_endless_soft_wave", 100)
+	if mode == "endless" and wave > cap_w:
+		# Endless past wave 100: the ramp continues on a softer exponent.
+		return pow(hp_growth, float(cap_w - 1)) * pow(TuneRef.num("pc_endless_hp_exp", 1.12), float(wave - cap_w))
 	return pow(hp_growth, float(wave - 1))
 
 
@@ -596,12 +667,16 @@ func unlock_cost() -> int:
 
 
 func time_scale() -> float:
-	return SLOWMO if (draft.size() > 0 or pending_place != "" or perk_offer.size() > 0) else 1.0
+	return SLOWMO if (draft.size() > 0 or pending_place != "" or perk_offer.size() > 0 or mutation_offer.size() > 0) else 1.0
 
 
 ## Coins multiplier for everything earned this run (tier × lab × card × perks).
 func run_coin_mult() -> float:
-	return coin_mult * float(stats.get("perk_coin", 1.0))
+	return coin_mult * float(stats.get("perk_coin", 1.0)) * mutation_coin()
+
+
+func mutation_coin() -> float:
+	return 1.0 + ModifierDB.MUTATION_COIN * float(mutations_taken.size())
 
 
 func run_cash_mult() -> float:
@@ -685,8 +760,10 @@ func _wave_coins(w: int, frac: float) -> float:
 
 func _enter_wave(w: int) -> void:
 	wave = w
-	if wave % maxi(1, TuneRef.int_of("perk_every", 5)) == 0 and not Perks.available(perks_taken).is_empty():
+	if not modifiers.has("noperks") and wave % maxi(1, TuneRef.int_of("perk_every", 5)) == 0 and not Perks.available(perks_taken).is_empty():
 		perk_pending += 1
+	if mode == "endless" and wave % ModifierDB.MUTATION_EVERY == 0:
+		mutation_pending += 1
 
 
 func _advance_wave(ev: Array) -> void:
@@ -717,14 +794,23 @@ func _on_death(ev: Array) -> void:
 		return
 	hp = 0.0
 	over = true
-	var cashout: int = int(floor(TuneRef.num("cashout_frac", 0.02) * cash_earned * tier_coin_mult))
+	var cashout: int = int(floor(TuneRef.num("cashout_frac", 0.02) * cash_earned * tier_coin_mult * mod_coin * mode_coin))
 	var coins: int = int(coins_run) + cashout
 	var bd: Dictionary = {
 		"wave": int(coins_wave), "kills": int(coins_kill), "boss": int(coins_boss),
 		"cashout": cashout, "mult": run_coin_mult(), "tier": tier, "gems": gems_run,
+		"refinery": int(coins_refinery), "mod_mult": mod_coin, "mode_mult": mode_coin,
 	}
-	ev.append({"t": "game_over", "wave": wave, "coins": coins, "kills": kills, "cash_earned": int(cash_earned), "breakdown": bd, "perks": perks_taken.duplicate()})
-	ev.append_array(BaseMeta.bank(save, coins, wave, tier, time_alive / 60.0, now_unix, gems_run))
+	var build: Array = []
+	for i in N:
+		build.append(id_at(i))
+	ev.append({"t": "game_over", "wave": wave, "coins": coins, "kills": kills, "cash_earned": int(cash_earned), "breakdown": bd, "perks": perks_taken.duplicate(),
+		"seed": run_seed, "tier": tier, "mode": mode, "modifiers": modifiers.duplicate(), "mutations": mutations_taken.duplicate(),
+		"duration_s": time_alive, "build": build, "ts": now_unix})
+	# Endless records its own best and never feeds the tier ladder (§3.1).
+	ev.append_array(BaseMeta.bank(save, coins, wave, tier, time_alive / 60.0, now_unix, gems_run, mode != "endless"))
+	if mode == "endless":
+		BaseMeta.record_endless(save, wave)
 	ev.append({"t": "dead", "wave": wave, "coins": coins, "kills": kills, "cash_earned": int(cash_earned), "breakdown": bd})
 
 
@@ -746,7 +832,7 @@ static func telegraph_s() -> float:
 
 ## PC_SPEC §2.3 schedule: waves 1-9 one quadrant, 10-24 two, 25-49 three, 50+ four.
 func quad_count(w: int) -> int:
-	if w >= 50:
+	if w >= 50 or modifiers.has("allsides"):
 		return 4
 	if w >= 25:
 		return 3
@@ -874,7 +960,10 @@ func _roll_kind(for_wave: int = -1) -> String:
 				if wv >= 3:
 					w = float(EnemyDB.WEIGHTS["skitter"]) + (0.0 if wv >= 5 else float(EnemyDB.WEIGHTS["hauler"]))
 			"elite":
-				w = Tiers.elite_weight(tier) if Tiers.allows(k, tier, wv) else 0.0
+				if modifiers.has("elitist"):
+					w = 3.0 * maxf(Tiers.elite_weight(tier), Tiers.elite_weight(2)) if wv >= 5 else 0.0
+				else:
+					w = Tiers.elite_weight(tier) if Tiers.allows(k, tier, wv) else 0.0
 			_:
 				w = float(EnemyDB.WEIGHTS[k]) if Tiers.allows(k, tier, wv) else 0.0
 		if w <= 0.0:
@@ -889,7 +978,7 @@ func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF, quad: int = -1) 
 	if enemies.size() >= MAX_ENEMIES:
 		return false
 	var d: Dictionary = EnemyDB.get_def(kind)
-	var sc: float = scale() * hp_mult * float(stats.get("perk_enemy_hp", 1.0))
+	var sc: float = scale() * hp_mult * float(stats.get("perk_enemy_hp", 1.0)) * enemy_hp_mod
 	var pos: Vector2 = at
 	if at == Vector2.INF:
 		var q: int = quad
@@ -901,8 +990,8 @@ func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF, quad: int = -1) 
 	var e: Dictionary = {
 		"kind": kind, "pos": pos,
 		"hp": float(d["hp"]) * sc, "max_hp": float(d["hp"]) * sc,
-		"spd": float(d["spd"]) * float(stats.get("perk_enemy_spd", 1.0)),
-		"dmg": float(d["dmg"]) * pow(dmg_growth, float(wave - 1)) * hp_mult,
+		"spd": float(d["spd"]) * float(stats.get("perk_enemy_spd", 1.0)) * enemy_spd_mod,
+		"dmg": float(d["dmg"]) * pow(dmg_growth, float(wave - 1)) * hp_mult * enemy_dmg_mod,
 		"cash": float(d["cash"]), "xp": float(d["xp"]), "coin": float(d["coin"]),
 		"size": float(d["size"]), "atk_cd": 0.0, "slow_t": 0.0,
 		"shield": 0, "fire_cd": 0.0, "shock_t": 0.0, "shock_src": -1,
@@ -920,7 +1009,7 @@ func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF, quad: int = -1) 
 			e["hp"] = float(e["hp"]) * bm
 			e["max_hp"] = float(e["max_hp"]) * bm
 		"elite":
-			e["shield"] = TuneRef.int_of("elite_shield_base", 3) + wave / 10
+			e["shield"] = TuneRef.int_of("elite_shield_base", 3) + wave / 10 + elite_shield_add
 			e["max_shield"] = int(e["shield"])
 		"ranged":
 			e["fire_cd"] = TuneRef.num("ranged_fire", 2.0)
@@ -1179,7 +1268,7 @@ func _reap(ev: Array) -> void:
 		if float(ed["hp"]) > 0.0:
 			alive.append(ed)
 			continue
-		var gain: float = float(ed["cash"]) * float(stats["bounty_mult"]) * run_cash_mult()
+		var gain: float = float(ed["cash"]) * float(stats["bounty_mult"]) * run_cash_mult() * kill_cash_mod
 		cash += gain
 		cash_earned += gain
 		xp += float(ed["xp"]) * float(stats["xp_mult"])
@@ -1217,12 +1306,47 @@ func _boss_bounty(pos: Vector2, ev: Array) -> void:
 
 
 func _check_queue(ev: Array) -> void:
+	_check_mutation(ev)
 	_check_level(ev)
 	_check_perk(ev)
 
 
+## Endless mutation pick (every 25 waves): 3 distinct, non-maxed mutations.
+func _check_mutation(ev: Array) -> void:
+	if mutation_pending <= 0 or draft.size() > 0 or pending_place != "" or perk_offer.size() > 0 or mutation_offer.size() > 0:
+		return
+	mutation_pending -= 1
+	var pool: Array = []
+	for id in ModifierDB.MUTATION_IDS:
+		if mutations_taken.count(id) < ModifierDB.MUTATION_STACK:
+			pool.append(id)
+	for i in range(pool.size() - 1, 0, -1):
+		var j: int = rng.randi_range(0, i)
+		var tmp: Variant = pool[i]
+		pool[i] = pool[j]
+		pool[j] = tmp
+	mutation_offer = pool.slice(0, 3)
+	if mutation_offer.is_empty():
+		return
+	ev.append({"t": "mutation_offer", "ids": mutation_offer.duplicate(), "wave": wave})
+
+
+func choose_mutation(idx: int) -> Array:
+	var ev: Array = []
+	if idx < 0 or idx >= mutation_offer.size():
+		return ev
+	var id: String = mutation_offer[idx]
+	mutation_offer.clear()
+	mutations_taken.append(id)
+	_refresh_enemy_mods()
+	var d: Dictionary = ModifierDB.MUTATIONS.get(id, {})
+	ev.append({"t": "mutation_taken", "id": id, "name": String(d.get("name", id)), "coin_mult": mutation_coin()})
+	_check_queue(ev)
+	return ev
+
+
 func _check_level(ev: Array) -> void:
-	if draft.size() > 0 or pending_place != "" or perk_offer.size() > 0:
+	if draft.size() > 0 or pending_place != "" or perk_offer.size() > 0 or mutation_offer.size() > 0:
 		return
 	if xp >= xp_need():
 		xp -= xp_need()
@@ -1233,7 +1357,9 @@ func _check_level(ev: Array) -> void:
 
 ## Perk offers queue behind the building draft (B7).
 func _check_perk(ev: Array) -> void:
-	if perk_pending <= 0 or draft.size() > 0 or pending_place != "" or perk_offer.size() > 0:
+	if modifiers.has("noperks"):
+		perk_pending = 0
+	if perk_pending <= 0 or draft.size() > 0 or pending_place != "" or perk_offer.size() > 0 or mutation_offer.size() > 0:
 		return
 	perk_pending -= 1
 	perk_offer = Perks.offer(rng, perks_taken)

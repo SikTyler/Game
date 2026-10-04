@@ -19,6 +19,7 @@ const CardDB := preload("res://data/CardDB.gd")
 const Perks := preload("res://Perks.gd")
 const PerkDB := preload("res://data/PerkDB.gd")
 const EnemyDB := preload("res://data/EnemyDB.gd")
+const ModifierDB := preload("res://data/ModifierDB.gd")
 
 var fails: Array = []
 
@@ -1053,6 +1054,7 @@ func _pc_engine_stages() -> void:
 	_pc_spawn_stages()
 	_pc_building_stages()
 	_pc_move_stages()
+	_pc_mode_stages()
 
 
 ## PC-E1 7x7 ring unlocks, PC-E2 build cap.
@@ -1467,3 +1469,107 @@ func _pc_move_stages() -> void:
 	BaseMeta.try_place(bs, a, "gun")
 	BaseMeta.try_place(bs, c, "mine")
 	_check("PC-E4 base move + swap", BaseMeta.try_move(bs, a, b) and String(BaseMeta.slot_of(bs, b)["id"]) == "gun" and BaseMeta.try_move(bs, b, c) and String(BaseMeta.slot_of(bs, c)["id"]) == "gun" and String(BaseMeta.slot_of(bs, b)["id"]) == "mine" and not BaseMeta.try_move(bs, c, _rc(0, 0)))
+
+
+func _mod_run(mods: Array, sv: Dictionary = {}, seed_value: int = 1234):
+	var S = TowerState.new()
+	S.setup(seed_value, BaseMeta.normalize(sv), 0, {"modifiers": mods})
+	return S
+
+
+## PC-E6 challenge modifiers, PC-E7 endless mode.
+func _pc_mode_stages() -> void:
+	_check("PC-E6 coin mult = min(3, 1 + sum)", is_equal_approx(ModifierDB.coin_mult(["glass"]), 1.4) and is_equal_approx(ModifierDB.coin_mult(["glass", "haste"]), 1.7) and is_equal_approx(ModifierDB.coin_mult(ModifierDB.IDS), 3.0) and is_equal_approx(ModifierDB.coin_mult(["bogus"]), 1.0))
+	var S0 = _mod_run([])
+	var S = _mod_run(["glass", "haste", "bogus", "glass"])
+	_check("PC-E6 modifiers cleaned + run coin mult applied", S.modifiers == ["glass", "haste"] and is_equal_approx(S.coin_mult, S0.coin_mult * 1.7) and is_equal_approx(S.run_coin_mult(), S0.run_coin_mult() * 1.7))
+	_check("PC-E6 Glass Core: max HP -50%", is_equal_approx(float(S.stats["max_hp"]), 50.0) and is_equal_approx(S.hp, 50.0))
+	S.spawn_hold = true
+	S._spawn("drone", [])
+	_check("PC-E6 Haste: enemy speed +25%", is_equal_approx(float(S.enemies[0]["spd"]), 45.0 * 1.25))
+	S = _mod_run(["swarm"])
+	S.spawn_hold = true
+	S._spawn("drone", [])
+	var p0: int = int(S0._build_plan(3, 0.0)["entries"].size())
+	var p1: int = int(S._build_plan(3, 0.0)["entries"].size())
+	_check("PC-E6 Swarm: -30% HP each, +60% count", is_equal_approx(float(S.enemies[0]["hp"]), 6.0 * 0.7) and float(p1) >= 1.5 * float(p0) and float(p1) <= 1.7 * float(p0))
+	S = _mod_run(["ironclad"])
+	var e1: Dictionary = _enemy("hauler", TowerState.CENTER + Vector2(0, 300))
+	var e2: Dictionary = _enemy("hauler", TowerState.CENTER + Vector2(0, 300))
+	S._hit(e1, 10.0, [])
+	S._hit(e2, 10.0, [], true)
+	_check("PC-E6 Ironclad: non-crit -20%, crit full", is_equal_approx(999.0 - float(e1["hp"]), 8.0) and is_equal_approx(999.0 - float(e2["hp"]), 10.0))
+	var lab: Dictionary = BaseMeta.default_save()
+	lab["labs"]["lvls"]["startcash"] = 2
+	lab["labs"]["lvls"]["dmg"] = 4
+	var SL = _mod_run([], lab)
+	S = _mod_run(["poverty"], lab)
+	_check("PC-E6 Austerity: start cash 0", is_equal_approx(SL.cash, 30.0) and is_equal_approx(S.cash, 0.0))
+	S.spawn_hold = true
+	S.enemies.append(_enemy("drone", TowerState.CENTER + Vector2(0, 300), 0.0))
+	S._reap([])
+	_check("PC-E6 Austerity: kill cash -30%", is_equal_approx(S.cash, 1.0 * 0.7))
+	S = _mod_run(["allsides"])
+	_check("PC-E6 Encircled: 4 lanes from wave 1", S.active_quads.size() == 4 and S.quad_count(1) == 4)
+	S = _mod_run(["noperks"])
+	S.spawn_hold = true
+	S.wave = 4
+	S.wave_t = S.wave_time - 0.001
+	var pev: Array = S.tick(0.01)
+	_check("PC-E6 Purist suppresses perk_offer", S.wave == 5 and _evts(pev, "perk_offer").is_empty() and S.perk_offer.is_empty() and S.perk_pending == 0)
+	S = _mod_run(["elitist"])
+	var el: bool = false
+	S.wave = 10
+	for k in 2000:
+		el = el or S._roll_kind() == "elite"
+	var el0: bool = false
+	S0.wave = 10
+	for k in 2000:
+		el0 = el0 or S0._roll_kind() == "elite"
+	_check("PC-E6 Elite Guard: elites from T1", el and not el0)
+	S = _mod_run(["nolabs"], lab)
+	_check("PC-E6 Fresh Start: lab bonuses off", is_equal_approx(float(_weapon(S, "core")["dmg"]), float(_weapon(S0, "core")["dmg"])) and float(_weapon(SL, "core")["dmg"]) > float(_weapon(S0, "core")["dmg"]) and is_equal_approx(S.cash, 0.0))
+	# PC-E7 endless.
+	var es: Dictionary = BaseMeta.default_save()
+	es["best_wave_by_tier"] = {"1": 49}
+	es = BaseMeta.normalize(es)
+	var E = TowerState.new()
+	var eev: Array = E.setup(5, es, 0, {"mode": "endless"})
+	_check("PC-E7 endless locked below wave 50", E.mode == "normal" and _evts(eev, "endless_locked").size() == 1 and not BaseMeta.endless_unlocked(es))
+	es["best_wave_by_tier"] = {"1": 50}
+	es = BaseMeta.normalize(es)
+	var N0 = TowerState.new()
+	N0.setup(5, es)
+	E = TowerState.new()
+	E.setup(5, es, 0, {"mode": "endless"})
+	_check("PC-E7 endless unlocked at wave 50, coins x0.8", E.mode == "endless" and is_equal_approx(E.coin_mult, N0.coin_mult * 0.8))
+	E.spawn_hold = true
+	E.wave = 24
+	E.wave_t = E.wave_time - 0.001
+	var mev: Array = E.tick(0.01)
+	var mo: Array = _evts(mev, "mutation_offer")
+	_check("PC-E7 mutation offer at wave 25 (3 distinct)", E.wave == 25 and mo.size() == 1 and E.mutation_offer.size() == 3 and E.mutation_offer[0] != E.mutation_offer[1] and E.mutation_offer[1] != E.mutation_offer[2] and is_equal_approx(E.time_scale(), 0.2))
+	E.mutation_offer = ["m_vigor", "m_rush", "m_horde"]
+	var cm0: float = E.run_coin_mult()
+	var tk: Array = E.choose_mutation(0)
+	E._spawn("drone", [])
+	var vh: float = float(E.enemies[E.enemies.size() - 1]["hp"]) / E.scale()
+	_check("PC-E7 mutation pays +10% coins and buffs enemies", _evts(tk, "mutation_taken").size() == 1 and is_equal_approx(E.run_coin_mult(), cm0 * 1.1) and is_equal_approx(vh, 6.0 * 1.2) and E.mutation_offer.is_empty())
+	N0.mode = "normal"
+	N0.wave = 49
+	N0.wave_t = N0.wave_time - 0.001
+	N0.spawn_hold = true
+	_check("PC-E7 normal mode never offers mutations", _evts(N0.tick(0.01), "mutation_offer").is_empty())
+	E.wave = 120
+	_check("PC-E7 soft HP exponent past wave 100", is_equal_approx(E.scale(), pow(E.hp_growth, 99.0) * pow(1.12, 20.0)))
+	E.wave = 130
+	E.wave_t = E.wave_time - 0.001
+	E.mutation_offer.clear()
+	E.tick(0.01)
+	_check("PC-E7 no wave cap", E.wave == 131 and not E.over)
+	var bw_before: Dictionary = (es["best_wave_by_tier"] as Dictionary).duplicate()
+	E.hp = -1.0
+	E.stats["regen"] = 0.0
+	var dev: Array = E.tick(0.01)
+	var go: Array = _evts(dev, "game_over")
+	_check("PC-E7 endless banks its own best, not the tier ladder", E.over and go.size() == 1 and String(go[0]["mode"]) == "endless" and int(es["endless"]["best"]) == 131 and JSON.stringify(es["best_wave_by_tier"]) == JSON.stringify(bw_before))
