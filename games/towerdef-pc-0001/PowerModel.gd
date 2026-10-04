@@ -92,7 +92,27 @@ static func effective_dps(snap: Dictionary) -> float:
 	var spc: float = 0.0
 	for s in snap.get("specials", []):
 		spc += float((s as Dictionary).get("dps", 0.0))
-	return (core + bld + trp * TROOP_UPTIME + spc) * float(snap.get("mult", 1.0))
+	# Expected crit (POWER_MODEL §8 values crit at its expectation): x(1 + c (m - 1)).
+	var crit: float = 1.0 + clampf(float(snap.get("crit", 0.0)), 0.0, 1.0) * (float(snap.get("crit_mult", 2.0)) - 1.0)
+	return (core + bld + trp * TROOP_UPTIME + spc) * float(snap.get("mult", 1.0)) * crit
+
+
+## Building kinds whose snapshot DPS carries an AoE / multi-hit factor
+## (TowerState.power_snapshot); a lone boss soaks only one target's worth.
+const AOE_MULT: Dictionary = {"mortar": 2.0, "tesla": 2.19, "railgun": 2.0, "frost": 3.0}
+
+
+## Single-target DPS (POWER_MODEL §2.1 U(w) at density 1, e.g. a boss): the
+## Core without its multi-target factor, buildings without their AoE factor.
+static func single_target_dps(snap: Dictionary) -> float:
+	var s: Dictionary = snap.duplicate()
+	s["core_targets"] = 1.0
+	var blds: Array = []
+	for b in snap.get("buildings", []):
+		var bd: Dictionary = b
+		blds.append({"dps": float(bd.get("dps", 0.0)) / float(AOE_MULT.get(String(bd.get("kind", "")), 1.0))})
+	s["buildings"] = blds
+	return effective_dps(s)
 
 
 ## EHP = hp * (1 + armor_frac) * (1 + regen * T / hp) * (1 + shield_frac).

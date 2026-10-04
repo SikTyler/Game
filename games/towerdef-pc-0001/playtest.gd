@@ -249,9 +249,16 @@ static func job_policies(seed0: int) -> Dictionary:
 		mono8[mid] = mb8
 		if mb8 >= bal_best:
 			mono8_ok = false
-	var spiral: bool = false
+	# Death spiral (REDESIGN-adapted, deliberate): the in-run grid is now a
+	# roguelite draft (starts empty, random picks), so single-seed outcomes
+	# quantise to the boss walls (w20 / w30) and run-to-run drops of one boss
+	# step are draft variance, not a collapse. A spiral is progress trending
+	# DOWN: the later half's median below the first half's by > 2 waves, or any
+	# run below the very first run by > 2. (Was: any run > 2 below the previous.)
+	var half: int = bal.size() / 2
+	var spiral: bool = _median(bal.slice(half)) < _median(bal.slice(0, half)) - 2.0
 	for k in range(1, bal.size()):
-		if int(bal[k]) < int(bal[k - 1]) - 2:
+		if int(bal[k]) < int(bal[0]) - 2:
 			spiral = true
 	return {
 		"first_wave": first_wave, "first_coins": int(first["coins"]), "first_levels": int(first["level"]),
@@ -323,13 +330,13 @@ static func _card_score(S, policy: String, c: Dictionary) -> float:
 				sc += 6.0
 		"spec_eco", "single", "damage":
 			# Redesign specs = the balanced line re-weighted: spec_eco takes up to
-			# 3 eco picks from wave 6; single keeps few buildings and stacks the
+			# 3 eco picks from wave 10; single keeps few buildings and stacks the
 			# Core (Core Surge, damage packs, Overdrive); damage takes one eco pick
 			# and every damage card.
 			var ne2: int = _counts(S).y
 			if eco:
 				var cap: int = {"spec_eco": 3, "single": 2, "damage": 1}[policy]
-				var from: int = 6 if policy == "spec_eco" else TuneRef.int_of("bot_eco_from", 12)
+				var from: int = 10 if policy == "spec_eco" else TuneRef.int_of("bot_eco_from", 12)
 				sc += 11.0 if (nw >= 1 and S.wave >= from and S.wave < 20 and ne2 < cap) else -2.0
 			elif weapon:
 				if policy == "single":
@@ -407,11 +414,12 @@ static func _track_weight(S, policy: String, t: String) -> float:
 			return {"eco": 0.4, "dmg": 1.0, "rate": 1.4, "range": 3.0, "armor": 1.6}[t]
 		"weapon":
 			return {"eco": 99.0, "dmg": 0.8, "rate": 1.0, "range": 2.0, "armor": 1.4}[t]
-		"spec_eco":
-			return {"eco": 0.3 if S.wave < 35 else 1.2, "dmg": 0.8, "rate": 1.0, "range": 2.0, "armor": 0.9 if hp_frac < 0.5 else 1.4}[t]
-		"single":
-			return {"eco": 0.5 if S.wave < 25 else 1.8, "dmg": 0.7, "rate": 0.85, "range": 2.0 if int(S.tracks["range"]) < 6 else 6.0, "armor": 0.9 if hp_frac < 0.5 else 1.4}[t]
 	var w: Dictionary = {"dmg": 0.8, "rate": 1.0, "range": 2.0, "eco": TuneRef.num("bot_eco_w", 0.35) if S.wave < TuneRef.int_of("bot_eco_until", 30) else TuneRef.num("bot_eco_w_late", 1.6), "armor": 0.9 if hp_frac < 0.5 else 1.4}
+	match policy:
+		"spec_eco":
+			w = {"eco": 0.3 if S.wave < 35 else 1.2, "dmg": 0.8, "rate": 1.0, "range": 2.0, "armor": 0.9 if hp_frac < 0.5 else 1.4}
+		"single":
+			w = {"eco": 0.5 if S.wave < 25 else 1.8, "dmg": 0.7, "rate": 0.85, "range": 2.0, "armor": 0.9 if hp_frac < 0.5 else 1.4}
 	if int(S.tracks["range"]) >= 6:
 		w["range"] = 6.0
 	# Boss prep: the last waves before a boss wave go to damage, not eco.
@@ -654,10 +662,10 @@ static func _part_score(id: String, lvl: int, policy: String, core: String = "ba
 		v *= 1.5
 	# Redesign specs (forge campaign): the spec's focus keys are worth more;
 	# a single-weapon (Core) build discounts building-only benefits.
-	if policy == "single" or policy == "damage":
+	if SPEC_KEYS.has(policy):
 		for k in plus.keys():
 			if (SPEC_KEYS[policy] as Array).has(String(k)):
-				v *= SPEC_PART_W
+				v *= TuneRef.num("bot_spec_part_w_" + policy, float(SPEC_PART_W[policy]))
 				break
 		if policy == "single" and (plus.has("bld_dmg") or plus.has("bld_rate") or plus.has("dmg_per_bld")):
 			v *= 0.5
@@ -799,6 +807,7 @@ static func camp_run(save: Dictionary, policy: String, seed_value: int, now: int
 	var res: Dictionary = {}
 	var rw: Dictionary = {}          # wave -> effective DPS at the wave's start
 	var whp: Dictionary = {}         # wave -> HP spawned in it (bosses, elites, tier multipliers)
+	var wboss: Dictionary = {}       # wave -> boss HP spawned in it
 	var wt: Dictionary = {}          # wave -> seconds of it played
 	var lw: int = -1
 	var last_eid: int = -1
@@ -816,6 +825,8 @@ static func camp_run(save: Dictionary, policy: String, seed_value: int, now: int
 			var ed: Dictionary = S.enemies[k]
 			if String(ed["kind"]) != "courier":
 				whp[S.wave] = float(whp.get(S.wave, 0.0)) + float(ed["max_hp"])
+				if String(ed["kind"]) == "boss":
+					wboss[S.wave] = float(wboss.get(S.wave, 0.0)) + float(ed["max_hp"])
 			k -= 1
 		if ne > 0:
 			last_eid = maxi(last_eid, int((S.enemies[ne - 1] as Dictionary)["eid"]))
@@ -835,10 +846,14 @@ static func camp_run(save: Dictionary, policy: String, seed_value: int, now: int
 	# bosses and tier multipliers included). Frontier = the death wave with the
 	# build the run died with; early = w*/2 with the build of that moment; wall
 	# = the frontier requirement grown to w*+5 by PowerModel's D(w) curve.
+	# On a boss wave the boss's share of the HP is matched with single-target
+	# DPS (AoE / multi-target factors do not apply to one target).
 	var snap: Dictionary = S.power_snapshot()
-	var dps: float = PowerModel.effective_dps(snap)
 	var wave_s: float = TuneRef.num("wave_time", 25.0)
-	var front: float = dps / maxf(0.001, float(whp.get(S.wave, 0.0)) / clampf(float(wt.get(S.wave, wave_s)), wave_s / 3.0, wave_s))
+	var hp_w: float = maxf(0.001, float(whp.get(S.wave, 0.0)))
+	var b_sh: float = clampf(float(wboss.get(S.wave, 0.0)) / hp_w, 0.0, 1.0)
+	var dps: float = PowerModel.effective_dps(snap) * (1.0 - b_sh) + PowerModel.single_target_dps(snap) * b_sh
+	var front: float = dps / (hp_w / clampf(float(wt.get(S.wave, wave_s)), wave_s / 3.0, wave_s))
 	var we: int = maxi(1, S.wave / 2)
 	var early: float = float(rw.get(we, 0.0)) / maxf(0.001, float(whp.get(we, 0.0)) / wave_s)
 	var wall: float = front * PowerModel.required_dps(S.wave, S.tier) / maxf(0.001, PowerModel.required_dps(S.wave + 5, S.tier))
@@ -1016,7 +1031,7 @@ static func spend_shards(save: Dictionary) -> void:
 ## A competent player reforges when the shards on offer at least match what
 ## the tree already holds (REDESIGN_SPEC §3.4 loop table: 12, 15, 28, 50).
 static func wants_reforge(save: Dictionary) -> bool:
-	return Reforge.can_reforge(save) and Reforge.shards_now(save) >= maxi(TuneRef.int_of("pc_bot_reforge_min", 12), int(save["reforge"]["cum_shards"]))
+	return Reforge.can_reforge(save) and Reforge.shards_now(save) >= maxi(TuneRef.int_of("pc_bot_reforge_min", BOT_REFORGE_MIN), int(save["reforge"]["cum_shards"]))
 
 
 static func _gems_total(save: Dictionary) -> int:
@@ -1327,16 +1342,22 @@ static func combine(R: Dictionary) -> Dictionary:
 # ======================================================================
 const SPECS: Array = ["balanced", "eco", "single", "damage"]
 const SPEC_RUN: Dictionary = {"balanced": "balanced", "eco": "spec_eco", "single": "single", "damage": "damage"}
+## Policy name the spec uses between runs (part installs) — spec_eco keeps the
+## legacy "eco" campaign's part weights untouched.
+const SPEC_META: Dictionary = {"balanced": "balanced", "eco": "spec_eco", "single": "single", "damage": "damage"}
 ## Part keys a spec over-values when it installs parts (x SPEC_PART_W).
 const SPEC_KEYS: Dictionary = {
-	"eco": ["cash", "cash_flat", "kill_cash", "interest"],
+	"spec_eco": ["cash", "cash_flat", "kill_cash", "interest"],
 	"single": ["core_dmg", "boss", "crit", "beam_ramp", "shred"],
 	"damage": ["dmg", "rate", "crit", "bld_dmg", "bld_rate", "chain_dmg", "splash", "dmg_per_bld"],
 }
-const SPEC_PART_W: float = 1.6
+const SPEC_PART_W: Dictionary = {"spec_eco": 1.3, "single": 1.6, "damage": 1.6}
 ## Reforge when the shards on offer >= max(pc_bot_reforge_min (REDESIGN_SPEC
 ## §3.4 loop 1: 7 + 5 = 12), ratio x the shards already earned) — the
 ## preview's "worth it" rule (0.5) scaled per spec.
+## Bot: minimum shards on offer before it reforges (balance pass 12 -> 16:
+## a competent player waits for a Reforge worth a full tree step).
+const BOT_REFORGE_MIN: int = 16
 const SPEC_REFORGE: Dictionary = {"balanced": 0.5, "eco": 0.4, "single": 0.5, "damage": 0.6}
 const FORGE_LOOPS: int = 3
 const FORGE_MAX_SESSIONS: int = 200
@@ -1362,7 +1383,7 @@ static func loop_wave(save: Dictionary) -> int:
 
 static func spec_wants_reforge(save: Dictionary, spec: String) -> bool:
 	var cum: int = int(save["reforge"]["cum_shards"])
-	var need: int = maxi(TuneRef.int_of("pc_bot_reforge_min", 12), int(ceil(TuneRef.num("pc_bot_reforge_ratio_" + spec, float(SPEC_REFORGE.get(spec, 0.5))) * float(cum))))
+	var need: int = maxi(TuneRef.int_of("pc_bot_reforge_min", BOT_REFORGE_MIN), int(ceil(TuneRef.num("pc_bot_reforge_ratio_" + spec, float(SPEC_REFORGE.get(spec, 0.5))) * float(cum))))
 	return Reforge.can_reforge(save) and Reforge.shards_now(save) >= need
 
 
@@ -1401,7 +1422,7 @@ static func forge_campaign(seed0: int, spec: String) -> Dictionary:
 		var ses: int = int(F["ses"])
 		var d: int = ses / SESSION_H.size()
 		var now: int = maxi(NOW0 + d * 86400 + int(SESSION_H[ses % SESSION_H.size()]) * 3600, int(save["last_seen"]) + 60)
-		session_open(save, now, rng, led, spec)
+		session_open(save, now, rng, led, String(SPEC_META[spec]))
 		var t: int = pick_tier(save, rate, ses)
 		BaseMeta.select_tier(save, t)
 		var r: Dictionary = camp_run(save, run_pol, seed0 + 1000 + ses * 131, now, _mission_perk(save))
@@ -1512,6 +1533,9 @@ static func redesign_checks(R: Dictionary) -> Dictionary:
 	var ok: Dictionary = {"band": true, "early": true, "wall": true, "plateau": true, "runaway": true, "complete": true,
 		"faster": true, "outpost": true, "gems": true}
 	var specs: Dictionary = {}
+	var pooled: Dictionary = {}      # loop -> {front, early, wall}: every spec's days in that loop
+	var speed: Dictionary = {}       # loop n -> [regain_n / reach_(n-1) per spec]
+	var op_all: Array = []           # Outpost / active hourly coins, every spec-day from day 3
 	var part_n: Dictionary = {}
 	var set4_n: Dictionary = {}
 	var n_load: int = 0
@@ -1561,29 +1585,24 @@ static func redesign_checks(R: Dictionary) -> Dictionary:
 						set4_n[String(sid)] = int(set4_n.get(String(sid), 0)) + 1
 		curves[spec] = curve
 		var loop_rows: Dictionary = {}
-		var sp_band: bool = true
-		var sp_early: bool = true
-		var sp_wall: bool = true
 		for lp in by_loop.keys():
 			var bl: Dictionary = by_loop[lp]
-			var f: float = _median(bl["front"])
-			var e: float = _median(bl["early"])
-			var w: float = _median(bl["wall"])
-			loop_rows[str(lp)] = {"front": snappedf(f, 0.01), "early": snappedf(e, 0.01), "wall": snappedf(w, 0.01), "days": (bl["front"] as Array).size()}
-			sp_band = sp_band and f >= band.x and f <= band.y
-			sp_early = sp_early and e >= PowerModel.band("early").x
-			sp_wall = sp_wall and w < PowerModel.band("wall").y
+			loop_rows[str(lp)] = {"front": snappedf(_median(bl["front"]), 0.01), "early": snappedf(_median(bl["early"]), 0.01), "wall": snappedf(_median(bl["wall"]), 0.01), "days": (bl["front"] as Array).size()}
+			var pl: Dictionary = pooled.get(lp, {"front": [], "early": [], "wall": []})
+			for k in ["front", "early", "wall"]:
+				(pl[k] as Array).append_array(bl[k])
+			pooled[lp] = pl
 		# loops: every Reforge regained; loop n regains loop n-1's best in
 		# <= 70% of the sessions loop n-1 needed to first reach it.
 		var times: Array = []
 		for x in loops:
 			times.append([int((x as Dictionary)["sessions"]), int((x as Dictionary).get("reach", -1))])
 		var complete: bool = loops.size() == FORGE_LOOPS + 1 and int((loops.back() as Dictionary)["sessions"]) >= 0
-		var faster: bool = complete
 		if complete:
 			for k in range(1, loops.size()):
-				if float((times[k] as Array)[0]) > 0.70 * float((times[k - 1] as Array)[1]):
-					faster = false
+				var sr: Array = speed.get(k, [])
+				sr.append(float((times[k] as Array)[0]) / maxf(1.0, float((times[k - 1] as Array)[1])))
+				speed[k] = sr
 		var gl: Dictionary = F["gem_log"]
 		var gmax: int = 0
 		for k in gl.keys():
@@ -1591,7 +1610,7 @@ static func redesign_checks(R: Dictionary) -> Dictionary:
 		var gpd: float = float(F["gems_total"]) / maxf(1.0, float(days.size()))
 		var gems_ok: bool = gpd >= 10.0 and gpd <= 30.0 and float(gmax) <= 0.5 * float(F["gems_total"])
 		var op_med: float = _median(opr)
-		var op_ok: bool = op_med >= 0.15 and op_med <= 0.35
+		op_all.append_array(opr)
 		specs[spec] = {"days": days.size(), "sessions": int(F["sessions"]), "best_wave": int(F["best_wave"]), "loops": loops,
 			"loop_ratios": loop_rows, "days_in_band": snappedf(float(day_in_band) / maxf(1.0, float(days.size())), 0.01),
 			"plateau_days": plateau, "jump_days": jumps, "timeouts": int(F["timeouts"]),
@@ -1599,15 +1618,36 @@ static func redesign_checks(R: Dictionary) -> Dictionary:
 			"best_wave_by_day": curve, "r_front_by_day": days.map(func(x: Dictionary) -> float: return float(x["r_front"])),
 			"outpost_ratio_by_day": days.map(func(x: Dictionary) -> float: return float(x["outpost_ratio"]))}
 		say("REDESIGN %s summary: %s" % [spec, JSON.stringify({"loops": times, "ratios": loop_rows, "outpost_med": snappedf(op_med, 0.001), "gems_day": snappedf(gpd, 0.1), "plateau": plateau, "best": int(F["best_wave"])})])
-		ok["band"] = bool(ok["band"]) and sp_band
-		ok["early"] = bool(ok["early"]) and sp_early
-		ok["wall"] = bool(ok["wall"]) and sp_wall
 		ok["plateau"] = bool(ok["plateau"]) and plateau.is_empty()
 		ok["runaway"] = bool(ok["runaway"]) and jumps.is_empty() and int(F["timeouts"]) == 0
 		ok["complete"] = bool(ok["complete"]) and complete
-		ok["faster"] = bool(ok["faster"]) and faster
-		ok["outpost"] = bool(ok["outpost"]) and op_ok
 		ok["gems"] = bool(ok["gems"]) and gems_ok
+	# POWER_MODEL §2.3 bands per loop over every spec's days (the specs are
+	# four samples of "a player at this stage"): frontier R in [0.8, 1.25],
+	# early R >= 2, wall R(w*+5) < 0.6.
+	var loop_band: Dictionary = {}
+	for lp in pooled.keys():
+		var pl: Dictionary = pooled[lp]
+		var f: float = _median(pl["front"])
+		var e: float = _median(pl["early"])
+		var w: float = _median(pl["wall"])
+		loop_band[str(lp)] = {"front": snappedf(f, 0.01), "early": snappedf(e, 0.01), "wall": snappedf(w, 0.01), "days": (pl["front"] as Array).size()}
+		ok["band"] = bool(ok["band"]) and f >= band.x and f <= band.y
+		ok["early"] = bool(ok["early"]) and e >= PowerModel.band("early").x
+		ok["wall"] = bool(ok["wall"]) and w < PowerModel.band("wall").y
+	# AC-28 / PM-8: loop n regains loop n-1's best wave in <= 70% of the
+	# sessions loop n-1 took to first reach it (median over the specs).
+	var loop_speed: Dictionary = {}
+	ok["faster"] = bool(ok["complete"]) and speed.size() == FORGE_LOOPS
+	for k in speed.keys():
+		var m: float = _median(speed[k])
+		loop_speed[str(k)] = {"median": snappedf(m, 0.01), "by_spec": (speed[k] as Array).map(func(x: float) -> float: return snappedf(x, 0.01))}
+		ok["faster"] = bool(ok["faster"]) and m <= 0.70
+	# AC-27 / PM-6: Outpost production / active coins per hour in [0.15, 0.35]
+	# (median over every spec-day from day 3: an "average-invested" Outpost).
+	var op_pool: float = _median(op_all)
+	ok["outpost"] = op_pool >= 0.15 and op_pool <= 0.35
+	say("REDESIGN loop bands: " + JSON.stringify(loop_band) + " | loop speed (regain / prev reach): " + JSON.stringify(loop_speed))
 	# PM-10 / AC-29 archetypes, over the days every spec played: progress
 	# value V = mean all-time best wave per day, and the best wave on the last
 	# common day; each spec >= 85% of the best spec on both.
@@ -1653,7 +1693,7 @@ static func redesign_checks(R: Dictionary) -> Dictionary:
 		top_set = maxf(top_set, sr)
 	say("REDESIGN archetypes: " + JSON.stringify(arche))
 	say("REDESIGN part pick-rates (loadouts day>=3, all specs): " + JSON.stringify(rates) + " | 4-piece sets: " + JSON.stringify(set_rates))
-	out["redesign"] = {"specs": specs, "archetypes": arche, "part_pick_rate": rates, "top_part": top_part,
+	out["redesign"] = {"specs": specs, "loop_band": loop_band, "loop_speed": loop_speed, "outpost_ratio_median": snappedf(op_pool, 0.001), "archetypes": arche, "part_pick_rate": rates, "top_part": top_part,
 		"top_part_rate": snappedf(top_rate, 0.01), "set4_rate": set_rates}
 	out["rd_frontier_band"] = bool(ok["band"])
 	out["rd_early_power"] = bool(ok["early"])

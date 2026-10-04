@@ -2412,6 +2412,7 @@ func power_snapshot() -> Dictionary:
 		"buildings": blds, "troops": Troops.dps_list(troops), "specials": sps,
 		"mult": 1.0, "dmg_all": float(stats.get("dmg_all", 1.0)), "tracks": tracks.duplicate(),
 		"cash_ps": float(stats.get("cash_ps", 0.0)), "cash_bonus": float(stats.get("kill_cash", 1.0)) - 1.0,
+		"crit": minf(1.0, float(stats.get("crit", 0.0)) + float(core_w.get("crit", 0.0))), "crit_mult": TuneRef.num("pc_crit_mult", 2.0),
 	}
 
 
