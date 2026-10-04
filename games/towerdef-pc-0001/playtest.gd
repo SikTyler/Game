@@ -148,7 +148,7 @@ static func _mix_draft_score(S, id: String, kind: String) -> int:
 static func _counts(S) -> Vector2i:
 	var w: int = 0
 	var e: int = 0
-	for i in 25:
+	for i in TowerState.N:
 		var c: String = BuildingDB.cat_of(S.id_at(i))
 		if c == "weapon":
 			w += 1
@@ -208,7 +208,7 @@ static func bot_step(S, policy: String, perk_pref: String = "") -> Array:
 	# Spend cash: cheapest preferred upgrade (core counts as a weapon).
 	var target: int = -1
 	var cost: int = 1 << 30
-	for i in 25:
+	for i in TowerState.N:
 		var id: String = S.id_at(i)
 		if i != TowerState.CORE_SLOT and (id == "" or S.lvl_at(i) >= TowerState.lvl_cap()):
 			continue
@@ -253,7 +253,7 @@ static func spend_meta(save: Dictionary, policy: String) -> void:
 		var free: int = -1
 		var cheapest: int = -1
 		var cheapest_cost: int = 1 << 30
-		for i in 25:
+		for i in TowerState.N:
 			var s: Dictionary = BaseMeta.slot_of(save, i)
 			if s.is_empty():
 				if free < 0 and BaseMeta.is_unlocked(save, i):
@@ -269,7 +269,7 @@ static func spend_meta(save: Dictionary, policy: String) -> void:
 				cheapest_cost = uc
 				cheapest = i
 		var did: bool = false
-		if free >= 0:
+		if free >= 0 and BaseMeta.building_count(save) < BaseMeta.build_cap(save):
 			var best_id: String = ""
 			var best_sc: int = -1
 			for id in BuildingDB.ids():
@@ -288,11 +288,18 @@ static func spend_meta(save: Dictionary, policy: String) -> void:
 				did = BaseMeta.try_core(save, stat)
 			if not did and cheapest >= 0:
 				did = BaseMeta.try_upgrade(save, cheapest)
-		if not did and free < 0:
-			for i in 25:
-				if not BaseMeta.is_unlocked(save, i) and i != 12:
-					did = BaseMeta.try_unlock(save, i)
-					break
+		if not did and free < 0 and BaseMeta.building_count(save) < BaseMeta.build_cap(save):
+			# 7x7 ring unlocks: buy the cheapest open cell (ring 2 before ring 3).
+			var ucell: int = -1
+			var ucost: int = 1 << 30
+			for i in TowerState.N:
+				if not BaseMeta.is_unlocked(save, i) and i != TowerState.CORE_SLOT and BaseMeta.ring_open(save, i):
+					var cc: int = BaseMeta.unlock_cost(save, i)
+					if cc < ucost:
+						ucost = cc
+						ucell = i
+			if ucell >= 0:
+				did = BaseMeta.try_unlock(save, ucell)
 		if not did:
 			break
 

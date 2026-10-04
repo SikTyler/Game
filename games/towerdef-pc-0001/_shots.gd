@@ -12,6 +12,11 @@ const TowerState := preload("res://TowerState.gd")
 const Bot := preload("res://playtest.gd")
 const T0: int = 1800000000
 
+## Mobile 5x5 cell index -> the same cell on the PC 7x7 board (r+1, c+1).
+func _c(i5: int) -> int:
+	return BaseMeta.idx5_to_7(i5)
+
+
 func _initialize() -> void:
 	var uargs := OS.get_cmdline_user_args()
 	var outdir: String = uargs[0] if uargs.size() > 0 else "shots"
@@ -38,7 +43,7 @@ func _initialize() -> void:
 	main.claim_offline(false)
 	main.toast_queue.clear()
 	main.toast_t = 0.0
-	main.sel = 7
+	main.sel = _c(7)
 	main._rebuild_ui()
 	await _shot("%s/1_base.png" % outdir)
 	var s: Dictionary = main.save
@@ -91,7 +96,7 @@ func _initialize() -> void:
 	await _shot("%s/2c_bounty.png" % outdir)
 	# Midgame juice: weapon selected (Target button), live damage numbers,
 	# hit flashes and pooled kill bursts from real engine events.
-	main.sel = 7 if S.is_weapon_slot(7) else TowerState.CORE_SLOT
+	main.sel = _c(7) if S.is_weapon_slot(_c(7)) else TowerState.CORE_SLOT
 	main._rebuild_ui()
 	for e in S.enemies:
 		(e as Dictionary)["hp"] = minf(float((e as Dictionary)["hp"]), 30.0)

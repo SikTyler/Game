@@ -22,6 +22,11 @@ var main: Node2D
 var fail_count: int = 0
 
 
+## Mobile 5x5 cell index -> the same cell on the PC 7x7 board (r+1, c+1).
+func _c(i5: int) -> int:
+	return BaseMeta.idx5_to_7(i5)
+
+
 func _initialize() -> void:
 	_run()
 
@@ -85,34 +90,34 @@ func _run() -> void:
 	root.add_child(main)
 	await _frames()
 	main.save = BaseMeta.default_save()
-	main.save["coins"] = 500
+	main.save["coins"] = 1000   # PC ring-2 corner cell costs 600
 	main._rebuild_ui()
 	await _frames()
 
 	# ---- BASE SCREEN ---------------------------------------------------------
 	_check("boots to base screen", main.screen == "base")
-	_click(TowerState.slot_pos(7))
+	_click(TowerState.slot_pos(_c(7)))
 	await _frames()
-	_check("tap selects slot", main.sel == 7)
+	_check("tap selects slot", main.sel == _c(7))
 	_check("sfx node owned by Main (no autoload)", main.sfx != null and main.sfx.get_parent() == main and AudioServer.get_bus_index("SFX") >= 0 and AudioServer.get_bus_index("Music") >= 0)
 	main.sfx.clear_log()
 	_press("Gun Turret")
 	await _frames()
-	_check("build button places permanent gun", String(BaseMeta.slot_of(main.save, 7).get("id", "")) == "gun")
+	_check("build button places permanent gun", String(BaseMeta.slot_of(main.save, _c(7)).get("id", "")) == "gun")
 	_check("sfx: button click + place clips fire", main.sfx.played("click") and main.sfx.played("place"))
 	main.sfx.clear_log()
 	_press("Upgrade")
 	await _frames()
-	_check("perm upgrade button", int(BaseMeta.slot_of(main.save, 7).get("lvl", 0)) == 2)
+	_check("perm upgrade button", int(BaseMeta.slot_of(main.save, _c(7)).get("lvl", 0)) == 2)
 	_check("sfx: upgrade clip fires", main.sfx.played("upgrade"))
 	_press("Core DMG")
 	await _frames()
 	_check("core upgrade button", int(main.save["core"]["dmg"]) == 1)
-	_click(TowerState.slot_pos(0))
+	_click(TowerState.slot_pos(_c(0)))
 	await _frames()
 	_press("Unlock slot")
 	await _frames()
-	_check("perm unlock button", BaseMeta.is_unlocked(main.save, 0))
+	_check("perm unlock button", BaseMeta.is_unlocked(main.save, _c(0)))
 
 	# ---- BOOT: OFFLINE EARNINGS MODAL -----------------------------------------
 	main.now_override = T0
@@ -128,7 +133,7 @@ func _run() -> void:
 	await _frames()
 	_check("collect pays offline coins", expect_off > 0 and int(main.save["coins"]) == c_before + expect_off and main.offline_offer.is_empty(), "%d" % expect_off)
 	_check("missions rolled at boot", Missions.list(main.save).size() == 3)
-	_check("boot kept permanent base", String(BaseMeta.slot_of(main.save, 7).get("id", "")) == "gun")
+	_check("boot kept permanent base", String(BaseMeta.slot_of(main.save, _c(7)).get("id", "")) == "gun")
 
 	# ---- TIER SELECTOR -------------------------------------------------------
 	main.save["best_wave_by_tier"] = {"1": 40}
@@ -264,7 +269,7 @@ func _run() -> void:
 	_check("start run", main.screen == "run" and main.S != null)
 	_check("sfx: wave_start clip fires on run start", main.sfx.played("wave_start"))
 	var S = main.S
-	_check("perm base carried into run", S.id_at(7) == "gun" and S.lvl_at(7) == 2 and bool(S.unlocked[0]))
+	_check("perm base carried into run", S.id_at(_c(7)) == "gun" and S.lvl_at(_c(7)) == 2 and bool(S.unlocked[_c(0)]))
 	_press("SPD")
 	await _frames()
 	_check("speed pill cycles game speed", absf(S.speed - 1.5) < 0.01 and absf(float(main.save["speed"]) - 1.5) < 0.01)
@@ -290,45 +295,45 @@ func _run() -> void:
 		_click(card_btn.get_global_rect().get_center())
 		await _frames()
 		_check("card tap enters place mode", S.pending_place == new_id)
-		_click(TowerState.slot_pos(8))
+		_click(TowerState.slot_pos(_c(8)))
 		await _frames()
-		_check("slot tap places building", S.id_at(8) == new_id and S.pending_place == "")
+		_check("slot tap places building", S.id_at(_c(8)) == new_id and S.pending_place == "")
 		_check("sfx: run place clip fires", main.sfx.played("place"))
 	else:
 		_check("draft has a NEW card", false)
-	_click(TowerState.slot_pos(7))
+	_click(TowerState.slot_pos(_c(7)))
 	await _frames()
 	S.cash = 500.0
 	main._rebuild_ui()
 	await _frames()
-	var lv: int = S.lvl_at(7)
+	var lv: int = S.lvl_at(_c(7))
 	main.sfx.clear_log()
 	_press("Upgrade")
 	await _frames()
-	_check("cash upgrade button", S.lvl_at(7) == lv + 1)
+	_check("cash upgrade button", S.lvl_at(_c(7)) == lv + 1)
 	_check("sfx: run upgrade clip fires", main.sfx.played("upgrade"))
-	_click(TowerState.slot_pos(4))
+	_click(TowerState.slot_pos(_c(4)))
 	await _frames()
 	_press("Unlock plot")
 	await _frames()
-	_check("run unlock button", bool(S.unlocked[4]))
-	_click(TowerState.slot_pos(12))
+	_check("run unlock button", bool(S.unlocked[_c(4)]))
+	_click(TowerState.slot_pos(_c(12)))
 	await _frames()
 	_press("Overcharge")
 	await _frames()
 	_check("core cash upgrade button", S.core_run_lvl == 1)
 	# Targeting: selected weapon shows a "Target: X" cycle button (real click).
-	var tm0: String = String(S.target_modes[12])
+	var tm0: String = String(S.target_modes[_c(12)])
 	_check("target button shown for selected weapon", _find("Target: Nearest") != null or _find("Target:") != null)
 	_press("Target:")
 	await _frames()
-	_check("target button cycles mode", String(S.target_modes[12]) != tm0 and String(S.target_modes[12]) == String(TowerState.TARGET_MODES[(TowerState.TARGET_MODES.find(tm0) + 1) % 4]))
-	_check("target button label updates", _find("Target: " + String(S.target_modes[12]).capitalize()) != null)
+	_check("target button cycles mode", String(S.target_modes[_c(12)]) != tm0 and String(S.target_modes[_c(12)]) == String(TowerState.TARGET_MODES[(TowerState.TARGET_MODES.find(tm0) + 1) % 4]))
+	_check("target button label updates", _find("Target: " + String(S.target_modes[_c(12)]).capitalize()) != null)
 	# AC-37 polish: the boss-bounty banner renders below the grid, never over a slot.
 	main._handle([{"t": "boss_bounty", "coins": 50, "gems": 1, "pos": TowerState.CENTER}])
 	var bpop: Dictionary = main.pops.last
 	var bpos: Vector2 = bpop["pos"]
-	_check("bounty banner clears the grid", String(bpop["text"]).begins_with("BOUNTY") and bpos.y - 30.0 > TowerState.CENTER.y + 2.5 * TowerState.CELL)
+	_check("bounty banner clears the grid", String(bpop["text"]).begins_with("BOUNTY") and bpos.y - 30.0 > TowerState.CENTER.y + float(TowerState.SIDE) * 0.5 * TowerState.CELL)
 
 	# ---- REROLL + PERK OVERLAY -----------------------------------------------
 	S.xp = S.xp_need()
@@ -391,7 +396,7 @@ func _run() -> void:
 	_check("back to base screen", main.screen == "base" and _find("START RUN") != null)
 	_press("START RUN")
 	await _frames()
-	_check("second run starts fresh", main.screen == "run" and main.S != S and main.S.wave == 1 and main.S.id_at(8) == "")
+	_check("second run starts fresh", main.screen == "run" and main.S != S and main.S.wave == 1 and main.S.id_at(_c(8)) == "")
 
 	# ---- ABANDON (pause menu) -> coins banked --------------------------------
 	var S2 = main.S

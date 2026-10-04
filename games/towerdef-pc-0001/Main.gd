@@ -82,7 +82,7 @@ var dmgnums: FxPool = FxPool.new(48)  # {pos, amt, eid, t, size} merged per enem
 const DMG_MERGE: float = 0.1
 var juice: Juice = Juice.new()        # trauma shake + hit-pause (view-only)
 var bursts: Node2D = null             # vfx/Bursts.gd pooled kill particles
-const BOUNTY_BANNER_DY: float = 3.4 * TowerState.CELL   # below the grid's bottom edge (2.5 cells)
+const BOUNTY_BANNER_DY: float = 4.4 * TowerState.CELL   # below the grid's bottom edge (3.5 cells)
 var bolts: FxPool = FxPool.new(24)    # {a, t}
 var slot_pop: Dictionary = {}
 var flash: float = 0.0
@@ -566,14 +566,15 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func slot_at(pos: Vector2) -> int:
-	var rel: Vector2 = pos - TowerState.CENTER + Vector2(2.5 * TowerState.CELL, 2.5 * TowerState.CELL)
+	var hs: float = float(TowerState.SIDE) * 0.5 * TowerState.CELL
+	var rel: Vector2 = pos - TowerState.CENTER + Vector2(hs, hs)
 	if rel.x < 0.0 or rel.y < 0.0:
 		return -1
 	var x: int = int(rel.x / TowerState.CELL)
 	var y: int = int(rel.y / TowerState.CELL)
-	if x > 4 or y > 4:
+	if x >= TowerState.SIDE or y >= TowerState.SIDE:
 		return -1
-	return y * 5 + x
+	return y * TowerState.SIDE + x
 
 
 func tap_at(pos: Vector2) -> void:
@@ -816,8 +817,8 @@ func _build_base_ui() -> void:
 		return
 	var e: Dictionary = BaseMeta.slot_of(save, sel)
 	if not BaseMeta.is_unlocked(save, sel):
-		var c: int = BaseMeta.unlock_cost(save)
-		_btn("Unlock slot  %s coins" % fmt_num(c), Rect2(160, 790, 400, 96), func() -> void: _base_act(BaseMeta.try_unlock(save, sel), "place"), coins >= c)
+		var c: int = BaseMeta.unlock_cost(save, sel)
+		_btn("Unlock slot  %s coins" % fmt_num(c) if BaseMeta.ring_open(save, sel) else "Ring 3 needs Tier 3", Rect2(160, 790, 400, 96), func() -> void: _base_act(BaseMeta.try_unlock(save, sel), "place"), coins >= c and BaseMeta.ring_open(save, sel))
 	elif e.is_empty():
 		var ids: Array = BuildingDB.all_ids()
 		for k in ids.size():
@@ -970,11 +971,12 @@ func _draw_background() -> void:
 
 func _draw_base() -> void:
 	var c: float = TowerState.CELL
-	var plate := Rect2(TowerState.CENTER - Vector2(2.5 * c + 6, 2.5 * c + 6), Vector2(5 * c + 12, 5 * c + 12))
+	var hs: float = float(TowerState.SIDE) * 0.5
+	var plate := Rect2(TowerState.CENTER - Vector2(hs * c + 6, hs * c + 6), Vector2(2.0 * hs * c + 12, 2.0 * hs * c + 12))
 	draw_rect(plate, Color("12161b"))
 	draw_rect(plate, RUST.darkened(0.3), false, 3.0)
 	var placing: bool = screen == "run" and S != null and S.pending_place != ""
-	for i in 25:
+	for i in TowerState.N:
 		var p: Vector2 = TowerState.slot_pos(i)
 		var sc: float = 1.0
 		if slot_pop.has(i):

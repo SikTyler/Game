@@ -29,6 +29,12 @@ func _check(name: String, ok: bool) -> void:
 		print("SELFTEST FAIL: " + name)
 
 
+## Mobile 5x5 cell index -> the same cell on the PC 7x7 board (r+1, c+1), so
+## the inherited 5x5 checks keep their exact geometry and adjacency.
+func _c(i5: int) -> int:
+	return BaseMeta.idx5_to_7(i5)
+
+
 func _fresh(save: Dictionary = {}) -> RefCounted:
 	var S = TowerState.new()
 	S.setup(1234, BaseMeta.normalize(save))
@@ -39,24 +45,24 @@ func _initialize() -> void:
 	# --- Stage 1: setup ------------------------------------------------------
 	var S = _fresh()
 	_check("setup: full hp", is_equal_approx(S.hp, 100.0))
-	_check("setup: inner ring unlocked, outer locked", bool(S.unlocked[6]) and not bool(S.unlocked[0]) and not bool(S.unlocked[12]))
+	_check("setup: inner ring unlocked, outer locked", bool(S.unlocked[_c(6)]) and not bool(S.unlocked[_c(0)]) and not bool(S.unlocked[_c(12)]))
 	_check("setup: 8 free slots", S.free_slots().size() == 8)
 	_check("setup: core is the only weapon", (S.stats["weapons"] as Array).size() == 1)
 
 	# --- Stage 2: stats math + adjacency -------------------------------------
-	S.slots[7] = {"id": "gun", "perm": 1, "run": 0}
+	S.slots[_c(7)] = {"id": "gun", "perm": 1, "run": 0}
 	S.recompute()
 	var gun_dmg: float = float((S.stats["weapons"] as Array)[0]["dmg"])
-	S.slots[6] = {"id": "armory", "perm": 1, "run": 0}   # adjacent to gun (7) and core (12)
+	S.slots[_c(6)] = {"id": "armory", "perm": 1, "run": 0}   # adjacent to gun (7) and core (12)
 	S.recompute()
 	var buffed: float = float((S.stats["weapons"] as Array)[0]["dmg"])
 	_check("armory buffs adjacent gun +25%", is_equal_approx(buffed, gun_dmg * 1.25))
-	S.slots[0] = {"id": "armory", "perm": 1, "run": 0}   # NOT adjacent to 7
+	S.slots[_c(0)] = {"id": "armory", "perm": 1, "run": 0}   # NOT adjacent to 7
 	S.recompute()
 	_check("armory does not buff non-adjacent", is_equal_approx(float((S.stats["weapons"] as Array)[0]["dmg"]), buffed))
-	S.slots[16] = {"id": "mine", "perm": 2, "run": 0}
-	S.slots[17] = {"id": "oilmill", "perm": 1, "run": 0}   # adjacent to mine 16
-	S.slots[18] = {"id": "bulwark", "perm": 1, "run": 0}
+	S.slots[_c(16)] = {"id": "mine", "perm": 2, "run": 0}
+	S.slots[_c(17)] = {"id": "oilmill", "perm": 1, "run": 0}   # adjacent to mine 16
+	S.slots[_c(18)] = {"id": "bulwark", "perm": 1, "run": 0}
 	S.recompute()
 	_check("mine cash/sec", is_equal_approx(float(S.stats["cash_ps"]), 2.4))
 	_check("oil mill + adjacent mine xp", is_equal_approx(float(S.stats["xp_mult"]), 1.0 + 0.25 + 0.15))
@@ -111,10 +117,10 @@ func _initialize() -> void:
 	var card: Dictionary = S.draft[0]
 	S.choose_card(0)
 	_check("new card enters place mode", S.pending_place == String(card["id"]) and S.draft.is_empty())
-	S.place(0)  # locked — rejected
+	S.place(_c(0))  # locked — rejected
 	_check("cannot place on locked slot", S.pending_place != "")
-	ev = S.place(6)
-	_check("placed building in free slot", S.id_at(6) == String(card["id"]) and S.pending_place == "" and is_equal_approx(S.time_scale(), 1.0))
+	ev = S.place(_c(6))
+	_check("placed building in free slot", S.id_at(_c(6)) == String(card["id"]) and S.pending_place == "" and is_equal_approx(S.time_scale(), 1.0))
 	S.xp = S.xp_need()
 	S.tick(0.01)
 	var plus_idx: int = -1
@@ -123,9 +129,9 @@ func _initialize() -> void:
 			plus_idx = k
 	if plus_idx >= 0:
 		var pid: String = S.draft[plus_idx]["id"]
-		var before: int = S.lvl_at(6)
+		var before: int = S.lvl_at(_c(6))
 		S.choose_card(plus_idx)
-		_check("plus card raises owned level", pid != S.id_at(6) or S.lvl_at(6) == before + 1)
+		_check("plus card raises owned level", pid != S.id_at(_c(6)) or S.lvl_at(_c(6)) == before + 1)
 	var r1 := RandomNumberGenerator.new()
 	r1.seed = 99
 	var r2 := RandomNumberGenerator.new()
@@ -135,18 +141,18 @@ func _initialize() -> void:
 
 	# --- Stage 7: in-run cash spend ------------------------------------------
 	S = _fresh()
-	S.slots[7] = {"id": "gun", "perm": 0, "run": 1}
+	S.slots[_c(7)] = {"id": "gun", "perm": 0, "run": 1}
 	S.recompute()
 	S.cash = 5.0
-	S.upgrade(7)
-	_check("upgrade refused when broke", S.lvl_at(7) == 1)
+	S.upgrade(_c(7))
+	_check("upgrade refused when broke", S.lvl_at(_c(7)) == 1)
 	S.cash = 1000.0
-	S.upgrade(7)
-	_check("cash upgrade levels building", S.lvl_at(7) == 2 and S.cash < 1000.0)
-	S.upgrade(12)
+	S.upgrade(_c(7))
+	_check("cash upgrade levels building", S.lvl_at(_c(7)) == 2 and S.cash < 1000.0)
+	S.upgrade(_c(12))
 	_check("cash upgrade levels core", S.core_run_lvl == 1)
-	S.unlock_plot(0)
-	_check("run unlock opens outer plot", bool(S.unlocked[0]))
+	S.unlock_plot(_c(0))
+	_check("run unlock opens outer plot", bool(S.unlocked[_c(0)]))
 
 	# --- Stage 8: death banks coins into permanent save ----------------------
 	var save: Dictionary = BaseMeta.default_save()
@@ -162,25 +168,25 @@ func _initialize() -> void:
 
 	# --- Stage 9: permanent base carries into the next run -------------------
 	save["coins"] = 1000
-	_check("perm place", BaseMeta.try_place(save, 7, "gun"))
-	_check("perm place refuses occupied", not BaseMeta.try_place(save, 7, "mine"))
-	_check("perm upgrade", BaseMeta.try_upgrade(save, 7) and int(BaseMeta.slot_of(save, 7)["lvl"]) == 2)
-	_check("perm unlock outer", BaseMeta.try_unlock(save, 0))
+	_check("perm place", BaseMeta.try_place(save, _c(7), "gun"))
+	_check("perm place refuses occupied", not BaseMeta.try_place(save, _c(7), "mine"))
+	_check("perm upgrade", BaseMeta.try_upgrade(save, _c(7)) and int(BaseMeta.slot_of(save, _c(7))["lvl"]) == 2)
+	_check("perm unlock outer", BaseMeta.try_unlock(save, _c(0)))
 	_check("perm core", BaseMeta.try_core(save, "hp"))
 	S = TowerState.new()
 	S.setup(6, save)
-	_check("perm building present in new run", S.id_at(7) == "gun" and S.lvl_at(7) == 2)
-	_check("perm unlock present in new run", bool(S.unlocked[0]))
+	_check("perm building present in new run", S.id_at(_c(7)) == "gun" and S.lvl_at(_c(7)) == 2)
+	_check("perm unlock present in new run", bool(S.unlocked[_c(0)]))
 	_check("perm core hp applied", is_equal_approx(S.hp, 125.0))
 	S.cash = 1000.0
-	S.upgrade(7)
-	_check("run levels don't leak into save", S.lvl_at(7) == 3 and int(BaseMeta.slot_of(save, 7)["lvl"]) == 2)
+	S.upgrade(_c(7))
+	_check("run levels don't leak into save", S.lvl_at(_c(7)) == 3 and int(BaseMeta.slot_of(save, _c(7))["lvl"]) == 2)
 
 	# --- Stage 10: persistence round-trip ------------------------------------
 	MetaSave.clear()
 	MetaSave.write(save)
 	var back: Dictionary = BaseMeta.normalize(MetaSave.read())
-	_check("save round-trips", int(back["coins"]) == int(save["coins"]) and String(BaseMeta.slot_of(back, 7)["id"]) == "gun" and (back["unlocked"] as Array).has(0))
+	_check("save round-trips", int(back["coins"]) == int(save["coins"]) and String(BaseMeta.slot_of(back, _c(7))["id"]) == "gun" and (back["unlocked"] as Array).has(_c(0)))
 	var aset: Dictionary = save.duplicate(true)
 	aset["settings"] = {"music": 0.25, "sfx": 0.5, "mute": true}
 	MetaSave.write(aset)
@@ -220,6 +226,7 @@ func _initialize() -> void:
 	_engine_b_stages()
 	_fix_round_stages()
 	_juice_targeting_stages()
+	_pc_engine_stages()
 
 	if fails.is_empty():
 		print("SELFTEST OK")
@@ -239,10 +246,10 @@ func _meta_stages() -> void:
 	# --- Stage 12: save v2 + migration (AC-1..4) ----------------------------
 	var v1: Dictionary = {"coins": 123, "core": {"dmg": 1, "hp": 2, "regen": 0}, "slots": {"7": {"id": "gun", "lvl": 3}}, "unlocked": [0, 4], "best_wave": 37, "runs": 5, "labs": {"lvls": {"armor": 4, "coin": 2}}}
 	var m: Dictionary = BaseMeta.normalize(BaseMeta.migrate(v1))
-	_check("AC-1 migrate keeps v1 fields", int(m["coins"]) == 123 and int(m["runs"]) == 5 and int(m["core"]["hp"]) == 2 and String(BaseMeta.slot_of(m, 7)["id"]) == "gun" and int(BaseMeta.slot_of(m, 7)["lvl"]) == 3 and (m["unlocked"] as Array) == [0, 4])
-	_check("AC-1 migrate v2 fields", int(m["best_wave_by_tier"]["1"]) == 37 and int(m["best_wave"]) == 37 and int(m["gems"]) == 0 and int(m["tier"]) == 1 and int(m["last_seen"]) == 0 and int(m["version"]) == 2)
+	_check("AC-1 migrate keeps v1 fields", int(m["coins"]) == 123 and int(m["runs"]) == 5 and int(m["core"]["hp"]) == 2 and String(BaseMeta.slot_of(m, _c(7))["id"]) == "gun" and int(BaseMeta.slot_of(m, _c(7))["lvl"]) == 3 and (m["unlocked"] as Array) == [_c(0), _c(4)])
+	_check("AC-1 migrate v2 fields", int(m["best_wave_by_tier"]["1"]) == 37 and int(m["best_wave"]) == 37 and int(m["gems"]) == 0 and int(m["tier"]) == 1 and int(m["last_seen"]) == 0 and int(m["version"]) == BaseMeta.VERSION)
 	_check("AC-1 armor lab dropped, others kept", not (m["labs"]["lvls"] as Dictionary).has("armor") and int(m["labs"]["lvls"]["coin"]) == 2)
-	_check("normalize on raw v1 also migrates", int(BaseMeta.normalize(v1)["version"]) == 2 and int(BaseMeta.normalize(v1)["best_wave_by_tier"]["1"]) == 37)
+	_check("normalize on raw v1 also migrates", int(BaseMeta.normalize(v1)["version"]) == BaseMeta.VERSION and int(BaseMeta.normalize(v1)["best_wave_by_tier"]["1"]) == 37)
 	var v2: Dictionary = BaseMeta.normalize(m)
 	v2["gems"] = 77
 	v2["last_seen"] = NOW
@@ -254,16 +261,16 @@ func _meta_stages() -> void:
 	var rt: Dictionary = BaseMeta.normalize(JSON.parse_string(JSON.stringify(v2)))
 	_check("AC-2 v2 round-trips through JSON", JSON.stringify(rt) == JSON.stringify(v2) and int(rt["gems"]) == 77)
 	var bad: Dictionary = BaseMeta.normalize(v2)
-	bad["slots"]["8"] = {"id": "laser_of_doom", "lvl": 1}
-	bad["slots"]["7"]["lvl"] = 99
+	bad["slots"][str(_c(8))] = {"id": "laser_of_doom", "lvl": 1}
+	bad["slots"][str(_c(7))]["lvl"] = 99
 	bad["labs"]["lvls"]["dmg"] = 99
 	bad["labs"]["lvls"]["bogus"] = 3
 	bad["labs"]["running"] = [{"track": "coin", "to_lvl": 3, "start": 0, "end": 1}, {"track": "xp", "to_lvl": 1, "start": 0, "end": 1}, {"track": "hp", "to_lvl": 1, "start": 0, "end": 1}]
 	bad["cards"]["owned"]["c_hp"] = {"lvl": 9, "copies": 3}
 	bad["cards"]["owned"]["c_fake"] = {"lvl": 1, "copies": 0}
 	bad = BaseMeta.normalize(bad)
-	_check("AC-3 unknown building dropped", BaseMeta.slot_of(bad, 8).is_empty())
-	_check("AC-3 slot lvl clamped to perm cap", int(BaseMeta.slot_of(bad, 7)["lvl"]) == BaseMeta.perm_lvl_cap(bad))
+	_check("AC-3 unknown building dropped", BaseMeta.slot_of(bad, _c(8)).is_empty())
+	_check("AC-3 slot lvl clamped to perm cap", int(BaseMeta.slot_of(bad, _c(7))["lvl"]) == BaseMeta.perm_lvl_cap(bad))
 	_check("AC-3 lab lvl clamped + unknown lab dropped", int(bad["labs"]["lvls"]["dmg"]) == 30 and not (bad["labs"]["lvls"] as Dictionary).has("bogus"))
 	_check("AC-3 running <= slots", (bad["labs"]["running"] as Array).size() <= int(bad["labs"]["slots"]))
 	_check("AC-3 card lvl clamped + unknown card dropped", int(bad["cards"]["owned"]["c_hp"]["lvl"]) == 5 and not (bad["cards"]["owned"] as Dictionary).has("c_fake"))
@@ -274,9 +281,9 @@ func _meta_stages() -> void:
 	_check("bank records tier best, rate, last_seen, gems", int(b["best_wave_by_tier"]["1"]) == 35 and is_equal_approx(float(b["best_coin_rate"]), 10.0) and int(b["last_seen"]) == NOW and int(b["gems"]) == 2 and int(b["gem_log"]["boss"]) == 2 and bev.is_empty())
 	_check("perm lvl cap 10 at T1", BaseMeta.perm_lvl_cap(b) == 10)
 	b["coins"] = 1_000_000
-	BaseMeta.try_place(b, 7, "gun")
-	b["slots"]["7"]["lvl"] = 10
-	_check("try_upgrade refuses past perm cap", not BaseMeta.try_upgrade(b, 7))
+	BaseMeta.try_place(b, _c(7), "gun")
+	b["slots"][str(_c(7))]["lvl"] = 10
+	_check("try_upgrade refuses past perm cap", not BaseMeta.try_upgrade(b, _c(7)))
 
 	# --- Stage 13: tiers (AC-5..7) ------------------------------------------
 	_check("unlock waves 40/50/60", Tiers.unlock_wave(2) == 40 and Tiers.unlock_wave(3) == 50 and Tiers.unlock_wave(4) == 60)
@@ -408,8 +415,8 @@ func _meta_stages() -> void:
 	M["missions"]["list"] = [{"tpl": "upgrade", "target": 3, "prog": 0, "claimed": false, "gems": 2}, {"tpl": "lab", "target": 2, "prog": 0, "claimed": false, "gems": 2}, {"tpl": "eco", "target": 4, "prog": 0, "claimed": false, "gems": 2}]
 	M["coins"] = 100000
 	BaseMeta.try_core(M, "dmg")
-	BaseMeta.try_place(M, 6, "mine")
-	BaseMeta.try_upgrade(M, 6)
+	BaseMeta.try_place(M, _c(6), "mine")
+	BaseMeta.try_upgrade(M, _c(6))
 	Labs.start(M, "xp", NOW)
 	Missions.on_run_events(M, [{"t": "placed", "slot": 7, "id": "mine"}, {"t": "placed", "slot": 8, "id": "gun"}])
 	_check("perm upgrades / lab starts / eco placements count", int(Missions.list(M)[0]["prog"]) == 2 and int(Missions.list(M)[1]["prog"]) == 1 and int(Missions.list(M)[2]["prog"]) == 1)
@@ -609,7 +616,7 @@ func _engine_b_stages() -> void:
 		T3S._reap(b3ev)
 	_check("AC-10a run gems clipped by the daily allowance", T3S.gems_run == 4)
 	_check("AC-10a allowance survives normalize", int(BaseMeta.normalize(JSON.parse_string(JSON.stringify(sv3b)))["boss_gems_today"]["n"]) == 6)
-	S.slots[7] = {"id": "mine", "perm": 1, "run": 0}
+	S.slots[_c(7)] = {"id": "mine", "perm": 1, "run": 0}
 	S.wave = 11
 	S.recompute()
 	_check("mine scales 1.2*L*(1+0.03*(w-1))", is_equal_approx(float(S.stats["cash_ps"]), 1.2 * 1.3))
@@ -662,11 +669,11 @@ func _engine_b_stages() -> void:
 	_check("elite takes damage after shield breaks", float(el["hp"]) <= 0.0)
 	S = _fresh()
 	S.spawn_t = 999.0
-	S.slots[7] = {"id": "tesla", "perm": 3, "run": 0}
+	S.slots[_c(7)] = {"id": "tesla", "perm": 3, "run": 0}
 	S.recompute()
 	S.stats["weapons"] = [_weapon(S, "tesla")]
 	S._spawn("elite", [])
-	S.enemies[0]["pos"] = TowerState.slot_pos(7) + Vector2(60, 0)
+	S.enemies[0]["pos"] = TowerState.slot_pos(_c(7)) + Vector2(60, 0)
 	S.enemies[0]["spd"] = 0.0
 	var tev: Array = S.tick(0.05)
 	_check("AC-26 tesla chain hit counts as a shield hit", _evts(tev, "shield_hit").size() == 1 and int(S.enemies[0]["shield"]) == 2)
@@ -688,38 +695,38 @@ func _engine_b_stages() -> void:
 
 	# --- Stage 23: B5/B6 buildings + synergies (AC-19..21) --------------------
 	S = _fresh()
-	S.slots[7] = {"id": "gun", "perm": 1, "run": 0}
+	S.slots[_c(7)] = {"id": "gun", "perm": 1, "run": 0}
 	S.recompute()
 	var gr: float = float(_weapon(S, "gun")["rate"])
-	S.slots[8] = {"id": "mine", "perm": 3, "run": 0}
+	S.slots[_c(8)] = {"id": "mine", "perm": 3, "run": 0}
 	S.recompute()
-	_check("S1 mine+gun +5%/mine lvl", is_equal_approx(float(_weapon(S, "gun")["rate"]), gr * 1.15) and _has_link(S, 8, 7, "S1"))
-	S.slots[8] = {"id": "mine", "perm": 20, "run": 0}
+	_check("S1 mine+gun +5%/mine lvl", is_equal_approx(float(_weapon(S, "gun")["rate"]), gr * 1.15) and _has_link(S, _c(8), _c(7), "S1"))
+	S.slots[_c(8)] = {"id": "mine", "perm": 20, "run": 0}
 	S.recompute()
 	_check("S1 capped at +50%", is_equal_approx(float(_weapon(S, "gun")["rate"]), gr * 1.5))
-	S.slots[8] = {}
-	S.slots[0] = {"id": "mine", "perm": 3, "run": 0}
+	S.slots[_c(8)] = {}
+	S.slots[_c(0)] = {"id": "mine", "perm": 3, "run": 0}
 	S.recompute()
-	_check("S1 needs adjacency", is_equal_approx(float(_weapon(S, "gun")["rate"]), gr) and not _has_link(S, 0, 7, "S1"))
+	_check("S1 needs adjacency", is_equal_approx(float(_weapon(S, "gun")["rate"]), gr) and not _has_link(S, _c(0), _c(7), "S1"))
 	S = _fresh()
-	S.slots[7] = {"id": "gun", "perm": 25, "run": 0}
-	S.slots[6] = {"id": "armory", "perm": 10, "run": 0}
+	S.slots[_c(7)] = {"id": "gun", "perm": 25, "run": 0}
+	S.slots[_c(6)] = {"id": "armory", "perm": 10, "run": 0}
 	S.recompute()
 	_check("AC-21 gun rate cap 2.5", is_equal_approx(float(_weapon(S, "gun")["rate"]), 2.5))
 	_check("AC-21 armory per-target cap +100%", is_equal_approx(float(_weapon(S, "gun")["dmg"]), (3.0 + 2.0 * 25.0) * 2.0))
 	S = _fresh()
-	S.slots[6] = {"id": "bulwark", "perm": 2, "run": 0}
-	S.slots[0] = {"id": "bulwark", "perm": 2, "run": 0}
+	S.slots[_c(6)] = {"id": "bulwark", "perm": 2, "run": 0}
+	S.slots[_c(0)] = {"id": "bulwark", "perm": 2, "run": 0}
 	S.recompute()
-	_check("S3 bulwark on core ring +3%/lvl dr", is_equal_approx(float(S.stats["dr"]), 0.06) and _has_link(S, 6, 12, "S3") and not _has_link(S, 0, 12, "S3"))
-	S.slots[11] = {"id": "bulwark", "perm": 20, "run": 0}
-	S.slots[13] = {"id": "aegis", "perm": 20, "run": 0}
+	_check("S3 bulwark on core ring +3%/lvl dr", is_equal_approx(float(S.stats["dr"]), 0.06) and _has_link(S, _c(6), _c(12), "S3") and not _has_link(S, _c(0), _c(12), "S3"))
+	S.slots[_c(11)] = {"id": "bulwark", "perm": 20, "run": 0}
+	S.slots[_c(13)] = {"id": "aegis", "perm": 20, "run": 0}
 	S.recompute()
 	_check("dr caps: bulwark 30% + aegis 32% -> total 60%", is_equal_approx(float(S.stats["dr_bulwark"]), 0.3) and is_equal_approx(float(S.stats["dr_aegis"]), 0.32) and is_equal_approx(float(S.stats["dr"]), 0.6))
 	S = _fresh()
 	S.spawn_t = 999.0
 	S.stats["weapons"] = []
-	S.slots[13] = {"id": "aegis", "perm": 2, "run": 0}
+	S.slots[_c(13)] = {"id": "aegis", "perm": 2, "run": 0}
 	S.recompute()
 	S.stats["weapons"] = []
 	S.stats["regen"] = 0.0
@@ -728,19 +735,19 @@ func _engine_b_stages() -> void:
 	S.tick(0.01)
 	_check("AC-20 aegis core damage reduction", is_equal_approx(S.hp, 100.0 - 10.0 * 0.92))
 	S = _fresh()
-	S.slots[7] = {"id": "gun", "perm": 1, "run": 0}
-	S.slots[17] = {"id": "mine", "perm": 1, "run": 0}
+	S.slots[_c(7)] = {"id": "gun", "perm": 1, "run": 0}
+	S.slots[_c(17)] = {"id": "mine", "perm": 1, "run": 0}
 	S.recompute()
 	var g0: float = float(_weapon(S, "gun")["rate"])
 	var m0: float = float(S.stats["cash_ps"])
-	S.slots[8] = {"id": "aegis", "perm": 1, "run": 0}
-	S.slots[16] = {"id": "aegis", "perm": 1, "run": 0}
+	S.slots[_c(8)] = {"id": "aegis", "perm": 1, "run": 0}
+	S.slots[_c(16)] = {"id": "aegis", "perm": 1, "run": 0}
 	S.recompute()
-	_check("AC-20 aegis +10% rate to adjacent weapon", is_equal_approx(float(_weapon(S, "gun")["rate"]), g0 * 1.1) and _has_link(S, 8, 7, "S5"))
-	_check("AC-20 aegis -15% adjacent eco", is_equal_approx(float(S.stats["cash_ps"]), m0 * 0.85) and _has_link(S, 16, 17, "S5"))
+	_check("AC-20 aegis +10% rate to adjacent weapon", is_equal_approx(float(_weapon(S, "gun")["rate"]), g0 * 1.1) and _has_link(S, _c(8), _c(7), "S5"))
+	_check("AC-20 aegis -15% adjacent eco", is_equal_approx(float(S.stats["cash_ps"]), m0 * 0.85) and _has_link(S, _c(16), _c(17), "S5"))
 	S = _fresh()
 	S.spawn_t = 999.0
-	S.slots[7] = {"id": "vault", "perm": 2, "run": 0}
+	S.slots[_c(7)] = {"id": "vault", "perm": 2, "run": 0}
 	S.recompute()
 	S.cash = 100.0
 	S.wave_t = S.wave_time - 0.001
@@ -750,24 +757,24 @@ func _engine_b_stages() -> void:
 	vev = []
 	S._wave_end(vev)
 	_check("vault cap 40*L", is_equal_approx(float(vev[0]["amt"]), 80.0))
-	S.slots[8] = {"id": "bounty", "perm": 1, "run": 0}
+	S.slots[_c(8)] = {"id": "bounty", "perm": 1, "run": 0}
 	S.recompute()
 	vev = []
 	S._wave_end(vev)
-	_check("S4 vault+bounty cap x1.5", is_equal_approx(float(vev[0]["amt"]), 120.0) and _has_link(S, 8, 7, "S4"))
+	_check("S4 vault+bounty cap x1.5", is_equal_approx(float(vev[0]["amt"]), 120.0) and _has_link(S, _c(8), _c(7), "S4"))
 	S = _fresh()
-	S.slots[7] = {"id": "mortar", "perm": 1, "run": 0}
-	S.slots[8] = {"id": "tesla", "perm": 1, "run": 0}
+	S.slots[_c(7)] = {"id": "mortar", "perm": 1, "run": 0}
+	S.slots[_c(8)] = {"id": "tesla", "perm": 1, "run": 0}
 	S.recompute()
-	_check("S2 link tesla->mortar", _has_link(S, 8, 7, "S2"))
+	_check("S2 link tesla->mortar", _has_link(S, _c(8), _c(7), "S2"))
 	S.spawn_t = 999.0
 	S.stats["weapons"] = [_weapon(S, "mortar")]
 	var mdmg: float = float(_weapon(S, "mortar")["dmg"])
-	var shocked: Dictionary = _enemy("drone", TowerState.slot_pos(7) + Vector2(100, 0))
+	var shocked: Dictionary = _enemy("drone", TowerState.slot_pos(_c(7)) + Vector2(100, 0))
 	shocked["spd"] = 0.0
 	shocked["shock_t"] = 1.0
-	shocked["shock_src"] = 8
-	var plain: Dictionary = _enemy("drone", TowerState.slot_pos(7) + Vector2(100, 5))
+	shocked["shock_src"] = _c(8)
+	var plain: Dictionary = _enemy("drone", TowerState.slot_pos(_c(7)) + Vector2(100, 5))
 	plain["spd"] = 0.0
 	S.enemies.append(shocked)
 	S.enemies.append(plain)
@@ -776,9 +783,9 @@ func _engine_b_stages() -> void:
 	var rng5 := RandomNumberGenerator.new()
 	var sl: Array = []
 	var un: Array = []
-	for i in 25:
+	for i in TowerState.N:
 		sl.append({})
-		un.append(i != 12)
+		un.append(i != TowerState.CORE_SLOT)
 	var any_new: bool = false
 	for k in 200:
 		for c in Draft.offer(rng5, sl, un, false):
@@ -923,7 +930,7 @@ func _fix_round_stages() -> void:
 	_check("Overdrive: dmg lvl 17 -> core dmg x 1.1^2", is_equal_approx(float(_weapon(S, "core")["dmg"]), 5.0 * (1.0 + 0.25 * 17.0) * pow(1.1, 2.0)))
 	# Overcharge: each cash level on the core compounds ALL weapon damage.
 	S = _fresh()
-	S.slots[7] = {"id": "gun", "perm": 1, "run": 0}
+	S.slots[_c(7)] = {"id": "gun", "perm": 1, "run": 0}
 	S.recompute()
 	var g0: float = float(_weapon(S, "gun")["dmg"])
 	var c0: float = float(_weapon(S, "core")["dmg"])
@@ -939,30 +946,30 @@ func _fix_round_stages() -> void:
 	_check("Overcharge step grows with perm Core DMG (0.02 + 0.006*L)", is_equal_approx(float(S.stats["overcharge_step"]), 0.08))
 	# S6 Bounty Hunters / S7 Oil Shells.
 	S = _fresh()
-	S.slots[7] = {"id": "gun", "perm": 1, "run": 0}
+	S.slots[_c(7)] = {"id": "gun", "perm": 1, "run": 0}
 	S.recompute()
 	g0 = float(_weapon(S, "gun")["dmg"])
-	S.slots[6] = {"id": "bounty", "perm": 2, "run": 0}
+	S.slots[_c(6)] = {"id": "bounty", "perm": 2, "run": 0}
 	S.recompute()
-	_check("S6 Bounty L2 feeds adjacent gun +10% dmg", is_equal_approx(float(_weapon(S, "gun")["dmg"]), g0 * 1.1) and _has_link(S, 6, 7, "S6"))
+	_check("S6 Bounty L2 feeds adjacent gun +10% dmg", is_equal_approx(float(_weapon(S, "gun")["dmg"]), g0 * 1.1) and _has_link(S, _c(6), _c(7), "S6"))
 	S = _fresh()
-	S.slots[17] = {"id": "mortar", "perm": 1, "run": 0}
+	S.slots[_c(17)] = {"id": "mortar", "perm": 1, "run": 0}
 	S.recompute()
 	var m0: float = float(_weapon(S, "mortar")["dmg"])
-	S.slots[16] = {"id": "oilmill", "perm": 3, "run": 0}
-	S.slots[18] = {"id": "oilmill", "perm": 1, "run": 0}
+	S.slots[_c(16)] = {"id": "oilmill", "perm": 3, "run": 0}
+	S.slots[_c(18)] = {"id": "oilmill", "perm": 1, "run": 0}
 	S.recompute()
-	_check("S7 Oil Mills feed adjacent mortar +5%/lvl (3+1 -> +20%)", is_equal_approx(float(_weapon(S, "mortar")["dmg"]), m0 * 1.2) and _has_link(S, 16, 17, "S7"))
-	S.slots[12 - 5] = {"id": "gun", "perm": 1, "run": 0}
+	_check("S7 Oil Mills feed adjacent mortar +5%/lvl (3+1 -> +20%)", is_equal_approx(float(_weapon(S, "mortar")["dmg"]), m0 * 1.2) and _has_link(S, _c(16), _c(17), "S7"))
+	S.slots[_c(12 - 5)] = {"id": "gun", "perm": 1, "run": 0}
 	S.recompute()
-	_check("S7 Oil Mill does not feed guns", not _has_link(S, 16, 7, "S7"))
+	_check("S7 Oil Mill does not feed guns", not _has_link(S, _c(16), _c(7), "S7"))
 	# Run level ceiling raised to 40 (late cash keeps converting).
 	S = _fresh()
-	S.slots[7] = {"id": "gun", "perm": 39, "run": 0}
+	S.slots[_c(7)] = {"id": "gun", "perm": 39, "run": 0}
 	S.recompute()
 	S.cash = 1.0e9
-	S.upgrade(7)
-	_check("run level cap 40", S.lvl_at(7) == 40 and S.upgrade(7).is_empty())
+	S.upgrade(_c(7))
+	_check("run level cap 40", S.lvl_at(_c(7)) == 40 and S.upgrade(_c(7)).is_empty())
 	# Enemy damage ramp 1.06/wave so HP (labs, perks, Overdrive) matters late.
 	S = _fresh()
 	S.wave = 41
@@ -976,7 +983,7 @@ func _fix_round_stages() -> void:
 func _juice_targeting_stages() -> void:
 	var S = _fresh()
 	S.enemies.clear()
-	var from: Vector2 = TowerState.slot_pos(7)
+	var from: Vector2 = TowerState.slot_pos(_c(7))
 	# a: nearest to weapon, low hp, far from core
 	var a: Dictionary = _enemy("drone", from + Vector2(0, -60), 5.0)
 	# b: closest to core, mid hp
@@ -993,33 +1000,33 @@ func _juice_targeting_stages() -> void:
 	_check("target none in range", S.pick_target(from + Vector2(0, -5000), 50.0, "first") == -1)
 	# Per-slot modes: only weapon slots, cycle wraps, fire() uses the mode.
 	S = _fresh()
-	S.slots[7] = {"id": "gun", "perm": 1, "run": 0}
+	S.slots[_c(7)] = {"id": "gun", "perm": 1, "run": 0}
 	S.recompute()
-	_check("default target mode nearest", String(S.target_modes[7]) == "nearest")
-	_check("non-weapon slot rejects mode", S.set_target_mode(3, "first").is_empty())
-	var cev: Array = S.cycle_target_mode(7)
-	_check("cycle -> first + event", String(S.target_modes[7]) == "first" and cev.size() == 1 and String((cev[0] as Dictionary)["t"]) == "target_mode")
-	S.cycle_target_mode(7)
-	S.cycle_target_mode(7)
-	S.cycle_target_mode(7)
-	_check("cycle wraps to nearest", String(S.target_modes[7]) == "nearest")
-	S.set_target_mode(7, "strongest")
+	_check("default target mode nearest", String(S.target_modes[_c(7)]) == "nearest")
+	_check("non-weapon slot rejects mode", S.set_target_mode(_c(3), "first").is_empty())
+	var cev: Array = S.cycle_target_mode(_c(7))
+	_check("cycle -> first + event", String(S.target_modes[_c(7)]) == "first" and cev.size() == 1 and String((cev[0] as Dictionary)["t"]) == "target_mode")
+	S.cycle_target_mode(_c(7))
+	S.cycle_target_mode(_c(7))
+	S.cycle_target_mode(_c(7))
+	_check("cycle wraps to nearest", String(S.target_modes[_c(7)]) == "nearest")
+	S.set_target_mode(_c(7), "strongest")
 	S.enemies.clear()
-	var from7: Vector2 = TowerState.slot_pos(7)
+	var from7: Vector2 = TowerState.slot_pos(_c(7))
 	var weak: Dictionary = _enemy("drone", from7 + Vector2(0, -40), 10.0)
 	var strong: Dictionary = _enemy("drone", from7 + Vector2(0, -150), 900.0)
 	S.enemies.append_array([weak, strong])
-	for k in 25:
+	for k in TowerState.N:
 		S.cooldowns[k] = 99.0
-	S.cooldowns[7] = 0.0
+	S.cooldowns[_c(7)] = 0.0
 	var fev: Array = []
 	S._fire(0.01, fev)
 	_check("fire() honours strongest mode", float(strong["hp"]) < 900.0 and float(weak["hp"]) == 10.0)
 	_check("hit sets hit_t flash + dmg event", float(strong["hit_t"]) > 0.0 and _evts(fev, "dmg").size() >= 1)
-	_check("perm weapon mode persists in save", String((S.save["target_modes"] as Dictionary)["7"]) == "strongest")
+	_check("perm weapon mode persists in save", String((S.save["target_modes"] as Dictionary)[str(_c(7))]) == "strongest")
 	var S2 = TowerState.new()
 	S2.setup(77, S.save)
-	_check("persisted mode restored next run", String(S2.target_modes[7]) == "strongest")
+	_check("persisted mode restored next run", String(S2.target_modes[_c(7)]) == "strongest")
 	# Stress: tier 5, wave 60, forced spawn flood for 10 s -> cap holds.
 	S = _fresh()
 	S.tier = 5
@@ -1038,3 +1045,84 @@ func _juice_targeting_stages() -> void:
 		S.draft.clear()
 		S.perk_offer.clear()
 	_check("T5 w60 10 s flood: enemy count capped (peak %d)" % peak, peak <= TowerState.MAX_ENEMIES and peak > 50)
+
+
+## PC ENGINE package (design/PC_SPEC.md §10 ENGINE, PC-E1..E9).
+func _pc_engine_stages() -> void:
+	_pc_board_stages()
+
+
+## PC-E1 7x7 ring unlocks, PC-E2 build cap.
+func _pc_board_stages() -> void:
+	_check("PC-E1 cell_ring 0..3", BaseMeta.cell_ring_rc(3, 3) == 0 and BaseMeta.cell_ring_rc(2, 4) == 1 and BaseMeta.cell_ring_rc(1, 3) == 2 and BaseMeta.cell_ring_rc(0, 6) == 3 and BaseMeta.cell_ring(TowerState.CORE_SLOT) == 0)
+	var ring_n: Array = [0, 0, 0, 0]
+	for i in TowerState.N:
+		ring_n[BaseMeta.cell_ring(i)] = int(ring_n[BaseMeta.cell_ring(i)]) + 1
+	_check("PC-E1 ring sizes 1/8/16/24", ring_n == [1, 8, 16, 24])
+	var S = _fresh()
+	var open_ok: bool = true
+	for i in TowerState.N:
+		open_ok = open_ok and bool(S.unlocked[i]) == (BaseMeta.cell_ring(i) == 1)
+	_check("PC-E1 new save: exactly ring 1 unlocked", open_ok and S.free_slots().size() == 8)
+	var sv: Dictionary = BaseMeta.default_save()
+	var edge2: int = 1 * 7 + 3      # (1,3) ring 2 edge
+	var corner2: int = 1 * 7 + 1    # (1,1) ring 2 corner
+	var edge3: int = 0 * 7 + 3      # (0,3) ring 3 edge
+	var corner3: int = 0            # (0,0) ring 3 corner
+	_check("PC-E1 ring 2 cost 400, corner +50%", BaseMeta.unlock_cost(sv, edge2) == 400 and BaseMeta.unlock_cost(sv, corner2) == 600)
+	_check("PC-E1 ring 3 cost 2500, corner +50%", BaseMeta.unlock_cost(sv, edge3) == 2500 and BaseMeta.unlock_cost(sv, corner3) == 3750)
+	sv["coins"] = 1_000_000
+	_check("PC-E1 ring 2 unlock", BaseMeta.try_unlock(sv, edge2) and int(sv["coins"]) == 1_000_000 - 400)
+	_check("PC-E1 ring 2 price grows 1.18^n", BaseMeta.unlock_cost(sv, 1 * 7 + 2) == int(400.0 * 1.18) and BaseMeta.unlock_cost(sv, edge3) == 2500)
+	var c3: int = int(sv["coins"])
+	_check("PC-E1 ring 3 locked below T3 (no charge)", not BaseMeta.try_unlock(sv, edge3) and int(sv["coins"]) == c3 and not BaseMeta.is_unlocked(sv, edge3))
+	sv["best_wave_by_tier"] = {"1": 40, "2": 50}
+	_check("PC-E1 ring 3 unlocks at T3", Tiers.highest(sv) == 3 and BaseMeta.try_unlock(sv, edge3) and int(sv["coins"]) == c3 - 2500)
+	_check("PC-E1 ring 3 price grows 1.22^n", BaseMeta.unlock_cost(sv, 0 * 7 + 2) == int(2500.0 * 1.22))
+	_check("PC-E1 core / ring 1 cannot be bought", not BaseMeta.try_unlock(sv, TowerState.CORE_SLOT) and not BaseMeta.try_unlock(sv, 2 * 7 + 2))
+	var S1 = TowerState.new()
+	S1.setup(3, BaseMeta.default_save())
+	S1.cash = 1.0e6
+	_check("PC-E1 in-run unlock refuses ring 3 below T3", S1.unlock_plot(edge3).is_empty() and not bool(S1.unlocked[edge3]))
+	_check("PC-E1 in-run unlock opens ring 2", not S1.unlock_plot(edge2).is_empty() and bool(S1.unlocked[edge2]))
+	# PC-E2 build cap = 12 + 2(t-1), capped at 40.
+	var cs: Dictionary = BaseMeta.default_save()
+	_check("PC-E2 cap 12 at T1", BaseMeta.build_cap(cs) == 12)
+	cs["best_wave_by_tier"] = {"1": 40, "2": 50}
+	_check("PC-E2 cap 16 at T3", BaseMeta.build_cap(cs) == 16)
+	cs["best_wave_by_tier"] = {"1": 999, "2": 999, "3": 999, "4": 999, "5": 999, "6": 999, "7": 999}
+	_check("PC-E2 cap 26 at T8 (<= 40)", BaseMeta.build_cap(cs) == mini(40, 12 + 2 * 7))
+	S = TowerState.new()
+	S.setup(5, BaseMeta.default_save())
+	S.spawn_hold = true
+	for i in TowerState.N:
+		S.unlocked[i] = i != TowerState.CORE_SLOT
+	var placed: int = 0
+	for i in TowerState.N:
+		if i != TowerState.CORE_SLOT and placed < 12:
+			S.slots[i] = {"id": "mine", "perm": 0, "run": 1}
+			placed += 1
+	S.recompute()
+	S.pending_place = "gun"
+	var free_i: int = int(S.free_slots()[0])
+	var snap: String = JSON.stringify(S.slots)
+	_check("PC-E2 place past cap returns [] and does not mutate", S.at_cap() and S.place(free_i).is_empty() and JSON.stringify(S.slots) == snap and S.pending_place == "gun")
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4
+	var only_plus: bool = true
+	for k in 50:
+		for c in Draft.offer(rng, S.slots, S.unlocked, true, S.build_cap):
+			only_plus = only_plus and String((c as Dictionary)["kind"]) == "plus"
+	_check("PC-E2 draft offers no NEW cards at the cap", only_plus)
+	var ps: Dictionary = BaseMeta.default_save()
+	ps["coins"] = 1_000_000
+	var pn: int = 0
+	for i in TowerState.N:
+		if BaseMeta.is_unlocked(ps, i) and BaseMeta.try_place(ps, i, "gun"):
+			pn += 1
+	ps["best_wave_by_tier"] = {"1": 0}
+	for i in [1 * 7 + 3, 1 * 7 + 2, 1 * 7 + 4, 3 * 7 + 1, 3 * 7 + 5]:
+		BaseMeta.try_unlock(ps, int(i))
+		if BaseMeta.try_place(ps, int(i), "mine"):
+			pn += 1
+	_check("PC-E2 permanent base also capped at 12", pn == 12 and BaseMeta.building_count(ps) == 12)

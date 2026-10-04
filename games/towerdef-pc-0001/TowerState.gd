@@ -23,9 +23,14 @@ const PerkDB := preload("res://data/PerkDB.gd")
 
 const CENTER: Vector2 = Vector2(360, 470)
 const CELL: float = 52.0
-const CORE_SLOT: int = 12
-const SPAWN_R: float = 420.0
-const STOP_R: float = 150.0
+## PC 7x7 board (PC_SPEC §2.1). Cell index i = row * SIDE + col; the core sits
+## at (3,3). Enemies stop beyond the ring-3 corners and spawn proportionally
+## farther out, so the walk-in time matches the mobile 5x5 arena.
+const SIDE: int = 7
+const N: int = 49
+const CORE_SLOT: int = 24
+const SPAWN_R: float = 470.0
+const STOP_R: float = 200.0
 const SLOWMO: float = 0.2
 const MAX_LVL: int = 40          # default per-building level ceiling in a run (perm + run)
 
@@ -36,17 +41,17 @@ static func lvl_cap() -> int:
 	return TuneRef.int_of("run_lvl_cap", MAX_LVL)
 const MAX_ENEMIES: int = 220
 const SUBSTEP: float = 0.05
-const CORE_RING: Array = [6, 7, 8, 11, 13, 16, 17, 18]
+const CORE_RING: Array = [16, 17, 18, 23, 25, 30, 31, 32]
 const TARGET_MODES: Array = ["nearest", "first", "strongest", "weakest"]
 const HIT_FLASH: float = 0.12   # view reads e["hit_t"] for the white hit flash
 const ECO_IDS: Array = ["mine", "oilmill", "bounty", "vault"]
 
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var save: Dictionary = {}
-var slots: Array = []        # 25 × ({} | {id, perm, run})
-var unlocked: Array = []     # 25 × bool
-var cooldowns: Array = []    # 25 × float (core uses CORE_SLOT)
-var target_modes: Array = []  # 25 × String (TARGET_MODES); perm slots persist in save["target_modes"]
+var slots: Array = []        # N × ({} | {id, perm, run})
+var unlocked: Array = []     # N × bool
+var cooldowns: Array = []    # N × float (core uses CORE_SLOT)
+var target_modes: Array = []  # N × String (TARGET_MODES); perm slots persist in save["target_modes"]
 var next_eid: int = 1
 var enemies: Array = []      # {pos, hp, max_hp, spd, dmg, kind, atk_cd, slow_t, cash, xp, coin, size}
 var stats: Dictionary = {}
@@ -63,6 +68,8 @@ var coins_run: float = 0.0
 var kills: int = 0
 var core_run_lvl: int = 0
 var run_unlocks: int = 0
+var spawn_hold: bool = false      # test/tool hook: suppress wave spawns (bosses included)
+var build_cap: int = 40           # PC_SPEC §2.1 max buildings on the board this run
 var draft: Array = []
 var pending_place: String = ""
 var over: bool = false
@@ -133,7 +140,8 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0) -> Array:
 	unlocked.clear()
 	cooldowns.clear()
 	target_modes.clear()
-	for i in 25:
+	build_cap = BaseMeta.build_cap(save)
+	for i in N:
 		var perm: Dictionary = BaseMeta.slot_of(save, i)
 		if perm.is_empty():
 			slots.append({})
@@ -199,21 +207,25 @@ func _apply_mods(m: Dictionary) -> void:
 
 # ---------------------------------------------------------------- geometry
 static func slot_pos(i: int) -> Vector2:
-	return CENTER + Vector2(float(i % 5 - 2) * CELL, float(i / 5 - 2) * CELL)
+	return CENTER + Vector2(float(i % SIDE - SIDE / 2) * CELL, float(i / SIDE - SIDE / 2) * CELL)
+
+
+static func ring_of(i: int) -> int:
+	return BaseMeta.cell_ring(i)
 
 
 static func neighbors(i: int) -> Array:
 	var out: Array = []
-	var x: int = i % 5
-	var y: int = i / 5
+	var x: int = i % SIDE
+	var y: int = i / SIDE
 	for dy in [-1, 0, 1]:
 		for dx in [-1, 0, 1]:
 			if dx == 0 and dy == 0:
 				continue
 			var nx: int = x + int(dx)
 			var ny: int = y + int(dy)
-			if nx >= 0 and nx < 5 and ny >= 0 and ny < 5:
-				out.append(ny * 5 + nx)
+			if nx >= 0 and nx < SIDE and ny >= 0 and ny < SIDE:
+				out.append(ny * SIDE + nx)
 	return out
 
 
@@ -230,7 +242,24 @@ func id_at(i: int) -> String:
 
 
 func is_free(i: int) -> bool:
-	return i != CORE_SLOT and bool(unlocked[i]) and (slots[i] as Dictionary).is_empty()
+	return i >= 0 and i < N and i != CORE_SLOT and bool(unlocked[i]) and (slots[i] as Dictionary).is_empty()
+
+
+func building_count() -> int:
+	var n: int = 0
+	for i in N:
+		if not (slots[i] as Dictionary).is_empty():
+			n += 1
+	return n
+
+
+func at_cap() -> bool:
+	return building_count() >= build_cap
+
+
+## Can `id` go on cell i right now (free, under the build cap, ring rule)?
+func can_place(i: int, id: String) -> bool:
+	return is_free(i) and not at_cap() and BaseMeta.place_ok(i, id)
 
 
 # ------------------------------------------------------------------- stats
@@ -253,23 +282,23 @@ func compute_stats() -> Dictionary:
 	var arm_cap: float = TuneRef.num("armory_cap", 1.0)
 	# Armory multiplier per slot (weapons + core), capped per target (AC-21).
 	var arm: Array = []
-	for i in 25:
+	for i in N:
 		arm.append(1.0)
-	for i in 25:
+	for i in N:
 		if id_at(i) == "armory":
 			for n in neighbors(i):
 				arm[n] = float(arm[n]) + 0.25 * float(lvl_at(i))
-	for i in 25:
+	for i in N:
 		arm[i] = minf(1.0 + arm_cap, float(arm[i]))
 	# Aegis (S5): per-slot fire-rate bonus for weapons, output penalty for eco.
 	var aeg_rate: Array = []
 	var eco_pen: Array = []
-	for i in 25:
+	for i in N:
 		aeg_rate.append(0.0)
 		eco_pen.append(1.0)
 	var aegis_dr: float = 0.0
 	var pen: float = TuneRef.num("aegis_eco_pen", 0.15)
-	for i in 25:
+	for i in N:
 		if id_at(i) != "aegis":
 			continue
 		var La: float = float(lvl_at(i))
@@ -286,11 +315,11 @@ func compute_stats() -> Dictionary:
 	# adjacent weapons, so an eco slot also buys wave survival (AC-38) and a
 	# mono-weapon board leaves damage on the table (AC-39).
 	var eco_dmg: Array = []
-	for i in 25:
+	for i in N:
 		eco_dmg.append(0.0)
 	var b_adj: float = TuneRef.num("bounty_adj", 0.05)
 	var o_adj: float = TuneRef.num("oil_adj", 0.05)
-	for i in 25:
+	for i in N:
 		var sid: String = id_at(i)
 		if sid != "bounty" and sid != "oilmill":
 			continue
@@ -304,11 +333,11 @@ func compute_stats() -> Dictionary:
 				eco_dmg[n] = float(eco_dmg[n]) + o_adj * Ls
 				links.append([i, n, "S7"])
 	var e_cap: float = TuneRef.num("eco_adj_cap", 2.0)
-	for i in 25:
+	for i in N:
 		eco_dmg[i] = 1.0 + minf(e_cap, float(eco_dmg[i]))
 	var bulwark_dr: float = 0.0
 	var mine_scale: float = 1.0 + TuneRef.num("mine_wave_scale", 0.03) * float(wave - 1)
-	for i in 25:
+	for i in N:
 		var id: String = id_at(i)
 		var L: float = float(lvl_at(i))
 		var ep: float = float(eco_pen[i])
@@ -466,10 +495,11 @@ func _step(sub: float, ev: Array) -> void:
 		wave_t -= wave_time
 		_wave_end(ev)
 		_advance_wave(ev)
-	spawn_t -= dt
-	if spawn_t <= 0.0:
-		spawn_t += spawn_interval()
-		_spawn(_roll_kind(), ev)
+	if not spawn_hold:
+		spawn_t -= dt
+		if spawn_t <= 0.0:
+			spawn_t += spawn_interval()
+			_spawn(_roll_kind(), ev)
 	var cg: float = float(stats["cash_ps"]) * dt
 	cash += cg
 	cash_earned += cg
@@ -696,7 +726,7 @@ func pick_target(from: Vector2, rng_lim: float, mode: String) -> int:
 ## Set a weapon slot's targeting mode (run-scoped; permanent buildings also
 ## remember it in the save).
 func set_target_mode(i: int, mode: String) -> Array:
-	if i < 0 or i >= 25 or not TARGET_MODES.has(mode) or not is_weapon_slot(i):
+	if i < 0 or i >= N or not TARGET_MODES.has(mode) or not is_weapon_slot(i):
 		return []
 	target_modes[i] = mode
 	if i == CORE_SLOT or int((slots[i] as Dictionary).get("perm", 0)) > 0:
@@ -862,7 +892,7 @@ func _check_level(ev: Array) -> void:
 	if xp >= xp_need():
 		xp -= xp_need()
 		level += 1
-		draft = Draft.offer(rng, slots, unlocked, allow_new_bldg)
+		draft = Draft.offer(rng, slots, unlocked, allow_new_bldg, build_cap)
 		ev.append({"t": "levelup", "level": level, "cards": draft.duplicate(true)})
 
 
@@ -888,7 +918,7 @@ func choose_card(idx: int) -> Array:
 	var id: String = card["id"]
 	if String(card["kind"]) == "plus":
 		var best: int = -1
-		for i in 25:
+		for i in N:
 			if id_at(i) == id and (best < 0 or lvl_at(i) < lvl_at(best)):
 				best = i
 		if best >= 0:
@@ -909,7 +939,7 @@ func reroll_draft() -> Array:
 	if draft.is_empty() or rerolls_left <= 0:
 		return ev
 	rerolls_left -= 1
-	draft = Draft.offer(rng, slots, unlocked, allow_new_bldg)
+	draft = Draft.offer(rng, slots, unlocked, allow_new_bldg, build_cap)
 	ev.append({"t": "draft_reroll", "cards": draft.duplicate(true), "left": rerolls_left})
 	return ev
 
@@ -938,7 +968,7 @@ func set_speed(v: float) -> Array:
 
 func place(i: int) -> Array:
 	var ev: Array = []
-	if pending_place == "" or i < 0 or i > 24 or not is_free(i):
+	if pending_place == "" or not can_place(i, pending_place):
 		return ev
 	slots[i] = {"id": pending_place, "perm": 0, "run": 1}
 	cooldowns[i] = 0.0
@@ -952,7 +982,7 @@ func place(i: int) -> Array:
 ## Spend cash on a temporary in-run level (building or the core).
 func upgrade(i: int) -> Array:
 	var ev: Array = []
-	if over or i < 0 or i > 24:
+	if over or i < 0 or i >= N:
 		return ev
 	if i != CORE_SLOT and (id_at(i) == "" or lvl_at(i) >= lvl_cap()):
 		return ev
@@ -973,7 +1003,7 @@ func upgrade(i: int) -> Array:
 ## Spend cash to open an outer-ring plot for the rest of this run.
 func unlock_plot(i: int) -> Array:
 	var ev: Array = []
-	if over or i < 0 or i > 24 or i == CORE_SLOT or bool(unlocked[i]):
+	if over or i < 0 or i >= N or i == CORE_SLOT or bool(unlocked[i]) or not BaseMeta.ring_open(save, i):
 		return ev
 	var c: int = unlock_cost()
 	if cash < float(c):
@@ -987,7 +1017,7 @@ func unlock_plot(i: int) -> Array:
 
 func free_slots() -> Array:
 	var out: Array = []
-	for i in 25:
+	for i in N:
 		if is_free(i):
 			out.append(i)
 	return out

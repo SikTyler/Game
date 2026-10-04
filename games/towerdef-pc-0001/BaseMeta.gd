@@ -19,8 +19,12 @@ const Cards := preload("res://Cards.gd")
 const Missions := preload("res://Missions.gd")
 const TuneRef := preload("res://Tune.gd")
 
-const VERSION: int = 2
-const CORE_SLOT: int = 12
+const VERSION: int = 3
+## PC 7x7 base (PC_SPEC §2.1): rings by Chebyshev distance from the core cell
+## (3,3). Ring 1 (8 cells) starts unlocked; ring 2 / ring 3 are bought per cell.
+const SIDE: int = 7
+const N: int = 49
+const CORE_SLOT: int = 24
 const CORE_STATS: Array = ["dmg", "hp", "regen"]
 const MAX_LVL: int = 15
 ## Hard ceiling for migrated core levels; the live cap is core_cap(s).
@@ -48,11 +52,52 @@ static func default_save() -> Dictionary:
 	}
 
 
-## v1 (no `version`) -> v2. Lossless for v1 fields; returns a new Dictionary.
+## Mobile 5x5 index -> PC 7x7 index: (r, c) -> (r+1, c+1). The 5x5 inner ring
+## lands on 7x7 ring 1 and the 5x5 outer ring on ring 2.
+static func idx5_to_7(i: int) -> int:
+	return (i / 5 + 1) * SIDE + (i % 5 + 1)
+
+
+## v1 (no `version`) -> v2 -> v3. Lossless; returns a new Dictionary.
 static func migrate(s: Dictionary) -> Dictionary:
 	var d: Dictionary = s.duplicate(true)
-	if int(d.get("version", 1)) >= VERSION:
+	var v: int = int(d.get("version", 1))
+	if v >= VERSION:
 		return d
+	if v < 2:
+		d = _migrate_v1(d)
+	return _migrate_v2(d)
+
+
+## v2 -> v3: remap every 5x5 cell key onto the 7x7 board; new v3 blocks are
+## filled with defaults by normalize().
+static func _migrate_v2(d: Dictionary) -> Dictionary:
+	var slots_in: Dictionary = d.get("slots", {})
+	var slots: Dictionary = {}
+	for key in slots_in.keys():
+		var i5: int = int(key)
+		if i5 >= 0 and i5 < 25:
+			slots[str(idx5_to_7(i5))] = slots_in[key]
+	d["slots"] = slots
+	var un: Array = []
+	for v in d.get("unlocked", []):
+		var i5b: int = int(v)
+		if i5b >= 0 and i5b < 25:
+			un.append(idx5_to_7(i5b))
+	d["unlocked"] = un
+	if d.get("target_modes", null) is Dictionary:
+		var tm_in: Dictionary = d["target_modes"]
+		var tm: Dictionary = {}
+		for key in tm_in.keys():
+			var i5c: int = int(key)
+			if i5c >= 0 and i5c < 25:
+				tm[str(idx5_to_7(i5c))] = tm_in[key]
+		d["target_modes"] = tm
+	d["version"] = VERSION
+	return d
+
+
+static func _migrate_v1(d: Dictionary) -> Dictionary:
 	var bw: int = int(d.get("best_wave", 0))
 	d["best_wave_by_tier"] = {"1": bw}
 	d["gems"] = 0
@@ -61,7 +106,7 @@ static func migrate(s: Dictionary) -> Dictionary:
 	var labs: Dictionary = d.get("labs", {})
 	var lv: Dictionary = labs.get("lvls", {})
 	lv.erase("armor")
-	d["version"] = VERSION
+	d["version"] = 2
 	return d
 
 
@@ -118,13 +163,13 @@ static func normalize(s_in: Dictionary) -> Dictionary:
 		var e: Dictionary = slots_in[key]
 		var id: String = String(e.get("id", ""))
 		var idx: int = int(key)
-		if BuildingDB.DEFS.has(id) and idx >= 0 and idx < 25 and idx != CORE_SLOT:
+		if BuildingDB.DEFS.has(id) and idx >= 0 and idx < N and idx != CORE_SLOT and place_ok(idx, id):
 			slots[str(idx)] = {"id": id, "lvl": clampi(int(e.get("lvl", 1)), 1, cap)}
 	d["slots"] = slots
 	var un: Array = []
 	for v in s.get("unlocked", []):
 		var n2: int = int(v)
-		if n2 >= 0 and n2 < 25 and n2 != CORE_SLOT and not un.has(n2):
+		if n2 >= 0 and n2 < N and cell_ring(n2) >= 2 and not un.has(n2):
 			un.append(n2)
 	d["unlocked"] = un
 	# labs
@@ -230,10 +275,47 @@ static func run_mods(s: Dictionary) -> Dictionary:
 	}
 
 
+## Chebyshev ring of (r, c) around the core cell (3,3): 0 core, 1..3 rings.
+static func cell_ring_rc(r: int, c: int) -> int:
+	return maxi(absi(r - SIDE / 2), absi(c - SIDE / 2))
+
+
+static func cell_ring(i: int) -> int:
+	return cell_ring_rc(i / SIDE, i % SIDE)
+
+
+static func is_corner(i: int) -> bool:
+	var rg: int = cell_ring(i)
+	return rg > 0 and absi(i / SIDE - SIDE / 2) == rg and absi(i % SIDE - SIDE / 2) == rg
+
+
 static func is_inner(i: int) -> bool:
-	var dx: int = absi(i % 5 - 2)
-	var dy: int = absi(i / 5 - 2)
-	return dx <= 1 and dy <= 1 and i != CORE_SLOT
+	return i >= 0 and i < N and cell_ring(i) == 1
+
+
+## Railgun is outer-ring only (ring >= 2); every other building fits anywhere.
+static func place_ok(i: int, id: String) -> bool:
+	if id == "railgun":
+		return cell_ring(i) >= 2
+	return true
+
+
+## PC_SPEC §2.1 run build cap: 12 + 2*(highest_tier-1), capped at 40.
+static func build_cap(s: Dictionary) -> int:
+	var c: int = TuneRef.int_of("pc_build_cap_base", 12) + TuneRef.int_of("pc_build_cap_step", 2) * (Tiers.highest(s) - 1)
+	return mini(TuneRef.int_of("pc_build_cap_max", 40), c)
+
+
+static func building_count(s: Dictionary) -> int:
+	return (s["slots"] as Dictionary).size()
+
+
+## Ring 3 cells need best tier >= 3.
+static func ring_open(s: Dictionary, i: int) -> bool:
+	var rg: int = cell_ring(i)
+	if rg <= 2:
+		return true
+	return Tiers.highest(s) >= TuneRef.int_of("pc_ring3_tier", 3)
 
 
 static func is_unlocked(s: Dictionary, i: int) -> bool:
@@ -250,9 +332,24 @@ static func slot_of(s: Dictionary, i: int) -> Dictionary:
 	return slots.get(str(i), {})
 
 
-static func unlock_cost(s: Dictionary) -> int:
-	var un: Array = s["unlocked"]
-	return int(TuneRef.num("perm_unlock_base", 90.0) * pow(1.45, un.size()))
+## Per-cell permanent unlock price (PC_SPEC §2.1): ring 2 = 400*1.18^n, ring 3
+## = 2500*1.22^n (n = cells of that ring already unlocked), corners +50%.
+static func unlock_cost(s: Dictionary, i: int) -> int:
+	var rg: int = cell_ring(i)
+	if rg < 2:
+		return 0
+	var n: int = 0
+	for v in s["unlocked"]:
+		if cell_ring(int(v)) == rg:
+			n += 1
+	var c: float = 0.0
+	if rg == 2:
+		c = TuneRef.num("pc_cell_cost_r2", 400.0) * pow(TuneRef.num("pc_cell_growth_r2", 1.18), float(n))
+	else:
+		c = TuneRef.num("pc_cell_cost_r3", 2500.0) * pow(TuneRef.num("pc_cell_growth_r3", 1.22), float(n))
+	if is_corner(i):
+		c *= TuneRef.num("pc_corner_mult", 1.5)
+	return int(c)
 
 
 static func place_cost(id: String) -> int:
@@ -269,9 +366,9 @@ static func core_cost(lvl: int) -> int:
 
 
 static func try_unlock(s: Dictionary, i: int) -> bool:
-	if i < 0 or i > 24 or is_unlocked(s, i) or i == CORE_SLOT:
+	if i < 0 or i >= N or is_unlocked(s, i) or i == CORE_SLOT or not ring_open(s, i):
 		return false
-	var c: int = unlock_cost(s)
+	var c: int = unlock_cost(s, i)
 	if int(s["coins"]) < c:
 		return false
 	s["coins"] = int(s["coins"]) - c
@@ -280,7 +377,9 @@ static func try_unlock(s: Dictionary, i: int) -> bool:
 
 
 static func try_place(s: Dictionary, i: int, id: String) -> bool:
-	if not is_unlocked(s, i) or not slot_of(s, i).is_empty() or not BuildingDB.DEFS.has(id):
+	if not is_unlocked(s, i) or not slot_of(s, i).is_empty() or not BuildingDB.DEFS.has(id) or not place_ok(i, id):
+		return false
+	if building_count(s) >= build_cap(s):
 		return false
 	var c: int = place_cost(id)
 	if int(s["coins"]) < c:
