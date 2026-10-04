@@ -24,6 +24,11 @@ static func tree_rect(m) -> Rect2:
 	return Rect2(l.end.x + 16, cr.position.y + 16, cr.end.x - l.end.x - 32, cr.size.y - 32)
 
 
+## Node labels hang to the right of each node; shift columns left so the
+## rightmost (Mastery) labels stay inside the tree panel at 1080p.
+const LABEL_SHIFT: float = 60.0
+
+
 static func _branch_ids(br: String) -> Array:
 	var out: Array = []
 	for id in ReforgeDB.IDS:
@@ -47,7 +52,7 @@ static func node_pos(m, id: String) -> Vector2:
 	var top: float = tr.position.y + 260.0
 	var step: float = minf(118.0, (tr.end.y - top - 60.0) / float(maxi(1, ids.size() - 1)))
 	var zig: float = (-1.0 if j % 2 == 0 else 1.0) * colw * 0.16
-	return Vector2(tr.position.x + colw * (float(bi) + 0.5) + zig, top + float(j) * step)
+	return Vector2(tr.position.x + colw * (float(bi) + 0.5) - LABEL_SHIFT + zig, top + float(j) * step)
 
 
 static func build(m) -> void:
@@ -116,7 +121,7 @@ static func _draw_tree(m, s: Dictionary) -> void:
 	var colw: float = tr.size.x / 3.0
 	for k in BRANCHES.size():
 		var b: Array = BRANCHES[k]
-		var hx: float = tr.position.x + colw * (float(k) + 0.5)
+		var hx: float = tr.position.x + colw * (float(k) + 0.5) - LABEL_SHIFT
 		var hy: float = tr.position.y + 200.0
 		var col: Color = b[3]
 		m.draw_line(root, Vector2(hx, hy - 24), Color(col, 0.4), 3.0)

@@ -256,9 +256,12 @@ static func _draw_grid(m) -> void:
 		var id: String = S.id_at(i)
 		if id == "":
 			var oc := Color("3d4752")
-			if placing:
-				oc = Color(Kit.GREEN, 0.45 + 0.4 * sin(m.t_anim * 8.0))
-			m.draw_rect(r, Color("1d232a"))
+			var fill := Color("1d232a")
+			if placing and (S.pending_place == "" or S.can_place(i, S.pending_place)):
+				# Floor the pulse so valid cells always read as "glowing".
+				oc = Color(Kit.GREEN, 0.7 + 0.25 * sin(m.t_anim * 8.0))
+				fill = Color("1d232a").lerp(Kit.GREEN, 0.12)
+			m.draw_rect(r, fill)
 			m.draw_rect(r, oc, false, 2.0)
 		else:
 			var rc: Color = Kit.rarity_col(PickDB.rarity_of(id))
