@@ -417,7 +417,7 @@ static func _draw_lanes(m, fr: Rect2) -> void:
 		m.draw_colored_polygon(PackedVector2Array([tip, p + side, p - side]), col)
 		if q == S.focus_quad:
 			m.draw_arc(p, 28.0, 0, TAU, 32, Kit.GEM, 2.0)
-		if on:
+		if on and (int(counts.get(q, 0)) > 0 or bd == q):
 			Kit.t(m, "%d%s" % [int(counts.get(q, 0)), " BOSS" if bd == q else ""], p - dir * 54.0 + Vector2(0, 8), 18, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, 120.0)
 		m.stat_tips.append([Rect2(p - Vector2(30, 30), Vector2(60, 60)), "%s lane%s. %s/%s move the lane focus (Orbital auto-target)." % [String(QUAD_NAMES[q]), " — focused" if q == S.focus_quad else "", Kit.hint(m, "lane_prev"), Kit.hint(m, "lane_next")]])
 
@@ -443,8 +443,9 @@ static func _draw_field_hud(m, fr: Rect2) -> void:
 	elif m.banish_mode:
 		prompt = "Banish: click a draft card to remove it from this run"
 	if prompt != "":
-		Kit.panel(m, Rect2(cx - 330, fr.end.y - 54, 660, 40), Kit.GOLD, Color(0.14, 0.12, 0.06, 0.92))
-		Kit.t(m, prompt, Vector2(cx, fr.end.y - 27), 17, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, 640.0)
+		var pw: float = minf(fr.size.x - 20.0, 24.0 + m.font.get_string_size(prompt, HORIZONTAL_ALIGNMENT_LEFT, -1, 17).x)
+		Kit.panel(m, Rect2(cx - pw * 0.5, fr.end.y - 54, pw, 40), Kit.GOLD, Color(0.14, 0.12, 0.06, 0.92))
+		Kit.t(m, prompt, Vector2(cx, fr.end.y - 27), 17, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, pw - 16.0)
 	if m.insight_t > 0.0:
 		var a: float = clampf(m.insight_t, 0.0, 1.0)
 		var s: float = 1.0 + maxf(0.0, m.insight_t - 2.0) * 0.6

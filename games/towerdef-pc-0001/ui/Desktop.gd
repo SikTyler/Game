@@ -46,6 +46,15 @@ static func modal_rect(m, w: float, h: float) -> Rect2:
 	return Rect2(floorf((m.vw - w) * 0.5), floorf((m.vh - h) * 0.5), minf(w, m.vw - 16.0), minf(h, m.vh - 16.0))
 
 
+## The boot "while you were away" modal grows with the number of resources.
+static func offline_rect(m) -> Rect2:
+	var n: int = 0
+	for k in ["coins", "scrap", "gems", "keys"]:
+		if int(m.offline_offer.get(k, 0)) > 0:
+			n += 1
+	return modal_rect(m, 760, 300.0 + 66.0 * float(maxi(1, n)))
+
+
 static func apply_settings(m, s: Dictionary) -> void:
 	m.settings = Settings.normalize(s)
 	Settings.apply(m.settings, m.get_tree())
@@ -80,7 +89,7 @@ static func build(m) -> void:
 		_focus_first(m)
 		return
 	if m.screen == "base" and not m.offline_offer.is_empty():
-		var r: Rect2 = modal_rect(m, 760, 520)
+		var r: Rect2 = offline_rect(m)
 		Kit.btn(m, "Collect", Rect2(r.position.x + 230, r.end.y - 92, 300, 60), m.claim_offline, "Collect everything the Outpost stored while you were away", true, Kit.GOLD, "Collect", "ui_collect", 24)
 		_focus_first(m)
 		return
@@ -236,7 +245,7 @@ static func _build_settings(m) -> void:
 		var key: String = rw[3]
 		var opts: Array = rw[4]
 		Kit.btn(m, "%s:  %s" % [String(rw[0]), String(rw[1])], Rect2(x, y + k * 62.0, r.size.x - 80.0, 52), func() -> void: cycle_setting(m, sec, key, opts), String(rw[5]) + " (click to change)", true, Kit.NEUTRAL, "SET " + String(rw[0]))
-	Kit.btn(m, "Credits", Rect2(r.end.x - 440, r.end.y - 70, 200, 52), func() -> void: m.set_overlay("credits"), "Open-source credits", true, Kit.NEUTRAL, "Credits")
+	Kit.btn(m, "Credits", Rect2(r.end.x - 180, r.position.y + 14, 160, 44), func() -> void: m.set_overlay("credits"), "Open-source credits", true, Kit.NEUTRAL, "Credits")
 	Kit.btn(m, "Close [%s]" % hint(m, "cancel"), Rect2(r.end.x - 220, r.end.y - 70, 200, 52), func() -> void: m.set_overlay("pause" if m.screen == "run" else ""), "Close settings (changes are saved)", true, Kit.RUST, "SET CLOSE")
 
 
@@ -727,7 +736,7 @@ static func draw_overlay(m) -> void:
 static func _draw_offline(m) -> void:
 	var off: Dictionary = m.offline_offer
 	m.draw_rect(Rect2(0, 0, m.vw, m.vh), Color(0, 0, 0, 0.72))
-	var r: Rect2 = modal_rect(m, 760, 520)
+	var r: Rect2 = offline_rect(m)
 	Kit.panel(m, r, Kit.GOLD, Kit.PANEL2, 3)
 	Kit.t(m, "WHILE YOU WERE AWAY", Vector2(r.get_center().x, r.position.y + 70), 36, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
 	Kit.t(m, "Away %s — your Outpost kept producing" % Kit.dur(int(off.get("minutes", 0)) * 60), Vector2(r.get_center().x, r.position.y + 108), 19, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)

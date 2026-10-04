@@ -143,7 +143,6 @@ static func _draw_tree(m, s: Dictionary) -> void:
 			Kit.icon(m, "rf_root", r.grow(-10))
 		if can:
 			m.draw_arc(p2, NODE_R + 4.0, 0, TAU, 40, Color(col2, 0.5 + 0.4 * sin(m.t_anim * 4.0)), 3.0)
-		Kit.t(m, "%d/%d" % [lv, int(d["max"])], p2 + Vector2(0, 6), 15, Kit.TEXT if lv > 0 else Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, 80.0)
 		var lx: float = p2.x + NODE_R + 8.0
-		Kit.t(m, String(d["name"]), Vector2(lx, p2.y - 2), 15, col2 if lv > 0 else Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, 170.0)
+		Kit.t(m, "%s  %d/%d" % [String(d["name"]), lv, int(d["max"])], Vector2(lx, p2.y - 2), 15, col2 if lv > 0 else Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, 200.0)
 		Kit.t(m, ("%d shards" % ReforgeDB.cost(String(id), lv)) if lv < int(d["max"]) else "max", Vector2(lx, p2.y + 17), 13, Kit.SHARD if can else Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, 170.0)

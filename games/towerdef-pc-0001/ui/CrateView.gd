@@ -139,7 +139,7 @@ static func _draw_reveal(m, st: Rect2) -> void:
 	var crate: String = String(a["crate"])
 	var items: Array = a["items"]
 	var cs: float = minf(st.size.y - 60.0, 180.0)
-	var cx: float = st.position.x + 40.0 + cs * 0.5
+	var cx: float = st.position.x + 60.0 + cs * 0.7
 	var cy: float = st.get_center().y
 	if t < SHAKE:
 		var j: float = sin(t * 60.0) * 6.0 * (t / SHAKE)
@@ -147,9 +147,10 @@ static func _draw_reveal(m, st: Rect2) -> void:
 		Kit.t(m, "Opening...", Vector2(st.get_center().x, st.position.y + 36), 20, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, 300.0)
 		return
 	var bt: float = clampf((t - SHAKE) / BURST, 0.0, 1.0)
-	Kit.icon(m, "crate_open_fx", Rect2(cx - cs * (0.5 + bt * 0.4), cy - cs * (0.5 + bt * 0.4), cs * (1.0 + bt * 0.8), cs * (1.0 + bt * 0.8)), Color(1, 1, 1, 1.0 - bt * 0.6))
+	var fs: float = cs * (1.0 + bt * 0.35)
+	Kit.icon(m, "crate_open_fx", Rect2(cx - fs * 0.5, cy - fs * 0.5, fs, fs), Color(1, 1, 1, 1.0 - bt * 0.6))
 	Kit.icon(m, "crate_%s_open" % crate, Rect2(cx - cs * 0.5, cy - cs * 0.5, cs, cs))
-	var x0: float = cx + cs * 0.5 + 40.0
+	var x0: float = cx + cs * 0.7 + 40.0
 	var cw: float = minf(220.0, (st.end.x - 200.0 - x0) / float(maxi(1, items.size())) - 16.0)
 	for k in items.size():
 		var ft: float = (t - SHAKE - BURST - FLIP * float(k)) / FLIP

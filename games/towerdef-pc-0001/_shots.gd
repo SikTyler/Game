@@ -93,6 +93,7 @@ func _initialize() -> void:
 	await _shot("%s/03c_bay_locked.png" % outdir)
 	main.bay_core = "bastion"
 	# crates
+	_quiet()
 	main.set_tab("crates")
 	await _shot("%s/04_crates.png" % outdir)
 	main.meta_rng.seed = 77
@@ -145,6 +146,7 @@ func _initialize() -> void:
 	main.op_arm = ""
 	# research / cards / missions
 	Labs.start(s, "dmg", main.now_override - 120)
+	_quiet()
 	main.set_tab("research")
 	await _shot("%s/06_research.png" % outdir)
 	s["gems"] = 300
@@ -210,6 +212,7 @@ func _initialize() -> void:
 		if S.wave >= 4 and S.enemies.size() > 6 and S.draft.is_empty() and S.pending_place == "":
 			break
 	main.sel = -1
+	_quiet()
 	main._rebuild_ui()
 	await _wait(12)
 	await _shot("%s/13_battle_early.png" % outdir)
@@ -245,6 +248,7 @@ func _initialize() -> void:
 		if S.wave >= 22 and S.enemies.size() > 16 and S.draft.is_empty() and S.pending_place == "" and S.perk_offer.is_empty():
 			break
 	main.sel = TowerState.CORE_SLOT
+	_quiet()
 	main._rebuild_ui()
 	await _wait(14)
 	await _shot("%s/16_battle_late.png" % outdir)
@@ -296,6 +300,7 @@ func _initialize() -> void:
 
 
 func _quiet() -> void:
+	main.mouse_pos = Vector2(-1, -1)
 	main.toast_queue.clear()
 	main.toast_t = 0.0
 

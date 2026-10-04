@@ -58,7 +58,7 @@ const NAV_H: float = 60.0
 const FADE_TIME: float = 0.25
 const DMG_MERGE: float = 0.1
 ## World extent shown by the run field (spawn ring diameter + margin).
-const WORLD_SPAN: float = 2.0 * TowerState.SPAWN_R + 30.0
+const WORLD_SPAN: float = 2.0 * TowerState.SPAWN_R * 0.84
 
 var save: Dictionary = {}
 var settings: Dictionary = {}        # global user://settings.cfg (Settings.gd), never in a slot
@@ -96,6 +96,7 @@ var dmgnums: FxPool = FxPool.new(48)  # {pos, amt, eid, t, size}
 var bolts: FxPool = FxPool.new(24)    # {a, t}
 var juice: Juice = Juice.new()
 var bursts: Node2D = null
+var fclip: Control                   # clips kill particles to the battlefield
 var slot_pop: Dictionary = {}
 var flash: float = 0.0
 var heal_flash: float = 0.0
@@ -163,8 +164,12 @@ func _ready() -> void:
 	SteamService.init()
 	ach_run = Achievements.new_run()
 	meta_rng.seed = int(Time.get_ticks_usec() % 1000000007)
+	fclip = Control.new()
+	fclip.clip_contents = true
+	fclip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(fclip)    # before ui: particles under the widgets, clipped to the field
 	bursts = BurstsScript.new()
-	add_child(bursts)   # before ui: particles under the widgets
+	fclip.add_child(bursts)
 	ui = Control.new()
 	ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(ui)
@@ -202,6 +207,9 @@ func _layout() -> void:
 	side_w = clampf(roundf(vw * 0.2083), 300.0, 400.0)
 	ui.size = Vector2(vw, vh)
 	fader.size = Vector2(vw, vh)
+	var fr: Rect2 = field_rect()
+	fclip.position = fr.position
+	fclip.size = fr.size
 
 
 func _on_resize() -> void:
@@ -1152,6 +1160,7 @@ func _rebuild_ui() -> void:
 
 func _draw() -> void:
 	stat_tips = []
+	fclip.visible = screen == "run" or screen == "results"
 	draw_rect(Rect2(0, 0, vw, vh), Kit.BG)
 	match screen:
 		"menu":
@@ -1161,7 +1170,7 @@ func _draw() -> void:
 		"run", "results":
 			var off: Vector2 = juice.offset() * world_scale()
 			if bursts != null:
-				bursts.transform = Transform2D(0.0, off) * world_xform()
+				bursts.transform = Transform2D(0.0, off - fclip.position) * world_xform()
 			Battle.draw(self, off)
 	if screen != "menu":
 		Desktop.draw_topbar(self)

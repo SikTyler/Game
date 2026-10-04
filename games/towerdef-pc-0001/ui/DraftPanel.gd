@@ -202,20 +202,21 @@ static func _draw_info(m, lr: Rect2, x: float, w: float) -> void:
 	if focus >= 0:
 		var id: String = "core_" + String(S.core_id) if focus == TowerState.CORE_SLOT else S.id_at(focus)
 		var lines: PackedStringArray = load("res://ui/Battle.gd").cell_text(m, focus).split("\n")
-		Kit.panel(m, Rect2(x, y, w, 176), Kit.EDGE, Kit.PANEL2)
+		var body: String = "\n".join(lines.slice(1))
+		var bh: float = m.font.get_multiline_string_size(body, HORIZONTAL_ALIGNMENT_LEFT, w - 24, 15, 7).y
+		Kit.panel(m, Rect2(x, y, w, 96 + bh), Kit.EDGE, Kit.PANEL2)
 		if id != "":
 			Kit.icon(m, id, Rect2(x + 12, y + 12, 64, 64))
-		Kit.t(m, lines[0], Vector2(x + 88, y + 40), 19, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w - 96)
-		Kit.wrap(m, "\n".join(lines.slice(1)), Vector2(x + 12, y + 96), 15, Kit.DIM, w - 24, 4)
-		y += 190.0
+		Kit.t(m, lines[0], Vector2(x + 88, y + 50), 19, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w - 96)
+		Kit.wrap(m, body, Vector2(x + 12, y + 86), 15, Kit.DIM, w - 24, 7)
+		y += 110.0 + bh
 	else:
-		Kit.wrap(m, "Hover a cell for details. Drafts arrive after waves 1, 2, 3, then every 2nd wave (plus an Epic+ draft on boss waves). Cash buys Core tracks on the right.", Vector2(x, y + 10), 15, Kit.DIM, w, 5)
-		y += 110.0
+		y += Kit.wrap(m, "Hover a cell for details. Drafts arrive after waves 1, 2, 3, then every 2nd wave (plus an Epic+ draft on boss waves). Cash buys Core tracks on the right.", Vector2(x, y + 6), 15, Kit.DIM, w, 5) + 24.0
 	# run build summary
 	Kit.head(m, "THIS RUN", Vector2(x, y + 10), w)
 	y += 22.0
 	var blds: int = S.building_count()
-	Kit.row(m, "Buildings / huts", "%d / %d" % [blds, S.hut_count()], Vector2(x, y + 18), w, Kit.TEXT, "Buildings on the grid (huts included) — duplicates level them to L5", 15)
+	Kit.row(m, "Buildings  ·  huts", "%d  ·  %d" % [blds - S.hut_count(), S.hut_count()], Vector2(x, y + 18), w, Kit.TEXT, "Buildings on the grid (huts included) — duplicates level them to L5", 15)
 	Kit.row(m, "Rings open", "%d / 3" % int(S.rings_open), Vector2(x, y + 40), w, Kit.TEXT, "Outer rings open as Core track levels grow", 15)
 	Kit.row(m, "Troops", str(S.troops.filter(func(t: Variant) -> bool: return String((t as Dictionary).get("state", "")) != "dead").size()), Vector2(x, y + 62), w, Kit.TEXT, "Troops roaming the lanes from your huts", 15)
 	y += 76.0
