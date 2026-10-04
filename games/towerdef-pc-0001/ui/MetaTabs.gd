@@ -50,7 +50,7 @@ static func build_labs(m) -> void:
 		elif lvl >= mx:
 			status = "MAX"
 			sc = GREEN
-		var r := Rect2(16.0 + float(k % 2) * 348.0, TRACK_Y + float(k / 2) * 96.0, 340, 90)
+		var r := Rect2(16.0 + float(k % 2) * 348.0, TRACK_Y + float(k / 2) * 80.0, 340, 76)
 		var b: Button = m._card(r, [["%s  Lv%d/%d" % [String(d["name"]), lvl, mx], 20, TEXT], [String(d["effect"]), 18, DIM], [status, 18, sc]], "lab_" + id, func() -> void: m.meta_act(Labs.start(m.save, id, m.now())), Labs.can_start(s, id), LAB_COL, "LAB " + id, "row", 44.0)
 		for c in b.get_children():
 			if c is Label:

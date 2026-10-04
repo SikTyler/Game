@@ -6,6 +6,7 @@ extends SceneTree
 const BaseMeta := preload("res://BaseMeta.gd")
 const MetaSave := preload("res://MetaSave.gd")
 const Labs := preload("res://Labs.gd")
+const Outpost := preload("res://Outpost.gd")
 const Cards := preload("res://Cards.gd")
 const Missions := preload("res://Missions.gd")
 const TowerState := preload("res://TowerState.gd")
@@ -36,8 +37,12 @@ func _initialize() -> void:
 	save["best_wave"] = 50
 	save["tier"] = 3
 	save["runs"] = 6
+	# The away modal shows what the Outpost stored (a Coin Mill ran 3 h).
+	save["coins"] = 2000
+	Outpost.place(save, "mill", 4, 4, 0, T0 - 3 * 3600 - 200)
+	Outpost.tick(save, T0 - 3 * 3600)
+	save["coins"] = 1370
 	save["last_seen"] = T0 - 3 * 3600
-	save["best_coin_rate"] = 12.0
 	save["research"]["lvls"]["speed"] = 2
 	main.now_override = T0
 	main.boot(save, T0)

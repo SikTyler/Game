@@ -42,6 +42,13 @@ const PerkDB := preload("res://data/PerkDB.gd")
 const PickDB := preload("res://data/PickDB.gd")
 const Specials := preload("res://Specials.gd")
 const Cores := preload("res://Cores.gd")
+const Parts := preload("res://Parts.gd")
+const PartDB := preload("res://data/PartDB.gd")
+const Crates := preload("res://Crates.gd")
+const OutpostDB := preload("res://data/OutpostDB.gd")
+const Reforge := preload("res://Reforge.gd")
+const PowerModel := preload("res://PowerModel.gd")
+const ReforgeDB := preload("res://data/ReforgeDB.gd")
 
 const DT: float = 0.1
 const MAX_SIM_S: float = 3600.0
@@ -404,28 +411,175 @@ static func run_once(save: Dictionary, policy: String, seed_value: int) -> Dicti
 	return {"wave": S.wave, "level": S.level, "kills": S.kills, "coins": int(S.coins_run), "time": t}
 
 
-## Meta spending between runs (REDESIGN): permanent buildings no longer
-## enter runs, so coins go to the active Core's level and the legacy Core
-## stat levels (cheapest first). The Outpost / parts sinks arrive with
-## ENGINE-META.
-static func spend_meta(save: Dictionary, policy: String) -> void:
+## Meta spending between runs (REDESIGN + ENGINE-META): coins go to the
+## active Core's level first (Core Cores gate every 5th level), then Field
+## Crates (Keys open Supply Crates), then the best parts are installed and
+## levelled with Scrap. The legacy v3 Core stat levels are no longer bought
+## (save v4 migrates them into the Bastion level). The Outpost is built in
+## session_open (it needs the clock).
+static func spend_meta(save: Dictionary, policy: String, rng: RandomNumberGenerator = null) -> void:
 	var guard: int = 0
 	var core_order: Array = ["dmg", "hp", "regen"]
 	while guard < 400:
 		guard += 1
-		var core: Dictionary = save["core"]
-		var stat: String = core_order[0]
-		for k in core_order:
-			if int(core[k]) < int(core[stat]):
-				stat = k
 		var cid: String = Cores.active(save)
-		var lv_cost: int = int(Cores.level_cost(Cores.level(save, cid))["coins"]) if Cores.level(save, cid) < Cores.max_level(save) else 1 << 40
-		var st_cost: int = BaseMeta.core_cost(int(core[stat])) if int(core[stat]) < BaseMeta.core_cap(save) else 1 << 40
-		# A Core level (x1.06 dmg, x1.05 HP, x1.04 regen/cash) first; a legacy
-		# stat level (+6% / +5% / +4% additive) only while it is far cheaper.
 		var did: bool = not Cores.try_level(save, cid).is_empty()
-		if not did and (st_cost * 4 <= lv_cost or not Cores.can_level(save, cid)):
+		if not did and TuneRef.int_of("pc_bot_legacy_core", 0) > 0:
+			var core: Dictionary = save["core"]
+			var stat: String = core_order[0]
+			for k in core_order:
+				if int(core[k]) < int(core[stat]):
+					stat = k
 			did = BaseMeta.try_core(save, stat)
+		if not did:
+			break
+	var r: RandomNumberGenerator = rng
+	if r == null:
+		r = RandomNumberGenerator.new()
+		r.seed = int(save.get("runs", 0)) * 7919 + 13
+	_crates_spend(save, r)
+	_parts_equip(save, policy)
+
+
+## Crates: the free token, Keys -> Supply Crates, then Field Crates with up
+## to half the coins left after Core levels (a competent player keeps a
+## reserve), at most pc_bot_crates per session.
+static func _crates_spend(save: Dictionary, rng: RandomNumberGenerator) -> void:
+	while Crates.tokens(save) > 0:
+		Crates.open(save, "field", "token", rng)
+	while int(save.get("keys", 0)) >= 1:
+		if Crates.open(save, "supply", "keys", rng).is_empty():
+			break
+	var budget: int = int(save["coins"]) / 2
+	var n: int = 0
+	while n < TuneRef.int_of("pc_bot_crates", 3) and Crates.coin_cost(save) <= budget and Crates.can_pay(save, "field", "coins"):
+		budget -= Crates.coin_cost(save)
+		Crates.open(save, "field", "coins", rng)
+		n += 1
+
+
+## Keys that only pay off for one Core / build: the bot ignores their
+## benefit (but still pays their drawback) unless it fits.
+const NICHE: Dictionary = {"beam_ramp": "lance", "pulse_dmg": "tempest", "troop_count": "troops", "hut_drone": "troops",
+	"troop_dmg": "troops", "troop_respawn": "troops", "hut_max": "troops", "queen_hold": "never"}
+
+
+## Policy weighting of a part: eco values cash keys, weapon damage keys; a
+## part whose benefit is niche for this Core counts only its drawback.
+static func _part_score(id: String, lvl: int, policy: String, core: String = "bastion") -> float:
+	var d: Dictionary = PartDB.get_def(id)
+	var plus: Dictionary = d.get("plus", {})
+	for k in (plus.keys() + (d.get("minus", {}) as Dictionary).keys()):
+		var need: String = String(NICHE.get(String(k), ""))
+		if need == "never" or (need != "" and need != core):
+			return -1.0
+	var v: float = PowerModel.part_value(PartDB.pm_part(id, lvl), PartDB.val_weights())
+	if policy == "eco" and (plus.has("cash") or plus.has("cash_flat") or plus.has("kill_cash") or plus.has("interest")):
+		v *= 1.5
+	if policy == "weapon" and (plus.has("dmg") or plus.has("core_dmg") or plus.has("rate") or plus.has("crit")):
+		v *= 1.5
+	return v
+
+
+## Install the best owned part in every open slot of the active Core, then
+## spend Scrap levelling the equipped parts (cheapest level first).
+static func _parts_equip(save: Dictionary, policy: String) -> void:
+	var cid: String = Cores.active(save)
+	var lv: int = Cores.level(save, cid)
+	var used: Dictionary = {}
+	for k in Parts.N_SLOTS:
+		if not Parts.slot_open(lv, k):
+			continue
+		var best: String = ""
+		var bv: float = -INF
+		for uid in Parts.items(save).keys():
+			var u: String = String(uid)
+			if used.has(u) or not Parts.fits(save, u, k):
+				continue
+			var it: Dictionary = Parts.item(save, u)
+			var v: float = _part_score(String(it["id"]), int(it["lvl"]), policy, cid)
+			if v > 0.0 and v > bv:
+				bv = v
+				best = u
+		if best != "":
+			used[best] = true
+			if String(Parts.preset(save, cid)[k]) != best:
+				Parts.equip(save, cid, k, best)
+	var guard: int = 0
+	while guard < 200:
+		guard += 1
+		var bu: String = ""
+		var bc: int = 1 << 30
+		for e in Parts.equipped(save, cid):
+			var ed: Dictionary = e
+			if Parts.can_level(save, String(ed["uid"])):
+				var c: int = PartDB.level_cost(String(ed["id"]), int(ed["lvl"]))
+				if c < bc:
+					bc = c
+					bu = String(ed["uid"])
+		if bu == "" or Parts.level_up(save, bu).is_empty():
+			break
+
+
+## The Outpost plan a competent player follows (start area first, then plot
+## 0): [kind, id, x, y, rot]. Each session the bot takes the first affordable
+## action (one job per builder) within pc_bot_op_frac of its coins.
+const OP_PLAN: Array = [
+	["place", "mill", 4, 4, 0], ["place", "mill", 4, 6, 0], ["place", "warehouse", 3, 2, 0],
+	["up", "mill"], ["up", "relay"], ["up", "research"], ["place", "conduit", 2, 6, 0],
+	["place", "refinery", 0, 4, 0], ["place", "keyforge", 2, 7, 0], ["place", "gemmine", 0, 6, 0],
+	["plot", 0], ["place", "mill", 6, 4, 0], ["place", "archive", 6, 2, 0], ["place", "barracks", 8, 4, 0],
+	["place", "mill", 8, 2, 0], ["up", "warehouse"], ["up", "refinery"], ["up", "keyforge"], ["up", "gemmine"],
+	["up", "archive"], ["up", "barracks"],
+]
+
+
+static func _op_has(save: Dictionary, id: String, x: int, y: int) -> bool:
+	for k in save["outpost"]["buildings"].keys():
+		var b: Dictionary = save["outpost"]["buildings"][k]
+		if String(b["id"]) == id and int(b["x"]) == x and int(b["y"]) == y:
+			return true
+	return false
+
+
+static func outpost_spend(save: Dictionary, now: int) -> void:
+	Outpost.tick(save, now)
+	var guard: int = 0
+	while guard < 8 and Outpost.busy(save) < Outpost.builders(save):
+		guard += 1
+		var budget: int = int(float(save["coins"]) * TuneRef.num("pc_bot_op_frac", 0.4)) + int(save["outpost"].get("credit", 0))
+		var did: bool = false
+		for st in OP_PLAN:
+			var a: Array = st
+			match String(a[0]):
+				"place":
+					var id: String = String(a[1])
+					if _op_has(save, id, int(a[2]), int(a[3])):
+						continue
+					var d: Dictionary = OutpostDB.get_def(id)
+					if int(d["coins"]) > budget or (int(d.get("gems", 0)) > 0 and int(save.get("gems", 0)) < int(d["gems"]) + 20):
+						continue
+					did = not Outpost.place(save, id, int(a[2]), int(a[3]), int(a[4]), now).is_empty()
+				"plot":
+					var pc: Dictionary = Outpost.plot_cost(save)
+					if int(pc["coins_alt"]) <= budget:
+						did = not Outpost.unlock_plot(save, int(a[1])).is_empty()
+				"up":
+					var uid: String = ""
+					if String(a[1]) == "relay":
+						if Outpost.relay_cost(int(save["outpost"]["relay_lvl"])) <= budget:
+							uid = "relay"
+					else:
+						var lo: int = 99
+						for k in save["outpost"]["buildings"].keys():
+							var b: Dictionary = save["outpost"]["buildings"][k]
+							if String(b["id"]) == String(a[1]) and int(b["lvl"]) < lo and Outpost.can_upgrade(save, String(k)) and Outpost.cost(String(b["id"]), int(b["lvl"])) <= budget:
+								lo = int(b["lvl"])
+								uid = String(k)
+					if uid != "":
+						did = not Outpost.upgrade(save, uid, now).is_empty()
+			if did:
+				break
 		if not did:
 			break
 
@@ -536,7 +690,8 @@ static func session_open(save: Dictionary, now: int, rng: RandomNumberGenerator,
 	_claim_missions(save)
 	_gems_spend(save, rng)
 	_labs_spend(save, now)
-	spend_meta(save, policy)
+	outpost_spend(save, now)     # cheapest ROI first: Mills pay back in hours
+	spend_meta(save, policy, rng)
 	_labs_spend(save, now, 1.0)   # base saturated: the rest goes to research
 	var steps: Array = Labs.speed_steps(save)
 	BaseMeta.set_speed(save, float(steps[steps.size() - 1]))
@@ -601,17 +756,97 @@ static func campaign_days(seed0: int, policy: String = "balanced", n_days: int =
 		for id in LabDB.IDS:
 			lab_sum += Labs.level(save, String(id))
 		var bit: int = Tiers.best_in(save, hi)
+		var op_h: float = float(Outpost.production(save)["coins"])
+		var act_h: float = float(rate.get(Tiers.highest(save), rate.get(1, 0.0))) * 60.0
 		var row: Dictionary = {
+			"outpost_h": snappedf(op_h, 1.0), "outpost_ratio": snappedf(op_h / maxf(1.0, act_h), 0.001), "parts": Parts.count(save), "core_lvl": Cores.level(save, Cores.active(save)),
 			"day": d + 1, "tier": hi, "best_wave_hi_tier": bit, "best_wave": int(save["best_wave"]),
 			"coins_gross": int(led["gross_coins"]), "bank": int(save["coins"]), "gems": int(save["gems"]),
 			"gems_earned": _gems_total(save), "labs": lab_sum, "cards": Cards.owned(save).size(),
 			"progress_key": hi * 1000 + bit,
 		}
 		days.append(row)
-		print("CAMPAIGN " + policy + " day %2d: T%d best@T%d w%d best w%d | coins gross %d bank %d | gems %d (earned %d) | labs %d cards %d" % [d + 1, hi, hi, bit, row["best_wave"], row["coins_gross"], row["bank"], row["gems"], row["gems_earned"], lab_sum, row["cards"]])
+		print("CAMPAIGN " + policy + " day %2d: T%d best@T%d w%d best w%d | coins gross %d bank %d | gems %d (earned %d) | labs %d cards %d | core L%d parts %d outpost %d/h (x%.3f)" % [d + 1, hi, hi, bit, row["best_wave"], row["coins_gross"], row["bank"], row["gems"], row["gems_earned"], lab_sum, row["cards"], row["core_lvl"], row["parts"], int(op_h), float(row["outpost_ratio"])])
 		if d + 1 == 7 or d + 1 == 20:
 			snaps[d + 1] = save.duplicate(true)
 	return {"days": days, "save": save, "led": led, "rate": rate, "t2_day": t2_day, "t3_day": t3_day, "snaps": snaps}
+
+
+## Shard tree priority for the bot (power first, then economy, then speed).
+const SHARD_PRIO: Array = ["root_forge", "might", "bulwark_p", "prosperity", "head_start", "outpost_p", "starting_cash", "builder2", "shard_yield", "scrap_p", "crate_luck", "tempo", "banish_plus", "wide_draft", "core_ceiling", "retain"]
+
+
+static func spend_shards(save: Dictionary) -> void:
+	var guard: int = 0
+	while guard < 100:
+		guard += 1
+		var best: String = ""
+		var bc: int = 1 << 30
+		for id in SHARD_PRIO:
+			if Reforge.can_buy(save, String(id)):
+				var c: int = ReforgeDB.cost(String(id), Reforge.node(save, String(id)))
+				if c < bc:
+					bc = c
+					best = String(id)
+		if best == "" or Reforge.buy(save, best).is_empty():
+			break
+
+
+## A competent player reforges when the shards on offer at least match what
+## the tree already holds (REDESIGN_SPEC §3.4 loop table: 12, 15, 28, 50).
+static func wants_reforge(save: Dictionary) -> bool:
+	return Reforge.can_reforge(save) and Reforge.shards_now(save) >= maxi(TuneRef.int_of("pc_bot_reforge_min", 12), int(save["reforge"]["cum_shards"]))
+
+
+## AC-28 Reforge loops (report): from the day-30 save, keep playing sessions;
+## reforge whenever wants_reforge(); a loop's length is the sessions it takes
+## to get back to the progress key (tier*1000 + best wave in it) held before
+## that Reforge. Each loop should take <= 70% of the previous one.
+static func reforge_loops(seed0: int, start: Dictionary, loops: int = 2, max_days: int = 14) -> Dictionary:
+	var save: Dictionary = start.duplicate(true)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed0 + 99
+	var led: Dictionary = {"offline_coins": 0, "offline_min": 0, "gross_coins": 0, "run_coins": 0, "run_min": 0.0}
+	var rate: Dictionary = {}
+	var rows: Array = []
+	var run_idx: int = 0
+	var now: int = int(save["last_seen"]) + 3600
+	for L in loops:
+		var waited: int = 0
+		while not wants_reforge(save) and waited < max_days * 4:
+			waited += 1
+			now = _loop_session(save, now, rng, led, rate, seed0, run_idx)
+			run_idx += 1
+		if not wants_reforge(save):
+			rows.append({"loop": L + 1, "reforged": false, "sessions_waited": waited})
+			break
+		var key0: int = Tiers.highest(save) * 1000 + Tiers.best_in(save, Tiers.highest(save))
+		var ev: Array = Reforge.reforge(save, now)
+		spend_shards(save)
+		var n: int = 0
+		while n < max_days * 4:
+			n += 1
+			now = _loop_session(save, now, rng, led, rate, seed0, run_idx)
+			run_idx += 1
+			if Tiers.highest(save) * 1000 + Tiers.best_in(save, Tiers.highest(save)) >= key0:
+				break
+		var back: bool = Tiers.highest(save) * 1000 + Tiers.best_in(save, Tiers.highest(save)) >= key0
+		rows.append({"loop": L + 1, "reforged": true, "shards": int((ev[0] as Dictionary)["shards"]), "key_before": key0, "sessions_back": n, "regained": back, "sessions_waited": waited})
+		print("REFORGE loop %d: %s" % [L + 1, JSON.stringify(rows.back())])
+	var ok: bool = rows.size() >= 2 and bool((rows[0] as Dictionary).get("regained", false)) and bool((rows[1] as Dictionary).get("regained", false)) and float((rows[1] as Dictionary)["sessions_back"]) <= 0.7 * float((rows[0] as Dictionary)["sessions_back"])
+	return {"rows": rows, "ac28_ok": ok}
+
+
+static func _loop_session(save: Dictionary, now0: int, rng: RandomNumberGenerator, led: Dictionary, rate: Dictionary, seed0: int, run_idx: int) -> int:
+	var now: int = maxi(now0 + 8 * 3600, int(save["last_seen"]) + 60)
+	session_open(save, now, rng, led)
+	var t: int = pick_tier(save, rate, run_idx)
+	BaseMeta.select_tier(save, t)
+	var r: Dictionary = camp_run(save, "balanced", seed0 + 5000 + run_idx * 131, now, "")
+	rate[t] = float(r["coins"]) / maxf(0.1, float(r["real_s"]) / 60.0)
+	save["last_seen"] = now + int(r["real_s"])
+	_claim_missions(save)
+	return now
 
 
 static func _gems_total(save: Dictionary) -> int:
@@ -826,7 +1061,10 @@ func campaign_checks(seed0: int) -> Dictionary:
 	var per_day: Array = []
 	for r in days:
 		var rd: Dictionary = r
-		per_day.append({"day": rd["day"], "tier": rd["tier"], "best_wave_hi_tier": rd["best_wave_hi_tier"], "best_wave": rd["best_wave"], "coins": rd["coins_gross"], "gems": rd["gems_earned"], "labs": rd["labs"], "cards": rd["cards"]})
+		per_day.append({"day": rd["day"], "tier": rd["tier"], "best_wave_hi_tier": rd["best_wave_hi_tier"], "best_wave": rd["best_wave"], "coins": rd["coins_gross"], "gems": rd["gems_earned"], "labs": rd["labs"], "cards": rd["cards"], "core_lvl": rd["core_lvl"], "parts": rd["parts"], "outpost_h": rd["outpost_h"], "outpost_ratio": rd["outpost_ratio"]})
+	# AC-28 (report until the balance pass): Reforge loops from the day-30 save.
+	var RL: Dictionary = reforge_loops(seed0, save)
+	print("AC-28 REFORGE LOOPS: " + JSON.stringify(RL))
 	var day1: int = int((days[0] as Dictionary)["best_wave"])
 	var last: Dictionary = days[DAYS - 1]
 	return {
@@ -853,4 +1091,5 @@ func campaign_checks(seed0: int) -> Dictionary:
 		"pc_refinery": refin, "pc_refinery_not_dominant": refin_ok,
 		"pc_modifiers_d20": mod_rows, "pc_modifiers_reach_w25": mods_ok, "pc_modifiers_fair": fair_ok,
 		"pc_endless_d20": er, "pc_endless_runs": endless_ok,
+		"ac28_reforge_loops": RL,
 	}

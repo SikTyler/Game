@@ -397,16 +397,16 @@ func _meta_stages() -> void:
 	_check("AC-17 last_seen 0 pays 0", int(Outpost.away_report(O, NOW + 3600)["coins"]) == 0)
 	O["last_seen"] = NOW
 	_check("AC-17 under 5 min pays 0", int(Outpost.away_report(O, NOW + 299)["coins"]) == 0)
-	_check("away 1 h = Mill output (60/h)", absf(float(Outpost.away_report(O, NOW + 3600)["coins"]) - 60.0) < 0.01 and int(Outpost.away_report(O, NOW + 3600)["minutes"]) == 60)
-	_check("AC-17 capped at 8 h of storage", absf(float(Outpost.away_report(O, NOW + 86400)["coins"]) - 480.0) < 0.01)
+	_check("away 1 h = Mill output (60/h)", absf(float(Outpost.away_report(O, NOW + 3600)["coins"]) - OutpostDB.MILL_RATE) < 0.01 and int(Outpost.away_report(O, NOW + 3600)["minutes"]) == 60)
+	_check("AC-17 capped at 8 h of storage", absf(float(Outpost.away_report(O, NOW + 86400)["coins"]) - 8.0 * OutpostDB.MILL_RATE) < 0.01)
 	O["research"]["lvls"]["offcap"] = 4
 	O["research"]["lvls"]["offrate"] = 2
-	_check("Storage Tech +10%/L, Logistics Tech +5%/L", absf(Outpost.cap(O, om) - 60.0 * 1.10 * 8.0 * 1.4) < 0.01 and absf(Outpost.rate(O, om) - 66.0) < 0.01)
+	_check("Storage Tech +10%/L, Logistics Tech +5%/L", absf(Outpost.cap(O, om) - OutpostDB.MILL_RATE * 1.10 * 8.0 * 1.4) < 0.01 and absf(Outpost.rate(O, om) - 1.1 * OutpostDB.MILL_RATE) < 0.01)
 	O["research"]["lvls"]["offcap"] = 0
 	O["research"]["lvls"]["offrate"] = 0
 	var c18: int = int(O["coins"])
 	var oev: Array = Outpost.claim_away(O, NOW + 600)
-	_check("away claim pays + stamps last_seen", int(O["coins"]) == c18 + 10 and int(O["last_seen"]) == NOW + 600 and _evts(oev, "offline").size() == 1)
+	_check("away claim pays + stamps last_seen", int(O["coins"]) == c18 + int(OutpostDB.MILL_RATE / 6.0) and int(O["last_seen"]) == NOW + 600 and _evts(oev, "offline").size() == 1)
 
 	# --- Stage 16: missions + streak (AC-28..30) ----------------------------
 	var M: Dictionary = BaseMeta.default_save()
@@ -3099,7 +3099,7 @@ func _outpost_stages() -> void:
 	var con: Dictionary = Outpost.connected(cs["outpost"])
 	_check("AC-17 unconnected generator produces 0", not bool(con[isl]) and is_equal_approx(Outpost.rate(cs, isl), 0.0) and Outpost.nominal_rate(cs, isl) > 0.0)
 	_op_build(cs, "conduit", 2, 6)
-	_check("AC-17 a Conduit next to the Relay links it (flood fill)", bool(Outpost.connected(cs["outpost"])[isl]) and is_equal_approx(Outpost.rate(cs, isl), 60.0))
+	_check("AC-17 a Conduit next to the Relay links it (flood fill)", bool(Outpost.connected(cs["outpost"])[isl]) and is_equal_approx(Outpost.rate(cs, isl), OutpostDB.MILL_RATE))
 	# Power budget scales efficiency (AC-17).
 	var ps: Dictionary = _op_save()
 	ps["outpost"]["plots"] = [0, 1]
@@ -3115,14 +3115,14 @@ func _outpost_stages() -> void:
 	var a: Dictionary = _op_save()
 	var mu: String = _op_build(a, "mill", 4, 4)
 	Outpost.tick(a, OT0 + 3600)
-	_check("AC-18 accrual = rate x elapsed (60/h)", absf(float(a["outpost"]["buildings"][mu]["stored"]) - 60.0) < 0.01)
+	_check("AC-18 accrual = rate x elapsed (60/h)", absf(float(a["outpost"]["buildings"][mu]["stored"]) - OutpostDB.MILL_RATE) < 0.01)
 	Outpost.tick(a, OT0 + 3600 * 30)
-	_check("AC-18 accrual clamps at the 8 h storage cap", is_equal_approx(float(a["outpost"]["buildings"][mu]["stored"]), 480.0) and is_equal_approx(Outpost.cap(a, mu), 480.0))
+	_check("AC-18 accrual clamps at the 8 h storage cap", is_equal_approx(float(a["outpost"]["buildings"][mu]["stored"]), 8.0 * OutpostDB.MILL_RATE) and is_equal_approx(Outpost.cap(a, mu), 8.0 * OutpostDB.MILL_RATE))
 	var c0: int = int(a["coins"])
 	var cev: Array = Outpost.collect(a, mu, OT0 + 3600 * 30)
-	_check("AC-18 collect pays whole coins and empties storage", _evts(cev, "collect").size() == 1 and int(a["coins"]) == c0 + 480 and float(a["outpost"]["buildings"][mu]["stored"]) < 1.0 and int(a["stats"]["outpost_collects"]) == 1)
+	_check("AC-18 collect pays whole coins and empties storage", _evts(cev, "collect").size() == 1 and int(a["coins"]) == c0 + int(8.0 * OutpostDB.MILL_RATE) and float(a["outpost"]["buildings"][mu]["stored"]) < 1.0 and int(a["stats"]["outpost_collects"]) == 1)
 	var pv: Dictionary = Outpost.pending(a, OT0 + 3600 * 32)
-	_check("OP pending previews without mutating", absf(float(pv["coins"]) - 120.0) < 0.01 and float(a["outpost"]["buildings"][mu]["stored"]) < 1.0)
+	_check("OP pending previews without mutating", absf(float(pv["coins"]) - 2.0 * OutpostDB.MILL_RATE) < 0.01 and float(a["outpost"]["buildings"][mu]["stored"]) < 1.0)
 	# First tick of a never-ticked building only stamps the clock (no back pay).
 	var nb: Dictionary = _op_save()
 	var nu: String = _op_build(nb, "mill", 4, 4)
@@ -3138,13 +3138,13 @@ func _outpost_stages() -> void:
 	Outpost.tick(t, OT0 + 119)
 	_check("AC-18 build not done before ends_at", not bool(t["outpost"]["buildings"][tu]["built"]))
 	var dev: Array = Outpost.tick(t, OT0 + 120 + 3600)
-	_check("AC-18 build completes at ends_at, produces from then", _evts(dev, "build_done").size() == 1 and bool(t["outpost"]["buildings"][tu]["built"]) and absf(float(t["outpost"]["buildings"][tu]["stored"]) - 60.0) < 0.01)
+	_check("AC-18 build completes at ends_at, produces from then", _evts(dev, "build_done").size() == 1 and bool(t["outpost"]["buildings"][tu]["built"]) and absf(float(t["outpost"]["buildings"][tu]["stored"]) - OutpostDB.MILL_RATE) < 0.01)
 	var uc: int = Outpost.cost("mill", 1)
 	var c1: int = int(t["coins"])
 	var uev: Array = Outpost.upgrade(t, tu, OT0 + 3720)
 	_check("OP upgrade cost x1.6^(L-1), time x1.4^(L-1)", uev.size() >= 1 and int(t["coins"]) == c1 - uc and Outpost.cost("mill", 3) == int(round(500.0 * 2.56)) and Outpost.build_time(t, "mill", 2) == int(round(120.0 * 1.4)))
 	Outpost.tick(t, OT0 + 3720 + 120)
-	_check("OP upgrade done: L2 = +25% production", int(t["outpost"]["buildings"][tu]["lvl"]) == 2 and is_equal_approx(Outpost.nominal_rate(t, tu), 75.0))
+	_check("OP upgrade done: L2 = +25% production", int(t["outpost"]["buildings"][tu]["lvl"]) == 2 and is_equal_approx(Outpost.nominal_rate(t, tu), 1.25 * OutpostDB.MILL_RATE))
 	_check("OP max level = min(10, Relay L + 2)", Outpost.max_lvl(t, "mill") == 3)
 	var sk: Dictionary = _op_save()
 	Outpost.place(sk, "research", 0, 6, 0, OT0)
@@ -3377,7 +3377,7 @@ func _reforge_stages() -> void:
 	var oc: Dictionary = _op_save()
 	var ou: String = _op_build(oc, "mill", 4, 4)
 	Outpost.collect(oc, ou, OT0 + 3600)
-	_check("RF Outpost coins count toward coins_since", int(oc["reforge"]["coins_since"]) == 60)
+	_check("RF Outpost coins count toward coins_since", int(oc["reforge"]["coins_since"]) == int(OutpostDB.MILL_RATE))
 
 
 ## AC-22: v3 -> v4 migration fixture (a PC v3 save), idempotent, sanitize.
@@ -3424,7 +3424,7 @@ func _save_v4_stages() -> void:
 	var away: Dictionary = Outpost.away_report(m, OT0)
 	Outpost.tick(m, OT0)
 	Outpost.tick(m, OT0 + 3600)
-	_check("AC-22 no double offline pay (accrues from the migration time)", int(away["coins"]) == 0 and absf(float(Outpost.pending(m, OT0 + 3600)["coins"]) - 60.0 * 1.5) < 0.01)
+	_check("AC-22 no double offline pay (accrues from the migration time)", int(away["coins"]) == 0 and absf(float(Outpost.pending(m, OT0 + 3600)["coins"]) - OutpostDB.MILL_RATE * 1.5) < 0.01)
 	# Idempotent: migrating / normalizing again changes nothing.
 	var m2: Dictionary = BaseMeta.normalize(BaseMeta.migrate(m))
 	_check("AC-22 migration idempotent (v4 -> v4)", JSON.stringify(m2) == JSON.stringify(m) and int(BaseMeta.normalize(BaseMeta.normalize(BaseMeta.migrate(v3)))["coins"]) == 10000 + refund + core_ref)

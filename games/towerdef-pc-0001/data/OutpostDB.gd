@@ -8,6 +8,9 @@ extends RefCounted
 ## chunks of 8-16 cells that tile the map exactly (terrain is decorative,
 ## except Crystal Veins and 3 water cells that block building).
 
+## Coin Mill L1 coins/h (SYSTEMS 60 is "the tuning knob"; 150 measured so the
+## Outpost replaces the old Offline pay in the playtest campaign).
+const MILL_RATE: float = 150.0
 const W: int = 14
 const H: int = 10
 const RELAY: Vector2i = Vector2i(2, 4)       # top-left of the 2x2 Relay
@@ -26,7 +29,7 @@ const BLOCKED: Array = [Vector2i(13, 9), Vector2i(0, 0), Vector2i(13, 4)]
 ## (+50% per level); time = L1 build seconds; power = draw.
 const DEFS: Dictionary = {
 	"relay": {"name": "Core Relay", "size": [2, 2], "power": 0, "coins": 3000, "gems": 0, "time": 600, "res": "", "rate": 0.0, "storage_h": 0.0, "max_lvl": 10},
-	"mill": {"name": "Coin Mill", "size": [2, 2], "power": 2, "coins": 500, "gems": 0, "time": 120, "res": "coins", "rate": 60.0, "storage_h": 8.0},
+	"mill": {"name": "Coin Mill", "size": [2, 2], "power": 2, "coins": 500, "gems": 0, "time": 120, "res": "coins", "rate": MILL_RATE, "storage_h": 8.0},
 	"refinery": {"name": "Scrap Refinery", "size": [2, 2], "power": 3, "coins": 1500, "gems": 0, "time": 600, "res": "scrap", "rate": 6.0, "storage_h": 12.0},
 	"gemmine": {"name": "Gem Mine", "size": [2, 2], "power": 4, "coins": 10000, "gems": 50, "time": 14400, "res": "gems", "rate": 1.0 / 3.0, "storage_h": 0.0, "hard_cap": 24.0},
 	"keyforge": {"name": "Key Forge", "size": [2, 1], "power": 3, "coins": 8000, "gems": 0, "time": 3600, "res": "keys", "rate": 1.0 / 24.0, "storage_h": 0.0, "hard_cap": 3.0},
