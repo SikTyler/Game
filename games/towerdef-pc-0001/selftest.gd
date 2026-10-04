@@ -26,6 +26,7 @@ const Keybinds := preload("res://Keybinds.gd")
 const SteamService := preload("res://SteamService.gd")
 const Achievements := preload("res://Achievements.gd")
 const AchievementDB := preload("res://data/AchievementDB.gd")
+const PowerModel := preload("res://PowerModel.gd")
 
 var fails: Array = []
 
@@ -234,6 +235,7 @@ func _initialize() -> void:
 	_fix_round_stages()
 	_juice_targeting_stages()
 	_pc_engine_stages()
+	_redesign_run_stages()
 
 	if fails.is_empty():
 		print("SELFTEST OK")
@@ -1921,3 +1923,49 @@ func _pc_shell_stages() -> void:
 	_check("PC-E10 no false positives in a 9-wave normal run (%s)" % JSON.stringify(tgot), tgot.is_empty() and Achievements.unlocked_count(tsv) == 0 and SteamService.mock_ops("unlock_achievement").is_empty())
 	_check("PC-E10 achievements survive normalize", BaseMeta.normalize({"achievements": {"unlocked": {"ACH_FIRST_RUN": 5}, "missions_claimed": 3}})["achievements"] == {"unlocked": {"ACH_FIRST_RUN": 5}, "missions_claimed": 3})
 	SteamService.reset_mock()
+
+
+# ======================================================================
+# REDESIGN ENGINE-RUN (REDESIGN_SPEC §2): PowerModel, Cores + cash tracks,
+# empty roguelite grid + extended drafts, Specials, Troops, Insight, Drops.
+# ======================================================================
+func _redesign_run_stages() -> void:
+	_power_model_stages()
+
+
+## §2.7 PowerModel: pure, static, matches the engine's own curves.
+func _power_model_stages() -> void:
+	_check("PM hp_scale w1 = 1, w11 = 1.17^10 (T1)", is_equal_approx(PowerModel.hp_scale(1, 1), 1.0) and is_equal_approx(PowerModel.hp_scale(11, 1), pow(1.17, 10.0)))
+	_check("PM hp growth per tier 1.17 / 1.18 / 1.155", is_equal_approx(PowerModel.hp_growth(1), 1.17) and is_equal_approx(PowerModel.hp_growth(2), 1.18) and is_equal_approx(PowerModel.hp_growth(5), 1.155))
+	_check("PM endless softens past w100", PowerModel.hp_scale(120, 1, true) < PowerModel.hp_scale(120, 1, false) and is_equal_approx(PowerModel.hp_scale(100, 1, true), PowerModel.hp_scale(100, 1, false)))
+	_check("PM spawn interval 1.8 -> cap 0.45 at w21", is_equal_approx(PowerModel.spawn_interval(1), 1.8) and is_equal_approx(PowerModel.spawn_interval(21), 0.45) and PowerModel.spawn_interval(20) > 0.45 and is_equal_approx(PowerModel.spawn_interval(60), 0.45))
+	_check("PM required DPS table (w1 3.33, w10 26.3, w20 ~261, T3 x2.25)", absf(PowerModel.required_dps(1, 1) - 3.333) < 0.01 and absf(PowerModel.required_dps(10, 1) - 26.3) < 0.3 and absf(PowerModel.required_dps(20, 1) - 261.0) < 3.0 and is_equal_approx(PowerModel.required_dps(10, 3) / PowerModel.required_dps(10, 3) , 1.0) and absf(PowerModel.enemy_hp("drone", 10, 3) / PowerModel.enemy_hp("drone", 10, 1) - 2.25 * pow(1.155 / 1.17, 9.0)) < 0.001)
+	# PM-1: PowerModel's curves equal the engine's for a plain run.
+	var S = _fresh()
+	var pm1: bool = true
+	for w in [1, 10, 20, 40]:
+		S.wave = int(w)
+		pm1 = pm1 and absf(S.scale() - PowerModel.hp_scale(int(w), 1)) < 0.0001 * S.scale() and absf(S.interval_for(int(w)) - PowerModel.spawn_interval(int(w))) < 0.0001
+	_check("PM-1 engine HP scale + spawn interval == PowerModel (w1/10/20/40)", pm1)
+	var snap: Dictionary = {"core_dmg": 10.0, "core_rate": 1.0, "buildings": [{"dps": 5.0}], "troops": [{"dps": 10.0}], "specials": [{"dps": 1.0}], "mult": 2.0, "core_hp": 100.0, "core_regen": 2.0}
+	_check("PM effective_dps sums layers (troops x0.6) x mult", is_equal_approx(PowerModel.effective_dps(snap), (10.0 + 5.0 + 6.0 + 1.0) * 2.0))
+	_check("PM power ratio = eff / required", is_equal_approx(PowerModel.power_ratio(snap, 5, 1), 44.0 / PowerModel.required_dps(5, 1)))
+	_check("PM ehp grows with regen", PowerModel.ehp(snap) > 100.0 and is_equal_approx(PowerModel.ehp(snap), 100.0 * (1.0 + 2.0 * 25.0 / 100.0)))
+	var fw: int = PowerModel.frontier_wave(snap, 1)
+	var snap2: Dictionary = snap.duplicate(true)
+	snap2["mult"] = 4.0
+	_check("PM frontier wave: R crosses 1 there, more power -> later", PowerModel.power_ratio(snap, fw, 1) < 1.0 and PowerModel.power_ratio(snap, fw - 1, 1) >= 1.0 and PowerModel.frontier_wave(snap2, 1) > fw)
+	_check("PM bands (frontier 0.8-1.25, early >= 2, wall < 0.6)", PowerModel.band("frontier").is_equal_approx(Vector2(0.8, 1.25)) and is_equal_approx(PowerModel.band("early").x, 2.0) and is_equal_approx(PowerModel.band("wall").y, 0.6))
+	_check("PM cash index 1.10^(w-1) x (1 + 0.5(t-1))", is_equal_approx(PowerModel.cash_index(11, 1), pow(1.1, 10.0)) and is_equal_approx(PowerModel.cash_index(1, 3), 2.0))
+	_check("PM cash/wave grows ~1.10 after the spawn cap (PM-5)", absf(PowerModel.cash_per_wave(31, 1) / PowerModel.cash_per_wave(30, 1) - 1.10) < 0.001)
+	_check("PM-9 shards = floor(sqrt(L/1e4)), monotonic", PowerModel.shards_for(6e5) == 7 and PowerModel.shards_for(2.5e7) == 50 and PowerModel.shards_for(0.0) == 0 and PowerModel.shards_for(1e6) >= PowerModel.shards_for(9.99e5))
+	_check("PM shard_mult + reforge_worth", is_equal_approx(PowerModel.shard_mult({"power": 2, "economy": 1}), 1.1 * 1.05) and PowerModel.reforge_worth(2.5e6, 20) and not PowerModel.reforge_worth(6e5, 20))
+	_check("PM meta_mult = product", is_equal_approx(PowerModel.meta_mult({"parts": 1.2, "core": 1.5, "shards": 2.0}), 3.6))
+	var op: Dictionary = {"buildings": [{"rate": 60.0, "lvl": 1}, {"rate": 60.0, "lvl": 5, "adj": 2.0}, {"rate": 100.0, "linked": false}], "storage_h": 8.0}
+	_check("PM outpost rate (lvl +25%, layout cap 60%, unlinked 0)", is_equal_approx(PowerModel.outpost_rate(op), 60.0 + 60.0 * 2.0 * 1.6))
+	_check("PM outpost collect caps at storage hours", is_equal_approx(PowerModel.outpost_collect(op, 3600.0), PowerModel.outpost_rate(op)) and is_equal_approx(PowerModel.outpost_collect(op, 86400.0), 8.0 * PowerModel.outpost_rate(op)))
+	_check("PM part budget B_r x (1 + 0.06(lvl-1))", is_equal_approx(PowerModel.part_budget("epic", 1), 0.17) and is_equal_approx(PowerModel.part_budget("rare", 11), 0.12 * 1.6))
+	var pa: Dictionary = {"slot": "F", "rarity": "common", "lvl": 1, "stats": {"core_hp": 0.15, "rate": -0.05}}
+	var pb: Dictionary = {"slot": "F", "rarity": "common", "lvl": 1, "stats": {"core_hp": 0.10, "rate": -0.05}}
+	_check("PM part value: benefit scales with lvl, drawback does not", PowerModel.part_value(pa) > PowerModel.part_value(pb) and is_equal_approx(PowerModel.part_value({"lvl": 6, "stats": {"rate": -0.05}}), PowerModel.part_value({"lvl": 1, "stats": {"rate": -0.05}})))
+	_check("PM dominates: strictly better same-slot only", PowerModel.dominates(pa, pb) and not PowerModel.dominates(pb, pa) and not PowerModel.dominates(pa, pa))
