@@ -176,7 +176,7 @@ static func _draw_play(m, _cr: Rect2) -> void:
 	Kit.t(m, String(cd["attack_name"]), Vector2(x, y), 19, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, w)
 	y += Kit.wrap(m, String(cd["attack_desc"]), Vector2(x, y + 8), 15, Kit.DIM, w, 2) + 18.0
 	Kit.t(m, "Trait: " + String(cd["trait_name"]), Vector2(x, y + 8), 17, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w)
-	y += Kit.wrap(m, String(cd["trait_desc"]), Vector2(x, y + 16), 15, Kit.DIM, w, 2) + 34.0
+	y += Kit.wrap(m, String(cd["trait_desc"]), Vector2(x, y + 16), 15, Kit.DIM, w, 2) + 50.0
 	var stats: Array = [
 		["Damage", "%.1f" % (float(cd["dmg"]) * CoreDB.lvl_mult("dmg", lv))], ["Attack rate", "%.2f/s" % float(cd["rate"])],
 		["Range", "%.1f cells" % float(cd["range"])], ["Core HP", "%d" % int(float(cd["hp"]) * CoreDB.lvl_mult("hp", lv))],
