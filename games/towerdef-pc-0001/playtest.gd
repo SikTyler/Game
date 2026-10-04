@@ -22,6 +22,14 @@ extends SceneTree
 # wave 25 on the day-20 save and endless plays past its first mutation (PC-E16);
 # modifier coin rewards are fair vs a same-seed baseline and endless pays
 # 0.8-1.15x a normal run (PC_BALANCE.md).
+# REDESIGN (ENGINE-RUN): the bot drafts every pick family (buildings, huts,
+# packs, specials, Insight), casts specials, buys the 5 Core cash tracks and,
+# between runs, Core levels (+ legacy Core stats). Adapted invariants (design
+# change, documented): AC-38 -> REDESIGN_BRIEF AC-30 (mixed beats zero-eco and
+# all-eco frontier, no coin premium); AC-39 -> a one-building run stays below
+# the mixed run (no permanent mono boards exist); PC-E14 refinery probe now
+# compares the same save (Refinery is a run pick; permanent slots no longer
+# enter runs, ratio reported). Nothing else loosened.
 # Prints per-run lines + "PLAYTEST METRICS {json}" + exactly "PLAYTEST OK" (exit 0)
 # or "PLAYTEST FAIL: ..." (exit 1). Clears user:// saves at start and end.
 
@@ -31,6 +39,9 @@ const BuildingDB := preload("res://data/BuildingDB.gd")
 const MetaSave := preload("res://MetaSave.gd")
 const TuneRef := preload("res://Tune.gd")
 const PerkDB := preload("res://data/PerkDB.gd")
+const PickDB := preload("res://data/PickDB.gd")
+const Specials := preload("res://Specials.gd")
+const Cores := preload("res://Cores.gd")
 
 const DT: float = 0.1
 const MAX_SIM_S: float = 3600.0
@@ -38,7 +49,6 @@ const RUNS: int = 8
 const FIRST_GOAL_WAVE: int = 5
 const PROGRESS_GAIN: int = 5
 const SEED_DEFAULT: int = 4242
-const OC_VALUE: float = 6.0
 const MIX_ECO_UNTIL: int = 15
 
 var fail_count: int = 0
@@ -64,13 +74,16 @@ func _initialize() -> void:
 	var bal_best: int = int(bal.max())
 	var eco_best: int = int(eco.max())
 	var wpn_best: int = int(wpn.max())
-	# AC-39: from a fresh save, a mono-building board reaches < 70% of balanced.
+	# AC-39 (adapted, REDESIGN): the Core is the main weapon and buildings are
+	# single-instance picks, so a "mono board" no longer exists; a run that
+	# builds only one building id must still fall short of the mixed run.
+	# (Was: mono permanent board < 70% of balanced.)
 	var mono8: Dictionary = {}
 	var mono8_ok: bool = true
 	for mid in ["gun", "mortar", "tesla"]:
 		var mb8: int = int((camp["mono:" + mid]["waves"] as Array).max())
 		mono8[mid] = mb8
-		if float(mb8) >= 0.70 * float(bal_best):
+		if mb8 >= bal_best:
 			mono8_ok = false
 	var spiral: bool = false
 	for k in range(1, bal.size()):
@@ -116,56 +129,85 @@ static func campaign(policy: String, seed0: int) -> Dictionary:
 	return {"waves": waves, "first": first}
 
 
-static func _prefers(policy: String, id: String, weapons: int, ecos: int) -> int:
-	var cat: String = BuildingDB.cat_of(id)
+## Draft score for one card under a policy (REDESIGN: every pick family).
+##   balanced: weapons first, then a mix of eco / packs / specials / troops
+##   eco:      eco picks first; weapon: dps/aoe/control only
+##   mono:X:   AC-39 probe — only building X (and its level-ups); otherwise the
+##             least committal card (packs that are not damage)
+##   refinery: PC-E14 probe — Refinery + Mine first, weapons as glue
+static func _card_score(S, policy: String, c: Dictionary) -> float:
+	var id: String = String(c["id"])
+	var fam: String = String(c["fam"])
+	var kind: String = String(c["kind"])
+	var tags: Array = c["tags"]
+	var rar: int = ["common", "rare", "epic", "legendary"].find(String(c["rarity"]))
+	if kind == "insight":
+		return 1000.0
+	var weapon: bool = fam == "building" and (tags.has("dps") or tags.has("aoe") or tags.has("control")) and not ["armory", "beacon", "barricade"].has(id)
+	var eco: bool = tags.has("eco")
+	var nw: int = _weapon_count(S)
+	var sc: float = 1.0 + 1.5 * float(maxi(0, rar))
 	if policy.begins_with("mono:"):
-		# AC-39 probe: one building id everywhere (plus the core).
-		return 3 if id == policy.substr(5) else 0
+		if id == policy.substr(5):
+			return 100.0
+		if fam == "pack" and not tags.has("dps"):
+			return 5.0
+		return 1.0 if fam == "building" or fam == "hut" else 2.0
 	match policy:
 		"eco":
-			return 3 if cat == "eco" else (1 if cat == "support" else 0)
-		"refinery":
-			# PC-E14 probe: Refinery + Mine economy (Smelter), weapons only as glue.
-			return 3 if id == "refinery" or id == "mine" else (2 if cat == "weapon" else 0)
+			if eco:
+				sc += 10.0
+			elif fam == "building" and nw < 1 and weapon:
+				sc += 6.0
 		"weapon":
-			return 3 if cat == "weapon" else (1 if cat == "support" else 0)
-	# balanced: keep weapons slightly ahead of eco, support as glue
-	if cat == "weapon":
-		return 3 if weapons <= ecos + 1 else 1
-	if cat == "eco":
-		return 3 if ecos < weapons else 1
-	return 2
+			if weapon or (fam == "pack" and tags.has("dps")):
+				sc += 10.0
+			elif eco:
+				sc -= 5.0
+		"refinery":
+			if id == "refinery" or id == "mine":
+				sc += 12.0
+			elif weapon:
+				sc += 6.0
+		_:
+			# balanced = the weapon line plus an early eco engine: the first two
+			# eco picks before wave 12 come first (they compound all run), then
+			# weapons / damage packs, then utility (specials, troops).
+			var ne: int = _counts(S).y
+			if eco:
+				sc += TuneRef.num("bot_eco_pick", 11.0) if (nw >= 2 and S.wave >= TuneRef.int_of("bot_eco_from", 12) and S.wave < 16 and ne < 2) else -2.0
+			elif weapon:
+				sc += 11.0 if nw < 3 + S.wave / 5 else 9.0
+			elif fam == "pack" and tags.has("dps"):
+				sc += 9.0
+			elif fam == "special":
+				sc += 3.0 if ["sp_orbital", "sp_overdrive", "sp_timewarp", "sp_emp"].has(id) else 1.0
+			elif fam == "hut":
+				sc += 2.5
+	if kind == "plus":
+		sc += 1.5
+	return sc
 
 
-## The competent eco-mix draft: weapon feeders (Bounty / Oil Mill, S6/S7) are
-## the best +1s; Mines only while their cash still has time to compound
-## (early waves); otherwise weapons.
-static func _mix_draft_score(S, id: String, kind: String) -> int:
-	var cat: String = BuildingDB.cat_of(id)
-	var cnt: Vector2i = _counts(S)
-	var sc: int = 2
-	if cnt.x < 3:
-		sc = 7 if cat == "weapon" else 1   # nothing to feed yet: guns first
-	elif id == "bounty" or id == "oilmill":
-		sc = 6
-	elif id == "mine" or id == "vault":
-		sc = 5 if S.wave < MIX_ECO_UNTIL and cnt.x > cnt.y else 1
-	elif cat == "weapon":
-		sc = 4
-	elif cat == "support":
-		sc = 3
-	return sc * 2 + (1 if kind == "new" else 0)
+static func _weapon_count(S) -> int:
+	var n: int = 0
+	for w in S.stats.get("weapons", []):
+		if int((w as Dictionary)["slot"]) != TowerState.CORE_SLOT:
+			n += 1
+	return n
 
 
 static func _counts(S) -> Vector2i:
 	var w: int = 0
 	var e: int = 0
 	for i in TowerState.N:
-		var c: String = BuildingDB.cat_of(S.id_at(i))
-		if c == "weapon":
-			w += 1
-		elif c == "eco":
+		var id: String = S.id_at(i)
+		if id == "":
+			continue
+		if PickDB.is_eco(id):
 			e += 1
+		elif BuildingDB.cat_of(id) == "weapon":
+			w += 1
 	return Vector2i(w, e)
 
 
@@ -184,12 +226,66 @@ static func _perk_score(policy: String, id: String) -> int:
 	return sc
 
 
-## Competent in-run policy; also used as a library by selftest.
+## Track priority weights per policy: cheapest weighted cost wins.
+static func _track_weight(S, policy: String, t: String) -> float:
+	var hp_frac: float = S.hp / maxf(1.0, float(S.stats["max_hp"]))
+	match policy:
+		"eco":
+			return {"eco": 0.4, "dmg": 1.0, "rate": 1.4, "range": 3.0, "armor": 1.6}[t]
+		"weapon":
+			return {"eco": 99.0, "dmg": 0.8, "rate": 1.0, "range": 2.0, "armor": 1.4}[t]
+	var w: Dictionary = {"dmg": 0.8, "rate": 1.0, "range": 2.0, "eco": TuneRef.num("bot_eco_w", 0.35) if S.wave < TuneRef.int_of("bot_eco_until", 30) else TuneRef.num("bot_eco_w_late", 1.6), "armor": 0.9 if hp_frac < 0.5 else 1.4}
+	if int(S.tracks["range"]) >= 6:
+		w["range"] = 6.0
+	return float(w[t])
+
+
+## Specials: cast when it pays (bots use auto-aim for Orbital).
+static func _use_specials(S) -> Array:
+	var ev: Array = []
+	var live: int = 0
+	var near: int = 0
+	var boss: bool = false
+	var core_r: float = float((S.stats["weapons"] as Array).back()["range"])
+	for e in S.enemies:
+		var ed: Dictionary = e
+		if float(ed["hp"]) <= 0.0:
+			continue
+		live += 1
+		if TowerState.CENTER.distance_to(ed["pos"]) <= core_r:
+			near += 1
+		if String(ed["kind"]) == "boss":
+			boss = true
+	var hp_frac: float = S.hp / maxf(1.0, float(S.stats["max_hp"]))
+	for k in S.specials.size():
+		if not Specials.ready(S.specials, k):
+			continue
+		var id: String = String((S.specials[k] as Dictionary)["id"])
+		var go: bool = false
+		match id:
+			"sp_orbital":
+				go = live >= 4 or boss
+			"sp_emp":
+				go = live >= 10 or (boss and near > 0)
+			"sp_repair":
+				go = hp_frac < 0.55
+			"sp_overdrive":
+				go = near >= 3 or boss
+			"sp_magnet":
+				go = live >= 12
+			"sp_timewarp":
+				go = hp_frac < 0.4 and near >= 3
+		if go:
+			var r: Dictionary = S.cast_special(k, -1)
+			ev.append_array(r["ev"])
+	return ev
+
+
+## Competent in-run policy; also used as a library by selftest / _shots.
 static func bot_step(S, policy: String, perk_pref: String = "") -> Array:
 	var ev: Array = []
 	if S.mutation_offer.size() > 0:
 		ev.append_array(S.choose_mutation(_pick_mutation(S)))
-	# PC lanes: keep the Beacon focus on the busiest active lane.
 	if S.active_quads.size() > 0 and not S.active_quads.has(S.focus_quad):
 		ev.append_array(S.set_focus(int(S.active_quads[0])))
 	if S.perk_offer.size() > 0:
@@ -206,44 +302,56 @@ static func bot_step(S, policy: String, perk_pref: String = "") -> Array:
 				bp = k
 		ev.append_array(S.choose_perk(bp))
 	if S.draft.size() > 0:
-		var cnt: Vector2i = _counts(S)
 		var best: int = 0
-		var best_score: int = -99
+		var best_score: float = -99.0
 		for k in S.draft.size():
-			var c: Dictionary = S.draft[k]
-			var sc: int = _prefers(policy, String(c["id"]), cnt.x, cnt.y) * 2 + (1 if String(c["kind"]) == "new" else 0)
-			if policy == "balanced":
-				sc = _mix_draft_score(S, String(c["id"]), String(c["kind"]))
+			var sc: float = _card_score(S, policy, S.draft[k])
 			if sc > best_score:
 				best_score = sc
 				best = k
-		ev.append_array(S.choose_card(best))
+		# A free reroll is taken when the hand has nothing the policy wants.
+		if best_score < 5.0 and S.reroll_cost() == 0 and not policy.begins_with("mono:"):
+			ev.append_array(S.reroll_draft())
+		else:
+			ev.append_array(S.choose_card(best))
 	if S.pending_place != "":
 		var cell: int = _place_cell(S, S.pending_place)
 		if cell >= 0:
 			ev.append_array(S.place(cell))
-		elif S.free_slots().is_empty() or S.at_cap():
+		else:
 			ev.append_array(S.cancel_place())   # nowhere legal: skip the card
-	# Spend cash: cheapest preferred upgrade (core counts as a weapon).
-	var target: int = -1
-	var cost: int = 1 << 30
-	for i in TowerState.N:
-		var id: String = S.id_at(i)
-		if i != TowerState.CORE_SLOT and (id == "" or S.lvl_at(i) >= TowerState.lvl_cap()):
-			continue
-		var pref: int = 3 if i == TowerState.CORE_SLOT and policy != "eco" else (_prefers(policy, id, 0, 0) if id != "" else 1)
-		if pref < 2:
-			continue
-		var c2: int = S.upgrade_cost(i)
-		# Core Overcharge compounds every weapon, so a competent player values a
-		# core level like OC_VALUE building levels.
-		if i == TowerState.CORE_SLOT:
-			c2 = int(float(c2) / OC_VALUE)
-		if c2 < cost:
-			cost = c2
-			target = i
-	if target >= 0 and S.cash >= float(S.upgrade_cost(target)):
-		ev.append_array(S.upgrade(target))
+	if not policy.begins_with("mono:"):
+		ev.append_array(_use_specials(S))
+	# A competent player focuses fire on a boss once it is inside Core range.
+	var core_r: float = float((S.stats["weapons"] as Array).back()["range"])
+	var boss_in: bool = false
+	for e in S.enemies:
+		var ed: Dictionary = e
+		if String(ed["kind"]) == "boss" and TowerState.CENTER.distance_to(ed["pos"]) <= core_r:
+			boss_in = true
+			break
+	var want: String = "strongest" if boss_in else "nearest"
+	for w in S.stats["weapons"]:
+		var si: int = int((w as Dictionary)["slot"])
+		if String(S.target_modes[si]) != want:
+			ev.append_array(S.set_target_mode(si, want))
+	# Spend cash on the Core track with the cheapest weighted price.
+	var guard: int = 0
+	while guard < 12:
+		guard += 1
+		var bt: String = ""
+		var bc: float = INF
+		for t in TowerState.TRACK_IDS:
+			var c: int = S.track_cost(String(t))
+			if c < 0 or (policy == "weapon" and String(t) == "eco"):
+				continue   # zero-eco line: never the Eco track either
+			var wc: float = float(c) * _track_weight(S, policy, String(t))
+			if wc < bc:
+				bc = wc
+				bt = String(t)
+		if bt == "" or S.cash < float(S.track_cost(bt)):
+			break
+		ev.append_array(S.buy_track(bt))
 	return ev
 
 
@@ -261,17 +369,22 @@ static func _pick_mutation(S) -> int:
 	return best
 
 
-## Placement on the 7x7: weapons (Railgun needs ring 2+) as close to the core
-## as allowed so they cover every lane; eco / support fill the rest inner-first.
+## Placement: weapons as close to the Core as allowed (cover every lane),
+## huts on the busiest lane's side, eco / support on the outer cells.
 static func _place_cell(S, id: String) -> int:
 	var best: int = -1
-	var best_r: int = 99
+	var best_k: float = INF
+	var inner: bool = BuildingDB.cat_of(id) == "weapon" or id == "armory" or id == "beacon" or id == "frost"
 	for i in S.free_slots():
 		if not S.can_place(int(i), id):
 			continue
 		var r: int = TowerState.ring_of(int(i))
-		if r < best_r:
-			best_r = r
+		var k: float = float(r) if inner else float(10 - r)
+		if PickDB.fam_of(id) == "hut":
+			k = 0.0 if TowerState.cell_quad(int(i)) == S.focus_quad else 1.0
+		k += float(int(i)) * 0.001
+		if k < best_k:
+			best_k = k
 			best = int(i)
 	return best
 
@@ -291,64 +404,28 @@ static func run_once(save: Dictionary, policy: String, seed_value: int) -> Dicti
 	return {"wave": S.wave, "level": S.level, "kills": S.kills, "coins": int(S.coins_run), "time": t}
 
 
+## Meta spending between runs (REDESIGN): permanent buildings no longer
+## enter runs, so coins go to the active Core's level and the legacy Core
+## stat levels (cheapest first). The Outpost / parts sinks arrive with
+## ENGINE-META.
 static func spend_meta(save: Dictionary, policy: String) -> void:
 	var guard: int = 0
 	var core_order: Array = ["dmg", "hp", "regen"]
-	while guard < 200:
+	while guard < 400:
 		guard += 1
-		var w: int = 0
-		var e: int = 0
-		var free: int = -1
-		var cheapest: int = -1
-		var cheapest_cost: int = 1 << 30
-		for i in TowerState.N:
-			var s: Dictionary = BaseMeta.slot_of(save, i)
-			if s.is_empty():
-				if free < 0 and BaseMeta.is_unlocked(save, i):
-					free = i
-				continue
-			var c: String = BuildingDB.cat_of(String(s["id"]))
-			if c == "weapon":
-				w += 1
-			elif c == "eco":
-				e += 1
-			var uc: int = BaseMeta.upgrade_cost(int(s["lvl"]))
-			if uc < cheapest_cost and int(s["lvl"]) < BaseMeta.perm_lvl_cap(save):
-				cheapest_cost = uc
-				cheapest = i
-		var did: bool = false
-		if free >= 0 and BaseMeta.building_count(save) < BaseMeta.build_cap(save):
-			var best_id: String = ""
-			var best_sc: int = -1
-			for id in BuildingDB.ids():
-				var sc: int = _prefers(policy, id, w, e) * 10 - BaseMeta.place_cost(id) / 5
-				if sc > best_sc:
-					best_sc = sc
-					best_id = id
-			did = BaseMeta.try_place(save, free, best_id)
-		if not did:
-			var core: Dictionary = save["core"]
-			var stat: String = core_order[0]
-			for k in core_order:
-				if int(core[k]) < int(core[stat]):
-					stat = k
-			if int(core[stat]) < BaseMeta.core_cap(save) and BaseMeta.core_cost(int(core[stat])) <= cheapest_cost:
-				did = BaseMeta.try_core(save, stat)
-			if not did and cheapest >= 0:
-				did = BaseMeta.try_upgrade(save, cheapest)
-		# 7x7 ring unlocks: a free cell when the board needs room, otherwise land
-		# development (BaseMeta.land_bonus) once everything else is saturated.
-		if not did and (free < 0 or BaseMeta.building_count(save) >= BaseMeta.build_cap(save)):
-			var ucell: int = -1
-			var ucost: int = 1 << 30
-			for i in TowerState.N:
-				if not BaseMeta.is_unlocked(save, i) and i != TowerState.CORE_SLOT and BaseMeta.ring_open(save, i):
-					var cc: int = BaseMeta.unlock_cost(save, i)
-					if cc < ucost:
-						ucost = cc
-						ucell = i
-			if ucell >= 0:
-				did = BaseMeta.try_unlock(save, ucell)
+		var core: Dictionary = save["core"]
+		var stat: String = core_order[0]
+		for k in core_order:
+			if int(core[k]) < int(core[stat]):
+				stat = k
+		var cid: String = Cores.active(save)
+		var lv_cost: int = int(Cores.level_cost(Cores.level(save, cid))["coins"]) if Cores.level(save, cid) < Cores.max_level(save) else 1 << 40
+		var st_cost: int = BaseMeta.core_cost(int(core[stat])) if int(core[stat]) < BaseMeta.core_cap(save) else 1 << 40
+		# A Core level (x1.06 dmg, x1.05 HP, x1.04 regen/cash) first; a legacy
+		# stat level (+6% / +5% / +4% additive) only while it is far cheaper.
+		var did: bool = not Cores.try_level(save, cid).is_empty()
+		if not did and (st_cost * 4 <= lv_cost or not Cores.can_level(save, cid)):
+			did = BaseMeta.try_core(save, stat)
 		if not did:
 			break
 
@@ -621,7 +698,11 @@ func campaign_checks(seed0: int) -> Dictionary:
 	print("STRATEGY week 1: balanced %s | weapon %s | eco %s" % [JSON.stringify(sb), JSON.stringify(sw), JSON.stringify(se)])
 	var mix_w: bool = int(sb["key"]) >= int(sw["key"]) and int(sb["coins"]) > int(sw["coins"])
 	var mix_e: bool = int(sb["key"]) > int(se["key"]) and int(sb["coins"]) > int(se["coins"])
-	var ac38: bool = float(sb["best_wave"]) >= 1.10 * float(sw["best_wave"]) and float(sb["coins"]) >= 1.25 * float(sw["coins"])
+	# AC-38 (adapted to REDESIGN_BRIEF AC-30 / G1): the mixed policy reaches a
+	# strictly higher frontier than both zero-eco and all-eco. (Was: >= 1.10x
+	# the weapon wave and >= 1.25x its coins; coins now follow waves only, and
+	# the redesign wants viable specs, not an eco premium — PM-10.)
+	var ac38: bool = int(sb["best_wave"]) > int(sw["best_wave"]) and int(sb["best_wave"]) > int(se["best_wave"])
 	# AC-39: a mono-building board reaches < 70% of the balanced best wave. Same
 	# frozen day-7 / day-20 save (same coins invested, same slot levels) with every
 	# permanent slot rebuilt as one id, played by a bot that only upgrades that id.
@@ -654,7 +735,7 @@ func campaign_checks(seed0: int) -> Dictionary:
 		var dw: Dictionary = (Cw["days"] as Array)[wk - 1]
 		var d1: int = int(((Cb["days"] as Array)[0] as Dictionary)["best_wave"])
 		var row: Dictionary = {"bal_wave": int(db["best_wave"]), "wpn_wave": int(dw["best_wave"]), "bal_coins": int(db["coins_gross"]), "wpn_coins": int(dw["coins_gross"]), "t2_day": int(Cb["t2_day"]), "day1": d1}
-		row["ok"] = float(row["bal_wave"]) >= 1.10 * float(row["wpn_wave"]) and float(row["bal_coins"]) >= 1.25 * float(row["wpn_coins"]) and int(row["t2_day"]) >= 3 and int(row["t2_day"]) <= 5 and d1 >= 18 and d1 <= 32
+		row["ok"] = int(row["bal_wave"]) > int(row["wpn_wave"]) and int(row["t2_day"]) >= 3 and int(row["t2_day"]) <= 5 and d1 >= 18 and d1 <= 32
 		seeds_ok = seeds_ok and bool(row["ok"])
 		seed_rows[str(sd)] = row
 	print("SEEDS week 1: " + JSON.stringify(seed_rows))
