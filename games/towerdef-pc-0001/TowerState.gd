@@ -758,7 +758,7 @@ func recompute() -> void:
 ## enemy dmg growth so troops stay relevant deep into a run.
 func _troop_mods() -> Dictionary:
 	var bar: float = 1.0 + 0.25 * float(pack_n("pk_barracks"))
-	var tier_b: float = 1.0 + 0.10 * float(int(mods.get("barracks_tier", 0)))
+	var tier_b: float = (1.0 + 0.10 * float(int(mods.get("barracks_tier", 0)))) * (1.0 + float(mods.get("barracks_bonus", 0.0)))
 	return {
 		"dmg_mult": float(stats.get("dmg_all", 1.0)) * bar * tier_b * maxf(0.1, 1.0 + pf("troop_dmg")),
 		"hp_mult": bar * tier_b * pow(dmg_growth, float(wave - 1)) * hp_mult * maxf(0.1, 1.0 + pf("troop_hp")),

@@ -26,6 +26,7 @@ const Cores := preload("res://Cores.gd")
 const PickDB := preload("res://data/PickDB.gd")
 const Parts := preload("res://Parts.gd")
 const Crates := preload("res://Crates.gd")
+const Outpost := preload("res://Outpost.gd")
 
 const VERSION: int = 3
 ## PC 7x7 base (PC_SPEC §2.1): rings by Chebyshev distance from the core cell
@@ -37,7 +38,7 @@ const CORE_STATS: Array = ["dmg", "hp", "regen"]
 const MAX_LVL: int = 15
 ## Hard ceiling for migrated core levels; the live cap is core_cap(s).
 const CORE_HARD_MAX: int = 60
-const GEM_SOURCES: Array = ["boss", "mission", "streak", "tier"]
+const GEM_SOURCES: Array = ["boss", "mission", "streak", "tier", "mine"]
 
 
 static func default_save() -> Dictionary:
@@ -63,6 +64,7 @@ static func default_save() -> Dictionary:
 		"cores": Cores.default_block(), "core_cores": 0, "insight": {},
 		"scrap": 0, "keys": 0, "part_drops": [],
 		"parts": Parts.default_block(), "crates": Crates.default_block(),
+		"outpost": Outpost.default_block(),
 	}
 
 
@@ -254,6 +256,7 @@ static func normalize(s_in: Dictionary) -> Dictionary:
 	d["parts"] = Parts.normalize_block(s.get("parts", null))
 	Parts.sanitize_presets(d)
 	d["crates"] = Crates.normalize_block(s.get("crates", null))
+	d["outpost"] = Outpost.normalize_block(s.get("outpost", null))
 	d["core_cores"] = maxi(0, int(s.get("core_cores", 0)))
 	d["insight"] = PickDB.normalize_insight(s.get("insight", {}))
 	d["scrap"] = maxi(0, int(s.get("scrap", 0)))
@@ -306,7 +309,10 @@ static func run_mods(s: Dictionary) -> Dictionary:
 	var sp: float = float(s.get("speed", 1.0))
 	if not steps.has(sp):
 		sp = 1.0
+	var om: Dictionary = Outpost.run_mods(s) if s.get("outpost", null) is Dictionary else {}
 	return {
+		"barracks_tier": int(om.get("barracks_tier", 0)), "barracks_bonus": float(om.get("barracks_bonus", 0.0)),
+		"insight_cap": int(om.get("insight_cap", 0)), "banish": int(om.get("banish", 0)),
 		"tier": t, "hp_mult": Tiers.hp_mult(t), "coin_mult": Tiers.coin_mult(t),
 		"boss_every": Tiers.boss_every(t),
 		"lab_dmg": float(lm["dmg"]), "lab_hp": float(lm["hp"]),
