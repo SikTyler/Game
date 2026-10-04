@@ -76,3 +76,10 @@ takes Greed now trades waves for coins visibly, instead of getting free money.
    level on Damage/Health at ×1.5 cost growth, or a coin-to-gem-shard exchange. This
    would absorb the 100k–230k idle bank and give about +1 wave/2 days in T4.
 4. **T1 wall days 1–3:** if AC-40 allows T2 on day 2–4, set `boss_hp_t1` to 2.5 so day 2 shows a gain.
+
+## 5. Open items for the next deepen pass (tracked, not fixed)
+
+- [ ] **Labs maxed by ~day 18** — lab caps/costs run out; extend lab levels or add new labs (deepen: run-meta).
+- [ ] **Coin bank piles up (100k–230k idle)** — add the late coin sink from Proposal 3.
+- [ ] **T5 out of reach by day 30** — retune tier unlock or late scaling so T5 lands in the SPEC band.
+- [ ] **Icons (plan item 8)** — game-icons SVGs not adopted yet; if adopted, credit each icon's CC BY 3.0 author in CreditsDB (enforced by tools/credits.test.mjs).

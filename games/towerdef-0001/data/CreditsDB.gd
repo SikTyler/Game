@@ -1,6 +1,7 @@
 extends RefCounted
-## In-game credits. Mirrors /third_party/README.md (keep in sync when a source
-## is added there). Only sources actually used by the shipped game are listed;
+## In-game credits. Mirrors /third_party/README.md; tools/credits.test.mjs (npm test)
+## fails if a used README source is missing here. If game-icons SVGs are adopted,
+## add one "Icon by <author> from game-icons.net, CC BY 3.0" line per icon. Only sources actually used by the shipped game are listed;
 ## CC-BY items must carry their attribution line here.
 
 const LINES: Array = [
