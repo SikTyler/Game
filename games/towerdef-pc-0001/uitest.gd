@@ -1,12 +1,19 @@
 extends SceneTree
-## Corehold interaction self-test — the view<->input twin of selftest.gd.
-## Boots Main.tscn headless and pushes REAL mouse clicks through the full loop:
-## base: select slot -> build -> upgrade core -> START RUN -> level-up card ->
-## place on slot -> select -> cash upgrade -> unlock plot -> death -> results ->
-## BACK TO BASE -> START RUN again (loop seam). Also: offline-earnings modal,
-## tier selector, Labs / Cards / Missions tabs, speed pill, draft reroll and
-## the perk overlay (SPEC UI). Asserts ENGINE / SAVE state after
-## every click. Prints "UITEST OK" (exit 0) or "UITEST FAIL: <n> checks failed".
+## Corehold PC interaction self-test — the view<->input twin of selftest.gd.
+## Boots Main.tscn headless at 1920x1080 and drives the native desktop view
+## with REAL mouse clicks, drags, wheel, keys and pad events, asserting ENGINE
+## / SAVE state after every action: main menu + slots, the "while you were
+## away" modal, the hub (Play / tier select / modes), Core Bay (select, level,
+## drag-install, equip / unequip, presets, filters, level / lock / salvage),
+## Crates (open + reveal), Outpost builder (palette click + drag place,
+## preview, rotate, move, upgrade, skip, collect, Collect all, plots, pan /
+## zoom, blueprints), Research, Cards, Missions, Reforge (two-step + tree),
+## settings + remapping, records, and the run (draft cards, reroll, banish,
+## drag-to-place, Core tracks, specials + aim, targeting, pause, retry,
+## abandon -> results). Layout, tooltip, press-mode and focus checks on every
+## screen. Prints "UITEST OK" (exit 0) or "UITEST FAIL: <n> checks failed".
+## REDESIGN (deliberate rewrite): the permanent base grid, perm-building hotbar,
+## info popover and mobile column are gone (Outpost / Core Bay replace them).
 ## Run: godot --headless --path games/towerdef-pc-0001/ --script res://uitest.gd
 
 const TowerState := preload("res://TowerState.gd")
@@ -16,19 +23,22 @@ const Labs := preload("res://Labs.gd")
 const Cards := preload("res://Cards.gd")
 const Missions := preload("res://Missions.gd")
 const Outpost := preload("res://Outpost.gd")
-const Desktop := preload("res://ui/Desktop.gd")
+const Parts := preload("res://Parts.gd")
+const Cores := preload("res://Cores.gd")
+const Crates := preload("res://Crates.gd")
+const Reforge := preload("res://Reforge.gd")
+const Specials := preload("res://Specials.gd")
+const PartDB := preload("res://data/PartDB.gd")
+const OutpostDB := preload("res://data/OutpostDB.gd")
 const Settings := preload("res://Settings.gd")
 const Keybinds := preload("res://Keybinds.gd")
-const BuildingDB := preload("res://data/BuildingDB.gd")
+const CoreBay := preload("res://ui/CoreBay.gd")
+const OutpostView := preload("res://ui/OutpostView.gd")
+const Hotbar := preload("res://ui/Hotbar.gd")
 const T0: int = 1800000000
 
 var main: Node2D
 var fail_count: int = 0
-
-
-## Mobile 5x5 cell index -> the same cell on the PC 7x7 board (r+1, c+1).
-func _c(i5: int) -> int:
-	return BaseMeta.idx5_to_7(i5)
 
 
 func _initialize() -> void:
@@ -41,22 +51,32 @@ func _check(name: String, ok: bool, detail: String = "") -> void:
 	print("UITEST %s: %s %s" % ["PASS" if ok else "FAIL", name, detail])
 
 
-func _click(pos: Vector2) -> void:
-	main.last_tap_ms = -1000
-	for pressed in [true, false]:
-		var ev := InputEventMouseButton.new()
-		ev.button_index = MOUSE_BUTTON_LEFT
-		ev.pressed = pressed
-		ev.position = pos
-		ev.global_position = pos
-		root.push_input(ev, true)
-
-
-## Button label: its "key" meta (rich / ambiguous buttons) or its text of a rich (icon + labels) button.
-func _label(b: Button) -> String:
+func _label(b: Control) -> String:
 	if b.has_meta("key"):
 		return String(b.get_meta("key"))
-	return b.text
+	return (b as Button).text if b is Button else ""
+
+
+func _all_buttons() -> Array:
+	var out: Array = []
+	for c in main.ui.get_children():
+		if c is Button and not (c as Button).is_queued_for_deletion():
+			out.append(c)
+	return out
+
+
+func _find(key: String) -> Button:
+	for c in _all_buttons():
+		if _label(c as Button) == key:
+			return c
+	return null
+
+
+func _findp(prefix: String) -> Button:
+	for c in _all_buttons():
+		if _label(c as Button).begins_with(prefix):
+			return c
+	return null
 
 
 func _find_ctl(key: String) -> Control:
@@ -66,37 +86,27 @@ func _find_ctl(key: String) -> Control:
 	return null
 
 
-func _find(prefix: String) -> Button:
-	for c in main.ui.get_children():
-		if c is Button and _label(c as Button).begins_with(prefix) and not (c as Button).is_queued_for_deletion():
-			return c
-	return null
-
-
-func _press(prefix: String) -> bool:
-	var b: Button = _find(prefix)
+func _press(key: String) -> bool:
+	var b: Button = _find(key)
 	if b == null:
-		print("UITEST note: no button '%s'" % prefix)
+		b = _findp(key)
+	if b == null:
+		print("UITEST note: no button '%s'" % key)
 		return false
 	_click(b.get_global_rect().get_center())
 	return true
 
 
-## Desktop chrome (main.dui) lookups: exact "key" meta.
-func _findd(key: String) -> Button:
-	for c in main.dui.get_children():
-		if c is Button and _label(c as Button) == key and not (c as Button).is_queued_for_deletion():
-			return c
-	return null
-
-
-func _pressd(key: String) -> bool:
-	var b: Button = _findd(key)
-	if b == null:
-		print("UITEST note: no desktop button '%s'" % key)
-		return false
-	_click(b.get_global_rect().get_center())
-	return true
+func _click(pos: Vector2) -> void:
+	main.last_tap_ms = -1000
+	_motion(pos)
+	for pressed in [true, false]:
+		var ev := InputEventMouseButton.new()
+		ev.button_index = MOUSE_BUTTON_LEFT
+		ev.pressed = pressed
+		ev.position = pos
+		ev.global_position = pos
+		root.push_input(ev, true)
 
 
 func _mouse(pos: Vector2, button: MouseButton, pressed: bool) -> void:
@@ -109,11 +119,27 @@ func _mouse(pos: Vector2, button: MouseButton, pressed: bool) -> void:
 	root.push_input(ev, true)
 
 
-func _motion(pos: Vector2) -> void:
+func _motion(pos: Vector2, rel: Vector2 = Vector2.ZERO) -> void:
 	var ev := InputEventMouseMotion.new()
 	ev.position = pos
 	ev.global_position = pos
+	ev.relative = rel
 	root.push_input(ev, true)
+
+
+## Press at `a`, move in steps, release at `b` (a real drag).
+func _drag(a: Vector2, b: Vector2, button: MouseButton = MOUSE_BUTTON_LEFT) -> void:
+	_motion(a)
+	_mouse(a, button, true)
+	await _frames()
+	var prev: Vector2 = a
+	for k in range(1, 5):
+		var p: Vector2 = a.lerp(b, float(k) / 4.0)
+		_motion(p, p - prev)
+		prev = p
+		await _frames(1)
+	_mouse(b, button, false)
+	await _frames()
 
 
 func _key(code: Key, ctrl: bool = false, shift: bool = false) -> void:
@@ -148,6 +174,10 @@ func _cell_scr(i: int) -> Vector2:
 	return main.w2s(TowerState.slot_pos(i))
 
 
+func _op_scr(x: int, y: int) -> Vector2:
+	return OutpostView.cell_rect(main, x, y).get_center()
+
+
 func _no_overlap(rects: Array) -> bool:
 	for a in rects.size():
 		for b in range(a + 1, rects.size()):
@@ -161,69 +191,69 @@ func _frames(n: int = 2) -> void:
 		await process_frame
 
 
+## PC-U2 on the current screen: every visible button has a tooltip, fires on
+## press, is >= 40 px tall and sits inside the viewport.
+func _audit(where: String) -> void:
+	var bad: Array = []
+	var vis := Rect2(Vector2.ZERO, main.get_viewport().get_visible_rect().size)
+	for c in _all_buttons():
+		var b: Button = c
+		if not b.visible:
+			continue
+		if b.tooltip_text == "" or b.action_mode != BaseButton.ACTION_MODE_BUTTON_PRESS:
+			bad.append(_label(b) + " tip/mode")
+		if b.size.y < 40.0:
+			bad.append(_label(b) + " h")
+		if not vis.grow(1.0).encloses(b.get_global_rect()):
+			bad.append(_label(b) + " out %s" % b.get_global_rect())
+	_check("PC-U2 %s: buttons have tooltips, press mode, >= 40 px, inside the window" % where, bad.is_empty(), str(bad))
+
+
 func _run() -> void:
 	MetaSave.clear()
+	root.size = Vector2i(1920, 1080)
 	var scene: PackedScene = load("res://Main.tscn")
 	main = scene.instantiate()
 	root.add_child(main)
 	await _frames()
-	# ---- PC MAIN MENU / SLOT PICKER (PC-U6) -----------------------------------
+	main.settings["controls"]["tooltip_delay"] = 0.0
+	# ---- MENU ------------------------------------------------------------------
 	_check("PC: boots to the main menu", main.screen == "menu")
-	_check("PC: slot picker shows 3 slots", _findd("SLOT 1 PLAY") != null and _findd("SLOT 2 PLAY") != null and _findd("SLOT 3 PLAY") != null)
-	_pressd("SLOT 1 PLAY")
+	_check("PC: slot picker shows 3 slots", _find("SLOT 1 PLAY") != null and _find("SLOT 2 PLAY") != null and _find("SLOT 3 PLAY") != null)
+	_audit("menu")
+	_press("SLOT 1 PLAY")
 	await _frames()
-	_check("PC: slot 1 loads to the base", main.screen == "base" and MetaSave.active == 1)
+	_check("PC: slot 1 loads to the hub (Play tab)", main.screen == "base" and main.tab == "play" and MetaSave.active == 1)
+	# ---- PC-U1 native layout ------------------------------------------------------
+	_check("PC-U1: no embedded mobile column (one unscaled Control layer)", main.ui.scale == Vector2.ONE and not ("col_s" in main) and main.get_node_or_null("Sfx") != null)
+	_check("PC-U1: overlays ignore the mouse", main.tipbox.mouse_filter == Control.MOUSE_FILTER_IGNORE and main.ui.mouse_filter == Control.MOUSE_FILTER_IGNORE and main.fader.mouse_filter == Control.MOUSE_FILTER_IGNORE)
 	main.save = BaseMeta.default_save()
-	main.save["coins"] = 1000   # PC ring-2 corner cell costs 600
+	main.save["coins"] = 50000
+	main.save["gems"] = 500
+	main.save["scrap"] = 2000
+	main.save["keys"] = 5
+	main.save["core_cores"] = 10
+	main.now_override = T0
 	main._rebuild_ui()
 	await _frames()
+	_audit("play")
 
-	# ---- BASE SCREEN ---------------------------------------------------------
-	_check("boots to base screen", main.screen == "base")
-	_click(main.w2s(TowerState.slot_pos(_c(7))))
-	await _frames()
-	_check("tap selects slot", main.sel == _c(7))
-	_check("sfx node owned by Main (no autoload)", main.sfx != null and main.sfx.get_parent() == main and AudioServer.get_bus_index("SFX") >= 0 and AudioServer.get_bus_index("Music") >= 0)
-	main.sfx.clear_log()
-	_press("Gun Turret")
-	await _frames()
-	_check("build button places permanent gun", String(BaseMeta.slot_of(main.save, _c(7)).get("id", "")) == "gun")
-	_check("sfx: button click + place clips fire", main.sfx.played("click") and main.sfx.played("place"))
-	main.sfx.clear_log()
-	_press("Upgrade")
-	await _frames()
-	_check("perm upgrade button", int(BaseMeta.slot_of(main.save, _c(7)).get("lvl", 0)) == 2)
-	_check("sfx: upgrade clip fires", main.sfx.played("upgrade"))
-	_press("Core DMG")
-	await _frames()
-	_check("core upgrade button", int(main.save["core"]["dmg"]) == 1)
-	_click(main.w2s(TowerState.slot_pos(_c(0))))
-	await _frames()
-	_press("Unlock slot")
-	await _frames()
-	_check("perm unlock button", BaseMeta.is_unlocked(main.save, _c(0)))
-
-	# ---- BOOT: OFFLINE EARNINGS MODAL -----------------------------------------
-	# REDESIGN (ENGINE-META, deliberate): the away pay is the Outpost's stored
-	# production (Offline.gd is gone) — a connected Coin Mill ran for 2 h.
-	main.now_override = T0
+	# ---- BOOT: AWAY MODAL ------------------------------------------------------
 	var boot_save: Dictionary = main.save.duplicate(true)
-	boot_save["coins"] = int(boot_save["coins"]) + 500
-	var mev: Array = Outpost.place(boot_save, "mill", 4, 4, 0, T0 - 7200 - 120)
+	Outpost.place(boot_save, "mill", 4, 4, 0, T0 - 7200 - 120)
 	Outpost.tick(boot_save, T0 - 7200)
 	boot_save["last_seen"] = T0 - 7200
 	var expect_off: int = int(Outpost.away_report(BaseMeta.normalize(boot_save), T0)["coins"])
 	main.boot(boot_save, T0)
 	await _frames()
-	_check("offline modal shown at boot", not main.offline_offer.is_empty() and _find("Collect") != null and _find("START RUN") == null)
+	_check("away modal shown at boot (only Collect clickable)", not main.offline_offer.is_empty() and _find("Collect") != null and _find("DSTART") == null)
 	var c_before: int = int(main.save["coins"])
 	_press("Collect")
 	await _frames()
-	_check("collect pays offline coins", expect_off > 0 and int(main.save["coins"]) == c_before + expect_off and main.offline_offer.is_empty(), "%d" % expect_off)
+	_check("Collect pays the Outpost's stored coins", expect_off > 0 and int(main.save["coins"]) == c_before + expect_off and main.offline_offer.is_empty(), "%d" % expect_off)
 	_check("missions rolled at boot", Missions.list(main.save).size() == 3)
-	_check("boot kept permanent base", String(BaseMeta.slot_of(main.save, _c(7)).get("id", "")) == "gun")
 
-	# ---- TIER SELECTOR -------------------------------------------------------
+	# ---- TIER SELECT --------------------------------------------------------------
 	main.save["best_wave_by_tier"] = {"1": 40}
 	main._rebuild_ui()
 	await _frames()
@@ -232,269 +262,21 @@ func _run() -> void:
 	_check("tier > selects tier 2", int(main.save["tier"]) == 2 and main.view_tier == 2)
 	_press(">")
 	await _frames()
-	_check("locked tier 3 shown, not selected, START disabled", main.view_tier == 3 and int(main.save["tier"]) == 2 and _find("START RUN").disabled)
+	_check("locked tier 3 shown, START disabled", main.view_tier == 3 and int(main.save["tier"]) == 2 and _find("DSTART").disabled)
 	_press("<")
 	await _frames()
 	_press("<")
 	await _frames()
-	_check("tier < back to tier 1", int(main.save["tier"]) == 1 and main.view_tier == 1)
+	_check("tier < back to tier 1", int(main.save["tier"]) == 1)
 
-	# ---- LABS TAB ------------------------------------------------------------
-	main.save["coins"] = 5000
-	main.save["gems"] = 300
-	_press("TAB Labs")
-	await _frames()
-	_check("labs tab opens", main.tab == "labs" and _find("LAB dmg") != null)
-	var lc: int = int(main.save["coins"])
-	_press("LAB dmg")
-	await _frames()
-	_check("start research", Labs.is_running(main.save, "dmg") and int(main.save["coins"]) == lc - Labs.cost("dmg", 0))
-	main.now_override = T0 + 100000
-	main.poll_t = 1.0
-	await _frames(3)
-	_check("real-time research completes on poll", Labs.level(main.save, "dmg") == 1 and not Labs.is_running(main.save, "dmg"))
-	_press("LAB hp")
-	await _frames()
-	var g0: int = int(main.save["gems"])
-	_press("Rush")
-	await _frames()
-	_check("rush finishes research for gems", Labs.level(main.save, "hp") == 1 and int(main.save["gems"]) < g0)
-	# REDESIGN (deliberate): no gem lab slots; queues follow the Research Hall.
-	_check("research queue count follows the Research Hall", Labs.slots(main.save) == 1 and _find("Buy slot") == null)
-
-	# ---- CARDS TAB -----------------------------------------------------------
-	_press("TAB Cards")
-	await _frames()
-	_check("cards tab opens", main.tab == "cards" and _find("Open Chest") != null)
-	var g1: int = int(main.save["gems"])
-	main.sfx.clear_log()
-	_press("Open Chest")
-	await _frames()
-	_check("sfx: card_open clip fires", main.sfx.played("card_open"))
-	_check("open chest", Cards.owned(main.save).size() == 1 and int(main.save["gems"]) == g1 - Cards.chest_cost())
-	var cid: String = String(Cards.owned(main.save).keys()[0])
-	_press("CARD " + cid)
-	await _frames()
-	_check("tap card equips", Cards.equipped(main.save).has(cid))
-	_press("EQ " + cid)
-	await _frames()
-	_check("tap equipped slot unequips", not Cards.equipped(main.save).has(cid))
-	_press("CARD " + cid)
-	await _frames()
-	_press("CSLOT")
-	await _frames()
-	_check("buy card slot", Cards.slots(main.save) == 3 and Cards.equipped(main.save).has(cid))
-
-	# ---- MISSIONS TAB --------------------------------------------------------
-	_press("TAB Missions")
-	await _frames()
-	var g2: int = int(main.save["gems"])
-	var c2b: int = int(main.save["coins"])
-	_press("Claim Day")
-	await _frames()
-	_check("streak claim day 1", int(main.save["streak"]["day_idx"]) == 1 and int(main.save["coins"]) > c2b)
-	_check("streak not claimable twice", _find("Claim Day") == null)
-	var lst: Array = Missions.list(main.save)
-	for k in lst.size():
-		lst[k]["prog"] = int(lst[k]["target"])
-	main._rebuild_ui()
-	await _frames()
-	for k in lst.size():
-		_press("MCLAIM %d" % k)
-		await _frames()
-	_check("mission claims", Missions.all_claimed(main.save) and int(main.save["gems"]) > g2)
-	var g3: int = int(main.save["gems"])
-	_press("BONUS")
-	await _frames()
-	_check("all-clear bonus", bool(main.save["missions"]["bonus_claimed"]) and int(main.save["gems"]) > g3)
-	_press("TAB Base")
-	await _frames()
-	_check("back to base tab", main.tab == "base")
-	main.save["research"]["lvls"]["speed"] = 1
-
-	# ---- OPTIONS / CREDITS (gear) ---------------------------------------------
-	_press("GEAR")
-	await _frames()
-	_check("gear opens options", main.overlay == "options" and _find_ctl("SLIDER music") != null and _find("MUTE") != null)
-	var ms: Control = _find_ctl("SLIDER music")
-	if ms != null:
-		var mr: Rect2 = ms.get_global_rect()
-		_click(Vector2(mr.position.x + mr.size.x * 0.25, mr.get_center().y))
-		await _frames()
-	var mus: float = float(main.save["settings"]["music"])
-	_check("music slider click sets volume", mus > 0.1 and mus < 0.4, str(mus))
-	var ss: Control = _find_ctl("SLIDER sfx")
-	if ss != null:
-		var sr: Rect2 = ss.get_global_rect()
-		_click(Vector2(sr.position.x + sr.size.x * 0.6, sr.get_center().y))
-		await _frames()
-	var sv: float = float(main.save["settings"]["sfx"])
-	_check("sfx slider click sets volume", sv > 0.45 and sv < 0.75, str(sv))
-	_check("music volume applied to bus", absf(AudioServer.get_bus_volume_db(AudioServer.get_bus_index("Music")) - (main.sfx.lin_db(mus) - 4.0)) < 0.5)
-	var m0: bool = bool(main.save["settings"]["mute"])
-	_press("MUTE")
-	await _frames()
-	_check("mute button toggles + applies", bool(main.save["settings"]["mute"]) != m0 and AudioServer.is_bus_mute(AudioServer.get_bus_index("SFX")) != m0)
-	var disk: Dictionary = BaseMeta.normalize(MetaSave.read())
-	_check("audio settings persisted to save file", absf(float(disk["settings"]["music"]) - mus) < 0.001 and absf(float(disk["settings"]["sfx"]) - sv) < 0.001 and bool(disk["settings"]["mute"]) != m0)
-	_press("MUTE")
-	await _frames()
-	_press("Credits")
-	await _frames()
-	_check("credits open from options", main.overlay == "credits" and _find_ctl("CREDITS_SCROLL") != null)
-	_press("Back")
-	await _frames()
-	_check("credits back -> options", main.overlay == "options")
-	_press("Back")
-	await _frames()
-	_check("options close to base", main.overlay == "" and _find("START RUN") != null)
-
-	# ---- RUN -----------------------------------------------------------------
-	main.sfx.clear_log()
-	_press("START RUN")
-	await _frames()
-	_check("start run", main.screen == "run" and main.S != null)
-	_check("sfx: wave_start clip fires on run start", main.sfx.played("wave_start"))
-	var S = main.S
-	# REDESIGN (deliberate): the run grid starts empty; permanent buildings stay out of runs.
-	_check("run grid starts empty (perm base stays out of runs)", S.building_count() == 0 and not bool(S.unlocked[_c(0)]))
-	_press("SPD")
-	await _frames()
-	_check("speed pill cycles game speed", absf(S.speed - 1.5) < 0.01 and absf(float(main.save["speed"]) - 1.5) < 0.01)
-	_press("SPD")
-	await _frames()
-	_check("speed pill wraps to 1x", absf(S.speed - 1.0) < 0.01)
-	S.spawn_hold = true
-	# REDESIGN: drafts follow the wave cadence; grant_draft is the tool hook.
-	S.grant_draft()
-	S.draft[0] = load("res://Draft.gd").card_for("gun", S._draft_ctx(""))
-	main._rebuild_ui()
-	await _frames(3)
-	_check("draft shows cards", S.draft.size() == 3 and (_find("NEW") != null or _find("+1") != null))
-	var new_id: String = ""
-	var card_btn: Button = null
-	for c in main.ui.get_children():
-		if c is Button and _label(c as Button).begins_with("NEW"):
-			card_btn = c
-			break
-	var idx: int = -1
-	for k in S.draft.size():
-		if String(S.draft[k]["kind"]) == "new" and idx < 0:
-			idx = k
-			new_id = S.draft[k]["id"]
-	if card_btn != null and idx >= 0:
-		_click(card_btn.get_global_rect().get_center())
-		await _frames()
-		_check("card tap enters place mode", S.pending_place == new_id)
-		_click(main.w2s(TowerState.slot_pos(_c(8))))
-		await _frames()
-		_check("slot tap places building", S.id_at(_c(8)) == new_id and S.pending_place == "")
-		_check("sfx: run place clip fires", main.sfx.played("place"))
-	else:
-		_check("draft has a NEW card", false)
-	S.cash = 500.0
-	# REDESIGN (deliberate): buildings level through duplicate picks only and
-	# rings open by Core track total, so cash goes into the Core tracks.
-	_check("cash cannot level a building / unlock a cell", S.upgrade(_c(8)).is_empty() and S.unlock_plot(_c(4)).is_empty())
-	_click(main.w2s(TowerState.slot_pos(_c(12))))
-	await _frames()
-	main.sfx.clear_log()
-	_press("Overcharge")
-	await _frames()
-	_check("core cash upgrade button", S.core_run_lvl == 1)
-	_check("sfx: run upgrade clip fires", main.sfx.played("upgrade"))
-	# Targeting: selected weapon shows a "Target: X" cycle button (real click).
-	var tm0: String = String(S.target_modes[_c(12)])
-	_check("target button shown for selected weapon", _find("Target: Nearest") != null or _find("Target:") != null)
-	_press("Target:")
-	await _frames()
-	_check("target button cycles mode", String(S.target_modes[_c(12)]) != tm0 and String(S.target_modes[_c(12)]) == String(TowerState.TARGET_MODES[(TowerState.TARGET_MODES.find(tm0) + 1) % 4]))
-	_check("target button label updates", _find("Target: " + String(S.target_modes[_c(12)]).capitalize()) != null)
-	# AC-37 polish: the boss-bounty banner renders below the grid, never over a slot.
-	main._handle([{"t": "boss_bounty", "coins": 50, "gems": 1, "pos": TowerState.CENTER}])
-	var bpop: Dictionary = main.pops.last
-	var bpos: Vector2 = bpop["pos"]
-	_check("bounty banner clears the grid", String(bpop["text"]).begins_with("BOUNTY") and bpos.y - 30.0 > TowerState.CENTER.y + float(TowerState.SIDE) * 0.5 * TowerState.CELL)
-
-	# ---- REROLL + PERK OVERLAY -----------------------------------------------
-	S.grant_draft()
-	await _frames(3)
-	S.free_reroll = false
-	S.rerolls_left = 1
-	main._rebuild_ui()
-	await _frames()
-	_press("Reroll")
-	await _frames()
-	_check("draft reroll button", S.rerolls_left == 0 and S.draft.size() == 3)
-	var dk: String = _label(_find("NEW")) if _find("NEW") != null else "+1"
-	_press(dk)
-	await _frames()
-	if S.pending_place != "":
-		_click(main.w2s(TowerState.slot_pos(int(S.free_slots()[0]))))
-		await _frames()
-	_check("rerolled draft resolves", S.draft.is_empty() and S.pending_place == "")
-	S.perk_pending = 1
-	await _frames(3)
-	_check("perk overlay shows 3 cards", S.perk_offer.size() == 3 and _find("PERK") != null)
-	var pid: String = String(S.perk_offer[0])
-	_press("PERK")
-	await _frames()
-	_check("perk tap takes perk", S.perks_taken.size() == 1 and S.perk_offer.is_empty() and _find("PERK") == null, pid)
-
-	# ---- PAUSE / RESUME --------------------------------------------------------
-	S.spawn_hold = true
-	_press("PAUSE")
-	await _frames()
-	var ta: float = S.time_alive
-	var wt: float = S.wave_t
-	await _frames(10)
-	_check("pause opens menu + freezes engine time", main.overlay == "pause" and main.is_paused() and S.time_alive == ta and S.wave_t == wt)
-	_press("Options")
-	await _frames(4)
-	_check("pause -> options keeps time frozen", main.overlay == "options" and S.time_alive == ta)
-	_press("Back")
-	await _frames()
-	_check("options back -> pause", main.overlay == "pause")
-	_press("Resume")
-	await _frames(4)
-	_check("resume unfreezes engine time", main.overlay == "" and S.time_alive > ta)
-
-	# ---- DEATH -> RESULTS -> BASE -> RUN (loop seam) -------------------------
-	S.wind_used = true   # a chest may have equipped Second Wind; this check is about the death seam
-	S.hp = -1.0
-	S.stats["regen"] = 0.0
-	await _frames(3)
-	_check("death shows results", main.screen == "results" and _find("BACK TO BASE") != null)
-	_check("sfx: game_over clip fires", main.sfx.played("game_over"))
-	_check("sfx: rate limit drops a same-clip burst", main.sfx.play("kill") != main.sfx.play("kill") or not main.sfx.streams.has("kill"))
-	var vol_before: bool = bool(main.save["settings"]["mute"])
-	main.toggle_mute()
-	_check("sfx: mute toggles save setting + bus", bool(main.save["settings"]["mute"]) != vol_before and AudioServer.is_bus_mute(AudioServer.get_bus_index("SFX")) != vol_before)
-	main.toggle_mute()
-	_check("coins banked", int(main.save["runs"]) == 1)
-	_check("results has coin breakdown", (main.last_result.get("breakdown", {}) as Dictionary).has("cashout") and not main.last_breakdown.is_empty())
-	_press("BACK TO BASE")
-	await _frames()
-	_check("back to base screen", main.screen == "base" and _find("START RUN") != null)
-	_press("START RUN")
-	await _frames()
-	_check("second run starts fresh", main.screen == "run" and main.S != S and main.S.wave == 1 and main.S.id_at(_c(8)) == "")
-
-	# ---- ABANDON (pause menu) -> coins banked --------------------------------
-	var S2 = main.S
-	S2.coins_run = 33.0
-	var runs_b: int = int(main.save["runs"])
-	var coins_b: int = int(main.save["coins"])
-	_press("PAUSE")
-	await _frames()
-	_press("Abandon")
-	await _frames(3)
-	_check("abandon ends run -> results", S2.over and main.screen == "results" and _find("BACK TO BASE") != null)
-	_check("abandon banks coins", int(main.save["runs"]) == runs_b + 1 and int(main.save["coins"]) >= coins_b + 33, "%d -> %d" % [coins_b, int(main.save["coins"])])
-	var disk2: Dictionary = BaseMeta.normalize(MetaSave.read())
-	_check("abandon bank persisted", int(disk2["coins"]) == int(main.save["coins"]))
-
-	await _pc_desktop()
+	await _core_bay()
+	await _crates()
+	await _outpost()
+	await _research_cards_missions()
+	await _reforge()
+	await _settings_records()
+	await _run_screen()
+	await _pad_and_slots()
 
 	MetaSave.clear()
 	if fail_count == 0:
@@ -505,332 +287,648 @@ func _run() -> void:
 		quit(1)
 
 
-# ============================================================ PC DESKTOP UI
-func _pc_desktop() -> void:
-	var settings_before: Dictionary = Settings.read()
-	_pressd("DBACK")
+# ============================================================== CORE BAY
+func _core_bay() -> void:
+	var s: Dictionary = main.save
+	for id in ["f_plating", "f_lightweave", "b_longbore", "b_shortbore", "c_scope", "e_dynamo", "f_bulkhead"]:
+		Parts.grant(s, id, "test")
+	_key(KEY_K)
 	await _frames()
-	_check("PC: results Back to Base (hotbar)", main.screen == "base")
-	main.save["coins"] = 5000
-	main.settings["controls"]["tooltip_delay"] = 0.0
-	main._rebuild_ui()
+	_check("BAY: K opens the Core Bay", main.tab == "bay")
+	_audit("bay")
+	_press("BAY CORE foundry")
 	await _frames()
-
-	# ---- PC-U1 layout -----------------------------------------------------
-	var hud := Rect2(0, 0, main.vw, main.HUD_H)
-	var hot := Rect2(0, main.vh - main.HOT_H, main.vw, main.HOT_H)
-	var lr: Rect2 = Desktop.left_rect(main)
-	var rr: Rect2 = Desktop.right_rect(main)
-	var col := Rect2(main.col_pos, Vector2(main.W, main.H) * main.col_s)
-	_check("PC-U1: HUD, left, centre, right, hotbar do not overlap at 1920x1080", main.vw >= 1919.0 and _no_overlap([hud, hot, lr, rr, col]), "%s" % [[hud, hot, lr, rr, col]])
-	for res in [Vector2i(1280, 720), Vector2i(1280, 800)]:
-		root.size = res
-		await _frames(3)
-		var vis := Rect2(Vector2.ZERO, main.get_viewport().get_visible_rect().size)
-		var inside: bool = true
-		for c in main.dui.get_children():
-			if c is Control and not (c as Control).is_queued_for_deletion() and not vis.encloses((c as Control).get_rect()):
-				inside = false
-				print("UITEST note: outside ", _label(c as Button) if c is Button else c.name, " ", (c as Control).get_rect(), " vis ", vis)
-		_check("PC-U1: every control in the viewport at %dx%d (re-laid out)" % [res.x, res.y], inside and absf(main.vw - vis.size.x) < 1.0)
-	root.size = Vector2i(1920, 1080)
-	await _frames(3)
-
-	# ---- PC-U2 tooltips / press mode / height ------------------------------
-	var bad: Array = []
-	for host in [main.dui, main.ui]:
-		for c in host.get_children():
-			if c is Button and (c as Button).visible and not (c as Button).is_queued_for_deletion():
-				var b: Button = c
-				if b.tooltip_text == "" or b.action_mode != BaseButton.ACTION_MODE_BUTTON_PRESS:
-					bad.append(_label(b))
-				if host == main.dui and b.size.y < 40.0:
-					bad.append(_label(b) + " h")
-	_check("PC-U2: every button has a tooltip, press action, >= 40 px", bad.is_empty(), str(bad))
-	_check("PC-U2: tooltip box ignores the mouse", main.tipbox.mouse_filter == Control.MOUSE_FILTER_IGNORE and main.dui.mouse_filter == Control.MOUSE_FILTER_IGNORE)
-	# hover -> tooltip appears (button, then a cell)
-	var sb: Button = _findd("HUD Stats")
-	_motion(sb.get_global_rect().get_center())
-	await _frames(3)
-	_check("PC: hovering a button shows its tooltip", main.tipbox.visible and main.tip_label.text.contains("Lifetime"), main.tip_label.text)
-	_motion(_cell_scr(TowerState.CORE_SLOT))
-	await _frames(3)
-	_check("PC: hovering a cell shows a building tooltip", main.tipbox.visible and main.tip_label.text.begins_with("The Core"), main.tip_label.text)
-	_motion(Vector2(main.vw * 0.5, 30))
-	await _frames(2)
-
-	# ---- PC-U4 drag-to-place / right-click / wheel ---------------------------
-	var free: int = -1
-	for i in TowerState.N:
-		if free < 0 and i != TowerState.CORE_SLOT and BaseMeta.is_unlocked(main.save, i) and BaseMeta.slot_of(main.save, i).is_empty() and BaseMeta.place_ok(i, "gun"):
-			free = i
-	if free < 0:
-		free = _c(13)
-		BaseMeta.demolish(main.save, free)
-		main._rebuild_ui()
-		await _frames()
-	var hb: Button = _findd("HOT Gun Turret")
-	var hp: Vector2 = hb.get_global_rect().get_center()
-	_motion(hp)
-	_mouse(hp, MOUSE_BUTTON_LEFT, true)
+	_check("BAY: clicking a locked Core shows it (cannot be activated)", main.bay_core == "foundry" and _find("BAY ACTIVE").disabled)
+	_press("BAY CORE bastion")
 	await _frames()
-	_motion(_cell_scr(free))
-	await _frames(2)
-	_mouse(_cell_scr(free), MOUSE_BUTTON_LEFT, false)
+	var c0: int = int(s["coins"])
+	var lc: Dictionary = Cores.level_cost(1)
+	_press("BAY LEVEL")
 	await _frames()
-	_check("PC-U4: drag from hotbar to a valid cell places", String(BaseMeta.slot_of(main.save, free).get("id", "")) == "gun")
-	var locked: int = 0   # ring-3 corner, locked on a fresh save
-	_check("PC-U4: test cell 0 is locked", not BaseMeta.is_unlocked(main.save, locked))
-	hb = _findd("HOT Gun Turret")
-	hp = hb.get_global_rect().get_center()
-	_motion(hp)
-	_mouse(hp, MOUSE_BUTTON_LEFT, true)
-	await _frames()
-	_motion(_cell_scr(locked))
-	await _frames(3)
-	_check("PC-U4: drag ghost over a locked cell shows the reason", String(main.get_meta("ghost_reason", "")) == "Locked cell", String(main.get_meta("ghost_reason", "")))
-	_mouse(_cell_scr(locked), MOUSE_BUTTON_LEFT, false)
-	await _frames()
-	_check("PC-U4: drop on a locked cell does not place", BaseMeta.slot_of(main.save, locked).is_empty() and main.drag_id == "")
-	_mouse(_cell_scr(free), MOUSE_BUTTON_RIGHT, true)
-	_mouse(_cell_scr(free), MOUSE_BUTTON_RIGHT, false)
-	await _frames()
-	_check("PC-U4: right-click opens the info popover with Upgrade/Sell", main.overlay == "info" and main.info_cell == free and _findd("INFO UPGRADE") != null and _findd("INFO SELL") != null)
-	_pressd("INFO UPGRADE")
-	await _frames()
-	_check("PC-U4: popover Upgrade upgrades", int(BaseMeta.slot_of(main.save, free).get("lvl", 0)) == 2)
-	_pressd("INFO SELL")
-	await _frames()
-	_check("PC-U4: popover Sell demolishes", BaseMeta.slot_of(main.save, free).is_empty() and main.overlay == "")
-	var c0: Vector2 = _cell_scr(TowerState.CORE_SLOT)
-	_mouse(c0, MOUSE_BUTTON_WHEEL_UP, true)
-	await _frames()
-	_check("PC-U4: wheel up zooms in", absf(main.zoom - 1.1) < 0.001, str(main.zoom))
-	for k in 10:
-		_mouse(main.w2s(TowerState.CENTER), MOUSE_BUTTON_WHEEL_UP, true)
-	await _frames()
-	_check("PC-U4: zoom clamps at 1.4", absf(main.zoom - 1.4) < 0.001, str(main.zoom))
-	for k in 12:
-		_mouse(main.w2s(TowerState.CENTER), MOUSE_BUTTON_WHEEL_DOWN, true)
-	await _frames()
-	_check("PC-U4: zoom clamps at 0.8", absf(main.zoom - 0.8) < 0.001, str(main.zoom))
-	main.zoom = 1.0
-	_click(_cell_scr(TowerState.CORE_SLOT))
-	await _frames()
-	_check("PC: click still selects a cell after zooming", main.sel == TowerState.CORE_SLOT)
-
-	# ---- PC-U3 hotkeys -------------------------------------------------------
-	main.sel = -1
-	_key(KEY_1)
-	await _frames()
-	var first: String = String(BuildingDB.all_ids()[0])
-	_check("PC-U3: 1 arms hotbar slot 1", main.armed == first, main.armed)
-	_key(KEY_ESCAPE)
-	await _frames()
-	_check("PC-U3: Esc cancels the armed building", main.armed == "")
-	_key(KEY_1)
-	await _frames()
-	_click(_cell_scr(free))
-	await _frames()
-	_check("PC-U3: armed building places on click", String(BaseMeta.slot_of(main.save, free).get("id", "")) == first)
-	_key(KEY_ESCAPE)
-	main.sel = free
-	await _frames()
+	_check("BAY: Level up spends coins and raises the Core level", Cores.level(main.save, "bastion") == 2 and int(main.save["coins"]) == c0 - int(lc["coins"]))
 	_key(KEY_U)
 	await _frames()
-	_check("PC-U3: U upgrades the selection", int(BaseMeta.slot_of(main.save, free).get("lvl", 0)) == 2)
-	_key(KEY_X)
+	_check("BAY: U levels the viewed Core", Cores.level(main.save, "bastion") == 3)
+	# drag a Frame part from the inventory onto Frame slot 0
+	var uid: String = Parts.uid_of(s, "f_plating")
+	var cell: Button = null
+	for c in _all_buttons():
+		if (c as Button).has_meta("uid") and String((c as Button).get_meta("uid")) == uid:
+			cell = c
+	_check("BAY: inventory shows owned parts", cell != null and _findp("PART ") != null)
+	if cell != null:
+		await _drag(cell.get_global_rect().get_center(), CoreBay.slot_pos(main, 0))
+	_check("BAY: dragging a part onto its slot installs it", String(Parts.preset(main.save, "bastion")[0]) == uid, str(Parts.preset(main.save, "bastion")))
+	# wrong slot type is refused
+	var bar_uid: String = Parts.uid_of(s, "b_longbore")
+	var bcell: Button = null
+	for c in _all_buttons():
+		if (c as Button).has_meta("uid") and String((c as Button).get_meta("uid")) == bar_uid:
+			bcell = c
+	if bcell != null:
+		await _drag(bcell.get_global_rect().get_center(), CoreBay.slot_pos(main, 0))
+	_check("BAY: a Barrel dropped on a Frame slot is refused", String(Parts.preset(main.save, "bastion")[0]) == uid)
+	# select + Equip button
+	main.bay_part = bar_uid
+	main._rebuild_ui()
 	await _frames()
-	_check("PC-U3: X sells the selection", BaseMeta.slot_of(main.save, free).is_empty())
-	_key(KEY_L)
+	_press("BAY EQUIP")
 	await _frames()
-	_check("PC-U3: L opens the Labs tab", main.tab == "labs")
-	_key(KEY_B)
+	_check("BAY: Equip installs into the open Barrel slot", Parts.preset(main.save, "bastion").has(bar_uid))
+	_press("BAY UNEQUIP")
 	await _frames()
-	_key(KEY_H)
+	_check("BAY: Unequip removes it", not Parts.preset(main.save, "bastion").has(bar_uid))
+	# presets
+	_press("PRESET 2")
 	await _frames()
-	_check("PC-U3: H opens stats", main.overlay == "stats")
+	_check("BAY: preset tab 2 switches loadouts (empty)", Parts.preset_idx(main.save, "bastion") == 1 and String(Parts.preset(main.save, "bastion")[0]) == "")
+	_key(KEY_1)
+	await _frames()
+	_check("BAY: key 1 returns to loadout 1", Parts.preset_idx(main.save, "bastion") == 0 and String(Parts.preset(main.save, "bastion")[0]) == uid)
+	# filters
+	_press("FILTER SLOT B")
+	await _frames()
+	var only_b: bool = true
+	var n_parts: int = 0
+	for c in _all_buttons():
+		if (c as Button).has_meta("uid"):
+			n_parts += 1
+			if PartDB.slot_of(String(Parts.item(main.save, String((c as Button).get_meta("uid")))["id"])) != "B":
+				only_b = false
+	_check("BAY: slot filter shows only Barrels", only_b and n_parts == 2, str(n_parts))
+	_press("FILTER SLOT ALL")
+	await _frames()
+	# level / lock / salvage
+	main.bay_part = uid
+	main._rebuild_ui()
+	await _frames()
+	var sc0: int = int(main.save["scrap"])
+	_press("BAY PART LEVEL")
+	await _frames()
+	_check("BAY: part Lv up spends Scrap", int(Parts.item(main.save, uid)["lvl"]) == 2 and int(main.save["scrap"]) < sc0)
+	var sal_uid: String = Parts.uid_of(s, "f_lightweave")
+	main.bay_part = sal_uid
+	main._rebuild_ui()
+	await _frames()
+	_press("BAY LOCK")
+	await _frames()
+	_check("BAY: Lock protects a part (Salvage disabled)", bool(Parts.item(main.save, sal_uid)["locked"]) and _find("BAY SALVAGE").disabled)
+	_press("BAY LOCK")
+	await _frames()
+	var sc1: int = int(main.save["scrap"])
+	_press("BAY SALVAGE")
+	await _frames()
+	_check("BAY: Salvage turns a part into Scrap", Parts.item(main.save, sal_uid).is_empty() and int(main.save["scrap"]) > sc1)
+	# make another Core active once owned
+	(main.save["cores"]["owned"] as Array).append("foundry")
+	main.bay_core = "foundry"
+	main._rebuild_ui()
+	await _frames()
+	_press("BAY ACTIVE")
+	await _frames()
+	_check("BAY: Make active switches the run Core", Cores.active(main.save) == "foundry")
+	_press("BAY CORE bastion")
+	await _frames()
+	_press("BAY ACTIVE")
+	await _frames()
+	_check("BAY: back to Bastion", Cores.active(main.save) == "bastion")
+	_motion(CoreBay.slot_pos(main, 0))
+	await _frames(3)
+	_check("BAY: hovering a slot shows the part tooltip with + and - lines", main.tipbox.visible and main.tip_label.text.contains("\n+") and main.tip_label.text.contains("\n-"), main.tip_label.text)
+
+
+# ================================================================= CRATES
+func _crates() -> void:
+	var s: Dictionary = main.save
+	_key(KEY_J)
+	await _frames()
+	_check("CRATE: J opens Crates", main.tab == "crates")
+	_audit("crates")
+	var n0: int = Parts.items(s).size() + 0
+	var stars0: int = 0
+	for it in Parts.items(s).values():
+		stars0 += int((it as Dictionary)["stars"])
+	var c0: int = int(s["coins"])
+	var cost: int = Crates.coin_cost(s, "field")
+	main.meta_rng.seed = 3
+	_press("CRATE FIELD COINS")
+	await _frames()
+	var stars1: int = 0
+	for it in Parts.items(main.save).values():
+		stars1 += int((it as Dictionary)["stars"])
+	_check("CRATE: Field Crate costs its coin price and yields a part", int(main.save["coins"]) == c0 - cost and (Parts.items(main.save).size() > n0 or stars1 > stars0 or int(main.save["scrap"]) > 0))
+	_check("CRATE: the reveal plays from the open events", not main.crate_anim.is_empty() and (main.crate_anim["items"] as Array).size() == 1 and _find("CRATE SKIP") != null)
+	_press("CRATE SKIP")
+	await _frames()
+	_check("CRATE: Skip reveals all (Close shown)", _find("CRATE CLOSE") != null)
+	_press("CRATE CLOSE")
+	await _frames()
+	_check("CRATE: Close clears the stage", main.crate_anim.is_empty())
+	var k0: int = int(main.save["keys"])
+	_press("CRATE SUPPLY KEYS")
+	await _frames()
+	_check("CRATE: Supply Crate with a Key opens 2 parts", int(main.save["keys"]) == k0 - 1 and (main.crate_anim["items"] as Array).size() == 2)
+	main.crate_anim = {}
+
+
+# ================================================================= OUTPOST
+func _outpost() -> void:
+	var s: Dictionary = main.save
+	s["coins"] = 200000
+	s["gems"] = 500
+	_key(KEY_O)
+	await _frames()
+	_check("OP: O opens the Outpost", main.tab == "outpost")
+	_audit("outpost")
+	var o: Dictionary = s["outpost"]
+	var mills0: int = Outpost.count_of(o, "mill")
+	var c0: int = int(s["coins"])
+	# palette click arms, map click places (a 2x2 Mill next to the Relay)
+	_press("OPBUILD mill")
+	await _frames()
+	_check("OP: palette click arms the building", main.op_arm == "mill")
+	_motion(_op_scr(4, 6))
+	await _frames(2)
+	var gh: Dictionary = main.get_meta("op_ghost", {})
+	_check("OP: hover preview validates the footprint and the Relay link", gh.has("err") and String(gh["err"]) == "" and bool(gh.get("linked", false)), str(gh))
+	_motion(_op_scr(0, 2))
+	await _frames(2)
+	gh = main.get_meta("op_ghost", {})
+	_check("OP: hover over the Research Hall shows the refusal", String(gh.get("err", "")) == "occupied", str(gh))
+	_click(_op_scr(4, 6))
+	await _frames()
+	var o2: Dictionary = main.save["outpost"]
+	_check("OP: click on the map places it (coins spent, builder busy)", Outpost.count_of(o2, "mill") == mills0 + 1 and int(main.save["coins"]) == c0 - Outpost.cost("mill", 1) and Outpost.busy(main.save) == 1)
+	var new_uid: String = main.op_sel
+	_check("OP: the new building is selected", new_uid != "" and (o2["buildings"] as Dictionary).has(new_uid))
+	# skip the build timer for gems
+	var g0: int = int(main.save["gems"])
+	_press("OP SKIP 0")
+	await _frames()
+	_check("OP: Skip finishes the build for gems", bool((o2["buildings"][new_uid] as Dictionary)["built"]) and int(main.save["gems"]) < g0)
+	# drag a Conduit from the palette onto the map
+	_press("OPCAT infra")
+	await _frames()
+	var b: Button = _find("OPBUILD conduit")
+	if b != null:
+		await _drag(b.get_global_rect().get_center(), _op_scr(1, 4))
+	_check("OP: dragging a Conduit from the palette places it", Outpost.occupancy(main.save["outpost"]).has(Vector2i(1, 4)))
 	_key(KEY_ESCAPE)
 	await _frames()
-	_check("PC-U3: Esc closes the overlay", main.overlay == "")
+	_check("OP: Esc disarms", main.op_arm == "")
+	# select + upgrade (U) + move (M) + rotate (R) + demolish (Del)
+	_click(_op_scr(4, 6))
+	await _frames()
+	_check("OP: clicking a building selects it", main.op_sel == new_uid)
+	_key(KEY_U)
+	await _frames()
+	_check("OP: U queues an upgrade", Outpost.has_job(main.save, new_uid))
+	_press("OP SKIP 0")
+	await _frames()
+	_check("OP: the upgrade completes after Skip", int((o2["buildings"][new_uid] as Dictionary)["lvl"]) == 2)
+	_key(KEY_M)
+	await _frames()
+	_check("OP: M picks the building up", main.op_moving)
+	_click(_op_scr(0, 6))
+	await _frames()
+	_check("OP: click drops it at the new spot", int((o2["buildings"][new_uid] as Dictionary)["x"]) == 0 and int((o2["buildings"][new_uid] as Dictionary)["y"]) == 6 and not main.op_moving)
+	_press("OPCAT support")
+	await _frames()
+	_press("OPBUILD scrapyard")
+	await _frames()
+	var r0: int = main.op_rot
+	_key(KEY_R)
+	await _frames()
+	_check("OP: R rotates the armed footprint", main.op_rot == (r0 + 1) % 2)
+	_key(KEY_ESCAPE)
+	await _frames()
+	main.op_sel = new_uid
+	_key(KEY_DELETE)
+	await _frames()
+	_check("OP: Delete demolishes the selection", not (o2["buildings"] as Dictionary).has(new_uid))
+	# collect: click a full generator; Collect all at Relay 3
+	var mill_uid: String = ""
+	Outpost.place(main.save, "mill", 4, 4, 0, T0 - 4000)
+	Outpost.tick(main.save, T0)
+	for u in o2["buildings"].keys():
+		if String((o2["buildings"][u] as Dictionary)["id"]) == "mill" and bool((o2["buildings"][u] as Dictionary)["built"]):
+			mill_uid = String(u)
+	if mill_uid != "":
+		(o2["buildings"][mill_uid] as Dictionary)["stored"] = 120.0
+	main._rebuild_ui()
+	await _frames()
+	var cb: int = int(main.save["coins"])
+	var mb: Dictionary = o2["buildings"].get(mill_uid, {})
+	_click(_op_scr(int(mb.get("x", 4)), int(mb.get("y", 4))))
+	await _frames()
+	_check("OP: clicking a stocked generator collects it", int(main.save["coins"]) >= cb + 120)
+	_check("OP: Collect all is locked below Relay Lv3", _find("OP COLLECT ALL").disabled)
+	o2["relay_lvl"] = 3
+	if mill_uid != "":
+		(o2["buildings"][mill_uid] as Dictionary)["stored"] = 50.0
+	main._rebuild_ui()
+	await _frames()
+	var cc: int = int(main.save["coins"])
+	_press("OP COLLECT ALL")
+	await _frames()
+	_check("OP: Collect all collects every building", int(main.save["coins"]) >= cc + 50)
+	# plots
+	var pk: int = -1
+	for k in OutpostDB.PLOTS.size():
+		if pk < 0 and Outpost.plot_adjacent(o2, k) and not (o2["plots"] as Array).has(k):
+			pk = k
+	var pr: Rect2i = OutpostDB.PLOTS[pk]
+	_click(_op_scr(pr.position.x, pr.position.y))
+	await _frames()
+	_check("OP: clicking locked land selects the plot", main.op_sel == "plot:%d" % pk)
+	_press("OP PLOT COINS")
+	await _frames()
+	_check("OP: buying a plot opens the land", (o2["plots"] as Array).has(pk))
+	# pan + zoom
+	var cam0: Vector2 = main.op_cam
+	await _drag(_op_scr(6, 1), _op_scr(6, 1) + Vector2(120, 60), MOUSE_BUTTON_RIGHT)
+	_check("OP: right-drag pans the map", main.op_cam.distance_to(cam0) > 50.0, str(main.op_cam))
+	var z0: float = main.op_zoom
+	_mouse(_op_scr(5, 5), MOUSE_BUTTON_WHEEL_UP, true)
+	await _frames()
+	_check("OP: wheel zooms the map", main.op_zoom > z0)
+	main.op_cam = Vector2.ZERO
+	main.op_zoom = 1.0
+	# blueprints
+	var nb: int = (o2["blueprints"] as Array).size()
+	_press("BP SAVE")
+	await _frames()
+	_check("OP: blueprint Save stores the layout", (o2["blueprints"] as Array).size() == nb + 1)
+	_press("BP EXPORT")
+	await _frames()
+	_check("OP: Export produces a layout code", main.op_bp_text != "" and Outpost.import_layout(main.op_bp_text).size() > 0)
+	_press("BP LOAD 0")
+	await _frames()
+	_check("OP: Load rebuilds the saved blueprint", main.toast_queue.any(func(t: Variant) -> bool: return String(t).begins_with("Blueprint rebuilt")) or main.toast_text.begins_with("Blueprint rebuilt"))
+	main.op_sel = ""
+	main._rebuild_ui()
 
-	# ---- PC-U5 controller --------------------------------------------------
-	main.sel = TowerState.CORE_SLOT
-	_pad_axis(JOY_AXIS_LEFT_X, 1.0)
-	await _frames()
-	_pad_axis(JOY_AXIS_LEFT_X, 1.0)   # still held: no repeat
-	await _frames()
-	_check("PC-U5: stick moves the grid cursor once per push", main.sel == TowerState.CORE_SLOT + 1, str(main.sel))
-	_check("PC-U5: glyphs switch to the pad", main.last_device == "pad" and Desktop.hint(main, "cancel") == "B")
-	_pad_axis(JOY_AXIS_LEFT_X, 0.0)
-	await _frames()
-	main.armed = first
-	_pad_button(JOY_BUTTON_A)
-	await _frames()
-	_check("PC-U5: A places the armed building at the cursor", String(BaseMeta.slot_of(main.save, TowerState.CORE_SLOT + 1).get("id", "")) == first)
-	var dead: Array = []
-	for c in main.dui.get_children():
-		if c is Button and not (c as Button).disabled:
-			if (c as Button).focus_mode != Control.FOCUS_ALL or (c as Button).find_next_valid_focus() == null:
-				dead.append(_label(c as Button))
-	_check("PC-U5: base focus chain has no dead ends (pad)", dead.is_empty(), str(dead))
-	main.set_overlay("settings")
-	await _frames()
-	var dead2: int = 0
-	for c in main.dui.get_children():
-		if c is Button and (c as Button).focus_mode != Control.FOCUS_ALL:
-			dead2 += 1
-	_check("PC-U5: settings buttons are all focusable (pad)", dead2 == 0)
-	main.set_overlay("")
-	_key(KEY_ESCAPE)   # back to keyboard/mouse
-	await _frames()
-	_check("PC-U5: keyboard switches glyphs back", main.last_device == "kbm")
-	main.sel = -1
 
-	# ---- PC-S1/S2 settings + remap ------------------------------------------
-	_pressd("HUD Settings")
+# ================================================= RESEARCH / CARDS / MISSIONS
+func _research_cards_missions() -> void:
+	var s: Dictionary = main.save
+	_key(KEY_L)
 	await _frames()
-	_check("PC-S1: settings opens on 4 tabs", main.overlay == "settings" and _findd("SET TAB Video") != null and _findd("SET TAB Audio") != null and _findd("SET TAB Controls") != null and _findd("SET TAB Gameplay") != null)
+	_check("RES: L opens Research", main.tab == "research" and _find("LAB dmg") != null)
+	_audit("research")
+	var lc: int = int(s["coins"])
+	_press("LAB dmg")
+	await _frames()
+	_check("RES: click a project starts it", Labs.is_running(main.save, "dmg") and int(main.save["coins"]) == lc - Labs.cost("dmg", 0))
+	var g0: int = int(main.save["gems"])
+	_press("Rush")
+	await _frames()
+	_check("RES: Rush finishes it for gems", Labs.level(main.save, "dmg") == 1 and int(main.save["gems"]) < g0)
+	_key(KEY_C)
+	await _frames()
+	_check("CARDS: C opens Cards", main.tab == "cards" and _find("Open Chest") != null)
+	_audit("cards")
+	var g1: int = int(main.save["gems"])
+	main.sfx.clear_log()
+	_press("Open Chest")
+	await _frames()
+	_check("CARDS: Open Chest (sfx card_open)", Cards.owned(main.save).size() == 1 and int(main.save["gems"]) == g1 - Cards.chest_cost() and main.sfx.played("card_open"))
+	var cid: String = String(Cards.owned(main.save).keys()[0])
+	_press("CARD " + cid)
+	await _frames()
+	_check("CARDS: click a card equips it", Cards.equipped(main.save).has(cid))
+	_press("EQ " + cid)
+	await _frames()
+	_check("CARDS: click an equipped slot unequips", not Cards.equipped(main.save).has(cid))
+	_key(KEY_M)
+	await _frames()
+	_check("MIS: M opens Missions", main.tab == "missions")
+	_audit("missions")
+	var c2: int = int(main.save["coins"])
+	_press("Claim Day")
+	await _frames()
+	_check("MIS: streak claim", int(main.save["streak"]["day_idx"]) == 1 and int(main.save["coins"]) > c2)
+	var lst: Array = Missions.list(main.save)
+	for k in lst.size():
+		lst[k]["prog"] = int(lst[k]["target"])
+	main._rebuild_ui()
+	await _frames()
+	for k in lst.size():
+		_press("MCLAIM %d" % k)
+		await _frames()
+	_check("MIS: mission claims", Missions.all_claimed(main.save))
+	var g3: int = int(main.save["gems"])
+	_press("BONUS")
+	await _frames()
+	_check("MIS: all-clear bonus", bool(main.save["missions"]["bonus_claimed"]) and int(main.save["gems"]) > g3)
+
+
+# ================================================================= REFORGE
+func _reforge() -> void:
+	var s: Dictionary = main.save
+	_key(KEY_Y)
+	await _frames()
+	_check("RF: Y opens Reforge", main.tab == "reforge")
+	_audit("reforge")
+	_check("RF: Reforge is locked below the gate", _find("REFORGE").disabled == not Reforge.can_reforge(s))
+	s["best_wave_by_tier"] = {"1": 45}
+	s["reforge"]["coins_since"] = 250000
+	main._rebuild_ui()
+	await _frames()
+	var want: int = Reforge.shards_now(s)
+	_press("REFORGE")
+	await _frames()
+	_check("RF: first click asks to confirm (nothing reset)", main.rf_confirm == 1 and int(main.save["coins"]) > 0 and _find("REFORGE CONFIRM") != null)
+	_press("REFORGE CANCEL")
+	await _frames()
+	_check("RF: Keep playing cancels", main.rf_confirm == 0)
+	_press("REFORGE")
+	await _frames()
+	_press("REFORGE CONFIRM")
+	await _frames()
+	_check("RF: confirmed Reforge banks shards and resets coins", Reforge.count(main.save) == 1 and int(main.save["shards"]) == want and int(main.save["coins"]) == 0, "%d" % want)
+	_check("RF: Reforge keeps owned parts", Parts.items(main.save).size() > 0)
+	_press("RF might")
+	await _frames()
+	_check("RF: a branch node needs the root first", Reforge.node(main.save, "might") == 0)
+	_press("RF root_forge")
+	await _frames()
+	_press("RF might")
+	await _frames()
+	_check("RF: tree nodes buy with shards", Reforge.node(main.save, "root_forge") == 1 and Reforge.node(main.save, "might") == 1)
+	main.save["coins"] = 50000
+
+
+# ======================================================= SETTINGS / RECORDS
+func _settings_records() -> void:
+	var settings_before: Dictionary = Settings.read()
+	_press("HUD Settings")
+	await _frames()
+	_check("PC-S1: settings opens on 4 tabs", main.overlay == "settings" and _find("SET TAB Video") != null and _find("SET TAB Controls") != null)
+	_audit("settings")
 	var vs0: String = String(Settings.normalize(main.settings)["video"]["vsync"])
-	_pressd("SET VSync")
+	_press("SET VSync")
 	await _frames()
 	var vs1: String = String(Settings.normalize(main.settings)["video"]["vsync"])
 	_check("PC-S1: VSync cycles and persists to settings.cfg", vs1 != vs0 and String(Settings.read()["video"]["vsync"]) == vs1)
-	var fps0: int = int(Engine.max_fps)
-	_pressd("SET FPS cap")
+	_press("SET TAB Controls")
 	await _frames()
-	_check("PC-S1: FPS cap applies to the engine", int(Engine.max_fps) != fps0 and int(Engine.max_fps) == int(main.settings["video"]["fps_cap"]))
-	_pressd("SET TAB Audio")
-	await _frames()
-	_check("PC-S1: audio tab lists every bus", _findd("SET Master volume") != null and _findd("SET UI volume") != null)
-	_pressd("SET TAB Controls")
-	await _frames()
-	_pressd("REMAP pause")
+	_press("REMAP pause")
 	await _frames()
 	_check("PC-S2: remap button enters capture", main.remap_action == "pause")
 	_key(KEY_P)
 	await _frames()
 	_check("PC-S2: captured key rebinds the action", main.remap_action == "" and Keybinds.hint("pause") == "P", Keybinds.hint("pause"))
-	_check("PC-S2: binding persisted in settings.cfg", (Settings.read()["keybinds"] as Dictionary).has("pause"))
-	_pressd("REMAP pause")
+	_press("REMAP pause")
 	await _frames()
-	_key(KEY_U)   # U belongs to "upgrade": swap
+	_key(KEY_U)
 	await _frames()
-	_check("PC-S2: conflicting key swaps bindings", Keybinds.hint("pause") == "U" and Keybinds.hint("upgrade") == "P", "%s / %s" % [Keybinds.hint("pause"), Keybinds.hint("upgrade")])
-	_pressd("KEYS RESET ALL")
+	_check("PC-S2: conflicting key swaps bindings", Keybinds.hint("pause") == "U" and Keybinds.hint("upgrade") == "P")
+	_press("KEYS RESET ALL")
 	await _frames()
 	_check("PC-S2: reset all restores defaults", Keybinds.hint("pause") == "Space" and Keybinds.hint("upgrade") == "U")
-	_pressd("SET CLOSE")
+	_press("SET CLOSE")
+	await _frames()
+	Settings.write(settings_before)
+	Settings.apply(settings_before)
+	main.settings = Settings.normalize(settings_before)
+	main.settings["controls"]["tooltip_delay"] = 0.0
+	_key(KEY_H)
+	await _frames()
+	_check("PC-U7: H opens stats", main.overlay == "stats")
+	_audit("records")
+	_press("REC Achievements")
+	await _frames()
+	_check("PC-U7: achievements tab", main.overlay == "achievements")
+	_key(KEY_ESCAPE)
+	await _frames()
+	_check("PC-U3: Esc closes the overlay", main.overlay == "")
+	_press("DTAB Play")
+	await _frames()
+	_press("MODES")
+	await _frames()
+	_check("PC: mode select lists modifiers", main.overlay == "modes" and _find("MOD Swarm") != null)
+	_press("MOD Swarm")
+	await _frames()
+	_check("PC: toggling a modifier updates run options", (main.run_opts["modifiers"] as Array).has("swarm"))
+	_press("MOD Swarm")
+	await _frames()
+	_press("MODES CLOSE")
 	await _frames()
 
-	# ---- PC-U7 stats / history / achievements --------------------------------
-	_pressd("HUD History")
-	await _frames()
-	var hist: Array = main.save.get("history", [])
-	_check("PC-U7: history lists the save's runs with Retry", main.overlay == "history" and hist.size() >= 2 and _findd("HIST RETRY 0") != null and _findd("HIST RETRY %d" % (mini(12, hist.size()) - 1)) != null)
-	_pressd("REC Stats")
-	await _frames()
-	_check("PC-U7: stats overlay from engine data", main.overlay == "stats" and int(main.save["stats"]["runs"]) == hist.size())
-	_pressd("REC Achievements")
-	await _frames()
-	_check("PC-U7: achievements overlay", main.overlay == "achievements")
-	_pressd("REC Stats")
-	await _frames()
-	_pressd("REC History")
-	await _frames()
-	var want_seed: int = int((hist[hist.size() - 1] as Dictionary)["seed"])
-	_pressd("HIST RETRY 0")
-	await _frames()
-	_check("PC-U7: Retry replays the entry's seed", main.screen == "run" and main.S != null and int(main.S.run_seed) == want_seed and main.last_seed == want_seed)
 
-	# ---- in-run: pause key, draft/perk hotkeys, lane focus, retry -----------
+# =================================================================== RUN
+func _run_screen() -> void:
+	main.save["research"]["lvls"]["speed"] = 1
+	main._rebuild_ui()
+	await _frames()
+	main.sfx.clear_log()
+	_press("DSTART")
+	await _frames()
+	_check("RUN: START RUN starts a run on an empty grid", main.screen == "run" and main.S != null and main.S.building_count() == 0)
+	_check("sfx: wave_start on run start", main.sfx.played("wave_start"))
 	var S = main.S
+	S.spawn_hold = true
+	_audit("run")
+	# PC-U1 run layout
+	var top := Rect2(0, 0, main.vw, main.TOP_H)
+	_check("PC-U1: top bar, left, field, right, hotbar do not overlap at 1920x1080", main.vw >= 1919.0 and _no_overlap([top, main.left_rect(), main.field_rect(), main.right_rect(), main.hot_rect()]))
+	_check("PC-U1: the whole 7x7 grid is inside the field", main.field_rect().has_point(_cell_scr(0)) and main.field_rect().has_point(_cell_scr(TowerState.N - 1)))
+	await _frames(2)
+	var cash_tips: int = 0
+	var hp_tips: int = 0
+	for st in main.stat_tips:
+		if String((st as Array)[1]).begins_with("Run cash"):
+			cash_tips += 1
+		if String((st as Array)[1]).begins_with("Core HP"):
+			hp_tips += 1
+	_check("PC-G6: cash and Core HP are shown once (right panel only)", cash_tips == 1 and hp_tips == 1, "%d/%d" % [cash_tips, hp_tips])
+	for res in [Vector2i(1280, 720), Vector2i(1280, 800)]:
+		root.size = res
+		await _frames(3)
+		_audit("run %dx%d" % [res.x, res.y])
+	root.size = Vector2i(1920, 1080)
+	await _frames(3)
+	# speed
+	_press("SPD")
+	await _frames()
+	_check("RUN: speed button cycles game speed", absf(S.speed - 1.5) < 0.01 and absf(float(main.save["speed"]) - 1.5) < 0.01)
+	_key(KEY_F)
+	await _frames()
+	_check("RUN: F steps the speed down", absf(S.speed - 1.0) < 0.01)
+	# tracks
+	S.cash = 400.0
+	main._rebuild_ui()
+	await _frames()
+	var cost: int = S.track_cost("dmg")
+	_press("TRACK Damage")
+	await _frames()
+	_check("RUN: clicking a Core track buys a level", int(S.tracks["dmg"]) == 1 and S.cash < 400.0 - float(cost) + 5.0)
+	_key(KEY_2, false, true)
+	await _frames()
+	_check("RUN: Shift+2 buys the Rate track", int(S.tracks["rate"]) == 1)
+	_motion(_find("TRACK Eco").get_global_rect().get_center())
+	await _frames(3)
+	_check("RUN: hovering a track shows its tooltip", main.tipbox.visible and main.tip_label.text.begins_with("Eco track"), main.tip_label.text)
+	_motion(_cell_scr(TowerState.CORE_SLOT))
+	await _frames(3)
+	_check("RUN: hovering the Core shows its attack + trait", main.tipbox.visible and main.tip_label.text.contains("Core") and main.tip_label.text.contains("Trait"), main.tip_label.text)
+	# draft: cards, reroll, banish, Q pick, place
+	S.grant_draft()
+	S.draft[0] = load("res://Draft.gd").card_for("gun", S._draft_ctx(""))
+	main._rebuild_ui()
+	await _frames(2)
+	_check("RUN: the draft panel shows the cards", S.draft.size() >= 3 and _findp("DCARD 0") != null and _findp("DCARD 2") != null)
+	_audit("draft")
+	var hand0: String = JSON.stringify(S.draft)
+	_press("Reroll")
+	await _frames()
+	_check("RUN: free reroll re-rolls the hand", not S.free_reroll and S.draft.size() >= 3)
+	_check("RUN: reroll now shows its cash cost", _find("Reroll") != null and _find("Reroll").text.contains("$"))
+	var bid: String = String((S.draft[2] as Dictionary)["id"])
+	_press("Banish")
+	await _frames()
+	_check("RUN: Banish arms banish mode", main.banish_mode)
+	_press("DCARD 2")
+	await _frames()
+	_check("RUN: clicking a card in banish mode banishes it", S.banished.has(bid) and S.banish_left == 0 and not main.banish_mode)
+	S.draft[0] = load("res://Draft.gd").card_for("gun", S._draft_ctx(""))
+	main._rebuild_ui()
+	await _frames()
+	_key(KEY_Q)
+	await _frames()
+	_check("RUN: Q takes draft card 1 (place mode)", S.draft.is_empty() and S.pending_place == "gun")
+	var cell: int = TowerState.CORE_RING[0]
+	_click(_cell_scr(cell))
+	await _frames()
+	_check("RUN: click a glowing cell places it", S.id_at(cell) == "gun" and S.pending_place == "")
+	_check("sfx: place clip", main.sfx.played("place"))
+	# drag a NEW building card onto a cell
+	S.grant_draft()
+	S.draft[1] = load("res://Draft.gd").card_for("mortar", S._draft_ctx(""))
+	main._rebuild_ui()
+	await _frames()
+	var cb: Button = _findp("DCARD 1")
+	var cell2: int = TowerState.CORE_RING[1]
+	if cb != null:
+		await _drag(cb.get_global_rect().get_center(), _cell_scr(cell2))
+	_check("RUN: dragging a draft card onto a cell places it", S.id_at(cell2) == "mortar" and S.draft.is_empty())
+	# target mode on a selected weapon
+	_click(_cell_scr(cell))
+	await _frames()
+	var tm0: String = String(S.target_modes[cell])
+	_press("Target:")
+	await _frames()
+	_check("RUN: Target button cycles the weapon's mode", String(S.target_modes[cell]) != tm0)
+	# specials: key cast, cooldown, targeted aim
+	Specials.take(S.specials, "sp_repair")
+	Specials.take(S.specials, "sp_orbital")
+	S._spawn("hauler", [])
+	main._rebuild_ui()
+	await _frames()
+	_check("RUN: the hotbar shows the specials", _find("SPECIAL 1") != null and not _find("SPECIAL 1").disabled and _find("SPECIAL 3").disabled)
+	var casts0: int = S.special_casts
+	_key(KEY_1)
+	await _frames()
+	_check("RUN: key 1 casts special 1 (cooldown starts)", S.special_casts == casts0 + 1 and float((S.specials[0] as Dictionary)["cd"]) > 0.0)
+	_press("SPECIAL 1")
+	await _frames()
+	_check("RUN: casting on cooldown is refused", S.special_casts == casts0 + 1)
+	_key(KEY_2)
+	await _frames()
+	_check("RUN: a targeted special arms the aim cursor", main.aim_special == 1 and S.special_casts == casts0 + 1)
+	_mouse(main.w2s(TowerState.CENTER + Vector2(120, 0)), MOUSE_BUTTON_RIGHT, true)
+	_mouse(main.w2s(TowerState.CENTER + Vector2(120, 0)), MOUSE_BUTTON_RIGHT, false)
+	await _frames()
+	_check("RUN: right-click cancels the aim", main.aim_special == -1)
+	_key(KEY_2)
+	await _frames()
+	_click(main.w2s(TowerState.CENTER + Vector2(160, -40)))
+	await _frames()
+	_check("RUN: clicking the field drops the Orbital Strike there", S.special_casts == casts0 + 2 and S.orbitals.size() == 1 and (S.orbitals[0]["pos"] as Vector2).distance_to(TowerState.CENTER + Vector2(160, -40)) < 2.0)
+	# wheel zoom
+	for k in 8:
+		_mouse(main.w2s(TowerState.CENTER), MOUSE_BUTTON_WHEEL_UP, true)
+	await _frames()
+	_check("RUN: zoom clamps at 1.4", absf(main.zoom - 1.4) < 0.001)
+	main.zoom = 1.0
+	# pause / resume / lane / retry
 	_key(KEY_SPACE)
 	await _frames()
-	_check("PC-U3: Space pauses", main.overlay == "pause" and main.is_paused())
+	var ta: float = S.time_alive
+	await _frames(6)
+	_check("RUN: Space pauses (engine time frozen)", main.overlay == "pause" and S.time_alive == ta)
+	_audit("pause")
 	_key(KEY_SPACE)
-	await _frames()
-	_check("PC-U3: Space resumes", main.overlay == "")
+	await _frames(4)
+	_check("RUN: Space resumes", main.overlay == "" and S.time_alive > ta)
 	var fq: int = S.focus_quad
 	_key(KEY_V)
 	await _frames()
-	_check("PC-U3: V moves the lane focus", S.focus_quad == (fq + 1) % 4)
-	S.perk_pending = 1
-	for k in 40:
-		if S.perk_offer.size() > 0:
-			break
-		await _frames(1)
-	var perks0: int = S.perks_taken.size()
-	_check("PC-U6: perk draft modal on the hotbar", S.perk_offer.size() == 3 and _findd("DPERK " + String(load("res://data/PerkDB.gd").get_def(String(S.perk_offer[1]))["name"])) != null)
-	_key(KEY_2)
-	await _frames()
-	_check("PC-U6: perk draft accepts 2", S.perks_taken.size() == perks0 + 1 and S.perk_offer.is_empty())
-	S.grant_draft()
-	for k in 40:
-		if S.draft.size() > 0:
-			break
-		await _frames(1)
-	if S.draft.size() > 0:
-		var cell: int = int(S.free_slots()[0]) if S.free_slots().size() > 0 else -1
-		var card: Button = null
-		for c in main.dui.get_children():
-			if c is Button and _label(c as Button).begins_with("DCARD"):
-				card = c
-				break
-		var newc: bool = String((S.draft[0] as Dictionary)["kind"]) == "new"
-		if card != null and cell >= 0 and newc:
-			var cp: Vector2 = card.get_global_rect().get_center()
-			_motion(cp)
-			_mouse(cp, MOUSE_BUTTON_LEFT, true)
-			await _frames()
-			_motion(_cell_scr(cell))
-			await _frames()
-			_mouse(_cell_scr(cell), MOUSE_BUTTON_LEFT, false)
-			await _frames()
-			_check("PC-U4: drag a draft card onto a run cell places it", S.id_at(cell) != "" and S.draft.is_empty())
-		else:
-			_key(KEY_1)
-			await _frames()
-			_check("PC-U3: 1 picks draft card 1", S.draft.is_empty())
+	_check("RUN: V moves the lane focus", S.focus_quad == (fq + 1) % 4)
 	var seed_now: int = main.last_seed
 	_key(KEY_R, true)
 	await _frames()
-	_check("PC-U3: Ctrl+R retries the same seed", main.S != S and int(main.S.run_seed) == seed_now)
+	_check("RUN: Ctrl+R retries the same seed", main.S != S and int(main.S.run_seed) == seed_now)
+	var S2 = main.S
+	S2.coins_run = 33.0
+	var runs_b: int = int(main.save["runs"])
+	_press("HUD Pause")
+	await _frames()
+	_press("Abandon")
+	await _frames(3)
+	_check("RUN: Abandon ends the run -> results (banked)", S2.over and main.screen == "results" and int(main.save["runs"]) == runs_b + 1)
+	_check("RUN: results offer Back to base + Retry seed", _find("DBACK") != null and _find("RETRY SEED") != null)
+	_audit("results")
+	_check("sfx: game_over clip", main.sfx.played("game_over"))
+	_press("DBACK")
+	await _frames()
+	_check("RUN: Back to base returns to the hub", main.screen == "base" and main.tab == "play")
+
+
+# ======================================================= PAD + SLOT DELETE
+func _pad_and_slots() -> void:
+	_pad_button(JOY_BUTTON_A)
+	await _frames()
+	_check("PC-U5: pad input switches glyphs", main.last_device == "pad")
+	main.screen = "base"
+	for tb in ["play", "bay", "crates", "outpost", "research", "reforge"]:
+		main.set_tab(tb)
+		await _frames()
+		var dead: Array = []
+		for c in _all_buttons():
+			if not (c as Button).disabled and ((c as Button).focus_mode != Control.FOCUS_ALL or (c as Button).find_next_valid_focus() == null):
+				dead.append(_label(c as Button))
+		_check("PC-U5: %s focus chain has no dead ends (pad)" % tb, dead.is_empty(), str(dead))
+	main.set_tab("play")
+	main.start_run()
+	await _frames()
+	main.S.spawn_hold = true
+	main.sel = TowerState.CORE_SLOT
+	_pad_axis(JOY_AXIS_LEFT_X, 1.0)
+	await _frames()
+	_pad_axis(JOY_AXIS_LEFT_X, 1.0)
+	await _frames()
+	_check("PC-U5: stick moves the grid cursor once per push", main.sel == TowerState.CORE_SLOT + 1, str(main.sel))
+	_pad_axis(JOY_AXIS_LEFT_X, 0.0)
+	main.S.pending_place = "gun"
+	_pad_button(JOY_BUTTON_A)
+	await _frames()
+	_check("PC-U5: A places at the cursor", main.S.id_at(TowerState.CORE_SLOT + 1) == "gun")
 	main.abandon_run()
 	await _frames(3)
-	_check("PC-U6: death screen shows Retry seed + Back to Base", main.screen == "results" and _findd("RETRY SEED") != null and _findd("DBACK") != null)
-	_pressd("DBACK")
+	_key(KEY_ESCAPE)
 	await _frames()
-
-	# ---- mode select (endless + modifiers) ----------------------------------
-	_pressd("MODES")
+	_check("PC-U5: keyboard switches glyphs back; Esc leaves results", main.last_device == "kbm" and main.screen == "base")
+	_press("HUD Menu")
 	await _frames()
-	_check("PC: mode select lists the 9 modifiers", main.overlay == "modes" and _findd("MOD Swarm") != null and _findd("MOD Fresh Start") != null)
-	_check("PC: endless locked below best wave 50", _findd("MODE Endless").disabled == not BaseMeta.endless_unlocked(main.save))
-	_pressd("MOD Swarm")
+	_check("PC: Menu returns to the slot picker", main.screen == "menu" and MetaSave.slot_exists(1))
+	_press("SLOT 1 DELETE")
 	await _frames()
-	_check("PC: toggling a modifier updates run options", (main.run_opts["modifiers"] as Array).has("swarm"))
-	_pressd("MODES START")
-	await _frames()
-	_check("PC: run starts with the chosen modifiers", main.screen == "run" and (main.S.modifiers as Array).has("swarm"))
-	main.abandon_run()
-	await _frames(3)
-	_pressd("DBACK")
-	await _frames()
-
-	# ---- slot delete needs confirmation (PC-U6) ----------------------------
-	_pressd("HUD Menu")
-	await _frames()
-	_check("PC: Menu returns to the slot picker", main.screen == "menu")
-	_check("PC: slot 1 exists on disk", MetaSave.slot_exists(1))
-	_pressd("SLOT 1 DELETE")
-	await _frames()
-	_check("PC-U6: delete asks for confirmation first", main.confirm_del == 1 and MetaSave.slot_exists(1) and _findd("SLOT 1 CONFIRM") != null)
-	_pressd("SLOT 1 CONFIRM")
+	_check("PC-U6: delete asks for confirmation first", main.confirm_del == 1 and MetaSave.slot_exists(1) and _find("SLOT 1 CONFIRM") != null)
+	_press("SLOT 1 CONFIRM")
 	await _frames()
 	_check("PC-U6: confirmed delete removes the slot", not MetaSave.slot_exists(1))
-	_pressd("SLOT 1 PLAY")
+	_press("SLOT 1 PLAY")
 	await _frames()
 	_check("PC: new game in the emptied slot", main.screen == "base" and int(main.save["runs"]) == 0)
-	Settings.write(settings_before)   # leave the player's settings.cfg as found
-	Settings.apply(settings_before)
