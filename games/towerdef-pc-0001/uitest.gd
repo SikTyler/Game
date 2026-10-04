@@ -797,7 +797,7 @@ func _run_screen() -> void:
 	await _frames()
 	_key(KEY_Q)
 	await _frames()
-	_check("RUN: Q takes draft card 1 (place mode)", S.draft.is_empty() and S.pending_place == "gun")
+	_check("RUN: Q takes draft card 1 (place mode)", S.draft.is_empty() and S.pending_place == "gun", "draft %s pending '%s' perk %d mut %d over %s" % [str(S.draft.map(func(c: Dictionary) -> String: return String(c["id"]))), S.pending_place, S.perk_offer.size(), S.mutation_offer.size(), str(S.over)])
 	var cell: int = TowerState.CORE_RING[0]
 	_click(_cell_scr(cell))
 	await _frames()
