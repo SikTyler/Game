@@ -530,8 +530,10 @@ static func _draw_right(m) -> void:
 		["Armor", "%.1f" % float(st.get("armor", 0.0)), "Flat damage removed from each enemy hit"],
 		["Base DPS", Kit.fmt(float(S.dps())), "Estimated damage per second of the Core and every building"],
 		["Coins this run", Kit.fmt(float(S.coins_run)), "Coins banked when the run ends (x tier, x modifiers)"],
+		["Crit chance", "%d%%" % int(round(minf(1.0, float(st.get("crit", 0.0)) + float(cw.get("crit", 0.0))) * 100.0)), "Chance a Core hit deals critical damage"],
+		["Best wave", "%d" % int(m.save.get("best_wave", 0)), "Your best wave on any tier — beat it to push the frontier"],
 	]
-	var sh: float = clampf((track_y(m) - 74.0 - y) / float(rows.size()), 20.0, 28.0)
+	var sh: float = clampf((track_y(m) - 74.0 - y) / float(rows.size()), 20.0, 30.0)
 	for k in rows.size():
 		var rw: Array = rows[k]
 		Kit.row(m, String(rw[0]), String(rw[1]), Vector2(x, y + sh * float(k)), w, Kit.TEXT, String(rw[2]), 16)

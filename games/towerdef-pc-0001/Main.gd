@@ -58,7 +58,7 @@ const NAV_H: float = 60.0
 const FADE_TIME: float = 0.25
 const DMG_MERGE: float = 0.1
 ## World extent shown by the run field (spawn ring diameter + margin).
-const WORLD_SPAN: float = 2.0 * TowerState.SPAWN_R * 0.84
+const WORLD_SPAN: float = 2.0 * TowerState.SPAWN_R * 0.78   # was 0.84: larger run-grid cells (PM fix round)
 
 var save: Dictionary = {}
 var settings: Dictionary = {}        # global user://settings.cfg (Settings.gd), never in a slot

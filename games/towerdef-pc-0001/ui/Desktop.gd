@@ -639,11 +639,13 @@ static func draw_toast(m) -> void:
 	if m.toast_t <= 0.0 or m.toast_text == "" or m.screen == "menu":
 		return
 	var a: float = clampf(m.toast_t * 3.0, 0.0, 1.0)
-	var w: float = 560.0
-	var y: float = m.TOP_H + (m.NAV_H if m.screen == "base" else 0.0) + 12.0
-	var r := Rect2((m.vw - w) * 0.5, y, w, 44)
-	Kit.panel(m, r, Color(Kit.GOLD, a), Color(0.16, 0.13, 0.07, 0.94 * a))
-	Kit.t(m, m.toast_text, Vector2(m.vw * 0.5, y + 29), 18, Color(Kit.TEXT, a), HORIZONTAL_ALIGNMENT_CENTER, w - 24.0)
+	# Corner toast (PM fix round): top-right, just under the top bar (and the
+	# Base nav), clear of the battlefield and the Outpost map.
+	var w: float = 440.0
+	var y: float = m.TOP_H + (m.NAV_H if m.screen == "base" else 0.0) + 8.0
+	var r := Rect2(m.vw - w - 12.0, y, w, 40)
+	Kit.panel(m, r, Color(Kit.GOLD, a), Color(0.16, 0.13, 0.07, 0.96 * a))
+	Kit.t(m, m.toast_text, Vector2(r.get_center().x, y + 26), 16, Color(Kit.TEXT, a), HORIZONTAL_ALIGNMENT_CENTER, w - 20.0)
 
 
 static func draw_menu(m) -> void:

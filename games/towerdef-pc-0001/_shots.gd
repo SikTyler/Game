@@ -135,6 +135,12 @@ func _initialize() -> void:
 			main.op_sel = String(uid)
 	main._rebuild_ui()
 	await _shot("%s/05b_outpost_dev.png" % outdir)
+	# corner toast (achievement / missions banner) over the Outpost map
+	main.toast_text = "Achievement: Outpost Builder  (+10 gems)"
+	main.toast_t = 30.0
+	main.queue_redraw()
+	await _shot("%s/05f_outpost_toast.png" % outdir, false)
+	_quiet()
 	main.op_sel = "plot:3"
 	main._rebuild_ui()
 	await _shot("%s/05d_outpost_plot.png" % outdir)
