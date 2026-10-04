@@ -578,7 +578,7 @@ func _pc_buildings(st: Dictionary, arm: Array, eco_dmg: Array, aeg_rate: Array, 
 				st["beacon"] = float(st["beacon"]) + TuneRef.num("pc_beacon", 0.15) * L
 			"refinery":
 				var ep: float = float(eco_pen[i])
-				(st["refineries"] as Array).append({"slot": i, "rate": TuneRef.num("pc_refinery_rate", 0.10) * ep, "cap": TuneRef.num("pc_refinery_cap", 5.0) * L * ep})
+				(st["refineries"] as Array).append({"slot": i, "rate": TuneRef.num("pc_refinery_rate", 0.10) * ep, "cap": TuneRef.num("pc_refinery_cap", 2.5) * L * ep})
 			"barricade":
 				var q: int = cell_quad(i)
 				var wl: Dictionary = st["walls"]
@@ -1436,6 +1436,17 @@ func place(i: int) -> Array:
 	pending_place = ""
 	recompute()
 	ev.append({"t": "placed", "slot": i, "id": id_at(i)})
+	_check_queue(ev)
+	return ev
+
+
+## Drop a pending placement (no legal cell / player cancels with Esc).
+func cancel_place() -> Array:
+	if pending_place == "":
+		return []
+	var id: String = pending_place
+	pending_place = ""
+	var ev: Array = [{"t": "place_cancelled", "id": id}]
 	_check_queue(ev)
 	return ev
 

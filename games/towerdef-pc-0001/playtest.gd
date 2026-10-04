@@ -14,6 +14,12 @@ extends SceneTree
 # probe may still place drafted run-only buildings, which makes it stricter),
 # T2 on day 3-5 + day-1 best wave 18-32 (AC-40), no post-T3 plateau, and the
 # week-1 checks repeated on EXTRA_SEEDS.
+# PC (7x7 board, build cap, multi-lane waves): the bot places weapons as close
+# to the core as the ring rules allow, keeps the Beacon lane focus on an active
+# lane, cancels cards with no legal cell, buys outer cells for land development
+# once saturated, and picks the mildest endless mutation. PC gates: swapping
+# Mines for Refineries never out-earns the same board by > 15% (PC-E14), every challenge modifier reaches
+# wave 25 on the day-20 save and endless plays past its first mutation (PC-E16).
 # Prints per-run lines + "PLAYTEST METRICS {json}" + exactly "PLAYTEST OK" (exit 0)
 # or "PLAYTEST FAIL: ..." (exit 1). Clears user:// saves at start and end.
 
@@ -37,7 +43,8 @@ var fail_count: int = 0
 const GATES: Array = ["solvent", "first_goal_reachable", "progressable", "no_death_spiral", "no_trivial_dominant",
 	"t2_by_day5", "tier3_by_day30", "no_plateau_before_t3", "early_3day_rise",
 	"gems_per_day_ok", "gem_sources_ok", "offline_below_active", "mix_beats_weapon", "mix_beats_eco", "no_dominant_perk",
-	"ac38_eco_mix", "ac39_no_mono", "day1_band", "no_plateau_after_t3", "seeds_ok"]
+	"ac38_eco_mix", "ac39_no_mono", "day1_band", "no_plateau_after_t3", "seeds_ok",
+	"pc_refinery_not_dominant", "pc_modifiers_reach_w25", "pc_endless_runs"]
 const EXTRA_SEEDS: Array = [5151, 6262]   # AC-38/AC-40 re-checked on more seeds (thin margins)
 
 
@@ -115,6 +122,9 @@ static func _prefers(policy: String, id: String, weapons: int, ecos: int) -> int
 	match policy:
 		"eco":
 			return 3 if cat == "eco" else (1 if cat == "support" else 0)
+		"refinery":
+			# PC-E14 probe: Refinery + Mine economy (Smelter), weapons only as glue.
+			return 3 if id == "refinery" or id == "mine" else (2 if cat == "weapon" else 0)
 		"weapon":
 			return 3 if cat == "weapon" else (1 if cat == "support" else 0)
 	# balanced: keep weapons slightly ahead of eco, support as glue
@@ -175,6 +185,11 @@ static func _perk_score(policy: String, id: String) -> int:
 ## Competent in-run policy; also used as a library by selftest.
 static func bot_step(S, policy: String, perk_pref: String = "") -> Array:
 	var ev: Array = []
+	if S.mutation_offer.size() > 0:
+		ev.append_array(S.choose_mutation(_pick_mutation(S)))
+	# PC lanes: keep the Beacon focus on the busiest active lane.
+	if S.active_quads.size() > 0 and not S.active_quads.has(S.focus_quad):
+		ev.append_array(S.set_focus(int(S.active_quads[0])))
 	if S.perk_offer.size() > 0:
 		var bp: int = 0
 		var bs: int = -99
@@ -202,9 +217,11 @@ static func bot_step(S, policy: String, perk_pref: String = "") -> Array:
 				best = k
 		ev.append_array(S.choose_card(best))
 	if S.pending_place != "":
-		var free: Array = S.free_slots()
-		if free.size() > 0:
-			ev.append_array(S.place(int(free[0])))
+		var cell: int = _place_cell(S, S.pending_place)
+		if cell >= 0:
+			ev.append_array(S.place(cell))
+		elif S.free_slots().is_empty() or S.at_cap():
+			ev.append_array(S.cancel_place())   # nowhere legal: skip the card
 	# Spend cash: cheapest preferred upgrade (core counts as a weapon).
 	var target: int = -1
 	var cost: int = 1 << 30
@@ -226,6 +243,35 @@ static func bot_step(S, policy: String, perk_pref: String = "") -> Array:
 	if target >= 0 and S.cash >= float(S.upgrade_cost(target)):
 		ev.append_array(S.upgrade(target))
 	return ev
+
+
+## Endless mutations: the competent pick is the least dangerous buff
+## (Plating only matters with elites, Rush before Fangs/Vigor/Horde).
+static func _pick_mutation(S) -> int:
+	var order: Array = ["m_plating", "m_rush", "m_fangs", "m_vigor", "m_horde"]
+	var best: int = 0
+	var best_r: int = 99
+	for k in S.mutation_offer.size():
+		var r: int = order.find(String(S.mutation_offer[k]))
+		if r >= 0 and r < best_r:
+			best_r = r
+			best = k
+	return best
+
+
+## Placement on the 7x7: weapons (Railgun needs ring 2+) as close to the core
+## as allowed so they cover every lane; eco / support fill the rest inner-first.
+static func _place_cell(S, id: String) -> int:
+	var best: int = -1
+	var best_r: int = 99
+	for i in S.free_slots():
+		if not S.can_place(int(i), id):
+			continue
+		var r: int = TowerState.ring_of(int(i))
+		if r < best_r:
+			best_r = r
+			best = int(i)
+	return best
 
 
 static func run_once(save: Dictionary, policy: String, seed_value: int) -> Dictionary:
@@ -288,8 +334,9 @@ static func spend_meta(save: Dictionary, policy: String) -> void:
 				did = BaseMeta.try_core(save, stat)
 			if not did and cheapest >= 0:
 				did = BaseMeta.try_upgrade(save, cheapest)
-		if not did and free < 0 and BaseMeta.building_count(save) < BaseMeta.build_cap(save):
-			# 7x7 ring unlocks: buy the cheapest open cell (ring 2 before ring 3).
+		# 7x7 ring unlocks: a free cell when the board needs room, otherwise land
+		# development (BaseMeta.land_bonus) once everything else is saturated.
+		if not did and (free < 0 or BaseMeta.building_count(save) >= BaseMeta.build_cap(save)):
 			var ucell: int = -1
 			var ucost: int = 1 << 30
 			for i in TowerState.N:
@@ -317,6 +364,7 @@ const Missions := preload("res://Missions.gd")
 const Offline := preload("res://Offline.gd")
 const Tiers := preload("res://Tiers.gd")
 const LabDB := preload("res://data/LabDB.gd")
+const ModifierDB := preload("res://data/ModifierDB.gd")
 
 const DAYS: int = 30
 const SESSION_H: Array = [8, 8, 16, 16]        # 2 sessions x 2 runs; 8 h / 16 h offline gaps (AC-40)
@@ -327,9 +375,9 @@ const CARD_PRIO: Array = ["c_dmg", "c_hp", "c_wind", "c_coin", "c_cash", "c_xp",
 
 
 ## One run on `save` (mutated: banks, missions). Returns run facts.
-static func camp_run(save: Dictionary, policy: String, seed_value: int, now: int, perk_pref: String = "", feed_missions: bool = true) -> Dictionary:
+static func camp_run(save: Dictionary, policy: String, seed_value: int, now: int, perk_pref: String = "", feed_missions: bool = true, opts: Dictionary = {}) -> Dictionary:
 	var S = TowerState.new()
-	S.setup(seed_value, save, now)
+	S.setup(seed_value, save, now, opts)
 	var t: float = 0.0
 	var acc: float = 0.0
 	var res: Dictionary = {}
@@ -347,7 +395,7 @@ static func camp_run(save: Dictionary, policy: String, seed_value: int, now: int
 			if String(e.get("t", "")) == "game_over":
 				res = e
 	var coins: int = int(res.get("coins", int(S.coins_run)))
-	return {"wave": S.wave, "tier": S.tier, "coins": coins, "real_s": t, "gems": S.gems_run, "perks": S.perks_taken.duplicate()}
+	return {"wave": S.wave, "tier": S.tier, "coins": coins, "real_s": t, "gems": S.gems_run, "perks": S.perks_taken.duplicate(), "mode": S.mode, "mutations": S.mutations_taken.size()}
 
 
 static func _gems_spend(save: Dictionary, rng: RandomNumberGenerator) -> void:
@@ -500,13 +548,13 @@ static func _gems_total(save: Dictionary) -> int:
 
 
 ## Replays a frozen snapshot with an in-run policy (and optional forced perk).
-static func snap_eval(snap: Dictionary, policy: String, seeds: Array, perk_pref: String = "") -> Dictionary:
+static func snap_eval(snap: Dictionary, policy: String, seeds: Array, perk_pref: String = "", opts: Dictionary = {}) -> Dictionary:
 	var w: float = 0.0
 	var c: float = 0.0
 	for sv in seeds:
 		var s: Dictionary = snap.duplicate(true)
 		BaseMeta.select_tier(s, Tiers.highest(s))
-		var r: Dictionary = camp_run(s, policy, int(sv), NOW0, perk_pref, false)
+		var r: Dictionary = camp_run(s, policy, int(sv), NOW0, perk_pref, false, opts)
 		w += float(r["wave"])
 		c += float(r["coins"])
 	var n: float = float(seeds.size())
@@ -640,6 +688,47 @@ func campaign_checks(seed0: int) -> Dictionary:
 		if ratio > 1.2 and float(pr["wave"]) >= w_med:
 			dominant.append(pid)
 	print("PERKS day 20 (always-take-X): " + JSON.stringify(perk_rows))
+	# PC-E14: a Refinery + Mine economy must not out-earn the same board without
+	# Refineries by > 15%. Same frozen day-7 / day-20 save; the probe turns every
+	# other permanent Mine into a Refinery (so each sits next to a Mine: S11
+	# Smelter), and both boards are played by the same eco-leaning in-run policy.
+	var refin: Dictionary = {}
+	var refin_ok: bool = true
+	for rday in [7, 20]:
+		var rsnap: Dictionary = (C["snaps"] as Dictionary)[rday]
+		var rp: Dictionary = rsnap.duplicate(true)
+		var nmine: int = 0
+		var rsl: Dictionary = rp["slots"]
+		for k in rsl.keys():
+			var re: Dictionary = rsl[k]
+			if String(re["id"]) == "mine":
+				if nmine % 2 == 0:
+					re["id"] = "refinery"
+				nmine += 1
+		var rb: Dictionary = snap_eval(rsnap, "refinery", seeds)
+		var rr: Dictionary = snap_eval(rp, "refinery", seeds)
+		var ratio: float = float(rr["coins"]) / maxf(1.0, float(rb["coins"]))
+		refin["d%d" % rday] = {"with_refinery": rr, "without": rb, "coin_ratio": snappedf(ratio, 0.001)}
+		if ratio > 1.15:
+			refin_ok = false
+	print("PC REFINERY vs balanced: " + JSON.stringify(refin))
+	# PC-E16 (subset): every challenge modifier stays winnable to wave 25 on the
+	# day-20 save, and an endless run plays past its first mutation.
+	var mod_rows: Dictionary = {}
+	var mods_ok: bool = true
+	for mid in ModifierDB.IDS:
+		var mr: Dictionary = snap_eval(snap20, "balanced", [seed0 + 11], "", {"modifiers": [mid]})
+		mod_rows[mid] = snappedf(float(mr["wave"]), 0.1)
+		mods_ok = mods_ok and float(mr["wave"]) >= 25.0
+	print("PC MODIFIERS day 20 (wave): " + JSON.stringify(mod_rows))
+	var esnap: Dictionary = snap20.duplicate(true)
+	var endless_ok: bool = BaseMeta.endless_unlocked(esnap)
+	var er: Dictionary = {}
+	if endless_ok:
+		BaseMeta.select_tier(esnap, Tiers.highest(esnap))
+		er = camp_run(esnap, "balanced", seed0 + 11, NOW0, "", false, {"mode": "endless"})
+		endless_ok = String(er["mode"]) == "endless" and int(er["wave"]) > ModifierDB.MUTATION_EVERY and int(er["mutations"]) >= 1
+	print("PC ENDLESS day 20: " + JSON.stringify(er))
 	var per_day: Array = []
 	for r in days:
 		var rd: Dictionary = r
@@ -667,4 +756,7 @@ func campaign_checks(seed0: int) -> Dictionary:
 		"ac38_eco_mix": ac38, "mono_same_save": mono, "mono_same_save_below_70": mono_ok,
 		"late_stall_days": late_stall, "best_wave_at_t3": bw_t3, "no_plateau_after_t3": late_ok,
 		"seed_runs": seed_rows, "seeds_ok": seeds_ok,
+		"pc_refinery": refin, "pc_refinery_not_dominant": refin_ok,
+		"pc_modifiers_d20": mod_rows, "pc_modifiers_reach_w25": mods_ok,
+		"pc_endless_d20": er, "pc_endless_runs": endless_ok,
 	}

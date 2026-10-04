@@ -297,3 +297,16 @@ static func reset_mock() -> void
 2. ENGINE: 7x7 and cap (E1, E2), spawns (E5), buildings and synergy (E3), move (E4), save v3 and slots (E9), stats and history (E8), achievements (E10), modifiers and endless (E6, E7).
 3. UI: the layout rewrite (U1, U2), input (U3–U5), screens (U6, U7), settings and remap (S1, S2).
 4. Balance (E14–E16), then shots (U8), then exports, CI and credits (S3–S6), then final gates (S7).
+
+### ENGINE implementation notes (as built)
+- **Board:** `BaseMeta.SIDE=7`, `N=49`, `CORE_SLOT=24`; `cell_ring`, `is_corner`, `unlock_cost(s, i)`, `ring_open` (ring 3 needs T3), `build_cap`, `place_ok` (Railgun ring ≥ 2). `TowerState.can_place` / `at_cap()` gate placement and `Draft.offer(..., cap)` offers no NEW cards at the cap.
+- **Land development (added):** every 4 outer cells bought raise every building's permanent level cap by 1 (`pc_land_cells=4`, max `pc_land_max=10`), so the 48-cell base stays a coin sink under the build cap.
+- **Geometry:** the enemy stop ring is 200 px (it was 150) and the spawn ring is 470 px. All weapon ranges scale by `pc_range_scale = 200/150`, and weapons get +8% range per ring past ring 1 (`pc_ring_range`).
+- **Refinery cap** tuned to 2.5 coins/lv/wave (`pc_refinery_cap`; spec said 5). At 5 the playtest PC-E14 probe earned 1.5x coins with Mines half-swapped for Refineries; at 2.5 it earns 0.97-1.06x and loses about 1-2 waves, so it is a real coin-for-waves trade.
+- **Synergy tags** continue the mobile numbering (mobile S6/S7 are Bounty Hunters/Oil Shells): **S8** Capacitor Bank (Railgun+Tesla), **S9** Crossfire (Flak+Gun), **S10** Spotter (Beacon+Mortar), **S11** Smelter (Refinery+Mine). Crits exist only through Crossfire (`pc_crit_mult=2`), with one seeded roll per shot. Ironclad reduces non-crit hits.
+- **Waves:** each wave is *planned* when it is telegraphed (`_build_plan`): its quadrants, then one entry `{t, kind, quad}` per spawn tick, round-robin over the quadrants. `wave_telegraph {wave, quadrants, counts{quad:n}, total, elites, boss_dir, lead}` fires `pc_telegraph_s` before `wave_start`. Wave 1 is telegraphed at t=0 and starts at t=3 s. Quadrants: 0 = N/NE, 1 = E/SE, 2 = S/SW, 3 = W/NW. `spawn_hold` is the test hook (it replaces the mobile `spawn_t = 999`).
+- **Barricade** walls sit at `STOP_R+50` on the Barricade's lane (`cell_quad`). Enemies pressing on a wall are slowed 30% and wear it down with their contact damage. Events: `wall_up` (each wave), `wall_broken`.
+- **Move:** `TowerState.move_building(a, b, paused)` (free while paused or when the field is clear; otherwise 10% of `building_value`) and `BaseMeta.try_move` (free). `cancel_place()` drops a pending card.
+- **Modes:** `setup(seed, save, now, {mode, modifiers})`. Endless doesn't feed the tier ladder; it records `save.endless.best`. Mutations: `mutation_offer` / `choose_mutation`, +10% coins each.
+- **Stats/history:** `Stats.on_event` is fed by `Missions.on_run_events` (one call from the view) plus BaseMeta/Labs `coins_spent`. `game_over` carries `seed, tier, mode, modifiers, mutations, duration_s, build, ts, dps`. `Stats.retry_opts(entry)` replays a history entry.
+- **Slots:** `MetaSave.read_slot/write_slot/delete_slot(n, "DELETE")/copy_slot/slot_summary/set_active`. `read()/write()/clear()` act on the active slot. The legacy mobile `user://save.json` is imported into an empty slot 1.

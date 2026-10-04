@@ -18,7 +18,7 @@ const DEFS: Dictionary = {
 	"railgun":   {"name": "Railgun",       "cat": "weapon",  "coin": 28, "desc": "Piercing line shot every 2.5 s; outer rings only (ring 2+). Adj Tesla: +20% dmg per 5 Tesla lv (max +60%)"},
 	"flak":      {"name": "Flak Battery",  "cat": "weapon",  "coin": 22, "desc": "Fast splash, x1.5 vs skitter/mite/drone. Adj Gun: both +10% crit"},
 	"beacon":    {"name": "Lane Beacon",   "cat": "support", "coin": 20, "desc": "+15%/lv weapon dmg vs the focused lane. Adj Mortar: +25% range"},
-	"refinery":  {"name": "Refinery",      "cat": "eco",     "coin": 24, "desc": "Wave end: 10% of the wave's cash income -> coins (cap 5/lv). Adj Mine: +20% output"},
+	"refinery":  {"name": "Refinery",      "cat": "eco",     "coin": 24, "desc": "Wave end: 10% of the wave's cash income -> coins (cap 2.5/lv). Adj Mine: +20% output"},
 	"barricade": {"name": "Barricade",     "cat": "support", "coin": 16, "desc": "Wall on its lane: -30% enemy speed, 60 HP/lv, rebuilt each wave"},
 }
 

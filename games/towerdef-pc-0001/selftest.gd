@@ -1093,6 +1093,19 @@ func _pc_board_stages() -> void:
 	S1.cash = 1.0e6
 	_check("PC-E1 in-run unlock refuses ring 3 below T3", S1.unlock_plot(edge3).is_empty() and not bool(S1.unlocked[edge3]))
 	_check("PC-E1 in-run unlock opens ring 2", not S1.unlock_plot(edge2).is_empty() and bool(S1.unlocked[edge2]))
+	# Land development: +1 perm level cap per 4 outer cells (max +10).
+	var ld: Dictionary = BaseMeta.default_save()
+	var cap0: int = BaseMeta.perm_lvl_cap(ld)
+	ld["unlocked"] = [8, 9, 10]
+	var cap3: int = BaseMeta.perm_lvl_cap(ld)
+	ld["unlocked"] = [8, 9, 10, 11]
+	var cap4: int = BaseMeta.perm_lvl_cap(ld)
+	var many: Array = []
+	for i in TowerState.N:
+		if BaseMeta.cell_ring(i) >= 2:
+			many.append(i)
+	ld["unlocked"] = many
+	_check("PC land bonus: +1 perm cap per 4 outer cells, max +10", cap0 == 10 and cap3 == 10 and cap4 == 11 and BaseMeta.perm_lvl_cap(ld) == 20)
 	# PC-E2 build cap = 12 + 2(t-1), capped at 40.
 	var cs: Dictionary = BaseMeta.default_save()
 	_check("PC-E2 cap 12 at T1", BaseMeta.build_cap(cs) == 12)
@@ -1384,7 +1397,7 @@ func _pc_building_stages() -> void:
 	S.cash_earned = 1000.0
 	c0 = S.coins_run
 	S._wave_end([])
-	_check("PC-E3 refinery cap 5 coins/lv/wave", is_equal_approx(S.coins_run - c0, 10.0))
+	_check("PC-E3 refinery cap 2.5 coins/lv/wave (PC-E14 tuned)", is_equal_approx(S.coins_run - c0, 5.0))
 	S.slots[_rc(5, 5)] = {}
 	S.slots[_rc(2, 2)] = {"id": "mine", "perm": 1, "run": 0}
 	S.recompute()
@@ -1466,6 +1479,9 @@ func _pc_move_stages() -> void:
 	S.slots[_rc(1, 3)] = {"id": "railgun", "perm": 1, "run": 0}
 	S.recompute()
 	_check("PC-E4 railgun cannot move inside ring 2", S.move_building(_rc(1, 3), _rc(3, 2)).is_empty() and S.move_building(_rc(1, 3), b).is_empty())
+	S.pending_place = "railgun"
+	var cev: Array = S.cancel_place()
+	_check("cancel_place drops a pending card", S.pending_place == "" and cev.size() == 1 and String(cev[0]["t"]) == "place_cancelled" and S.cancel_place().is_empty())
 	_check("PC-E4 core / locked cells refused", S.move_building(c, TowerState.CORE_SLOT).is_empty())
 	var bs: Dictionary = BaseMeta.default_save()
 	bs["coins"] = 1000

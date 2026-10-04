@@ -260,7 +260,16 @@ static func core_cap(s: Dictionary) -> int:
 
 
 static func perm_lvl_cap(s: Dictionary) -> int:
-	return TuneRef.int_of("perm_lvl_cap", 10) + 5 * (Tiers.highest(s) - 1)
+	return TuneRef.int_of("perm_lvl_cap", 10) + 5 * (Tiers.highest(s) - 1) + land_bonus(s)
+
+
+## PC land development: every pc_land_cells outer cells bought (ring 2/3) lift
+## every building's permanent level cap by 1 (max pc_land_max). The build cap
+## keeps the board scarce, so this is what makes the 48-cell base a real late
+## coin sink instead of dead land.
+static func land_bonus(s: Dictionary) -> int:
+	var un: Array = s.get("unlocked", [])
+	return mini(TuneRef.int_of("pc_land_max", 10), un.size() / maxi(1, TuneRef.int_of("pc_land_cells", 4)))
 
 
 ## The single hand-off to TowerState (SPEC A8).
