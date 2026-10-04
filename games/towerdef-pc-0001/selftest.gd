@@ -1803,10 +1803,15 @@ func _pc_shell_stages() -> void:
 	var ps: Dictionary = BaseMeta.default_save()
 	SteamService.reset_mock()
 	SteamService.push_stats(ps)
-	_check("PC-E11 stats mirrored (5 stats + store)", SteamService.mock_ops("set_stat_int").size() == 5 and SteamService.mock_ops("store_stats").size() == 1)
+	# REDESIGN (deliberate): + parts / reforges / specials stats -> 8.
+	_check("PC-E11 stats mirrored (8 stats + store)", SteamService.mock_ops("set_stat_int").size() == 8 and SteamService.mock_ops("store_stats").size() == 1)
 
 	# --- Achievements (PC-E10) -----------------------------------------------
-	_check("PC-E10 24 achievements, unique ids", AchievementDB.LIST.size() == 24 and AchievementDB.ids().size() == 24)
+	# REDESIGN (ENGINE-META, deliberate): +10 achievements (AC-23) -> 34.
+	var stx: Dictionary = BaseMeta.default_save()
+	Stats.on_event(stx, {"t": "game_over", "wave": 20, "couriers": 1, "specials_cast": 7, "duration_s": 1.0})
+	_check("ACH hooks: game_over feeds couriers + specials_cast stats", int(stx["stats"]["couriers"]) == 1 and int(stx["stats"]["specials_cast"]) == 7)
+	_check("PC-E10 34 achievements, unique ids", AchievementDB.LIST.size() == 34 and AchievementDB.ids().size() == 34)
 	var ring3: int = 0
 	var full: Array = []
 	for i in BaseMeta.N:
@@ -1829,6 +1834,16 @@ func _pc_shell_stages() -> void:
 		"ACH_ECO_ONLY": [{}, [{"t": "game_over", "wave": 30, "build": ["", "mine", "bounty"]}], -1.0],
 		"ACH_NO_ECO": [{}, [{"t": "game_over", "wave": 60, "build": ["gun", "", "armory"]}], -1.0],
 		"ACH_LABS_MAX": [{"research": {"lvls": {"speed": 3}, "running": []}}, [{"t": "meta"}], -1.0],
+		"ACH_FIRST_PART": [{"parts": {"next_uid": 2, "items": {"1": {"id": "f_glass", "lvl": 1, "stars": 0, "locked": false}}, "sets_completed": [], "specials_unlocked": []}}, [{"t": "meta"}], -1.0],
+		"ACH_FULL_SET": [{"parts": {"next_uid": 1, "items": {}, "sets_completed": ["mint"], "specials_unlocked": []}}, [{"t": "meta"}], -1.0],
+		"ACH_FIRST_REFORGE": [{"reforge": {"count": 1, "nodes": {}}}, [{"t": "meta"}], -1.0],
+		"ACH_REFORGE_5": [{"reforge": {"count": 5, "nodes": {}}}, [{"t": "meta"}], -1.0],
+		"ACH_GEM_MINE": [{"outpost": {"buildings": {"1": {"id": "gemmine", "built": true}}, "plots": []}}, [{"t": "meta"}], -1.0],
+		"ACH_COURIER": [{"stats": {"couriers": 1}}, [{"t": "meta"}], -1.0],
+		"ACH_CORES_4": [{"cores": {"active": "bastion", "owned": ["bastion", "foundry", "lance", "tempest"], "levels": {}}}, [{"t": "meta"}], -1.0],
+		"ACH_OUTPOST_FULL": [{"outpost": {"buildings": {}, "plots": [0, 1, 2, 3, 4, 5, 6, 7]}}, [{"t": "meta"}], -1.0],
+		"ACH_INSIGHT_10": [{"insight": {"in_dmg": 6, "in_hp": 4}}, [{"t": "meta"}], -1.0],
+		"ACH_SPECIAL_100": [{"stats": {"specials_cast": 100}}, [{"t": "meta"}], -1.0],
 		"ACH_CARD_MAX": [{"cards": {"owned": {"c_test": {"lvl": CardDB.MAX_LVL, "copies": 0}}}}, [{"t": "meta"}], -1.0],
 		"ACH_MOD_3": [{}, [{"t": "run_start", "modifiers": ["swarm", "haste", "noperks"]}, {"t": "core_hit", "dmg": 1.0}, {"t": "wave", "wave": 51}], -1.0],
 		"ACH_GLASS_50": [{}, [{"t": "run_start", "modifiers": ["glass"]}, {"t": "core_hit", "dmg": 1.0}, {"t": "wave", "wave": 50}], -1.0],
@@ -1848,7 +1863,7 @@ func _pc_shell_stages() -> void:
 	for k in 50:
 		m50.append({"t": "mission_claimed", "idx": 0, "gems": 1})
 	cases["ACH_MISSIONS_50"][1] = m50
-	_check("PC-E10 every achievement has a synthetic case", cases.size() == 24 and cases.keys().all(func(k: Variant) -> bool: return AchievementDB.ids().has(String(k))))
+	_check("PC-E10 every achievement has a synthetic case", cases.size() == 34 and cases.keys().all(func(k: Variant) -> bool: return AchievementDB.ids().has(String(k))))
 	for id in cases.keys():
 		var c: Array = cases[id]
 		var sv: Dictionary = BaseMeta.default_save()

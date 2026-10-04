@@ -124,6 +124,10 @@ static func push_stats(save: Dictionary) -> void:
 	set_stat_int("stat_best_wave", int(save.get("best_wave", 0)))
 	set_stat_int("stat_runs", int(st.get("runs", 0)))
 	set_stat_int("stat_playtime_min", int(float(st.get("play_s", 0.0)) / 60.0))
+	# Redesign stats (the new achievements' progress bars in Steam).
+	set_stat_int("stat_parts", int(st.get("parts_found", 0)))
+	set_stat_int("stat_reforges", int(st.get("reforges", 0)))
+	set_stat_int("stat_specials", int(st.get("specials_cast", 0)))
 	store_stats()
 
 

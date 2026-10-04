@@ -29,6 +29,17 @@ const LIST: Array = [
 	{"id": "ACH_STREAK_7",      "name": "Regular",         "desc": "Reach a 7-day login streak"},
 	{"id": "ACH_MISSIONS_50",   "name": "Contractor",      "desc": "Claim 50 missions"},
 	{"id": "ACH_ENDLESS",       "name": "No End",          "desc": "Unlock endless mode"},
+	# Redesign (REDESIGN_SPEC §3.6, AC-23): all save-based.
+	{"id": "ACH_FIRST_PART",    "name": "Spare Parts",     "desc": "Find your first Core part"},
+	{"id": "ACH_FULL_SET",      "name": "Matched Set",     "desc": "Complete a full part set"},
+	{"id": "ACH_FIRST_REFORGE", "name": "Reforged",        "desc": "Complete a Core Reforge"},
+	{"id": "ACH_REFORGE_5",     "name": "Phoenix Core",    "desc": "Complete 5 Core Reforges"},
+	{"id": "ACH_GEM_MINE",      "name": "Prospector",      "desc": "Build a Gem Mine in the Outpost"},
+	{"id": "ACH_COURIER",       "name": "Intercepted",     "desc": "Catch a Courier"},
+	{"id": "ACH_CORES_4",       "name": "Core Collection", "desc": "Own 4 Cores"},
+	{"id": "ACH_OUTPOST_FULL",  "name": "Frontier Settled", "desc": "Open all 8 Outpost plots"},
+	{"id": "ACH_INSIGHT_10",    "name": "Insightful",      "desc": "Bank 10 Insight picks"},
+	{"id": "ACH_SPECIAL_100",   "name": "Ability Spammer", "desc": "Cast 100 special attacks"},
 ]
 
 const SYNERGY_TARGET: int = 6

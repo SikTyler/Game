@@ -231,9 +231,50 @@ static func check_save(save: Dictionary, now: int = 0) -> Array:
 			if Cards.level(save, String(id)) >= CardDB.MAX_LVL:
 				out.append_array(unlock(save, "ACH_CARD_MAX", now))
 				break
+	out.append_array(_redesign_checks(save, st, now))
 	var sk: Dictionary = save.get("streak", {}) if save.get("streak", {}) is Dictionary else {}
 	if int(sk.get("day_idx", 0)) >= 7 or int(sk.get("loops", 0)) >= 1:
 		out.append_array(unlock(save, "ACH_STREAK_7", now))
 	if int(_a(save)["missions_claimed"]) >= 50:
 		out.append_array(unlock(save, "ACH_MISSIONS_50", now))
+	return out
+
+
+## Redesign achievements (REDESIGN_SPEC §3.6): parts, sets, Reforge, Outpost,
+## Courier, Cores, Insight, specials — all read from the persistent save.
+static func _redesign_checks(save: Dictionary, st: Dictionary, now: int) -> Array:
+	var out: Array = []
+	var pb: Dictionary = save.get("parts", {}) if save.get("parts", {}) is Dictionary else {}
+	if int(st.get("parts_found", 0)) >= 1 or (pb.get("items", {}) is Dictionary and not (pb.get("items", {}) as Dictionary).is_empty()):
+		out.append_array(unlock(save, "ACH_FIRST_PART", now))
+	if pb.get("sets_completed", []) is Array and not (pb.get("sets_completed", []) as Array).is_empty():
+		out.append_array(unlock(save, "ACH_FULL_SET", now))
+	var rf: Dictionary = save.get("reforge", {}) if save.get("reforge", {}) is Dictionary else {}
+	var nrf: int = maxi(int(rf.get("count", 0)), int(st.get("reforges", 0)))
+	if nrf >= 1:
+		out.append_array(unlock(save, "ACH_FIRST_REFORGE", now))
+	if nrf >= 5:
+		out.append_array(unlock(save, "ACH_REFORGE_5", now))
+	var op: Dictionary = save.get("outpost", {}) if save.get("outpost", {}) is Dictionary else {}
+	var bl: Dictionary = op.get("buildings", {}) if op.get("buildings", {}) is Dictionary else {}
+	for k in bl.keys():
+		var b: Dictionary = bl[k]
+		if String(b.get("id", "")) == "gemmine" and bool(b.get("built", false)):
+			out.append_array(unlock(save, "ACH_GEM_MINE", now))
+			break
+	if op.get("plots", []) is Array and (op.get("plots", []) as Array).size() >= 8:
+		out.append_array(unlock(save, "ACH_OUTPOST_FULL", now))
+	if int(st.get("couriers", 0)) >= 1:
+		out.append_array(unlock(save, "ACH_COURIER", now))
+	var cb: Dictionary = save.get("cores", {}) if save.get("cores", {}) is Dictionary else {}
+	if cb.get("owned", []) is Array and (cb.get("owned", []) as Array).size() >= 4:
+		out.append_array(unlock(save, "ACH_CORES_4", now))
+	var ins: Dictionary = save.get("insight", {}) if save.get("insight", {}) is Dictionary else {}
+	var ni: int = 0
+	for k in ins.keys():
+		ni += int(ins[k])
+	if ni >= 10:
+		out.append_array(unlock(save, "ACH_INSIGHT_10", now))
+	if int(st.get("specials_cast", 0)) >= 100:
+		out.append_array(unlock(save, "ACH_SPECIAL_100", now))
 	return out
