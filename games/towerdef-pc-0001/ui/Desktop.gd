@@ -308,10 +308,13 @@ static func _card_content(b: Button, icon: String, hk: String, title: String, de
 	b.add_child(tr)
 	_lbl(b, "[%s]" % hk, Vector2(b.size.x - 60, 6), 16, GOLD, 52.0, HORIZONTAL_ALIGNMENT_RIGHT)
 	_lbl(b, title, Vector2(80, 6), 20, TEXT, b.size.x - 150)
-	var d: Label = _lbl(b, desc, Vector2(80, 32), 15, DIM, b.size.x - 90)
+	var d: Label = _lbl(b, desc, Vector2(80, 32), 15, DIM, 0.0)
 	d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	d.size.y = b.size.y - 38
+	d.max_lines_visible = 3
+	d.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	d.clip_text = true
+	d.custom_minimum_size = Vector2(b.size.x - 96.0, 0.0)
+	d.size = Vector2(b.size.x - 96.0, b.size.y - 38.0)
 
 
 static func _lbl(parent: Control, s: String, pos: Vector2, size: int, col: Color, width: float = 0.0, align: int = HORIZONTAL_ALIGNMENT_LEFT) -> Label:
