@@ -2,16 +2,22 @@ config_version=5
 
 [application]
 config/name="Corehold"
+config/version="0.1.0"
+config/description="Corehold - idle roguelite tower defense (PC/Steam edition)"
 run/main_scene="res://Main.tscn"
 config/use_custom_user_dir=true
 config/custom_user_dir_name="Corehold-PC"
 
 [display]
-window/size/viewport_width=720
-window/size/viewport_height=1280
-window/handheld/orientation="portrait"
+
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+window/size/resizable=true
+window/size/window_width_override=1600
+window/size/window_height_override=900
 window/stretch/mode="canvas_items"
-window/stretch/aspect="keep"
+window/stretch/aspect="expand"
+window/vsync/vsync_mode=1
 
 [input]
 tap={
@@ -21,4 +27,5 @@ tap={
 
 [rendering]
 renderer/rendering_method="mobile"
+textures/vram_compression/import_s3tc_bptc=true
 textures/vram_compression/import_etc2_astc=true

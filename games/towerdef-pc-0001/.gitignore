@@ -1,0 +1,7 @@
+.godot/
+# Steam: never commit the App ID file or SDK / GodotSteam redistributables.
+steam_appid.txt
+addons/godotsteam/**/*.dll
+addons/godotsteam/**/*.so
+addons/godotsteam/**/*.dylib
+*.dll
