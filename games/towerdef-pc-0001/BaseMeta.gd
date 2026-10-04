@@ -18,6 +18,7 @@ const Labs := preload("res://Labs.gd")
 const Cards := preload("res://Cards.gd")
 const Missions := preload("res://Missions.gd")
 const TuneRef := preload("res://Tune.gd")
+const Stats := preload("res://Stats.gd")
 
 const VERSION: int = 3
 ## PC 7x7 base (PC_SPEC §2.1): rings by Chebyshev distance from the core cell
@@ -45,7 +46,7 @@ static func default_save() -> Dictionary:
 		"cards": {"owned": {}, "equipped": [], "slots": Cards.MIN_SLOTS},
 		"missions": {"day": -1, "list": [], "bonus_claimed": false},
 		"streak": {"day_idx": 0, "last_day": -1, "loops": 0},
-		"last_seen": 0, "stats": {"kills": 0, "bosses": 0},
+		"last_seen": 0, "stats": Stats.default_stats(), "history": [],
 		"gem_log": {"boss": 0, "mission": 0, "streak": 0, "tier": 0},
 		"boss_gems_today": {"day": -1, "n": 0},
 		"settings": {"music": 0.8, "sfx": 1.0, "mute": false},
@@ -228,7 +229,8 @@ static func normalize(s_in: Dictionary) -> Dictionary:
 	m["list"] = ml
 	var st_in: Dictionary = s.get("streak", {})
 	d["streak"] = {"day_idx": clampi(int(st_in.get("day_idx", 0)), 0, 7), "last_day": int(st_in.get("last_day", -1)), "loops": maxi(0, int(st_in.get("loops", 0)))}
-	d["stats"] = _int_dict(s.get("stats", {}), ["kills", "bosses"])
+	d["stats"] = Stats.normalize_stats(s.get("stats", {}))
+	d["history"] = Stats.normalize_history(s.get("history", []))
 	d["gem_log"] = _int_dict(s.get("gem_log", {}), GEM_SOURCES)
 	var bg_in: Dictionary = s.get("boss_gems_today", {})
 	d["boss_gems_today"] = {"day": int(bg_in.get("day", -1)), "n": maxi(0, int(bg_in.get("n", 0)))}
@@ -375,6 +377,7 @@ static func try_unlock(s: Dictionary, i: int) -> bool:
 	if int(s["coins"]) < c:
 		return false
 	s["coins"] = int(s["coins"]) - c
+	Stats.on_event(s, {"t": "coins_spent", "n": c})
 	(s["unlocked"] as Array).append(i)
 	return true
 
@@ -388,6 +391,7 @@ static func try_place(s: Dictionary, i: int, id: String) -> bool:
 	if int(s["coins"]) < c:
 		return false
 	s["coins"] = int(s["coins"]) - c
+	Stats.on_event(s, {"t": "coins_spent", "n": c})
 	(s["slots"] as Dictionary)[str(i)] = {"id": id, "lvl": 1}
 	return true
 
@@ -403,6 +407,7 @@ static func try_upgrade(s: Dictionary, i: int) -> bool:
 	if int(s["coins"]) < c:
 		return false
 	s["coins"] = int(s["coins"]) - c
+	Stats.on_event(s, {"t": "coins_spent", "n": c})
 	e["lvl"] = lvl + 1
 	Missions.progress(s, "upgrade", 1)
 	return true
@@ -444,6 +449,7 @@ static func try_core(s: Dictionary, stat: String) -> bool:
 	if int(s["coins"]) < c:
 		return false
 	s["coins"] = int(s["coins"]) - c
+	Stats.on_event(s, {"t": "coins_spent", "n": c})
 	core[stat] = lvl + 1
 	Missions.progress(s, "upgrade", 1)
 	return true

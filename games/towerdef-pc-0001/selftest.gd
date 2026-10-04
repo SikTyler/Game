@@ -20,6 +20,7 @@ const Perks := preload("res://Perks.gd")
 const PerkDB := preload("res://data/PerkDB.gd")
 const EnemyDB := preload("res://data/EnemyDB.gd")
 const ModifierDB := preload("res://data/ModifierDB.gd")
+const Stats := preload("res://Stats.gd")
 
 var fails: Array = []
 
@@ -1055,6 +1056,7 @@ func _pc_engine_stages() -> void:
 	_pc_building_stages()
 	_pc_move_stages()
 	_pc_mode_stages()
+	_pc_stats_stages()
 
 
 ## PC-E1 7x7 ring unlocks, PC-E2 build cap.
@@ -1573,3 +1575,73 @@ func _pc_mode_stages() -> void:
 	var dev: Array = E.tick(0.01)
 	var go: Array = _evts(dev, "game_over")
 	_check("PC-E7 endless banks its own best, not the tier ladder", E.over and go.size() == 1 and String(go[0]["mode"]) == "endless" and int(es["endless"]["best"]) == 131 and JSON.stringify(es["best_wave_by_tier"]) == JSON.stringify(bw_before))
+
+
+## Deterministic hands-on run for `waves` waves; returns the JSON of every
+## event (the retry-seed fingerprint).
+func _run_fingerprint(sv: Dictionary, opts: Dictionary, waves: int) -> String:
+	var R = TowerState.new()
+	var evs: Array = R.setup(int(opts.get("seed", 0)), sv, 0, opts)
+	R.max_hp_mult = 1.0e6
+	R.recompute()
+	R.hp = float(R.stats["max_hp"])
+	var guard: int = 0
+	while R.wave <= waves and not R.over and guard < 100000:
+		guard += 1
+		evs.append_array(R.tick(0.1))
+		if R.draft.size() > 0:
+			evs.append_array(R.choose_card(0))
+		if R.pending_place != "" and R.free_slots().size() > 0:
+			evs.append_array(R.place(int(R.free_slots()[0])))
+		if R.perk_offer.size() > 0:
+			evs.append_array(R.choose_perk(0))
+	var keep: Array = []
+	for e in evs:
+		var d: Dictionary = e
+		if String(d["t"]) == "wave" and int(d["wave"]) > waves:
+			break
+		keep.append(d)
+	return JSON.stringify(keep)
+
+
+## PC-E8 lifetime stats + run history + retry seed.
+func _pc_stats_stages() -> void:
+	var s: Dictionary = BaseMeta.default_save()
+	var st0: String = JSON.stringify(s["stats"])
+	var R = _fresh(s)
+	_check("PC-E8 a run does not touch stats by itself", JSON.stringify(R.save["stats"]) == st0)
+	var evs: Array = [{"t": "kill", "kind": "skitter"}, {"t": "kill", "kind": "skitter"}, {"t": "kill", "kind": "boss"}, {"t": "boss_bounty", "coins": 5}, {"t": "wave", "wave": 2}, {"t": "wave", "wave": 3}, {"t": "placed", "slot": 17, "id": "gun"}, {"t": "placed", "slot": 18, "id": "gun"}, {"t": "placed", "slot": 19, "id": "mine"}]
+	Stats.on_events(s, evs)
+	Stats.on_event(s, {"t": "game_over", "wave": 33, "coins": 120, "duration_s": 600.0, "seed": 9, "tier": 2, "mode": "normal", "modifiers": ["glass"], "build": ["gun"], "perks": ["p_dmg"], "ts": 77, "dps": 55.5})
+	var st: Dictionary = s["stats"]
+	_check("PC-E8 kills by kind + bosses + waves", int(st["kills"]) == 3 and int(st["kills_by_kind"]["skitter"]) == 2 and int(st["kills_by_kind"]["boss"]) == 1 and int(st["bosses"]) == 1 and int(st["waves"]) == 2)
+	_check("PC-E8 placed by id + favourite", int(st["placed"]["gun"]) == 2 and Stats.favourite(s, 2) == ["gun", "mine"])
+	_check("PC-E8 game_over: runs, play time, coins, best by mode, dps", int(st["runs"]) == 1 and is_equal_approx(float(st["play_s"]), 600.0) and int(st["coins_earned"]) == 120 and int(st["best_by_mode"]["challenge"]) == 33 and int(st["best_by_mode"]["normal"]) == 0 and is_equal_approx(float(st["dps_best"]), 55.5))
+	var h: Array = s["history"]
+	_check("PC-E8 history entry recorded", h.size() == 1 and int(h[0]["seed"]) == 9 and int(h[0]["wave"]) == 33 and (h[0]["modifiers"] as Array) == ["glass"] and int(h[0]["tier"]) == 2)
+	var sp: Dictionary = BaseMeta.default_save()
+	sp["coins"] = 5000
+	BaseMeta.try_place(sp, _rc(2, 3), "gun")
+	BaseMeta.try_core(sp, "dmg")
+	_check("PC-E8 coins_spent fed by BaseMeta spends", int(sp["stats"]["coins_spent"]) == 15 + 30)
+	var M: Dictionary = BaseMeta.default_save()
+	Missions.on_run_events(M, [{"t": "kill", "kind": "drone"}, {"t": "boss_bounty"}])
+	_check("PC-E8 Missions forwards run events to Stats once", int(M["stats"]["kills"]) == 1 and int(M["stats"]["kills_by_kind"]["drone"]) == 1 and int(M["stats"]["bosses"]) == 1)
+	for k in 50:
+		Stats.on_event(s, {"t": "game_over", "wave": 10 + k, "coins": 1, "seed": 100 + k})
+	h = s["history"]
+	_check("PC-E8 history ring buffer keeps 50, 51st evicts the oldest", h.size() == 50 and int(h[0]["seed"]) == 100 and int(h[49]["seed"]) == 149)
+	var rt: Dictionary = BaseMeta.normalize(JSON.parse_string(JSON.stringify(s)))
+	_check("PC-E8 stats + history survive JSON + normalize", JSON.stringify(rt["stats"]) == JSON.stringify(BaseMeta.normalize(s)["stats"]) and (rt["history"] as Array).size() == 50 and int(rt["stats"]["kills_by_kind"]["skitter"]) == 2)
+	# Retry the same seed from history: identical first 10 waves.
+	var base: Dictionary = BaseMeta.default_save()
+	var A = TowerState.new()
+	A.setup(31337, base.duplicate(true), 0, {"modifiers": ["haste"]})
+	var gev: Array = A.abandon()
+	Stats.on_events(base, gev)
+	var entry: Dictionary = (base["history"] as Array)[0]
+	var ro: Dictionary = Stats.retry_opts(entry)
+	var f1: String = _run_fingerprint(BaseMeta.default_save(), {"seed": 31337, "modifiers": ["haste"]}, 10)
+	var f2: String = _run_fingerprint(BaseMeta.default_save(), ro, 10)
+	var f3: String = _run_fingerprint(BaseMeta.default_save(), {"seed": 31338, "modifiers": ["haste"]}, 10)
+	_check("PC-E8 retry seed reproduces the first 10 waves", int(ro["seed"]) == 31337 and f1.length() > 1000 and f1.hash() == f2.hash() and f1 == f2 and f1 != f3)

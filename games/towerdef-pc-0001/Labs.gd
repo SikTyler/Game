@@ -3,6 +3,7 @@ extends RefCounted
 ##   {lvls:{id:int}, slots:int(2..4), running:[{track,to_lvl,start,end}]}
 ## Every time function takes `now` (unix seconds) so tests are deterministic.
 
+const Stats := preload("res://Stats.gd")
 const LabDB := preload("res://data/LabDB.gd")
 const Missions := preload("res://Missions.gd")
 const TuneRef := preload("res://Tune.gd")
@@ -66,6 +67,7 @@ static func start(s: Dictionary, id: String, now: int) -> Array:
 	if not can_start(s, id):
 		return []
 	var lvl: int = level(s, id)
+	Stats.on_event(s, {"t": "coins_spent", "n": cost(id, lvl)})
 	s["coins"] = int(s["coins"]) - cost(id, lvl)
 	var end_t: int = now + duration(s, id, lvl)
 	running(s).append({"track": id, "to_lvl": lvl + 1, "start": now, "end": end_t})

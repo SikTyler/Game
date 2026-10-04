@@ -806,7 +806,7 @@ func _on_death(ev: Array) -> void:
 		build.append(id_at(i))
 	ev.append({"t": "game_over", "wave": wave, "coins": coins, "kills": kills, "cash_earned": int(cash_earned), "breakdown": bd, "perks": perks_taken.duplicate(),
 		"seed": run_seed, "tier": tier, "mode": mode, "modifiers": modifiers.duplicate(), "mutations": mutations_taken.duplicate(),
-		"duration_s": time_alive, "build": build, "ts": now_unix})
+		"duration_s": time_alive, "build": build, "ts": now_unix, "dps": dps()})
 	# Endless records its own best and never feeds the tier ladder (§3.1).
 	ev.append_array(BaseMeta.bank(save, coins, wave, tier, time_alive / 60.0, now_unix, gems_run, mode != "endless"))
 	if mode == "endless":
@@ -1482,6 +1482,15 @@ func free_slots() -> Array:
 		if is_free(i):
 			out.append(i)
 	return out
+
+
+## Theoretical damage per second of the whole board (stats screen "highest DPS").
+func dps() -> float:
+	var t: float = 0.0
+	for w in stats.get("weapons", []):
+		var wd: Dictionary = w
+		t += float(wd["dmg"]) * float(wd["rate"])
+	return t
 
 
 ## Cash a building represents: its base price plus every run level bought.

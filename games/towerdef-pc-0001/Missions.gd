@@ -7,6 +7,7 @@ const MissionDB := preload("res://data/MissionDB.gd")
 const BuildingDB := preload("res://data/BuildingDB.gd")
 const Cards := preload("res://Cards.gd")
 const TuneRef := preload("res://Tune.gd")
+const Stats := preload("res://Stats.gd")
 
 const PER_DAY: int = 3
 
@@ -69,21 +70,20 @@ static func progress(s: Dictionary, tpl: String, amount: int, max_mode: bool = f
 	return ev
 
 
-## Feed a run's event stream into mission progress + lifetime stats.
+## Feed a run's event stream into mission progress + lifetime stats (every
+## event is forwarded to Stats.on_event, which owns save["stats"] / history).
 ## (Lab starts and permanent upgrades are counted by Labs/BaseMeta directly.)
 static func on_run_events(s: Dictionary, events: Array) -> Array:
 	var ev: Array = []
-	var st: Dictionary = s.get("stats", {})
 	for x in events:
 		var e: Dictionary = x
+		Stats.on_event(s, e)
 		match String(e.get("t", "")):
 			"kill":
-				st["kills"] = int(st.get("kills", 0)) + 1
 				ev.append_array(progress(s, "kill", 1))
 			"wave":
 				ev.append_array(progress(s, "wave", int(e.get("wave", 0)), true))
 			"boss_bounty":
-				st["bosses"] = int(st.get("bosses", 0)) + 1
 				ev.append_array(progress(s, "boss", 1))
 			"placed":
 				if BuildingDB.cat_of(String(e.get("id", ""))) == "eco":
