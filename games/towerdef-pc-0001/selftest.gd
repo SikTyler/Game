@@ -40,6 +40,8 @@ const Crates := preload("res://Crates.gd")
 const CrateDB := preload("res://data/CrateDB.gd")
 const Outpost := preload("res://Outpost.gd")
 const OutpostDB := preload("res://data/OutpostDB.gd")
+const Reforge := preload("res://Reforge.gd")
+const ReforgeDB := preload("res://data/ReforgeDB.gd")
 
 var fails: Array = []
 
@@ -2673,6 +2675,7 @@ func _engine_meta_stages() -> void:
 	_parts_engine_stages()
 	_crate_stages()
 	_outpost_stages()
+	_reforge_stages()
 
 
 ## A save owning `ids` (fresh items, L1), Core `core` at level `lvl`.
@@ -3271,3 +3274,84 @@ func _hall(sv: Dictionary, lvl: int) -> void:
 	for k in bl.keys():
 		if String((bl[k] as Dictionary)["id"]) == "research":
 			(bl[k] as Dictionary)["lvl"] = lvl
+
+
+## AC-21: gate, shard formula, reset / keep lists, tree cost + max, effects.
+func _reforge_stages() -> void:
+	var sv: Dictionary = _parts_save(["f_glass", "b_hollow"], "bastion", 20)
+	_equip_all(sv, ["f_glass", "b_hollow"])
+	sv["coins"] = 50000
+	sv["gems"] = 77
+	sv["keys"] = 3
+	sv["best_wave_by_tier"] = {"1": 39}
+	sv["best_wave"] = 39
+	sv["reforge"]["coins_since"] = 600000
+	_check("AC-21 refused below the gate (w39, 600k coins)", not Reforge.can_reforge(sv) and Reforge.reforge(sv, OT0).is_empty() and int(sv["coins"]) == 50000)
+	_check("AC-21 coin gate: 1,000,000 coins since", Reforge.can_reforge({"best_wave_by_tier": {"1": 1}, "reforge": {"coins_since": 1000000, "nodes": {}}}))
+	sv["best_wave_by_tier"] = {"1": 40}
+	_check("AC-21 wave gate: best wave 40", Reforge.can_reforge(sv))
+	_check("AC-21 shards = floor(sqrt(6e5 / 1e4)) + 5 first (loop table: 12)", Reforge.shards_now(sv) == 12 and int(Reforge.preview(sv)["shards"]) == 12 and bool(Reforge.preview(sv)["worth"]))
+	# Build a little state to reset.
+	var gu: String = Parts.uid_of(sv, "f_glass")
+	(Parts.item(sv, gu) as Dictionary)["lvl"] = 4
+	var mu: String = _op_build(sv, "mill", 4, 4)
+	sv["outpost"]["buildings"][mu]["lvl"] = 3
+	sv["outpost"]["relay_lvl"] = 3
+	sv["outpost"]["plots"] = [0]
+	Outpost.place_decor(sv, "dc_tree", 7, 2, 0)
+	Outpost.save_blueprint(sv, "Mine")
+	sv["research"]["lvls"]["dmg"] = 5
+	sv["insight"]["in_dmg"] = 4
+	sv["cards"]["owned"] = {"c_dmg": {"lvl": 2, "copies": 0}}
+	sv["tier"] = 1
+	var c_before: int = int(sv["coins"])
+	var ev: Array = Reforge.reforge(sv, OT0 + 100)
+	var ok_reset: bool = int(sv["coins"]) == 0 and Cores.level(sv, "bastion") == 1 and int(Parts.item(sv, gu)["lvl"]) == 1 and int(sv["outpost"]["buildings"][mu]["lvl"]) == 1 and int(sv["outpost"]["relay_lvl"]) == 1 and int(sv["research"]["lvls"]["dmg"]) == 0 and int(sv["tier"]) == 1 and Tiers.highest(sv) == 1
+	_check("AC-21 resets: coins, Core levels, part levels, Outpost levels + Relay, research, tier", c_before > 0 and _evts(ev, "reforge").size() == 1 and ok_reset)
+	var ok_keep: bool = Parts.owns(sv, "f_glass") and Parts.equipped(sv, "bastion").size() == 2 and (sv["outpost"]["plots"] as Array) == [0] and (sv["outpost"]["decor"] as Dictionary).size() == 1 and (sv["outpost"]["blueprints"] as Array).size() == 1 and int(sv["outpost"]["buildings"][mu]["x"]) == 4 and int(sv["gems"]) == 77 and int(sv["keys"]) == 3 and int(sv["insight"]["in_dmg"]) == 4 and (sv["cards"]["owned"] as Dictionary).has("c_dmg") and int(sv["best_wave"]) == 39
+	_check("AC-21 keeps: parts + presets, layout/plots/decor/blueprints, gems, Keys, Insight, cards, best wave", ok_keep)
+	_check("AC-21 part levels refund 50% Scrap", int(sv["scrap"]) == PartDB.invested("f_glass", 4) / 2)
+	_check("AC-21 shards banked, count + cum, Lance unlocks, Core Cores", int(sv["shards"]) == 12 and Reforge.count(sv) == 1 and int(sv["reforge"]["cum_shards"]) == 12 and int(sv["reforge"]["coins_since"]) == 0 and Cores.is_owned(sv, "lance") and int(sv["stats"]["reforges"]) == 1)
+	_check("AC-21 gate re-arms after a Reforge (tier progress reset)", not Reforge.can_reforge(sv))
+	sv["reforge"]["coins_since"] = 2500000
+	_check("R5 2nd Reforge: no first bonus (2.5e6 -> 15)", Reforge.shards_now(sv) == 15)
+	var rs: Dictionary = BaseMeta.normalize(JSON.parse_string(JSON.stringify(sv)))
+	_check("AC-21 tree/shards/count survive save/load", int(rs["shards"]) == 12 and Reforge.count(rs) == 1)
+	# Tree: root first, cost base + step*L, max.
+	_check("AC-21 nodes need root_forge", not Reforge.can_buy(sv, "might") and not Reforge.buy(sv, "root_forge").is_empty() and int(sv["shards"]) == 11)
+	Reforge.buy(sv, "might")
+	Reforge.buy(sv, "might")
+	_check("AC-21 cost 2 + L (might: 2 then 3)", Reforge.node(sv, "might") == 2 and int(sv["shards"]) == 6)
+	sv["shards"] = 999
+	for k in 5:
+		Reforge.buy(sv, "banish_plus")
+	_check("AC-21 max respected (banish+ 2)", Reforge.node(sv, "banish_plus") == 2 and ReforgeDB.cost("head_start", 2) == 8)
+	_check("AC-21 tree has no core_hive (deferred)", not ReforgeDB.NODES.has("core_hive") and ReforgeDB.IDS.size() == ReforgeDB.NODES.size())
+	# Effects reach the run and the meta.
+	for id in ["bulwark_p", "prosperity", "starting_cash", "head_start", "wide_draft", "tempo", "builder2", "crate_luck", "shard_yield", "scrap_p", "outpost_p", "retain"]:
+		Reforge.buy(sv, String(id))
+	sv["cores"]["active"] = "bastion"
+	var S = TowerState.new()
+	S.setup(3, sv)
+	var B = TowerState.new()
+	B.setup(3, _parts_save(["f_glass", "b_hollow"], "bastion", 1))
+	_equip_all(B.save, [])
+	_check("RF might +10% dmg, bulwark +5% HP, prosperity +6% coins in the run", is_equal_approx(S.dmg_mult, 1.10) and is_equal_approx(S.max_hp_mult, 1.05) and is_equal_approx(S.coin_mult, 1.06))
+	_check("RF head_start + starting_cash + wide_draft + banish+", int(S.tracks["dmg"]) == 1 and int(S.cash) == 25 and int(S._draft_ctx("")["choices"]) == 4 and S.banish_left == 3)
+	_check("RF tempo adds a speed step, builder2 a builder", (Labs.speed_steps(sv) as Array).back() == 1.25 and Outpost.builders(sv) == 2)
+	_check("RF shard_yield +10% (k 1.1)", Reforge.shards_now({"reforge": {"count": 1, "coins_since": 1000000, "nodes": {"shard_yield": 1}}}) == 11)
+	Reforge.buy(sv, "bp_mint")
+	_check("RF bp_mint: Mint Ring blueprint + 20% build credit", String((sv["outpost"]["blueprints"] as Array).back()["name"]) == "Mint Ring" and int(sv["outpost"]["credit"]) == (500 * 2 + 2000) / 5)
+	# retain keeps floor(lvl x 10%) of Outpost levels.
+	var rt: Dictionary = _op_save()
+	var ru: String = _op_build(rt, "mill", 4, 4)
+	rt["outpost"]["buildings"][ru]["lvl"] = 10
+	rt["reforge"]["nodes"] = {"root_forge": 1, "retain": 3}
+	rt["best_wave_by_tier"] = {"1": 45}
+	Reforge.reforge(rt, OT0)
+	_check("RF retain 3: keeps 30% of Outpost levels (L10 -> L3)", int(rt["outpost"]["buildings"][ru]["lvl"]) == 3)
+	# Outpost coins feed coins_since.
+	var oc: Dictionary = _op_save()
+	var ou: String = _op_build(oc, "mill", 4, 4)
+	Outpost.collect(oc, ou, OT0 + 3600)
+	_check("RF Outpost coins count toward coins_since", int(oc["reforge"]["coins_since"]) == 60)

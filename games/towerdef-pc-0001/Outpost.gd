@@ -490,7 +490,8 @@ static func nominal_rate(s: Dictionary, uid: String, con: Dictionary = {}) -> fl
 		"mill":
 			var tm: float = 1.0 + 0.5 * float(Tiers.highest(s) - 1)
 			return TuneRef.num("pc_mill_rate", float(d["rate"])) * (1.0 + 0.25 * float(L - 1)) * (1.0 + lay) * global_mult(s) * tm
-	return float(d["rate"]) * (1.0 + 0.25 * float(L - 1)) * (1.0 + lay) * global_mult(s)
+	# Scrap Refinery (+10% per Reforge scrap_p level).
+	return float(d["rate"]) * (1.0 + 0.25 * float(L - 1)) * (1.0 + lay) * global_mult(s) * (1.0 + 0.10 * float(_node(s, "scrap_p")))
 
 
 ## Live hourly output: nominal x efficiency, 0 if unbuilt or unconnected.
@@ -607,6 +608,8 @@ static func _pay_res(s: Dictionary, res: String, n: int) -> void:
 	match res:
 		"coins":
 			s["coins"] = int(s.get("coins", 0)) + n
+			if s.get("reforge", null) is Dictionary:
+				(s["reforge"] as Dictionary)["coins_since"] = int((s["reforge"] as Dictionary).get("coins_since", 0)) + n
 		"scrap":
 			s["scrap"] = int(s.get("scrap", 0)) + n
 		"keys":

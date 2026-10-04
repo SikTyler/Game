@@ -27,6 +27,7 @@ const PickDB := preload("res://data/PickDB.gd")
 const Parts := preload("res://Parts.gd")
 const Crates := preload("res://Crates.gd")
 const Outpost := preload("res://Outpost.gd")
+const Reforge := preload("res://Reforge.gd")
 
 const VERSION: int = 3
 ## PC 7x7 base (PC_SPEC §2.1): rings by Chebyshev distance from the core cell
@@ -62,6 +63,7 @@ static func default_save() -> Dictionary:
 		"scrap": 0, "keys": 0, "part_drops": [],
 		"parts": Parts.default_block(), "crates": Crates.default_block(),
 		"outpost": Outpost.default_block(),
+		"reforge": Reforge.default_block(), "shards": 0,
 	}
 
 
@@ -267,8 +269,8 @@ static func normalize(s_in: Dictionary) -> Dictionary:
 		if x is Dictionary and pd.size() < 200:
 			pd.append({"rarity": String((x as Dictionary).get("rarity", "common")), "source": String((x as Dictionary).get("source", "kill"))})
 	d["part_drops"] = pd
-	if s.get("reforge", null) is Dictionary:
-		d["reforge"] = (s["reforge"] as Dictionary).duplicate(true)
+	d["reforge"] = Reforge.normalize_block(s.get("reforge", null))
+	d["shards"] = maxi(0, int(s.get("shards", 0)))
 	d["settings"] = {"music": clampf(float(se_in.get("music", 0.8)), 0.0, 1.0), "sfx": clampf(float(se_in.get("sfx", 1.0)), 0.0, 1.0), "mute": bool(se_in.get("mute", false))}
 	# speed snaps to an unlocked step
 	var steps: Array = Labs.speed_steps(d)
@@ -311,14 +313,16 @@ static func run_mods(s: Dictionary) -> Dictionary:
 	if not steps.has(sp):
 		sp = 1.0
 	var om: Dictionary = Outpost.run_mods(s) if s.get("outpost", null) is Dictionary else {}
+	var rm: Dictionary = Reforge.run_mods(s)
 	return {
+		"rf_dmg": float(rm["rf_dmg"]), "rf_hp": float(rm["rf_hp"]), "rf_coin": float(rm["rf_coin"]),
 		"barracks_tier": int(om.get("barracks_tier", 0)), "barracks_bonus": float(om.get("barracks_bonus", 0.0)),
 		"insight_cap": int(om.get("insight_cap", 0)), "banish": int(om.get("banish", 0)),
 		"tier": t, "hp_mult": Tiers.hp_mult(t), "coin_mult": Tiers.coin_mult(t),
 		"boss_every": Tiers.boss_every(t),
 		"lab_dmg": float(lm["dmg"]), "lab_hp": float(lm["hp"]),
 		"lab_coin": float(lm["coin"]), "lab_xp": float(lm["xp"]),
-		"start_cash": int(lm["start_cash"]), "rerolls": int(lm["rerolls"]),
+		"start_cash": int(lm["start_cash"]) + int(rm["rf_start_cash"]), "rerolls": int(lm["rerolls"]),
 		"cards": Cards.mods(s), "speed": sp,
 		"allow_new_bldg": int(s.get("runs", 0)) >= 2,
 	}
@@ -515,6 +519,7 @@ static func bank(s: Dictionary, coins: int, wave: int, tier: int = 1, run_minute
 	var ev: Array = []
 	var hi_before: int = Tiers.highest(s)
 	s["coins"] = int(s["coins"]) + maxi(0, coins)
+	Reforge.on_coins(s, coins)
 	s["runs"] = int(s["runs"]) + 1
 	if not s.has("best_wave_by_tier"):
 		s["best_wave_by_tier"] = {"1": 0}
@@ -553,7 +558,7 @@ static func bank(s: Dictionary, coins: int, wave: int, tier: int = 1, run_minute
 ## drops wait in save.part_drops for the Parts module to resolve into parts.
 static func bank_loot(s: Dictionary, loot: Dictionary, rng: RandomNumberGenerator = null) -> Array:
 	var ev: Array = []
-	var sc: int = maxi(0, int(loot.get("scrap", 0)))
+	var sc: int = int(round(float(maxi(0, int(loot.get("scrap", 0)))) * Parts.scrap_mult(s)))
 	var ky: int = maxi(0, int(loot.get("keys", 0)))
 	var cc: int = maxi(0, int(loot.get("core_cores", 0)))
 	s["scrap"] = int(s.get("scrap", 0)) + sc

@@ -426,9 +426,10 @@ func _apply_mods(m: Dictionary) -> void:
 	tier = int(m.get("tier", 1))
 	hp_mult = float(m.get("hp_mult", 1.0))
 	tier_coin_mult = float(m.get("coin_mult", 1.0))
-	coin_mult = tier_coin_mult * (1.0 + float(m.get("lab_coin", 0.0)) + float(cards.get("coin", 0.0)))
-	dmg_mult = (1.0 + float(m.get("lab_dmg", 0.0))) * (1.0 + float(cards.get("dmg", 0.0)))
-	max_hp_mult = (1.0 + float(m.get("lab_hp", 0.0))) * (1.0 + float(cards.get("hp", 0.0)))
+	coin_mult = tier_coin_mult * (1.0 + float(m.get("lab_coin", 0.0)) + float(cards.get("coin", 0.0))) * (1.0 + float(m.get("rf_coin", 0.0)))
+	# Reforge tree (might / bulwark_p / prosperity) multiply the meta bundle.
+	dmg_mult = (1.0 + float(m.get("lab_dmg", 0.0))) * (1.0 + float(cards.get("dmg", 0.0))) * (1.0 + float(m.get("rf_dmg", 0.0)))
+	max_hp_mult = (1.0 + float(m.get("lab_hp", 0.0))) * (1.0 + float(cards.get("hp", 0.0))) * (1.0 + float(m.get("rf_hp", 0.0)))
 	cash_mult = 1.0 + float(cards.get("cash", 0.0))
 	xp_mod = 1.0 + float(m.get("lab_xp", 0.0)) + float(cards.get("xp", 0.0))
 	boss_every = maxi(1, int(m.get("boss_every", 10)))

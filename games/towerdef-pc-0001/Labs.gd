@@ -161,7 +161,16 @@ static func any_done(s: Dictionary, now: int) -> bool:
 ## Unlocked game-speed steps: [1.0] + one per Speed lab level.
 static func speed_steps(s: Dictionary) -> Array:
 	var n: int = clampi(level(s, "speed"), 0, 3)
-	return LabDB.SPEED_STEPS.slice(0, n + 1)
+	var steps: Array = LabDB.SPEED_STEPS.slice(0, n + 1)
+	# Reforge `tempo`: +0.25x max game speed per level (stacks on the lab).
+	var rf: Variant = s.get("reforge", null)
+	var tempo: int = 0
+	if rf is Dictionary and (rf as Dictionary).get("nodes", null) is Dictionary:
+		tempo = clampi(int(((rf as Dictionary)["nodes"] as Dictionary).get("tempo", 0)), 0, 4)
+	var top: float = float(steps[steps.size() - 1])
+	for k in tempo:
+		steps.append(top + 0.25 * float(k + 1))
+	return steps
 
 
 ## Run-facing lab modifiers.
