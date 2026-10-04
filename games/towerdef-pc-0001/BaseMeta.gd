@@ -25,6 +25,7 @@ const Stats := preload("res://Stats.gd")
 const Cores := preload("res://Cores.gd")
 const PickDB := preload("res://data/PickDB.gd")
 const Parts := preload("res://Parts.gd")
+const Crates := preload("res://Crates.gd")
 
 const VERSION: int = 3
 ## PC 7x7 base (PC_SPEC §2.1): rings by Chebyshev distance from the core cell
@@ -61,7 +62,7 @@ static func default_save() -> Dictionary:
 		# Redesign ENGINE-RUN blocks (additive; save v4 folds them in).
 		"cores": Cores.default_block(), "core_cores": 0, "insight": {},
 		"scrap": 0, "keys": 0, "part_drops": [],
-		"parts": Parts.default_block(),
+		"parts": Parts.default_block(), "crates": Crates.default_block(),
 	}
 
 
@@ -252,6 +253,7 @@ static func normalize(s_in: Dictionary) -> Dictionary:
 	d["cores"] = Cores.normalize_block(s.get("cores", null), Cores.max_level(s))
 	d["parts"] = Parts.normalize_block(s.get("parts", null))
 	Parts.sanitize_presets(d)
+	d["crates"] = Crates.normalize_block(s.get("crates", null))
 	d["core_cores"] = maxi(0, int(s.get("core_cores", 0)))
 	d["insight"] = PickDB.normalize_insight(s.get("insight", {}))
 	d["scrap"] = maxi(0, int(s.get("scrap", 0)))

@@ -37,6 +37,8 @@ const Drops := preload("res://Drops.gd")
 const Parts := preload("res://Parts.gd")
 const PartDB := preload("res://data/PartDB.gd")
 const SetDB := preload("res://data/SetDB.gd")
+const Crates := preload("res://Crates.gd")
+const CrateDB := preload("res://data/CrateDB.gd")
 
 var fails: Array = []
 
@@ -2667,6 +2669,7 @@ func _engine_meta_stages() -> void:
 	_parts_data_stages()
 	_parts_rule_stages()
 	_parts_engine_stages()
+	_crate_stages()
 
 
 ## A save owning `ids` (fresh items, L1), Core `core` at level `lvl`.
@@ -2942,3 +2945,85 @@ func _parts_engine_stages() -> void:
 	var a1: Array = _sim_waves(f1, 4)
 	var a2: Array = _sim_waves(f2, 4)
 	_check("RUN parts keep the run deterministic", JSON.stringify(a1).length() > 100 and JSON.stringify(a1) == JSON.stringify(a2))
+
+
+## AC-15: crate odds (disclosed), pity (saved), costs, duplicates -> stars.
+func _crate_stages() -> void:
+	var sv: Dictionary = BaseMeta.normalize(BaseMeta.default_save())
+	_check("CRATE Field cost 2,500 x (1 + 0.25(T-1))", Crates.coin_cost(sv) == 2500)
+	sv["best_wave_by_tier"] = {"1": 60, "2": 60, "3": 10}
+	_check("CRATE Field cost scales with tier (T3 x1.5)", Crates.coin_cost(sv) == 3750)
+	sv["research"] = {"lvls": {"crate_theory": 5}}
+	_check("CRATE Crate Theory -2%/level", Crates.coin_cost(sv) == int(round(3750.0 * 0.9)))
+	var o: Dictionary = Crates.odds(BaseMeta.default_save(), "field")
+	_check("CRATE disclosed odds = table (sum 100)", is_equal_approx(float(o["common"]), 70.0) and is_equal_approx(float(o["legendary"]), 0.5) and is_equal_approx(float(o["common"]) + float(o["rare"]) + float(o["epic"]) + float(o["legendary"]), 100.0))
+	var lk: Dictionary = BaseMeta.default_save()
+	lk["reforge"] = {"nodes": {"crate_luck": 5}}
+	_check("CRATE crate_luck raises Epic+ odds relatively", float(Crates.odds(lk, "supply")["epic"]) > 12.0 and float(Crates.odds(lk, "supply")["legendary"]) > 3.0)
+	# 10,000 seeded rolls match the disclosed odds (pure roll, no pity).
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 2024
+	var cnt: Dictionary = {"common": 0, "rare": 0, "epic": 0, "legendary": 0}
+	for k in 10000:
+		var r: String = Crates.roll_rarity(rng, o)
+		cnt[r] = int(cnt[r]) + 1
+	_check("AC-15 10,000 Field rolls within tolerance of 70/25/4.5/0.5", absi(int(cnt["common"]) - 7000) < 200 and absi(int(cnt["rare"]) - 2500) < 170 and absi(int(cnt["epic"]) - 450) < 70 and absi(int(cnt["legendary"]) - 50) < 25, str(cnt))
+	# 10,000 real opens (with pity) never fall below the disclosed Epic+ odds.
+	var ps: Dictionary = BaseMeta.normalize(BaseMeta.default_save())
+	ps["coins"] = 1 << 40
+	var rng2 := RandomNumberGenerator.new()
+	rng2.seed = 7
+	var ep: int = 0
+	var gap: int = 0
+	var max_gap: int = 0
+	for k in 10000:
+		var ev: Array = Crates.open(ps, "field", "coins", rng2)
+		var got: bool = false
+		for r in (ev[0] as Dictionary)["rarities"]:
+			if String(r) == "epic" or String(r) == "legendary":
+				got = true
+		ep += 1 if got else 0
+		gap = 0 if got else gap + 1
+		max_gap = maxi(max_gap, gap)
+	_check("AC-15 Field pity: an Epic+ at least every 20 opens; Epic+ rate >= disclosed", max_gap <= 19 and float(ep) / 10000.0 >= 0.05 and float(ep) / 10000.0 < 0.08, "%d gap %d" % [ep, max_gap])
+	# Pity is saved: 19 misses persist across save/load and the 20th is Epic+.
+	var pv: Dictionary = BaseMeta.normalize(BaseMeta.default_save())
+	pv["crates"]["pity"]["field"]["epic"] = 19
+	var pv2: Dictionary = BaseMeta.normalize(JSON.parse_string(JSON.stringify(pv)))
+	pv2["coins"] = 5000
+	var rng3 := RandomNumberGenerator.new()
+	rng3.seed = 1
+	var pev: Array = Crates.open(pv2, "field", "coins", rng3)
+	_check("AC-15 pity counter saved; 20th open guarantees Epic+, then resets", int(pv["crates"]["pity"]["field"]["epic"]) == 19 and ["epic", "legendary"].has(String(pev[0]["rarities"][0])) and int(pv2["crates"]["pity"]["field"]["epic"]) == 0 and int(pv2["coins"]) == 2500)
+	var lg: Dictionary = BaseMeta.normalize(BaseMeta.default_save())
+	lg["crates"]["pity"]["vault"]["legendary"] = 14
+	lg["keys"] = 4
+	var lev: Array = Crates.open(lg, "vault", "keys", rng3)
+	_check("CRATE Vault: 4 parts, Legendary pity at 15, paid 4 Keys", (lev[0]["rarities"] as Array).size() == 4 and (lev[0]["rarities"] as Array).has("legendary") and int(lg["keys"]) == 0 and Parts.count(lg) >= 1)
+	var sp: Dictionary = BaseMeta.normalize(BaseMeta.default_save())
+	_check("CRATE refused when unaffordable", Crates.open(sp, "supply", "gems", rng3).is_empty() and Crates.open(sp, "field", "coins", rng3).is_empty() and Crates.open(sp, "field", "token", rng3).is_empty())
+	sp["gems"] = 60
+	var sev: Array = Crates.open(sp, "supply", "gems", rng3)
+	_check("CRATE Supply: 2 parts for 60 gems", (sev[0]["rarities"] as Array).size() == 2 and int(sp["gems"]) == 0 and int(sp["stats"]["crates_opened"]) == 1)
+	var vr: Dictionary = BaseMeta.normalize(BaseMeta.default_save())
+	vr["gems"] = 300 * 50
+	var vok: bool = true
+	for k in 50:
+		var vv: Array = Crates.open(vr, "vault", "gems", rng3)
+		var best: int = 0
+		for r in vv[0]["rarities"]:
+			best = maxi(best, int(Crates.RANK[r]))
+		vok = vok and best >= 1
+	_check("CRATE Vault always holds a Rare+", vok)
+	var tk: Dictionary = BaseMeta.normalize(BaseMeta.default_save())
+	tk["crates"]["tokens"]["field"] = 1
+	_check("CRATE free Field token opens once", Crates.open(tk, "field", "token", rng3).size() >= 2 and Crates.tokens(tk) == 0 and Crates.open(tk, "field", "token", rng3).is_empty())
+	var same1: Dictionary = BaseMeta.normalize(BaseMeta.default_save())
+	var same2: Dictionary = BaseMeta.normalize(BaseMeta.default_save())
+	same1["gems"] = 600
+	same2["gems"] = 600
+	var ra := RandomNumberGenerator.new()
+	var rb := RandomNumberGenerator.new()
+	ra.seed = 5
+	rb.seed = 5
+	_check("CRATE opens are seeded (same seed -> same parts)", JSON.stringify(Crates.open(same1, "supply", "gems", ra)) == JSON.stringify(Crates.open(same2, "supply", "gems", rb)))
