@@ -30,6 +30,7 @@ const Specials := preload("res://Specials.gd")
 const Troops := preload("res://Troops.gd")
 const Drops := preload("res://Drops.gd")
 const PowerModel := preload("res://PowerModel.gd")
+const Parts := preload("res://Parts.gd")
 
 const CENTER: Vector2 = Vector2(360, 470)
 const CELL: float = 52.0
@@ -180,6 +181,11 @@ var orbitals: Array = []          # pending Orbital Strikes [{pos, t, dmg, r}]
 var special_casts: int = 0
 var couriers: int = 0
 var ins: Dictionary = {}          # Insight values {in_dmg: 0.01, ...}
+var pfx: Dictionary = {}          # Parts.run_fx of the active Core (ENGINE-META)
+var last_stand_used: bool = false # Bulwark 4-piece: once per wave
+var immune_t: float = 0.0         # Bulwark 4-piece immunity timer
+var interest_t: float = 0.0       # Mint 4-piece: interest every 15 s
+var core_shots: int = 0           # Storm 4-piece: every 10th Core attack
 
 # Meta modifiers (BaseMeta.run_mods at setup; SPEC B1).
 var mods: Dictionary = {}
@@ -258,6 +264,15 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 		core_id = oc
 	core_def = CoreDB.get_def(core_id)
 	core_lvl = Cores.level(save, core_id)
+	# Parts (ENGINE-META): the equipped preset's summed fx; specials fold into
+	# the meta bundle the Specials code already reads.
+	pfx = Parts.run_fx(save, core_id)
+	mods["special_dmg"] = float(mods.get("special_dmg", 1.0)) * maxf(0.1, 1.0 + pf("special_dmg"))
+	mods["special_cd"] = float(mods.get("special_cd", 1.0)) * maxf(0.2, 1.0 + pf("special_cd"))
+	last_stand_used = false
+	immune_t = 0.0
+	interest_t = 0.0
+	core_shots = 0
 	var head: int = _reforge_node("head_start")
 	tracks = {}
 	for t in TRACK_IDS:
@@ -267,7 +282,7 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	ins = {}
 	for id in PickDB.INSIGHT:
 		ins[id] = PickDB.insight_value(save, String(id))
-	luck = mini(10, int(round(float(ins["in_luck"]))) + int(mods.get("luck", 0)))
+	luck = mini(10, int(round(float(ins["in_luck"]))) + int(mods.get("luck", 0)) + int(pf("luck")))
 	slots.clear()
 	unlocked.clear()
 	cooldowns.clear()
@@ -356,6 +371,11 @@ func _reforge_node(id: String) -> int:
 		if nodes is Dictionary:
 			return int((nodes as Dictionary).get(id, 0))
 	return 0
+
+
+## One summed part fx value (0 when no equipped part carries the key).
+func pf(k: String) -> float:
+	return float(pfx.get(k, 0.0))
 
 
 ## Mode + modifier selection (validated). Endless needs best wave >= 50.
@@ -564,6 +584,8 @@ func compute_stats() -> Dictionary:
 	# Legacy Core DMG levels lift every weapon (interim meta until Parts land).
 	var legacy_dmg: float = 1.0 + TuneRef.num("pc_legacy_dmg", 0.03) * float(legacy.get("dmg", 0))
 	var dmg_all: float = dmg_mult * od_dmg * legacy_dmg * dmg_track * (1.0 + 0.12 * float(pack_n("pk_arsenal"))) * (1.0 + 0.40 * float(pack_n("pk_gambit"))) * (1.0 + float(ins.get("in_dmg", 0.0)))
+	# Parts: all-damage (+ Bastion Heart per building, max 12 buildings).
+	dmg_all *= maxf(0.1, 1.0 + pf("dmg") + pf("dmg_per_bld") * float(mini(12, nb)))
 	var rate_all: float = (1.0 + 0.08 * float(pack_n("pk_overclock"))) * (1.0 + float(ins.get("in_rate", 0.0)))
 	var range_add: float = 0.5 * float(pack_n("pk_optics"))
 	st["dmg_all"] = dmg_all
@@ -599,7 +621,7 @@ func compute_stats() -> Dictionary:
 						adj_rate[n] = float(adj_rate[n]) - 0.10
 						links.append([i, n, "OIL"])
 	# Core attack range (cells) first: Lance Focus taxes buildings inside it.
-	var core_range_c: float = float(cd["range"]) + 0.1 * float(tracks["range"]) + range_add + float(adj_range[CORE_SLOT])
+	var core_range_c: float = maxf(1.0, float(cd["range"]) + 0.1 * float(tracks["range"]) + range_add + float(adj_range[CORE_SLOT]) + pf("range"))
 	var core_range: float = core_range_c * px
 	var focus: bool = String(cd.get("trait", "")) == "focus"
 	var weapons: Array = st["weapons"]
@@ -612,10 +634,10 @@ func compute_stats() -> Dictionary:
 			continue
 		var m2: float = pow(1.35, float(lvl_at(i) - 1))
 		var ring_m: float = 1.0 + rr * float(maxi(0, ring_of(i) - 1))
-		var rate_m: float = rate_all * float(adj_rate[i])
+		var rate_m: float = rate_all * float(adj_rate[i]) * maxf(0.1, 1.0 + pf("bld_rate"))
 		if focus and slot_pos(i).distance_to(CENTER) <= core_range:
 			rate_m *= 1.0 - 0.10 * tm
-		var dm: float = dmg_all * float(adj_dmg[i]) * bld_dmg()
+		var dm: float = dmg_all * float(adj_dmg[i]) * bld_dmg() * maxf(0.1, 1.0 + pf("bld_dmg"))
 		var rng_c: float = float(adj_range[i]) + range_add
 		match id:
 			"gun":
@@ -623,7 +645,7 @@ func compute_stats() -> Dictionary:
 			"mortar":
 				weapons.append({"slot": i, "kind": "mortar", "dmg": 18.0 * m2 * dm, "rate": 0.4 * rate_m, "range": (4.5 + rng_c) * px * ring_m, "splash": 1.0 * px, "min_range": 1.5 * px})
 			"tesla":
-				weapons.append({"slot": i, "kind": "tesla", "dmg": 9.0 * m2 * dm, "rate": 0.8 * rate_m, "range": (3.0 + rng_c) * px * ring_m, "chains": 3, "chain_frac": 0.7})
+				weapons.append({"slot": i, "kind": "tesla", "dmg": 9.0 * m2 * dm * (1.0 + pf("chain_dmg")), "rate": 0.8 * rate_m, "range": (3.0 + rng_c) * px * ring_m, "chains": 3 + int(pf("chain")), "chain_frac": 0.7})
 			"flak":
 				weapons.append({"slot": i, "kind": "flak", "dmg": 8.0 * m2 * dm, "rate": 1.5 * rate_m, "range": (3.5 + rng_c) * px * ring_m, "prey": 2.5})
 			"railgun":
@@ -659,44 +681,57 @@ func compute_stats() -> Dictionary:
 				(st["huts"] as Array).append({"slot": i, "id": id, "lvl": lvl_at(i), "home": slot_pos(i), "anchor": CENTER + dir * (STOP_R + 0.6 * px)})
 	# Core sheet with tracks, packs, legacy core levels, Insight.
 	var arm_n: int = tracks["armor"]
-	st["max_hp"] = (float(st["max_hp"]) + hp_add) * (1.0 + 0.05 * float(arm_n)) * (1.0 + 0.20 * float(pack_n("pk_fort"))) * maxf(0.5, 1.0 - 0.05 * float(pack_n("pk_overclock"))) * max_hp_mult * (1.0 + float(ins.get("in_hp", 0.0))) * od_hp
-	st["regen"] = float(st["regen"]) + 0.2 * float(arm_n)
-	st["armor"] = float(st["armor"]) + 0.5 * float(arm_n) + float(pack_n("pk_fort"))
+	st["max_hp"] = (float(st["max_hp"]) + hp_add) * (1.0 + 0.05 * float(arm_n)) * (1.0 + 0.20 * float(pack_n("pk_fort"))) * maxf(0.5, 1.0 - 0.05 * float(pack_n("pk_overclock"))) * max_hp_mult * (1.0 + float(ins.get("in_hp", 0.0))) * od_hp * maxf(0.1, 1.0 + pf("core_hp"))
+	st["regen"] = (float(st["regen"]) + 0.2 * float(arm_n)) * maxf(0.0, 1.0 + pf("regen"))
+	st["armor"] = float(st["armor"]) + 0.5 * float(arm_n) + float(pack_n("pk_fort")) + pf("armor")
 	var eco_lv: int = tracks["eco"]
-	var cash_w1: float = float(st["cash_ps"]) + 0.4 * float(eco_lv) + 0.6 * float(pack_n("pk_ledger")) + cash_add
-	st["cash_ps"] = cash_w1 * e * cash_mult * (1.0 + float(ins.get("in_cash", 0.0))) * steadfast
-	st["kill_cash"] = (1.0 + 0.05 * float(pack_n("pk_ledger"))) * (1.0 + float(ins.get("in_cash", 0.0)))
-	var icap_w1: float = float(st["interest_cap"]) + 5.0 * float(eco_lv)
+	var cash_w1: float = maxf(0.0, float(st["cash_ps"]) + 0.4 * float(eco_lv) + 0.6 * float(pack_n("pk_ledger")) + cash_add + pf("cash_flat"))
+	st["cash_ps"] = cash_w1 * e * cash_mult * (1.0 + float(ins.get("in_cash", 0.0))) * steadfast * maxf(0.1, 1.0 + pf("cash"))
+	st["kill_cash"] = (1.0 + 0.05 * float(pack_n("pk_ledger"))) * (1.0 + float(ins.get("in_cash", 0.0))) * maxf(0.1, 1.0 + pf("kill_cash"))
+	st["interest_rate"] = float(st["interest_rate"]) + pf("interest")
+	var icap_w1: float = float(st["interest_cap"]) + 5.0 * float(eco_lv) + (50.0 if pf("interest") > 0.0 else 0.0)
 	if String(cd.get("trait", "")) == "compound":
 		icap_w1 += 10.0 * float(eco_lv) * tm
 	st["interest_cap"] = icap_w1 * e
 	# The Core's own weapon (always last in `weapons`; the view reads .back()).
-	var core_dmg: float = float(cd["dmg"]) * CoreDB.lvl_mult("dmg", L) * dmg_all * steadfast * float(adj_dmg[CORE_SLOT]) * (1.0 + 0.30 * float(pack_n("pk_core")))
-	var core_rate: float = float(cd["rate"]) * (1.0 + 0.03 * float(tracks["rate"])) * rate_all * float(adj_rate[CORE_SLOT]) * (1.0 + 0.10 * float(pack_n("pk_core")))
+	var core_dmg: float = float(cd["dmg"]) * CoreDB.lvl_mult("dmg", L) * dmg_all * steadfast * float(adj_dmg[CORE_SLOT]) * (1.0 + 0.30 * float(pack_n("pk_core"))) * maxf(0.1, 1.0 + pf("core_dmg"))
+	var core_rate: float = float(cd["rate"]) * (1.0 + 0.03 * float(tracks["rate"])) * rate_all * float(adj_rate[CORE_SLOT]) * (1.0 + 0.10 * float(pack_n("pk_core"))) * maxf(0.1, 1.0 + pf("rate"))
 	var cw: Dictionary = {"slot": CORE_SLOT, "kind": "core", "attack": String(cd["attack"]), "dmg": core_dmg, "rate": core_rate, "range": core_range, "range_cells": core_range_c}
+	# Parts on the Core attack: primary-target mult, splash, pierce, free pulse.
+	cw["single_mult"] = maxf(0.1, 1.0 + pf("core_single"))
+	cw["pierce"] = int(pf("pierce"))
+	cw["storm_pulse"] = int(pf("storm_pulse"))
+	cw["pulse_mult"] = 1.0 + pf("pulse_dmg")
+	var nosplash: bool = pf("nosplash") > 0.0
 	match String(cd["attack"]):
 		"cannon":
-			cw["splash"] = float(cd["splash"]) * px
+			cw["splash"] = 0.0 if nosplash else (float(cd["splash"]) + pf("splash")) * px
 			cw["splash_frac"] = float(cd["splash_frac"])
 			cw["barrels"] = 2 if L >= 20 else 1
 		"slag":
-			cw["splash"] = float(cd["splash"]) * px * (1.5 if L >= 20 else 1.0)
+			cw["splash"] = (0.25 if nosplash else (float(cd["splash"]) + pf("splash"))) * px * (1.5 if L >= 20 else 1.0)
 			cw["slow"] = float(cd["slow"])
 			cw["slow_t"] = float(cd["slow_t"])
 		"beam":
-			cw["ramp"] = float(cd["ramp"])
+			cw["ramp"] = float(cd["ramp"]) * (1.0 + pf("beam_ramp"))
 			cw["ramp_max"] = 2.0 if L >= 20 else float(cd["ramp_max"])
 			cw["boss_mult"] = 1.0 + 0.25 * tm
+			cw["retarget"] = maxf(0.0, pf("retarget"))
 		"pulse":
-			cw["rings"] = 2 if L >= 20 else 1
+			cw["rings"] = (2 if L >= 20 else 1) + int(pf("chain"))
 			cw["knock"] = float(cd["knock"])
 			cw["chain_every"] = int(cd["chain_every"])
-			cw["chain_frac"] = float(cd["chain_frac"]) * tm
+			cw["chain_frac"] = float(cd["chain_frac"]) * tm * (1.0 + pf("chain_dmg"))
 			cw["chain_n"] = int(cd["chain_n"])
 	if focus:
 		cw["boss_mult"] = 1.0 + 0.25 * tm
 	weapons.append(cw)
 	st["xp_mult"] = float(st["xp_mult"]) * xp_mod
+	st["crit"] = float(st["crit"]) + pf("crit")
+	st["boss_mult"] = 1.0 + pf("boss")
+	st["normal_mult"] = maxf(0.1, 1.0 + pf("normal_dmg"))
+	st["reflect"] = pf("reflect")
+	st["shred"] = pf("shred")
 	# Perks (B7) multiply weapons / HP / regen / cash / XP.
 	Perks.apply(st, perks_taken)
 	st["cash_ps"] = float(st["cash_ps"]) * float(st["perk_cash"])
@@ -725,9 +760,12 @@ func _troop_mods() -> Dictionary:
 	var bar: float = 1.0 + 0.25 * float(pack_n("pk_barracks"))
 	var tier_b: float = 1.0 + 0.10 * float(int(mods.get("barracks_tier", 0)))
 	return {
-		"dmg_mult": float(stats.get("dmg_all", 1.0)) * bar * tier_b,
-		"hp_mult": bar * tier_b * pow(dmg_growth, float(wave - 1)) * hp_mult,
+		"dmg_mult": float(stats.get("dmg_all", 1.0)) * bar * tier_b * maxf(0.1, 1.0 + pf("troop_dmg")),
+		"hp_mult": bar * tier_b * pow(dmg_growth, float(wave - 1)) * hp_mult * maxf(0.1, 1.0 + pf("troop_hp")),
 		"respawn_minus": 2.0 * float(pack_n("pk_barracks")),
+		"respawn_mult": maxf(0.2, 1.0 + pf("troop_respawn")),
+		"extra": int(pf("troop_count")),
+		"extra_drone": int(pf("hut_drone")),
 		"cell_px": cpx(),
 	}
 
@@ -860,6 +898,12 @@ func _step(sub: float, ev: Array) -> void:
 	cash += cg
 	cash_earned += cg
 	hp = minf(float(stats["max_hp"]), hp + (float(stats["regen"]) + float(buffs["repair_rate"]) * (1.0 if float(buffs["repair_t"]) > 0.0 else 0.0)) * dt)
+	immune_t = maxf(0.0, immune_t - dt)
+	if pf("interest_fast") > 0.0 and wave_started:
+		interest_t += dt
+		if interest_t >= 15.0:
+			interest_t -= 15.0
+			_pay_interest(ev)
 	_tick_buffs(dt, ev)
 	_move_enemies(dt, ev)
 	_fire(dt, ev)
@@ -878,7 +922,18 @@ func _tick_buffs(dt: float, ev: Array) -> void:
 	var smax: float = float(stats.get("shield_max", 0.0))
 	if smax > 0.0 and shield < smax and shield_idle >= TuneRef.num("pc_aegis_idle", 4.0):
 		shield = minf(smax, shield + float(stats.get("shield_regen", 0.0)) * dt)
-	ev.append_array(Specials.tick(specials, dt))
+	var rdy: Array = Specials.tick(specials, dt)
+	# Battery Bank: a cooldown that finishes while a charge is free banks it
+	# and restarts, so up to 1 + special_charges casts are stored.
+	var cap: int = int(pf("special_charges"))
+	if cap > 0:
+		for r in rdy:
+			var sk: int = int((r as Dictionary)["slot"])
+			var sd: Dictionary = specials[sk]
+			if int(sd.get("bank", 0)) < cap:
+				sd["bank"] = int(sd.get("bank", 0)) + 1
+				Specials.consume(specials, sk, float(mods.get("special_cd", 1.0)))
+	ev.append_array(rdy)
 	if orbitals.is_empty():
 		return
 	var keep: Array = []
@@ -901,6 +956,13 @@ func _tick_buffs(dt: float, ev: Array) -> void:
 
 ## Interest on banked cash (Core + Vaults), paid before the next wave starts.
 func _wave_end(ev: Array) -> void:
+	last_stand_used = false
+	if pf("interest_fast") > 0.0:
+		return   # Mint 4-piece pays interest every 15 s instead (see _step)
+	_pay_interest(ev)
+
+
+func _pay_interest(ev: Array) -> void:
 	var rate: float = float(stats.get("interest_rate", 0.0))
 	var cap: float = float(stats.get("interest_cap", 0.0))
 	var amt: float = minf(cash * rate, cap)
@@ -987,15 +1049,23 @@ func _on_death(ev: Array) -> void:
 		"seed": run_seed, "tier": tier, "mode": mode, "modifiers": modifiers.duplicate(), "mutations": mutations_taken.duplicate(),
 		"duration_s": time_alive, "build": build, "ts": now_unix, "dps": dps(),
 		"core": core_id, "core_lvl": core_lvl, "picks": picks_taken.duplicate(), "insight": insight_found.duplicate(),
-		"loot": loot.duplicate(true), "specials_cast": special_casts, "tracks": tracks.duplicate()})
+		"loot": loot.duplicate(true), "specials_cast": special_casts, "tracks": tracks.duplicate(), "couriers": _couriers_caught()})
 	# Endless records its own best and never feeds the tier ladder (§3.1).
 	ev.append_array(BaseMeta.bank(save, coins, wave, tier, time_alive / 60.0, now_unix, gems_run, mode != "endless"))
 	if mode == "endless":
 		BaseMeta.record_endless(save, wave)
 	# Insight (win or loss) + loot are banked permanently.
 	ev.append_array(PickDB.bank_insight(save, insight_found))
-	ev.append_array(BaseMeta.bank_loot(save, loot))
+	ev.append_array(BaseMeta.bank_loot(save, loot, drop_rng))
 	ev.append({"t": "dead", "wave": wave, "coins": coins, "kills": kills, "cash_earned": int(cash_earned), "breakdown": bd})
+
+
+func _couriers_caught() -> int:
+	var n: int = 0
+	for p in loot.get("parts", []):
+		if String((p as Dictionary).get("source", "")) == "courier":
+			n += 1
+	return n
 
 
 ## Player quit (pause menu "Abandon run"): skips any revive and banks coins
@@ -1231,7 +1301,12 @@ func _spawn_courier(ev: Array) -> void:
 	ev.append({"t": "courier_spawn", "eid": int(cd["eid"]), "pos": from, "to": to})
 
 
-func _core_damage(amt: float, ev: Array, kind: String, from: Vector2) -> void:
+func _core_damage(amt: float, ev: Array, kind: String, from: Vector2, src: Dictionary = {}) -> void:
+	if immune_t > 0.0:
+		return
+	# Mirror Hull: contact hits reflect a share back to the attacker.
+	if kind == "core_hit" and not src.is_empty() and float(stats.get("reflect", 0.0)) > 0.0 and float(src["hp"]) > 0.0:
+		_hit(src, amt * float(stats["reflect"]), ev)
 	var real: float = maxf(amt * TuneRef.num("pc_armor_floor", 0.25), amt - float(stats.get("armor", 0.0)))
 	real *= 1.0 - float(stats.get("dr", 0.0))
 	shield_idle = 0.0
@@ -1241,6 +1316,11 @@ func _core_damage(amt: float, ev: Array, kind: String, from: Vector2) -> void:
 		real -= absorb
 	hp -= real
 	ev.append({"t": kind, "dmg": real, "pos": from})
+	# Bulwark 4-piece: dropping below 30% grants 2 s immunity once per wave.
+	if pf("last_stand") > 0.0 and not last_stand_used and hp > 0.0 and hp < 0.3 * float(stats["max_hp"]):
+		last_stand_used = true
+		immune_t = 2.0
+		ev.append({"t": "last_stand", "dur": 2.0})
 
 
 func _move_enemies(dt: float, ev: Array) -> void:
@@ -1302,7 +1382,7 @@ func _move_enemies(dt: float, ev: Array) -> void:
 			ed["atk_cd"] = float(ed["atk_cd"]) - dt
 			if float(ed["atk_cd"]) <= 0.0:
 				ed["atk_cd"] = 1.0
-				_core_damage(float(ed["dmg"]), ev, "core_hit", pos)
+				_core_damage(float(ed["dmg"]), ev, "core_hit", pos, ed)
 	for x in escaped:
 		enemies.erase(x)
 		ev.append({"t": "courier_escape", "eid": int((x as Dictionary).get("eid", -1)), "pos": (x as Dictionary)["pos"]})
@@ -1399,6 +1479,14 @@ func _hit(ed: Dictionary, dmg_in: float, ev: Array, crit: bool = false) -> void:
 		if sh == 0:
 			ev.append({"t": "shield_break", "pos": ed["pos"]})
 		return
+	# Parts: Hunter Scope (vs bosses/elites/marked, else the normal-enemy tax)
+	# and Singularity Lens shred stacks (+shred per stack, x5).
+	if BOSSY.has(String(ed.get("kind", ""))) or bool(ed.get("marked", false)):
+		dmg *= float(stats.get("boss_mult", 1.0))
+	else:
+		dmg *= float(stats.get("normal_mult", 1.0))
+	if int(ed.get("shred_n", 0)) > 0:
+		dmg *= 1.0 + float(stats.get("shred", 0.0)) * float(int(ed["shred_n"]))
 	var real: float = minf(dmg, maxf(0.0, float(ed["hp"])))
 	ed["hp"] = float(ed["hp"]) - dmg
 	ed["hit_t"] = HIT_FLASH
@@ -1466,8 +1554,15 @@ func _fire(dt: float, ev: Array) -> void:
 				_beam_hold(wd, dt)
 			continue
 		if si == CORE_SLOT:
+			# Queen Engine: the Core holds fire while 3+ troops are alive.
+			if pf("queen_hold") > 0.0 and Troops.alive_count(troops) >= 3:
+				cooldowns[si] = 0.0
+				continue
 			if _core_fire(wd, ev):
 				cooldowns[si] = cd + 1.0 / rate
+				core_shots += 1
+				if int(wd.get("storm_pulse", 0)) > 0 and core_shots % 10 == 0:
+					_free_pulse(wd, ev)
 			else:
 				cooldowns[si] = 0.0
 			continue
@@ -1592,8 +1687,10 @@ func _core_fire(wd: Dictionary, ev: Array) -> bool:
 				var tpos: Vector2 = te["pos"]
 				var crit: bool = _roll_crit(wd)
 				var d: float = dmg * (TuneRef.num("pc_crit_mult", 2.0) if crit else 1.0)
-				_hit_carry(te, d, ev, crit, CENTER, rng_lim)
+				_hit_carry(te, d * float(wd.get("single_mult", 1.0)), ev, crit, CENTER, rng_lim)
+				_shred(te, wd)
 				targets.append(int(te.get("eid", -1)))
+				_pierce(te, d, wd, ev, targets)
 				var rad: float = float(wd.get("splash", 0.0))
 				for e in enemies:
 					var ed: Dictionary = e
@@ -1629,16 +1726,18 @@ func _core_fire(wd: Dictionary, ev: Array) -> bool:
 			var te3: Dictionary = enemies[tgt3]
 			if int(te3.get("eid", -1)) != beam_eid:
 				beam_eid = int(te3.get("eid", -1))
-				beam_t = 0.0
-			var ramp: float = minf(float(wd["ramp_max"]), float(wd["ramp"]) * beam_t)
-			var d3: float = dmg * (1.0 + ramp)
+				beam_t = -float(wd.get("retarget", 0.0))   # Focus Lens retarget delay
+			var ramp: float = clampf(float(wd["ramp"]) * beam_t, 0.0, float(wd["ramp_max"]))
+			var d3: float = dmg * (1.0 + ramp) * float(wd.get("single_mult", 1.0))
 			if BOSSY.has(String(te3["kind"])) or bool(te3.get("marked", false)):
 				d3 *= float(wd.get("boss_mult", 1.0))
 			var crit3: bool = _roll_crit(wd)
 			if crit3:
 				d3 *= TuneRef.num("pc_crit_mult", 2.0)
 			_hit_carry(te3, d3, ev, crit3, CENTER, rng_lim)
+			_shred(te3, wd)
 			targets.append(int(te3.get("eid", -1)))
+			_pierce(te3, d3, wd, ev, targets)
 			ev.append({"t": "shot", "kind": "core", "from": CENTER, "to": te3["pos"], "beam": true, "ramp": ramp})
 		"pulse":
 			var rings: int = int(wd.get("rings", 1))
@@ -1651,7 +1750,7 @@ func _core_fire(wd: Dictionary, ev: Array) -> bool:
 				return false
 			pulse_n += 1
 			var crit4: bool = _roll_crit(wd)
-			var d4: float = dmg * float(rings) * (TuneRef.num("pc_crit_mult", 2.0) if crit4 else 1.0)
+			var d4: float = dmg * float(rings) * float(wd.get("pulse_mult", 1.0)) * (TuneRef.num("pc_crit_mult", 2.0) if crit4 else 1.0)
 			var kb: float = float(wd.get("knock", 0.3)) * 40.0
 			for x in inside:
 				var xd: Dictionary = x
@@ -1678,6 +1777,42 @@ func _core_fire(wd: Dictionary, ev: Array) -> bool:
 	return true
 
 
+## Lancer 4-piece: the Core shot also hits the nearest other enemy to its target.
+func _pierce(te: Dictionary, d: float, wd: Dictionary, ev: Array, targets: Array) -> void:
+	if int(wd.get("pierce", 0)) <= 0:
+		return
+	var skip: Dictionary = {}
+	for k in enemies.size():
+		if enemies[k] == te:
+			skip[k] = true
+	for n in int(wd["pierce"]):
+		var j: int = _nearest(te["pos"], cpx() * 1.5, skip)
+		if j < 0:
+			return
+		skip[j] = true
+		_hit(enemies[j], d, ev)
+		targets.append(int((enemies[j] as Dictionary).get("eid", -1)))
+
+
+## Singularity Lens: Core hits stack armor shred on the target (max 5).
+func _shred(te: Dictionary, _wd: Dictionary) -> void:
+	if float(stats.get("shred", 0.0)) > 0.0:
+		te["shred_n"] = mini(5, int(te.get("shred_n", 0)) + 1)
+
+
+## Storm 4-piece: a free Pulse Ring (Core dmg, Core range, x pulse_mult).
+func _free_pulse(wd: Dictionary, ev: Array) -> void:
+	var targets: Array = []
+	var d: float = float(wd["dmg"]) * float(wd.get("pulse_mult", 1.0))
+	for e in enemies:
+		var ed: Dictionary = e
+		if float(ed["hp"]) > 0.0 and CENTER.distance_to(ed["pos"]) <= float(wd["range"]) + float(ed["size"]) * 0.5:
+			_hit(ed, d, ev)
+			targets.append(int(ed.get("eid", -1)))
+	ev.append({"t": "shot", "kind": "core", "from": CENTER, "to": CENTER, "radius": float(wd["range"]), "pulse": true})
+	ev.append({"t": "core_attack", "kind": "pulse", "core": core_id, "targets": targets, "free": true})
+
+
 ## Troops: reconcile with huts, step the AI, apply their hits through _hit.
 func _troops_step(dt: float, ev: Array) -> void:
 	_drain_troop_events(ev)
@@ -1692,7 +1827,20 @@ func _troops_step(dt: float, ev: Array) -> void:
 			var ed: Dictionary = e
 			if int(ed.get("eid", -2)) == eid and float(ed["hp"]) > 0.0:
 				_hit(ed, float(hd["dmg"]), ev)
+				# Swarm 4-piece: troops lifesteal 1%; a troop kill heals the Core.
+				if pf("troop_ls") > 0.0:
+					_troop_heal(int(hd.get("tid", -1)), 0.01 * float(hd["dmg"]))
+					if float(ed["hp"]) <= 0.0:
+						hp = minf(float(stats["max_hp"]), hp + 0.5)
 				break
+
+
+func _troop_heal(tid: int, amt: float) -> void:
+	for t in troops:
+		var td: Dictionary = t
+		if int(td["tid"]) == tid and String(td["state"]) != "dead":
+			td["hp"] = minf(float(td["max_hp"]), float(td["hp"]) + amt)
+			return
 
 
 func _reap(ev: Array) -> void:
@@ -1847,6 +1995,7 @@ func _draft_ctx(guarantee: String) -> Dictionary:
 			blocked.append(id)
 	return {
 		"owned": owned, "free": free and not at_cap(), "free_outer": free_outer and not at_cap(), "huts": hut_count(),
+		"hut_max": PickDB.HUT_MAX + int(pf("hut_max")),
 		"packs": packs, "specials": sp, "banished": banished, "luck": luck,
 		"eco_mult": 1.5 if String(core_def.get("trait", "")) == "compound" else 1.0,
 		"choices": 3 + mini(1, _reforge_node("wide_draft")),
@@ -1895,6 +2044,10 @@ func _check_perk(ev: Array) -> void:
 		return
 	perk_pending -= 1
 	perk_offer = Perks.offer(draft_rng, perks_taken)
+	# Luck Chip: -1 choice on perk waves (never below 1).
+	var pc: int = int(pf("perk_choices"))
+	if pc < 0 and perk_offer.size() > 1:
+		perk_offer = perk_offer.slice(0, maxi(1, perk_offer.size() + pc))
 	if perk_offer.is_empty():
 		perk_pending = 0
 		return
@@ -2060,11 +2213,18 @@ func buy_track(t: String) -> Array:
 	return ev
 
 
+## Track total that opens ring r; Bastion Heart (ring_delay) opens each ring
+## one step later (ring 2 at ring 3's threshold, ring 3 at 60).
+func ring_threshold(r: int) -> int:
+	var steps: Array = [int(RING_OPEN[2]), int(RING_OPEN[3]), 60, 100]
+	return int(steps[clampi(r - 2 + int(pf("ring_delay")), 0, steps.size() - 1)])
+
+
 func _open_rings(ev: Array) -> void:
 	var tot: int = track_total()
 	for r in [2, 3]:
 		var ring: int = r
-		if rings_open >= ring or tot < int(RING_OPEN[ring]):
+		if rings_open >= ring or tot < ring_threshold(ring):
 			continue
 		rings_open = ring
 		var cells: Array = []
@@ -2102,8 +2262,12 @@ func free_slots() -> Array:
 func cast_special(k: int, cell: Variant = -1) -> Dictionary:
 	if over or k < 0 or k >= specials.size():
 		return {"result": "empty", "ev": []}
+	var banked: bool = false
 	if not Specials.ready(specials, k):
-		return {"result": "cooldown", "ev": []}
+		# Battery Bank: a stored extra charge casts during the cooldown.
+		if int((specials[k] as Dictionary).get("bank", 0)) <= 0:
+			return {"result": "cooldown", "ev": []}
+		banked = true
 	var id: String = String((specials[k] as Dictionary)["id"])
 	var fx: Dictionary = Specials.FX.get(id, {})
 	var ev: Array = []
@@ -2147,7 +2311,15 @@ func cast_special(k: int, cell: Variant = -1) -> Dictionary:
 			buffs["overdrive_t"] = float(fx["dur"])
 		"sp_magnet":
 			buffs["magnet_t"] = float(fx["dur"])
-	Specials.consume(specials, k, float(mods.get("special_cd", 1.0)))
+	if banked:
+		(specials[k] as Dictionary)["bank"] = int((specials[k] as Dictionary)["bank"]) - 1
+	else:
+		Specials.consume(specials, k, float(mods.get("special_cd", 1.0)))
+	# Golden Ratio: every cast costs a share of banked cash.
+	if pf("special_tax") > 0.0:
+		var tax: float = cash * pf("special_tax")
+		cash -= tax
+		cast["tax"] = tax
 	special_casts += 1
 	ev.append(cast)
 	return {"result": "ok", "ev": ev}

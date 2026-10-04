@@ -192,7 +192,8 @@ static func reforge_worth(lifetime_coins: float, cum_shards: int) -> bool:
 # ----------------------------------------------------------------- parts
 ## part = {rarity, lvl, stats: {key: signed frac}}. Benefits (positive) scale
 ## +8% of L1 per level; drawbacks never scale (SYSTEMS §3.1).
-static func part_value(part: Dictionary) -> float:
+## `weights` overrides PART_W per key (PartDB.val_weights() for engine fx keys).
+static func part_value(part: Dictionary, weights: Dictionary = {}) -> float:
 	var lvl: int = maxi(1, int(part.get("lvl", 1)))
 	var v: float = 0.0
 	var st: Dictionary = part.get("stats", {})
@@ -200,7 +201,8 @@ static func part_value(part: Dictionary) -> float:
 		var x: float = float(st[k])
 		if x > 0.0:
 			x *= 1.0 + 0.08 * float(lvl - 1)
-		v += float(PART_W.get(String(k), 0.5)) * log(maxf(0.01, 1.0 + x))
+		var wk: float = float(weights.get(String(k), PART_W.get(String(k), 0.5)))
+		v += wk * log(maxf(0.01, 1.0 + x))
 	return v
 
 

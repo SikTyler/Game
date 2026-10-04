@@ -34,6 +34,11 @@ static func normalize_block(raw: Variant, max_lvl: int = CoreDB.MAX_LVL) -> Dict
 	var act: String = String(r.get("active", "bastion"))
 	d["owned"] = owned
 	d["levels"] = lv
+	# Part presets (Parts.sanitize_presets validates them against the inventory).
+	if r.get("presets", null) is Dictionary:
+		d["presets"] = (r["presets"] as Dictionary).duplicate(true)
+	if r.get("preset_idx", null) is Dictionary:
+		d["preset_idx"] = (r["preset_idx"] as Dictionary).duplicate(true)
 	d["active"] = act if owned.has(act) else "bastion"
 	return d
 

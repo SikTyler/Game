@@ -63,7 +63,7 @@ static func sync(troops: Array, huts: Array, mods: Dictionary, counter: Dictiona
 	for h in huts:
 		var hd: Dictionary = h
 		var hid: String = String(hd["id"])
-		var want: int = count_for(hid, int(hd["lvl"]), int(mods.get("extra", 0)))
+		var want: int = count_for(hid, int(hd["lvl"]), int(mods.get("extra", 0)) + (int(mods.get("extra_drone", 0)) if hid == "hut_drone" else 0))
 		var st: Dictionary = troop_stats(hid, int(hd["lvl"]), mods)
 		var have: int = 0
 		for t in troops:

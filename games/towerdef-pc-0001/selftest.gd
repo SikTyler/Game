@@ -34,14 +34,17 @@ const Cores := preload("res://Cores.gd")
 const Specials := preload("res://Specials.gd")
 const Troops := preload("res://Troops.gd")
 const Drops := preload("res://Drops.gd")
+const Parts := preload("res://Parts.gd")
+const PartDB := preload("res://data/PartDB.gd")
+const SetDB := preload("res://data/SetDB.gd")
 
 var fails: Array = []
 
 
-func _check(name: String, ok: bool) -> void:
+func _check(name: String, ok: bool, detail: String = "") -> void:
 	if not ok:
 		fails.append(name)
-		print("SELFTEST FAIL: " + name)
+		print("SELFTEST FAIL: " + name + ("" if detail == "" else "  [" + detail + "]"))
 
 
 ## Mobile 5x5 cell index -> the same cell on the PC 7x7 board (r+1, c+1), so
@@ -1884,6 +1887,7 @@ func _redesign_run_stages() -> void:
 	_troop_stages()
 	_insight_drop_stages()
 	_snapshot_stages()
+	_engine_meta_stages()
 
 
 ## §2.7 PowerModel: pure, static, matches the engine's own curves.
@@ -2539,7 +2543,10 @@ func _insight_drop_stages() -> void:
 	S.loot = {"parts": [{"rarity": "epic", "source": "boss"}], "scrap": 10, "keys": 1, "capped_parts": 0}
 	var dev: Array = S.abandon()
 	var go: Dictionary = _evts(dev, "game_over")[0]
-	_check("INS + loot banked at run end (abandon = loss path)", int(S.save["insight"]["in_cash"]) == 1 and _evts(dev, "insight_banked").size() == 1 and int(S.save["scrap"]) == 10 and int(S.save["keys"]) == 1 and (S.save["part_drops"] as Array).size() == 1 and _evts(dev, "loot_banked").size() == 1 and (go["insight"] as Array) == ["in_cash"])
+	# REDESIGN (ENGINE-META, deliberate): a banked part drop now resolves into a
+	# concrete part of its rarity (seeded) instead of waiting in part_drops.
+	var pn: Array = _evts(dev, "part_new")
+	_check("INS + loot banked at run end (abandon = loss path)", int(S.save["insight"]["in_cash"]) == 1 and _evts(dev, "insight_banked").size() == 1 and int(S.save["scrap"]) == 10 and int(S.save["keys"]) == 1 and (S.save["part_drops"] as Array).is_empty() and pn.size() == 1 and String(pn[0]["rarity"]) == "epic" and Parts.count(S.save) == 1 and _evts(dev, "loot_banked").size() == 1 and (go["insight"] as Array) == ["in_cash"])
 	# Drops: rates and replay.
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 3
@@ -2650,3 +2657,288 @@ func _snapshot_stages() -> void:
 	var snap2: Dictionary = S.power_snapshot()
 	_check("SNAP lists building DPS, troops, orbital DPS", (snap2["buildings"] as Array).size() == 1 and is_equal_approx(float(snap2["buildings"][0]["dps"]), 12.0 * TowerState.bld_dmg()) and (snap2["troops"] as Array).size() == 4 and float(snap2["specials"][0]["dps"]) > 0.0)
 	_check("SNAP power ratio rises with the board", PowerModel.power_ratio(snap2, 1, 1) > r0 and r0 > 2.0)
+
+
+# ======================================================================
+# ENGINE-META (REDESIGN_SPEC §3): Parts, Crates, Outpost, Research, Reforge,
+# save v4. TDD'd here; each sub-stage is one system.
+# ======================================================================
+func _engine_meta_stages() -> void:
+	_parts_data_stages()
+	_parts_rule_stages()
+	_parts_engine_stages()
+
+
+## A save owning `ids` (fresh items, L1), Core `core` at level `lvl`.
+func _parts_save(ids: Array, core: String = "bastion", lvl: int = 40) -> Dictionary:
+	var sv: Dictionary = BaseMeta.normalize(BaseMeta.default_save())
+	if core != "bastion":
+		(sv["cores"]["owned"] as Array).append(core)
+	sv["cores"]["active"] = core
+	sv["cores"]["levels"][core] = lvl
+	for id in ids:
+		Parts.grant(sv, String(id))
+	return sv
+
+
+## Equip ids into the first fitting open slots of the active Core.
+func _equip_all(sv: Dictionary, ids: Array) -> void:
+	var core: String = String(sv["cores"]["active"])
+	for id in ids:
+		var uid: String = Parts.uid_of(sv, String(id))
+		for k in Parts.N_SLOTS:
+			if Parts.fits(sv, uid, k) and String(Parts.preset(sv, core)[k]) == "" and Parts.slot_open(Cores.level(sv, core), k):
+				Parts.equip(sv, core, k, uid)
+				break
+
+
+## AC-11 / AC-12: data shape, budget, trade-off, Pareto; set budgets.
+func _parts_data_stages() -> void:
+	_check("PART 32 parts + 5 set specials", PartDB.DEFS.size() == 32 and PartDB.SPECIALS.size() == 5)
+	var shape: bool = true
+	var budget: Array = []
+	var trade: Array = []
+	var w: Dictionary = PartDB.val_weights()
+	for id in PartDB.DEFS.keys() + PartDB.SPECIALS.keys():
+		var d: Dictionary = PartDB.get_def(String(id))
+		shape = shape and PartDB.SLOTS.has(String(d["slot"])) and PartDB.MAX_LVL.has(String(d["rarity"])) and not (d["plus"] as Dictionary).is_empty() and not (d["minus"] as Dictionary).is_empty()
+		for k in (d["plus"] as Dictionary).keys() + (d["minus"] as Dictionary).keys():
+			shape = shape and PartDB.VAL.has(String(k)) and PartDB.FX_TEXT.has(String(k))
+		var v: float = PowerModel.part_value(PartDB.pm_part(String(id)), w)
+		var b: float = PowerModel.part_budget(String(d["rarity"]), 1)
+		if absf(v - b) > 0.10 * b:
+			budget.append("%s %.3f/%.3f" % [id, v, b])
+		var pos: float = PowerModel.part_value({"lvl": 1, "stats": PartDB.val_stats(d["plus"])}, w)
+		var neg: float = PowerModel.part_value({"lvl": 1, "stats": PartDB.val_stats(d["minus"])}, w)
+		if pos <= 0.0 or neg >= 0.0 or -neg < 0.25 * pos:
+			trade.append(id)
+	_check("AC-11 every part: slot, rarity, >=1 benefit, >=1 drawback, known fx keys", shape)
+	_check("AC-12 every part value within 10% of its budget (L1)", budget.is_empty(), str(budget))
+	_check("AC-12 every drawback >= 25% of its benefit", trade.is_empty(), str(trade))
+	var dom: Array = []
+	var ids: Array = PartDB.DEFS.keys() + PartDB.SPECIALS.keys()
+	for a in ids:
+		for b2 in ids:
+			if a == b2 or PartDB.rarity_of(String(a)) != PartDB.rarity_of(String(b2)):
+				continue
+			if PowerModel.dominates(PartDB.pm_part(String(a)), PartDB.pm_part(String(b2))):
+				dom.append("%s>%s" % [a, b2])
+	_check("AC-12 Pareto: no part dominates another of its slot and rarity", dom.is_empty(), str(dom))
+	var setb: Array = []
+	for st in SetDB.IDS:
+		var sd: Dictionary = SetDB.get_def(String(st))
+		var B: float = PowerModel.part_budget(SetDB.budget_rarity(String(st), PartDB.rarity_of), 1)
+		var v2: float = PowerModel.part_value({"lvl": 1, "stats": PartDB.val_stats(sd["two"])}, w)
+		var v4: float = PowerModel.part_value({"lvl": 1, "stats": PartDB.val_stats(sd["four"])}, w)
+		if v2 > 0.5 * B or v4 > 1.2 * B:
+			setb.append(st)
+		for m in sd["members"]:
+			if PartDB.set_of(String(m)) != String(st):
+				setb.append(m)
+		if PartDB.set_of(SetDB.special_of(String(st))) != String(st) or not PartDB.is_special(SetDB.special_of(String(st))):
+			setb.append(st)
+	_check("SET budgets: 2-piece <= 0.5B, 4-piece <= 1.2B; members + special tagged", setb.is_empty(), str(setb))
+	# Every full set fits one Core's 6 normal slots at once.
+	var fit: Array = []
+	for st in SetDB.IDS:
+		var need: Dictionary = {}
+		for m in SetDB.get_def(String(st))["members"]:
+			need[PartDB.slot_of(String(m))] = int(need.get(PartDB.slot_of(String(m)), 0)) + 1
+		for k in need.keys():
+			if int(need[k]) > Parts.SLOT_TYPES.slice(0, 6).count(k):
+				fit.append(st)
+	_check("SET every full set fits the F/B/C/E/F/B slots", fit.is_empty(), str(fit))
+	var pools: bool = true
+	for r in PartDB.RARITIES:
+		for id in PartDB.pool(String(r)):
+			pools = pools and not PartDB.is_special(String(id)) and PartDB.rarity_of(String(id)) == String(r)
+	_check("PART pools by rarity exclude set specials", pools and PartDB.pool("legendary").size() == 3)
+	var ln: Dictionary = PartDB.lines("f_plating")
+	_check("PART tooltip has a + and a - line", (ln["plus"] as Array).size() == 1 and (ln["minus"] as Array).size() == 1 and String(ln["plus"][0]).begins_with("+ ") and String(ln["minus"][0]).begins_with("- "))
+
+
+## AC-13 / AC-14 / AC-16: inventory, leveling, salvage, slots, presets, sets.
+func _parts_rule_stages() -> void:
+	var sv: Dictionary = _parts_save([], "bastion", 1)
+	var ev: Array = Parts.grant(sv, "f_plating", "crate")
+	var uid: String = Parts.uid_of(sv, "f_plating")
+	_check("PART grant: new item L1", _evts(ev, "part_new").size() == 1 and uid != "" and int(Parts.item(sv, uid)["lvl"]) == 1 and Parts.count(sv) == 1)
+	Parts.grant(sv, "f_plating")
+	Parts.grant(sv, "f_plating")
+	var ev3: Array = Parts.grant(sv, "f_plating")
+	_check("PART duplicates: 2 stars then auto-salvage for Scrap", int(Parts.item(sv, uid)["stars"]) == 2 and _evts(ev3, "part_dup_salvaged").size() == 1 and int(sv["scrap"]) == 5 and Parts.count(sv) == 1)
+	_check("PART level cost 10*r*1.25^(L-1)", PartDB.level_cost("f_plating", 1) == 10 and PartDB.level_cost("f_glass", 3) == int(round(80.0 * 1.5625)) and PartDB.level_cost("b_hollow", 2) == 25)
+	_check("PART level up refused without Scrap", Parts.level_up(sv, uid).is_empty() and int(Parts.item(sv, uid)["lvl"]) == 1)
+	sv["scrap"] = 1000
+	var lv: Array = Parts.level_up(sv, uid)
+	_check("AC-16 level up spends Scrap per formula", lv.size() == 1 and int(Parts.item(sv, uid)["lvl"]) == 2 and int(sv["scrap"]) == 990)
+	for k in 10:
+		Parts.level_up(sv, uid)
+	_check("PART max level by rarity (common 5)", int(Parts.item(sv, uid)["lvl"]) == 5 and not Parts.can_level(sv, uid))
+	var inv: int = PartDB.invested("f_plating", 5)
+	_check("PART invested = sum of level costs", inv == 10 + 13 + 16 + 20)
+	Parts.set_locked(sv, uid, true)
+	_check("AC-16 locked parts cannot be salvaged", Parts.salvage(sv, uid).is_empty() and Parts.owns(sv, "f_plating"))
+	Parts.set_locked(sv, uid, false)
+	var s0: int = int(sv["scrap"])
+	var sev: Array = Parts.salvage(sv, uid)
+	_check("AC-16 salvage = base + 50% invested", sev.size() == 1 and int(sv["scrap"]) == s0 + 5 + int(round(0.5 * float(inv))) and not Parts.owns(sv, "f_plating"))
+	# Slots by Core level (AC-14).
+	_check("AC-14 slots 2/3/4/5/6 at L1/5/12/20/30, Set slot at L40", Parts.slot_count(1) == 2 and Parts.slot_count(4) == 2 and Parts.slot_count(5) == 3 and Parts.slot_count(12) == 4 and Parts.slot_count(20) == 5 and Parts.slot_count(30) == 6 and not Parts.slot_open(39, 6) and Parts.slot_open(40, 6))
+	var s2: Dictionary = _parts_save(["f_plating", "b_longbore", "c_overcharge", "citadel_heart"], "bastion", 1)
+	var up: String = Parts.uid_of(s2, "f_plating")
+	var ub: String = Parts.uid_of(s2, "b_longbore")
+	var uc: String = Parts.uid_of(s2, "c_overcharge")
+	_check("AC-14 wrong slot type refused", Parts.equip(s2, "bastion", 1, up).is_empty() and Parts.equip(s2, "bastion", 0, ub).is_empty())
+	_check("AC-14 locked slot refused (C slot at L1)", Parts.equip(s2, "bastion", 2, uc).is_empty())
+	_check("AC-14 right slot accepted", Parts.equip(s2, "bastion", 0, up).size() >= 1 and Parts.equip(s2, "bastion", 1, ub).size() >= 1 and Parts.equipped(s2, "bastion").size() == 2)
+	var uh: String = Parts.uid_of(s2, "citadel_heart")
+	_check("AC-14 set special only in the Set slot or its own type", Parts.fits(s2, uh, 6) and Parts.fits(s2, uh, 3) and not Parts.fits(s2, up, 6))
+	Parts.select_preset(s2, "bastion", 2)
+	_check("PRESET 2 starts empty", Parts.equipped(s2, "bastion").is_empty())
+	Parts.equip(s2, "bastion", 0, up)
+	var js: Dictionary = BaseMeta.normalize(JSON.parse_string(JSON.stringify(s2)))
+	var p0: Array = Parts.preset(js, "bastion", 0)
+	_check("AC-14 4 presets per Core round-trip save/load", Parts.preset_idx(js, "bastion") == 2 and Parts.equipped(js, "bastion").size() == 1 and String(p0[0]) == up and String(p0[1]) == ub and (js["cores"]["presets"]["bastion"] as Array).size() == 4)
+	Parts.select_preset(js, "bastion", 0)
+	Parts.unequip(js, "bastion", 1)
+	_check("PART unequip", Parts.equipped(js, "bastion").size() == 1)
+	var sal: Dictionary = js.duplicate(true)
+	Parts.salvage(sal, up)
+	_check("PART salvage strips the part from presets", Parts.equipped(sal, "bastion").is_empty())
+	# Sets (AC-13).
+	var ms: Dictionary = _parts_save(["f_ledgerframe", "b_bounty", "c_interest", "e_mintpress"], "bastion", 40)
+	_equip_all(ms, ["f_ledgerframe", "b_bounty"])
+	var fx2: Dictionary = Parts.run_fx(ms, "bastion")
+	_check("AC-13 2-piece active at 2 distinct members", int(Parts.set_counts(ms, "bastion").get("mint", 0)) == 2 and is_equal_approx(float(fx2.get("cash", 0.0)), 0.10) and not fx2.has("interest_fast") and Parts.any_set2(ms))
+	var cev: Array = []
+	for id in ["c_interest", "e_mintpress"]:
+		var u2: String = Parts.uid_of(ms, String(id))
+		for k in Parts.N_SLOTS:
+			if Parts.fits(ms, u2, k) and String(Parts.preset(ms, "bastion")[k]) == "":
+				cev.append_array(Parts.equip(ms, "bastion", k, u2))
+				break
+	var fx4: Dictionary = Parts.run_fx(ms, "bastion")
+	_check("AC-13 4-piece active + full set unlocks Golden Ratio once", is_equal_approx(float(fx4.get("interest_fast", 0.0)), 1.0) and _evts(cev, "set_complete").size() == 1 and _evts(cev, "special_part_unlocked").size() == 1 and Parts.owns(ms, "golden_ratio") and (ms["parts"]["sets_completed"] as Array) == ["mint"])
+	var ms2: Dictionary = BaseMeta.normalize(JSON.parse_string(JSON.stringify(ms)))
+	_check("AC-13 set unlock + special persist through save/load", (ms2["parts"]["specials_unlocked"] as Array).has("golden_ratio") and Parts.owns(ms2, "golden_ratio"))
+	_check("AC-13 completing again does not re-grant", Parts.check_sets(ms2, "bastion").is_empty())
+	# Stacking rule: same stat additive; plus scales with lvl/stars, minus never.
+	var st: Dictionary = _parts_save(["f_glass"], "bastion", 1)
+	_equip_all(st, ["f_glass"])
+	var g: String = Parts.uid_of(st, "f_glass")
+	(Parts.item(st, g) as Dictionary)["lvl"] = 6
+	(Parts.item(st, g) as Dictionary)["stars"] = 1
+	var gx: Dictionary = Parts.run_fx(st, "bastion")
+	_check("PART fx: plus x(1+0.08(L-1))x(1+0.05 stars), minus unscaled", is_equal_approx(float(gx["dmg"]), 0.45 * 1.4 * 1.05) and is_equal_approx(float(gx["core_hp"]), -0.23))
+	# Seeded drop resolution.
+	var r1 := RandomNumberGenerator.new()
+	var r2 := RandomNumberGenerator.new()
+	r1.seed = 77
+	r2.seed = 77
+	var da: Dictionary = _parts_save([], "bastion", 1)
+	var db: Dictionary = _parts_save([], "bastion", 1)
+	da["part_drops"] = [{"rarity": "rare", "source": "boss"}, {"rarity": "legendary", "source": "courier"}]
+	db["part_drops"] = da["part_drops"].duplicate(true)
+	Parts.resolve_drops(da, r1)
+	Parts.resolve_drops(db, r2)
+	var ia: Array = []
+	for k in Parts.items(da).keys():
+		ia.append(String(Parts.items(da)[k]["id"]))
+	var ib: Array = []
+	for k in Parts.items(db).keys():
+		ib.append(String(Parts.items(db)[k]["id"]))
+	_check("DROP resolve: seeded, rarity kept, part_drops emptied", ia == ib and ia.size() == 2 and PartDB.rarity_of(String(ia[0])) == "rare" and PartDB.rarity_of(String(ia[1])) == "legendary" and (da["part_drops"] as Array).is_empty())
+	# Reforge part reset: levels to 1, 50% invested refunded.
+	var rs: Dictionary = _parts_save(["f_glass"], "bastion", 1)
+	var rg: String = Parts.uid_of(rs, "f_glass")
+	(Parts.item(rs, rg) as Dictionary)["lvl"] = 4
+	var ref: int = Parts.reforge_reset(rs)
+	_check("PART reforge reset: L1, 50% Scrap refund", int(Parts.item(rs, rg)["lvl"]) == 1 and ref == PartDB.invested("f_glass", 4) / 2 and int(rs["scrap"]) == ref)
+	# Tempest unlock reads the live 2-piece (Cores ctx from Parts).
+	var ts: Dictionary = BaseMeta.normalize(ms.duplicate(true))
+	ts["best_wave"] = 60
+	BaseMeta.bank_loot(ts, Drops.empty_loot())
+	_check("CORE Tempest unlocks with a 2-piece + best wave 60", Cores.is_owned(ts, "tempest"))
+
+
+func _parts_run(ids: Array, core: String = "bastion", lvl: int = 40, seed_value: int = 1234):
+	var sv: Dictionary = _parts_save(ids, core, lvl)
+	_equip_all(sv, ids)
+	var S = TowerState.new()
+	S.setup(seed_value, sv)
+	return S
+
+
+## Every equipped part's benefit and drawback reach the run (TowerState.setup).
+func _parts_engine_stages() -> void:
+	var B = _parts_run([], "bastion", 1)
+	var core0: Dictionary = _weapon(B, "core")
+	var P = _parts_run(["f_plating"], "bastion", 1)
+	var core1: Dictionary = _weapon(P, "core")
+	_check("RUN Plating: +28% Core HP, -4.2% rate", is_equal_approx(float(P.stats["max_hp"]), float(B.stats["max_hp"]) * 1.28) and is_equal_approx(float(core1["rate"]), float(core0["rate"]) * (1.0 - 0.042)) and is_equal_approx(P.hp, float(P.stats["max_hp"])))
+	var G = _parts_run(["f_glass"], "bastion", 1)
+	_check("RUN Glass Cannon: +45% all dmg, -23% HP", is_equal_approx(float(_weapon(G, "core")["dmg"]), float(core0["dmg"]) * 1.45) and is_equal_approx(float(G.stats["max_hp"]), float(B.stats["max_hp"]) * 0.77))
+	var T = _parts_run(["e_turbine", "f_ledgerframe"], "bastion", 40)
+	var B40 = _parts_run([], "bastion", 40)
+	_check("RUN Turbine + Ledger: flat cash/s, -dmg, -HP", float(T.stats["cash_ps"]) > float(B40.stats["cash_ps"]) and float(_weapon(T, "core")["dmg"]) < float(_weapon(B40, "core")["dmg"]) and float(T.stats["max_hp"]) < float(B40.stats["max_hp"]))
+	var L = _parts_run(["b_longbore"], "bastion", 1)
+	_check("RUN Long Bore: +0.72 range cells, -rate", is_equal_approx(float(_weapon(L, "core")["range_cells"]), float(core0["range_cells"]) + 0.72) and float(_weapon(L, "core")["rate"]) < float(core0["rate"]))
+	var R = _parts_run(["e_railcore"], "bastion", 40)
+	_check("RUN Rail Core: +69% Core dmg, no splash", is_equal_approx(float(_weapon(R, "core")["dmg"]), float(_weapon(B40, "core")["dmg"]) * 1.69) and is_equal_approx(float(_weapon(R, "core")["splash"]), 0.0))
+	var C = _parts_run(["c_luckchip"], "bastion", 12)
+	_check("RUN Luck Chip: +3 Luck", C.luck == 3)
+	var Q = _parts_run(["c_quickcap"], "bastion", 12)
+	_check("RUN Quick Cap: special cd x0.821, dmg x0.879", is_equal_approx(float(Q.mods["special_cd"]), 1.0 - 0.179) and is_equal_approx(float(Q.mods["special_dmg"]), 1.0 - 0.121))
+	var H = _parts_run(["e_bastionheart"], "bastion", 20)
+	_check("RUN Bastion Heart: rings open one step later", H.ring_threshold(2) == 30 and H.ring_threshold(3) == 60 and B.ring_threshold(2) == 10)
+	# Hunter Scope: bosses take more, normal enemies less (in _hit).
+	var S = _parts_run(["c_scope"], "bastion", 12)
+	var eb: Dictionary = _enemy("boss", Vector2(400, 400), 1000.0)
+	var en: Dictionary = _enemy("drone", Vector2(400, 400), 1000.0)
+	S._hit(eb, 100.0, [])
+	S._hit(en, 100.0, [])
+	_check("RUN Hunter Scope: +45% vs boss, -8.7% vs normal", is_equal_approx(float(eb["hp"]), 1000.0 - 145.0) and is_equal_approx(float(en["hp"]), 1000.0 - 91.3))
+	# Mirror Hull: contact damage reflects.
+	var M = _parts_run(["f_mirror"], "bastion", 12)
+	var em: Dictionary = _enemy("drone", Vector2(400, 400), 1000.0)
+	M._core_damage(10.0, [], "core_hit", em["pos"], em)
+	_check("RUN Mirror Hull reflects 18.2% of contact dmg", is_equal_approx(float(em["hp"]), 1000.0 - 1.82))
+	# Bulwark 4-piece: last stand once per wave.
+	var W = _parts_run(["f_bulkhead", "f_regenmesh", "f_mirror", "e_bastionheart"], "bastion", 40)
+	W.hp = float(W.stats["max_hp"]) * 0.35
+	var lev: Array = []
+	W._core_damage(float(W.stats["max_hp"]) * 0.2, lev, "core_hit", Vector2.ZERO)
+	var hp1: float = W.hp
+	W._core_damage(50.0, lev, "core_hit", Vector2.ZERO)
+	_check("RUN Bulwark 4-piece: 2 s immunity below 30% (once)", _evts(lev, "last_stand").size() == 1 and is_equal_approx(W.hp, hp1) and W.last_stand_used)
+	# Battery Bank stores an extra special charge.
+	var Bt = _parts_run(["c_battery"], "bastion", 12)
+	Bt.specials = [{"id": "sp_repair", "copies": 1, "cd": 0.0, "charges": 1}]
+	_check("RUN Battery: 1st cast", String(Bt.cast_special(0)["result"]) == "ok")
+	Bt._tick_buffs(Specials.cooldown("sp_repair", 1) + 0.1, [])
+	_check("RUN Battery: a finished cooldown banks a charge and restarts", int(Bt.specials[0]["bank"]) == 1 and float(Bt.specials[0]["cd"]) > 0.0 and String(Bt.cast_special(0)["result"]) == "ok" and String(Bt.cast_special(0)["result"]) == "cooldown")
+	# Hivecomb / Drone Port: more troops.
+	var Hv = _parts_run(["f_hivecomb", "b_droneport"], "bastion", 40)
+	var tm: Dictionary = Hv._troop_mods()
+	_check("RUN Hivecomb +1 troop/hut, Drone Port +1 drone, troop HP -31% (+15% Swarm 2-piece)", int(tm["extra"]) == 1 and int(tm["extra_drone"]) == 1 and is_equal_approx(float(tm["hp_mult"]), float(B40._troop_mods()["hp_mult"]) * (1.0 - 0.31 + 0.15)))
+	# Mint 4-piece: interest every 15 s instead of per wave.
+	var Mi = _parts_run(["f_ledgerframe", "b_bounty", "c_interest", "e_mintpress"], "bastion", 40)
+	Mi.spawn_hold = true
+	Mi.wave_started = true
+	Mi.cash = 100.0
+	var iev: Array = []
+	for k in 160:
+		Mi._step(0.1, iev)
+	_check("RUN Mint 4-piece pays interest every 15 s", _evts(iev, "interest").size() == 1)
+	# Lancer 4-piece: Core shots pierce one extra enemy.
+	var Lp = _parts_run(["b_hollow", "b_focuslens", "c_scope", "e_railcore"], "bastion", 40)
+	_check("RUN Lancer 4-piece: pierce 1", int(_weapon(Lp, "core")["pierce"]) == 1)
+	# Same seed, same parts -> same run fingerprint (determinism kept).
+	var f1 = _parts_run(["f_glass", "b_crit"], "bastion", 12, 99)
+	var f2 = _parts_run(["f_glass", "b_crit"], "bastion", 12, 99)
+	_godmode(f1)
+	_godmode(f2)
+	var a1: Array = _sim_waves(f1, 4)
+	var a2: Array = _sim_waves(f2, 4)
+	_check("RUN parts keep the run deterministic", JSON.stringify(a1).length() > 100 and JSON.stringify(a1) == JSON.stringify(a2))

@@ -24,6 +24,7 @@ const TuneRef := preload("res://Tune.gd")
 const Stats := preload("res://Stats.gd")
 const Cores := preload("res://Cores.gd")
 const PickDB := preload("res://data/PickDB.gd")
+const Parts := preload("res://Parts.gd")
 
 const VERSION: int = 3
 ## PC 7x7 base (PC_SPEC §2.1): rings by Chebyshev distance from the core cell
@@ -60,6 +61,7 @@ static func default_save() -> Dictionary:
 		# Redesign ENGINE-RUN blocks (additive; save v4 folds them in).
 		"cores": Cores.default_block(), "core_cores": 0, "insight": {},
 		"scrap": 0, "keys": 0, "part_drops": [],
+		"parts": Parts.default_block(),
 	}
 
 
@@ -248,6 +250,8 @@ static func normalize(s_in: Dictionary) -> Dictionary:
 	d["endless"] = {"best": maxi(0, int(en_in.get("best", 0)))}
 	d["achievements"] = _achievements(s.get("achievements", {}))
 	d["cores"] = Cores.normalize_block(s.get("cores", null), Cores.max_level(s))
+	d["parts"] = Parts.normalize_block(s.get("parts", null))
+	Parts.sanitize_presets(d)
 	d["core_cores"] = maxi(0, int(s.get("core_cores", 0)))
 	d["insight"] = PickDB.normalize_insight(s.get("insight", {}))
 	d["scrap"] = maxi(0, int(s.get("scrap", 0)))
@@ -538,7 +542,7 @@ static func bank(s: Dictionary, coins: int, wave: int, tier: int = 1, run_minute
 
 ## Bank a run's loot (REDESIGN §2.6): Scrap and Keys into the wallet; part
 ## drops wait in save.part_drops for the Parts module to resolve into parts.
-static func bank_loot(s: Dictionary, loot: Dictionary) -> Array:
+static func bank_loot(s: Dictionary, loot: Dictionary, rng: RandomNumberGenerator = null) -> Array:
 	var ev: Array = []
 	var sc: int = maxi(0, int(loot.get("scrap", 0)))
 	var ky: int = maxi(0, int(loot.get("keys", 0)))
@@ -553,7 +557,10 @@ static func bank_loot(s: Dictionary, loot: Dictionary) -> Array:
 		pd.append((p as Dictionary).duplicate())
 	if sc > 0 or ky > 0 or cc > 0 or not (loot.get("parts", []) as Array).is_empty():
 		ev.append({"t": "loot_banked", "scrap": sc, "keys": ky, "core_cores": cc, "parts": (loot.get("parts", []) as Array).size()})
-	ev.append_array(Cores.check_unlocks(s))
+	# ENGINE-META: generic part drops resolve into concrete parts (seeded).
+	if rng != null:
+		ev.append_array(Parts.resolve_drops(s, rng))
+	ev.append_array(Cores.check_unlocks(s, {"set2": Parts.any_set2(s)}))
 	return ev
 
 

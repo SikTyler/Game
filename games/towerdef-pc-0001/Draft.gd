@@ -63,7 +63,7 @@ static func card_for(id: String, ctx: Dictionary) -> Dictionary:
 				return {}
 			if id == "railgun" and not bool(ctx.get("free_outer", false)):
 				return {}
-			if fam == "hut" and int(ctx.get("huts", 0)) >= PickDB.HUT_MAX:
+			if fam == "hut" and int(ctx.get("huts", 0)) >= int(ctx.get("hut_max", PickDB.HUT_MAX)):
 				return {}
 			base["kind"] = "new"
 			return base

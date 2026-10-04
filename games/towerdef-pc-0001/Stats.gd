@@ -12,7 +12,8 @@ extends RefCounted
 
 const HISTORY_MAX: int = 50
 const MODES: Array = ["normal", "endless", "challenge"]
-const INT_KEYS: Array = ["kills", "bosses", "waves", "runs", "coins_earned", "coins_spent"]
+const INT_KEYS: Array = ["kills", "bosses", "waves", "runs", "coins_earned", "coins_spent",
+	"parts_found", "crates_opened", "specials_cast", "couriers", "outpost_collects", "reforges"]
 
 
 static func default_stats() -> Dictionary:
@@ -20,6 +21,9 @@ static func default_stats() -> Dictionary:
 		"kills": 0, "bosses": 0, "kills_by_kind": {}, "waves": 0, "runs": 0, "play_s": 0.0,
 		"coins_earned": 0, "coins_spent": 0, "placed": {},
 		"best_by_mode": {"normal": 0, "endless": 0, "challenge": 0}, "dps_best": 0.0,
+		# Redesign meta counters (achievements): parts found, crates opened,
+		# specials cast, Couriers caught, Outpost collects, Reforges.
+		"parts_found": 0, "crates_opened": 0, "specials_cast": 0, "couriers": 0, "outpost_collects": 0, "reforges": 0,
 	}
 
 
@@ -71,6 +75,8 @@ static func on_event(s: Dictionary, e: Dictionary) -> void:
 			st["play_s"] = float(st["play_s"]) + maxf(0.0, float(e.get("duration_s", 0.0)))
 			st["coins_earned"] = int(st["coins_earned"]) + maxi(0, int(e.get("coins", 0)))
 			st["dps_best"] = maxf(float(st["dps_best"]), float(e.get("dps", 0.0)))
+			st["specials_cast"] = int(st["specials_cast"]) + maxi(0, int(e.get("specials_cast", 0)))
+			st["couriers"] = int(st["couriers"]) + maxi(0, int(e.get("couriers", 0)))
 			var bm: Dictionary = st["best_by_mode"]
 			var m: String = mode_of(e)
 			bm[m] = maxi(int(bm.get(m, 0)), int(e.get("wave", 0)))
