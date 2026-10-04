@@ -85,8 +85,13 @@ static func can_reforge(s: Dictionary) -> bool:
 	return bw >= TuneRef.int_of("pc_reforge_gate_wave", 40) or int(_rf(s)["coins_since"]) >= TuneRef.int_of("pc_reforge_coin_gate", 1000000)
 
 
+## Effective shard multiplier k (ReforgeDB.SHARD_K, tunable, x shard_yield node).
+static func shard_k(s: Dictionary) -> float:
+	return TuneRef.num("pc_reforge_k", ReforgeDB.SHARD_K) * (1.0 + 0.1 * float(node(s, "shard_yield")))
+
+
 static func shards_now(s: Dictionary) -> int:
-	var k: float = TuneRef.num("pc_reforge_k", ReforgeDB.SHARD_K) * (1.0 + 0.1 * float(node(s, "shard_yield")))
+	var k: float = shard_k(s)
 	var l0: float = TuneRef.num("pc_reforge_l0", 10000.0)
 	var n: int = int(floor(k * sqrt(maxf(0.0, float(_rf(s)["coins_since"])) / l0)))
 	if count(s) == 0:

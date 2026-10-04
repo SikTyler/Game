@@ -8,6 +8,7 @@ extends RefCounted
 const Reforge := preload("res://Reforge.gd")
 const ReforgeDB := preload("res://data/ReforgeDB.gd")
 const Kit := preload("res://ui/Kit.gd")
+const TuneRef := preload("res://Tune.gd")
 
 const BRANCHES: Array = [["power", "POWER", "rf_power", Color("e8434f")], ["economy", "ECONOMY", "rf_economy", Color("f2c94c")], ["mastery", "MASTERY", "rf_mastery", Color("5ad1f0")]]
 const NODE_R: float = 34.0
@@ -85,7 +86,8 @@ static func draw(m, _cr: Rect2) -> void:
 	var x: float = l.position.x + 24.0
 	var w: float = l.size.x - 48.0
 	Kit.t(m, "CORE REFORGE", Vector2(x, l.position.y + 40), 28, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w)
-	Kit.wrap(m, "Melt this loop's progress into shards that buy permanent upgrades. Shards = sqrt(coins earned since the last Reforge / 10,000).", Vector2(x, l.position.y + 62), 15, Kit.DIM, w, 3)
+	var fb: String = " (+%d first-Reforge bonus)" % TuneRef.int_of("pc_reforge_first_bonus", 5) if Reforge.count(s) == 0 else ""
+	Kit.wrap(m, "Melt this loop's progress into shards that buy permanent upgrades. Shards = %s × sqrt(coins earned since the last Reforge / %s)%s." % [String.num(Reforge.shard_k(s), 2), _commas(int(TuneRef.num("pc_reforge_l0", 10000.0))), fb], Vector2(x, l.position.y + 62), 15, Kit.DIM, w, 3)
 	var y: float = l.position.y + 140.0
 	Kit.icon(m, "cur_shard", Rect2(x, y, 64, 64))
 	Kit.t(m, "+%d shards now" % int(pv["shards"]), Vector2(x + 80, y + 36), 30, Kit.SHARD, HORIZONTAL_ALIGNMENT_LEFT, w - 80)
@@ -151,3 +153,12 @@ static func _draw_tree(m, s: Dictionary) -> void:
 		var lx: float = p2.x + NODE_R + 8.0
 		Kit.t(m, "%s  %d/%d" % [String(d["name"]), lv, int(d["max"])], Vector2(lx, p2.y - 2), 15, col2 if lv > 0 else Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, 200.0)
 		Kit.t(m, ("%d shards" % ReforgeDB.cost(String(id), lv)) if lv < int(d["max"]) else "max", Vector2(lx, p2.y + 17), 13, Kit.SHARD if can else Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, 170.0)
+
+
+static func _commas(n: int) -> String:
+	var d: String = str(absi(n))
+	var o: String = ""
+	while d.length() > 3:
+		o = "," + d.substr(d.length() - 3) + o
+		d = d.substr(0, d.length() - 3)
+	return ("-" if n < 0 else "") + d + o
