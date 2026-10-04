@@ -29,7 +29,7 @@ const Crates := preload("res://Crates.gd")
 const Outpost := preload("res://Outpost.gd")
 const Reforge := preload("res://Reforge.gd")
 
-const VERSION: int = 3
+const VERSION: int = 4
 ## PC 7x7 base (PC_SPEC §2.1): rings by Chebyshev distance from the core cell
 ## (3,3). Ring 1 (8 cells) starts unlocked; ring 2 / ring 3 are bought per cell.
 const SIDE: int = 7
@@ -73,15 +73,93 @@ static func idx5_to_7(i: int) -> int:
 	return (i / 5 + 1) * SIDE + (i % 5 + 1)
 
 
-## v1 (no `version`) -> v2 -> v3. Lossless; returns a new Dictionary.
-static func migrate(s: Dictionary) -> Dictionary:
+## v1 (no `version`) -> v2 -> v3 -> v4. Pure; returns a new Dictionary.
+## `to` stops early (tests of a single step); idempotent at the target.
+static func migrate(s: Dictionary, to: int = VERSION) -> Dictionary:
 	var d: Dictionary = s.duplicate(true)
 	var v: int = int(d.get("version", 1))
-	if v >= VERSION:
+	if v >= to:
 		return d
 	if v < 2:
 		d = _migrate_v1(d)
-	return _migrate_v2(d)
+	if int(d.get("version", 2)) < 3 and to >= 3:
+		d = _migrate_v2(d)
+	if int(d.get("version", 3)) < 4 and to >= 4:
+		d = _migrate_v3(d)
+	return d
+
+
+## Coins a v3 permanent base cost: every slot's purchase + upgrades, plus
+## 500 per bought (unlocked) cell (SYSTEMS §8 step 1).
+static func v3_base_refund(d: Dictionary) -> int:
+	var refund: int = 0
+	var sl: Variant = d.get("slots", {})
+	if sl is Dictionary:
+		for k in (sl as Dictionary).keys():
+			var e: Variant = (sl as Dictionary)[k]
+			if not (e is Dictionary):
+				continue
+			var id: String = String((e as Dictionary).get("id", ""))
+			if not BuildingDB.DEFS.has(id):
+				continue
+			refund += place_cost(id)
+			for l in range(1, maxi(1, int((e as Dictionary).get("lvl", 1)))):
+				refund += upgrade_cost(l)
+	var un: Variant = d.get("unlocked", [])
+	if un is Array:
+		refund += 500 * (un as Array).size()
+	return refund
+
+
+## v3 -> v4 (REDESIGN_SYSTEMS §8 / REDESIGN_SPEC §3.5): permanent base ->
+## coin refund + Outpost starter (connected Coin Mill + 25% build credit, cap
+## 50k); Core stat levels -> Bastion level 1 + floor(sum/3) (cap 20), leftover
+## levels refunded at the old curve; labs -> research (slots 1/2/3+ -> Hall
+## L1/L4/L8); 1 free Field Crate. Outpost clocks start at 0, so the first
+## tick after migration only stamps the time (no double offline pay).
+static func _migrate_v3(d: Dictionary) -> Dictionary:
+	var refund: int = v3_base_refund(d)
+	var core: Dictionary = d.get("core", {}) if d.get("core", {}) is Dictionary else {}
+	var sum: int = 0
+	for k in CORE_STATS:
+		sum += maxi(0, int(core.get(k, 0)))
+	var blvl: int = mini(20, 1 + sum / 3)
+	var core_refund: int = 0
+	for k in CORE_STATS:
+		for l in range(blvl - 1, maxi(0, int(core.get(k, 0)))):
+			core_refund += core_cost(l)
+	d["coins"] = maxi(0, int(d.get("coins", 0))) + refund + core_refund
+	d["core"] = {"dmg": 0, "hp": 0, "regen": 0}
+	d["slots"] = {}
+	d["unlocked"] = []
+	var cb: Dictionary = d.get("cores", {}) if d.get("cores", {}) is Dictionary else Cores.default_block()
+	var lv: Dictionary = cb.get("levels", {}) if cb.get("levels", {}) is Dictionary else {}
+	lv["bastion"] = maxi(int(lv.get("bastion", 1)), blvl)
+	cb["levels"] = lv
+	d["cores"] = cb
+	# Outpost: Relay + Research Hall (default) + a placed, connected Coin Mill.
+	var o: Dictionary = Outpost.default_block()
+	Outpost._add_building(o, "mill", 4, 4, 0, true)
+	o["credit"] = mini(50000, refund / 4)
+	var labs: Dictionary = d.get("labs", {}) if d.get("labs", {}) is Dictionary else {}
+	var slots: int = int(labs.get("slots", 1))
+	var hall: int = 8 if slots >= 3 else (4 if slots == 2 else 1)
+	for k in o["buildings"].keys():
+		if String((o["buildings"][k] as Dictionary)["id"]) == "research":
+			(o["buildings"][k] as Dictionary)["lvl"] = hall
+			(o["buildings"][k] as Dictionary)["spent"] = Outpost.cost("research", 1)
+	d["outpost"] = o
+	d["research"] = {"lvls": (labs.get("lvls", {}) as Dictionary).duplicate(true) if labs.get("lvls", {}) is Dictionary else {}, "running": (labs.get("running", []) as Array).duplicate(true) if labs.get("running", []) is Array else []}
+	d.erase("labs")
+	d.erase("target_modes")
+	var cr: Dictionary = d.get("crates", {}) if d.get("crates", {}) is Dictionary else {}
+	var tk: Dictionary = cr.get("tokens", {}) if cr.get("tokens", {}) is Dictionary else {}
+	tk["field"] = int(tk.get("field", 0)) + 1
+	cr["tokens"] = tk
+	d["crates"] = cr
+	d["v4_refund"] = refund + core_refund
+	d["version"] = 4
+	return d
 
 
 ## v2 -> v3: remap every 5x5 cell key onto the 7x7 board; new v3 blocks are
@@ -108,7 +186,7 @@ static func _migrate_v2(d: Dictionary) -> Dictionary:
 			if i5c >= 0 and i5c < 25:
 				tm[str(idx5_to_7(i5c))] = tm_in[key]
 		d["target_modes"] = tm
-	d["version"] = VERSION
+	d["version"] = 3
 	return d
 
 

@@ -271,8 +271,13 @@ func _meta_stages() -> void:
 	var NOW: int = 1_800_000_000
 	# --- Stage 12: save v2 + migration (AC-1..4) ----------------------------
 	var v1: Dictionary = {"coins": 123, "core": {"dmg": 1, "hp": 2, "regen": 0}, "slots": {"7": {"id": "gun", "lvl": 3}}, "unlocked": [0, 4], "best_wave": 37, "runs": 5, "labs": {"lvls": {"armor": 4, "coin": 2}}}
+	var m3: Dictionary = BaseMeta.migrate(v1, 3)
+	_check("AC-1 migrate keeps v1 fields (to v3)", int(m3["coins"]) == 123 and int(m3["runs"]) == 5 and int(m3["core"]["hp"]) == 2 and String(m3["slots"][str(_c(7))]["id"]) == "gun" and int(m3["slots"][str(_c(7))]["lvl"]) == 3 and (m3["unlocked"] as Array) == [_c(0), _c(4)])
+	# REDESIGN (ENGINE-META, deliberate, AC-22): v4 refunds the permanent base
+	# and folds the Core stat levels into the Bastion level.
 	var m: Dictionary = BaseMeta.normalize(BaseMeta.migrate(v1))
-	_check("AC-1 migrate keeps v1 fields", int(m["coins"]) == 123 and int(m["runs"]) == 5 and int(m["core"]["hp"]) == 2 and String(BaseMeta.slot_of(m, _c(7))["id"]) == "gun" and int(BaseMeta.slot_of(m, _c(7))["lvl"]) == 3 and (m["unlocked"] as Array) == [_c(0), _c(4)])
+	var rf1: int = BaseMeta.place_cost("gun") + BaseMeta.upgrade_cost(1) + BaseMeta.upgrade_cost(2) + 2 * 500 + BaseMeta.core_cost(1)
+	_check("AC-1 v1 -> v4: base refunded, Core stats -> Bastion L2", int(m["coins"]) == 123 + rf1 and int(m["runs"]) == 5 and int(m["core"]["hp"]) == 0 and (m["slots"] as Dictionary).is_empty() and Cores.level(m, "bastion") == 2)
 	_check("AC-1 migrate v2 fields", int(m["best_wave_by_tier"]["1"]) == 37 and int(m["best_wave"]) == 37 and int(m["gems"]) == 0 and int(m["tier"]) == 1 and int(m["last_seen"]) == 0 and int(m["version"]) == BaseMeta.VERSION)
 	# REDESIGN (ENGINE-META, deliberate): labs live in save.research now.
 	_check("AC-1 armor lab dropped, others kept", not (m["research"]["lvls"] as Dictionary).has("armor") and int(m["research"]["lvls"]["coin"]) == 2)
@@ -289,7 +294,7 @@ func _meta_stages() -> void:
 	_check("AC-2 v2 round-trips through JSON", JSON.stringify(rt) == JSON.stringify(v2) and int(rt["gems"]) == 77)
 	var bad: Dictionary = BaseMeta.normalize(v2)
 	bad["slots"][str(_c(8))] = {"id": "laser_of_doom", "lvl": 1}
-	bad["slots"][str(_c(7))]["lvl"] = 99
+	bad["slots"][str(_c(7))] = {"id": "gun", "lvl": 99}   # legacy view key (v4 keeps it empty)
 	bad["research"]["lvls"]["dmg"] = 99
 	bad["research"]["lvls"]["bogus"] = 3
 	bad["research"]["running"] = [{"track": "coin", "to_lvl": 3, "start": 0, "end": 1}, {"track": "xp", "to_lvl": 1, "start": 0, "end": 1}, {"track": "hp", "to_lvl": 1, "start": 0, "end": 1}]
@@ -1641,17 +1646,19 @@ func _pc_save_stages() -> void:
 		"target_modes": {"7": "first"}, "stats": {"kills": 999, "bosses": 4},
 		"labs": {"lvls": {"dmg": 3, "coin": 1}, "slots": 2, "running": []},
 	}
+	# The v2 -> v3 step alone (migrate(.., 3)); v4 is checked in _save_v4_stages.
+	var m3: Dictionary = BaseMeta.migrate(v2, 3)
+	var sl3: Dictionary = m3["slots"]
+	var slot_ok: bool = String(sl3[str(_c(6))]["id"]) == "armory" and int(sl3[str(_c(6))]["lvl"]) == 4 and String(sl3[str(_c(7))]["id"]) == "gun" and String(sl3[str(_c(0))]["id"]) == "mine" and String(sl3[str(_c(24))]["id"]) == "vault" and sl3.size() == 4
+	_check("PC-E9 v2 -> v3: version, cells offset (r+1,c+1)", int(m3["version"]) == 3 and slot_ok and _c(6) == 16 and _c(24) == 40)
+	_check("PC-E9 v2 -> v3: unlocks land on ring 2", (m3["unlocked"] as Array) == [_c(0), _c(4), _c(24)] and BaseMeta.cell_ring(_c(0)) == 2)
 	var m: Dictionary = BaseMeta.normalize(BaseMeta.migrate(v2))
-	var slot_ok: bool = String(BaseMeta.slot_of(m, _c(6))["id"]) == "armory" and int(BaseMeta.slot_of(m, _c(6))["lvl"]) == 4 and String(BaseMeta.slot_of(m, _c(7))["id"]) == "gun" and String(BaseMeta.slot_of(m, _c(0))["id"]) == "mine" and String(BaseMeta.slot_of(m, _c(24))["id"]) == "vault" and (m["slots"] as Dictionary).size() == 4
-	_check("PC-E9 v2 -> v3: version, cells offset (r+1,c+1)", int(m["version"]) == 3 and slot_ok and _c(6) == 16 and _c(24) == 40)
-	_check("PC-E9 v2 -> v3: unlocks land on ring 2", (m["unlocked"] as Array) == [_c(0), _c(4), _c(24)] and BaseMeta.cell_ring(_c(0)) == 2)
-	_check("PC-E9 v2 -> v3 keeps meta fields", int(m["coins"]) == 4321 and int(m["gems"]) == 12 and int(m["core"]["dmg"]) == 3 and int(m["runs"]) == 9 and int(m["best_wave_by_tier"]["1"]) == 44 and int(m["tier"]) == 2 and int(m["research"]["lvls"]["dmg"]) == 3 and int(m["stats"]["kills"]) == 999 and int(m["stats"]["bosses"]) == 4)
+	_check("PC-E9 v2 -> v4 keeps meta fields", int(m["coins"]) >= 4321 and int(m["gems"]) == 12 and int(m["runs"]) == 9 and int(m["best_wave_by_tier"]["1"]) == 44 and int(m["tier"]) == 2 and int(m["research"]["lvls"]["dmg"]) == 3 and int(m["stats"]["kills"]) == 999 and int(m["stats"]["bosses"]) == 4 and int(m["version"]) == 4)
 	_check("PC-E9 v3 blocks filled", (m["history"] as Array).is_empty() and int(m["endless"]["best"]) == 0 and (m["stats"] as Dictionary).has("kills_by_kind"))
-	var mm: Dictionary = BaseMeta.migrate(v2)
-	_check("PC-E9 target modes remapped", String((mm["target_modes"] as Dictionary)[str(_c(7))]) == "first")
-	_check("PC-E9 migrate is idempotent on v3", JSON.stringify(BaseMeta.migrate(m)) == JSON.stringify(m))
+	_check("PC-E9 target modes remapped", String((m3["target_modes"] as Dictionary)[str(_c(7))]) == "first")
+	_check("PC-E9 migrate is idempotent on v4", JSON.stringify(BaseMeta.migrate(m)) == JSON.stringify(m))
 	var rt: Dictionary = BaseMeta.normalize(JSON.parse_string(JSON.stringify(m)))
-	_check("PC-E9 v3 JSON round-trip equality", JSON.stringify(rt) == JSON.stringify(m))
+	_check("PC-E9 v4 JSON round-trip equality", JSON.stringify(rt) == JSON.stringify(m))
 	# Slots.
 	for n in [1, 2, 3]:
 		MetaSave.delete_slot(n, MetaSave.DELETE_CONFIRM)
@@ -1684,7 +1691,7 @@ func _pc_save_stages() -> void:
 	lf.store_string(JSON.stringify(v2))
 	lf.close()
 	var imp: Dictionary = BaseMeta.normalize(MetaSave.read_slot(1))
-	_check("PC-E9 legacy save.json imports into slot 1 as v3", int(imp["version"]) == 3 and int(imp["coins"]) == 4321 and String(BaseMeta.slot_of(imp, _c(7))["id"]) == "gun" and MetaSave.read_slot(2).get("coins", 0) == 222)
+	_check("PC-E9 legacy save.json imports into slot 1 as v4 (base refunded)", int(imp["version"]) == 4 and int(imp["coins"]) == int(m["coins"]) and BaseMeta.slot_of(imp, _c(7)).is_empty() and Outpost.level_of(imp, "mill") == 1 and MetaSave.read_slot(2).get("coins", 0) == 222)
 	for n in [1, 2, 3]:
 		MetaSave.delete_slot(n, MetaSave.DELETE_CONFIRM)
 	MetaSave.set_active(1)
@@ -2676,6 +2683,7 @@ func _engine_meta_stages() -> void:
 	_crate_stages()
 	_outpost_stages()
 	_reforge_stages()
+	_save_v4_stages()
 
 
 ## A save owning `ids` (fresh items, L1), Core `core` at level `lvl`.
@@ -3355,3 +3363,62 @@ func _reforge_stages() -> void:
 	var ou: String = _op_build(oc, "mill", 4, 4)
 	Outpost.collect(oc, ou, OT0 + 3600)
 	_check("RF Outpost coins count toward coins_since", int(oc["reforge"]["coins_since"]) == 60)
+
+
+## AC-22: v3 -> v4 migration fixture (a PC v3 save), idempotent, sanitize.
+func _save_v4_stages() -> void:
+	var v3: Dictionary = {
+		"version": 3, "coins": 10000, "gems": 40, "core": {"dmg": 12, "hp": 9, "regen": 6},
+		"slots": {"16": {"id": "gun", "lvl": 5}, "17": {"id": "mine", "lvl": 3}, "9": {"id": "mortar", "lvl": 2}},
+		"unlocked": [8, 9, 10], "runs": 40, "best_wave": 52, "tier": 2, "best_wave_by_tier": {"1": 52, "2": 31},
+		"labs": {"lvls": {"dmg": 7, "coin": 4, "offcap": 2}, "slots": 3, "running": [{"track": "hp", "to_lvl": 1, "start": OT0 - 100, "end": OT0 + 500}]},
+		"cards": {"owned": {"c_dmg": {"lvl": 2, "copies": 1}}, "equipped": ["c_dmg"], "slots": 2},
+		"last_seen": OT0 - 86400, "stats": {"kills": 5000, "bosses": 9}, "achievements": {"unlocked": {"ACH_FIRST_RUN": 5}, "missions_claimed": 3},
+		"settings": {"music": 0.5, "sfx": 0.7, "mute": false}, "endless": {"best": 12}, "streak": {"day_idx": 3, "last_day": 5, "loops": 0},
+		"cores": {"active": "bastion", "owned": ["bastion"], "levels": {"bastion": 3}}, "core_cores": 2, "scrap": 30, "keys": 1, "insight": {"in_dmg": 2},
+		"part_drops": [{"rarity": "rare", "source": "boss"}],
+	}
+	var refund: int = BaseMeta.v3_base_refund(v3)
+	var r_exp: int = BaseMeta.place_cost("gun") + BaseMeta.place_cost("mine") + BaseMeta.place_cost("mortar") + 3 * 500
+	for l in range(1, 5):
+		r_exp += BaseMeta.upgrade_cost(l)
+	for l in range(1, 3):
+		r_exp += BaseMeta.upgrade_cost(l)
+	r_exp += BaseMeta.upgrade_cost(1)
+	_check("AC-22 refund = purchases + upgrades + 500 per bought cell", refund == r_exp)
+	var m: Dictionary = BaseMeta.normalize(BaseMeta.migrate(v3))
+	# Bastion: 1 + floor(27 / 3) = 10; leftover dmg 12 -> levels 9..11, hp 9 -> none.
+	var core_ref: int = BaseMeta.core_cost(9) + BaseMeta.core_cost(10) + BaseMeta.core_cost(11)
+	_check("AC-22 refund coins credited (+ Core leftover)", int(m["coins"]) == 10000 + refund + core_ref)
+	_check("AC-22 Bastion level per formula (1 + floor(sum/3))", Cores.level(m, "bastion") == 10 and int(m["core"]["dmg"]) == 0)
+	var con: Dictionary = Outpost.connected(m["outpost"])
+	var mill_ok: bool = false
+	var hall_ok: bool = false
+	for k in (m["outpost"]["buildings"] as Dictionary).keys():
+		var b: Dictionary = m["outpost"]["buildings"][k]
+		if String(b["id"]) == "mill":
+			mill_ok = bool(b["built"]) and bool(con[k]) and int(b["lvl"]) == 1
+		if String(b["id"]) == "research":
+			hall_ok = bool(b["built"]) and bool(con[k]) and int(b["lvl"]) == 8
+	_check("AC-22 Coin Mill + Research Hall placed and connected", mill_ok and hall_ok and (m["slots"] as Dictionary).is_empty() and (m["unlocked"] as Array).is_empty())
+	_check("AC-22 Outpost starter credit = 25% of the refund (cap 50k)", int(m["outpost"]["credit"]) == mini(50000, refund / 4))
+	_check("AC-22 research levels equal old labs; slots 3 -> Hall L8 (3 queues); running kept", int(m["research"]["lvls"]["dmg"]) == 7 and int(m["research"]["lvls"]["offcap"]) == 2 and Labs.slots(m) == 3 and (m["research"]["running"] as Array).size() == 1 and int(m["research"]["running"][0]["end"]) == OT0 + 500 and not m.has("labs"))
+	_check("AC-22 keeps cards, tiers, stats, achievements, gems, settings, endless, streak", int(m["gems"]) == 40 and (m["cards"]["owned"] as Dictionary).has("c_dmg") and int(m["best_wave_by_tier"]["2"]) == 31 and int(m["stats"]["kills"]) == 5000 and (m["achievements"]["unlocked"] as Dictionary).has("ACH_FIRST_RUN") and is_equal_approx(float(m["settings"]["music"]), 0.5) and int(m["endless"]["best"]) == 12 and int(m["streak"]["day_idx"]) == 3)
+	_check("AC-22 defaults: Bastion active, 1 free Field Crate, zero new keys", Cores.active(m) == "bastion" and Crates.tokens(m) == 1 and int(m["shards"]) == 0 and Parts.count(m) == 0 and Reforge.count(m) == 0)
+	# No double offline pay: the first tick after migration only starts clocks.
+	var away: Dictionary = Outpost.away_report(m, OT0)
+	Outpost.tick(m, OT0)
+	Outpost.tick(m, OT0 + 3600)
+	_check("AC-22 no double offline pay (accrues from the migration time)", int(away["coins"]) == 0 and absf(float(Outpost.pending(m, OT0 + 3600)["coins"]) - 60.0 * 1.5) < 0.01)
+	# Idempotent: migrating / normalizing again changes nothing.
+	var m2: Dictionary = BaseMeta.normalize(BaseMeta.migrate(m))
+	_check("AC-22 migration idempotent (v4 -> v4)", JSON.stringify(m2) == JSON.stringify(m) and int(BaseMeta.normalize(BaseMeta.normalize(BaseMeta.migrate(v3)))["coins"]) == 10000 + refund + core_ref)
+	_check("AC-22 v4 JSON round-trip", JSON.stringify(BaseMeta.normalize(JSON.parse_string(JSON.stringify(m)))) == JSON.stringify(m))
+	# Sanitize: negative ints clamp, unknown part ids drop, uids stay unique.
+	var bad: Dictionary = m.duplicate(true)
+	bad["coins"] = -5
+	bad["scrap"] = -1
+	bad["parts"] = {"next_uid": 2, "items": {"1": {"id": "f_glass", "lvl": 99}, "2": {"id": "nope"}, "3": {"id": "f_glass"}, "4": {"id": "b_crit", "stars": 7}}}
+	var bn: Dictionary = BaseMeta.normalize(bad)
+	_check("AC-22 sanitize: clamps, unknown parts dropped, one item per id, uids unique", int(bn["coins"]) == 0 and int(bn["scrap"]) == 0 and Parts.count(bn) == 2 and int(Parts.item(bn, "1")["lvl"]) == 20 and int(Parts.item(bn, "4")["stars"]) == 2 and int(bn["parts"]["next_uid"]) == 5)
+	_check("AC-22 v4 schema keys", int(m["version"]) == 4 and m.has("parts") and m.has("crates") and m.has("outpost") and m.has("research") and m.has("reforge") and m.has("shards") and m.has("cores") and m.has("insight"))
