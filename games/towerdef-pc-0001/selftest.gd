@@ -12,7 +12,6 @@ const MetaSave := preload("res://MetaSave.gd")
 const Tiers := preload("res://Tiers.gd")
 const Labs := preload("res://Labs.gd")
 const LabDB := preload("res://data/LabDB.gd")
-const Offline := preload("res://Offline.gd")
 const Missions := preload("res://Missions.gd")
 const Cards := preload("res://Cards.gd")
 const CardDB := preload("res://data/CardDB.gd")
@@ -273,13 +272,14 @@ func _meta_stages() -> void:
 	var m: Dictionary = BaseMeta.normalize(BaseMeta.migrate(v1))
 	_check("AC-1 migrate keeps v1 fields", int(m["coins"]) == 123 and int(m["runs"]) == 5 and int(m["core"]["hp"]) == 2 and String(BaseMeta.slot_of(m, _c(7))["id"]) == "gun" and int(BaseMeta.slot_of(m, _c(7))["lvl"]) == 3 and (m["unlocked"] as Array) == [_c(0), _c(4)])
 	_check("AC-1 migrate v2 fields", int(m["best_wave_by_tier"]["1"]) == 37 and int(m["best_wave"]) == 37 and int(m["gems"]) == 0 and int(m["tier"]) == 1 and int(m["last_seen"]) == 0 and int(m["version"]) == BaseMeta.VERSION)
-	_check("AC-1 armor lab dropped, others kept", not (m["labs"]["lvls"] as Dictionary).has("armor") and int(m["labs"]["lvls"]["coin"]) == 2)
+	# REDESIGN (ENGINE-META, deliberate): labs live in save.research now.
+	_check("AC-1 armor lab dropped, others kept", not (m["research"]["lvls"] as Dictionary).has("armor") and int(m["research"]["lvls"]["coin"]) == 2)
 	_check("normalize on raw v1 also migrates", int(BaseMeta.normalize(v1)["version"]) == BaseMeta.VERSION and int(BaseMeta.normalize(v1)["best_wave_by_tier"]["1"]) == 37)
 	var v2: Dictionary = BaseMeta.normalize(m)
 	v2["gems"] = 77
 	v2["last_seen"] = NOW
 	v2["best_coin_rate"] = 12.5
-	v2["labs"]["running"] = [{"track": "dmg", "to_lvl": 1, "start": NOW, "end": NOW + 300}]
+	v2["research"]["running"] = [{"track": "dmg", "to_lvl": 1, "start": NOW, "end": NOW + 300}]
 	v2["cards"]["owned"] = {"c_dmg": {"lvl": 2, "copies": 1}}
 	v2["cards"]["equipped"] = ["c_dmg"]
 	v2 = BaseMeta.normalize(v2)
@@ -288,18 +288,18 @@ func _meta_stages() -> void:
 	var bad: Dictionary = BaseMeta.normalize(v2)
 	bad["slots"][str(_c(8))] = {"id": "laser_of_doom", "lvl": 1}
 	bad["slots"][str(_c(7))]["lvl"] = 99
-	bad["labs"]["lvls"]["dmg"] = 99
-	bad["labs"]["lvls"]["bogus"] = 3
-	bad["labs"]["running"] = [{"track": "coin", "to_lvl": 3, "start": 0, "end": 1}, {"track": "xp", "to_lvl": 1, "start": 0, "end": 1}, {"track": "hp", "to_lvl": 1, "start": 0, "end": 1}]
+	bad["research"]["lvls"]["dmg"] = 99
+	bad["research"]["lvls"]["bogus"] = 3
+	bad["research"]["running"] = [{"track": "coin", "to_lvl": 3, "start": 0, "end": 1}, {"track": "xp", "to_lvl": 1, "start": 0, "end": 1}, {"track": "hp", "to_lvl": 1, "start": 0, "end": 1}]
 	bad["cards"]["owned"]["c_hp"] = {"lvl": 9, "copies": 3}
 	bad["cards"]["owned"]["c_fake"] = {"lvl": 1, "copies": 0}
 	bad = BaseMeta.normalize(bad)
 	_check("AC-3 unknown building dropped", BaseMeta.slot_of(bad, _c(8)).is_empty())
 	_check("AC-3 slot lvl clamped to perm cap", int(BaseMeta.slot_of(bad, _c(7))["lvl"]) == BaseMeta.perm_lvl_cap(bad))
-	_check("AC-3 lab lvl clamped + unknown lab dropped", int(bad["labs"]["lvls"]["dmg"]) == 30 and not (bad["labs"]["lvls"] as Dictionary).has("bogus"))
-	_check("AC-3 running <= slots", (bad["labs"]["running"] as Array).size() <= int(bad["labs"]["slots"]))
+	_check("AC-3 lab lvl clamped + unknown lab dropped", int(bad["research"]["lvls"]["dmg"]) == 30 and not (bad["research"]["lvls"] as Dictionary).has("bogus"))
+	_check("AC-3 running <= Research Hall queues", (bad["research"]["running"] as Array).size() <= Labs.slots(bad) and Labs.slots(bad) == 1)
 	_check("AC-3 card lvl clamped + unknown card dropped", int(bad["cards"]["owned"]["c_hp"]["lvl"]) == 5 and not (bad["cards"]["owned"] as Dictionary).has("c_fake"))
-	_check("AC-4 first v2 boot pays no offline", int(Offline.compute(m, NOW)["coins"]) == 0)
+	_check("AC-4 first v2 boot pays no offline (Outpost away report)", int(Outpost.away_report(m, NOW)["coins"]) == 0)
 	# bank + perm cap
 	var b: Dictionary = BaseMeta.default_save()
 	var bev: Array = BaseMeta.bank(b, 100, 35, 1, 10.0, NOW, 2)
@@ -337,6 +337,9 @@ func _meta_stages() -> void:
 
 	# --- Stage 14: labs + game speed (AC-11..13, A4) ------------------------
 	var L: Dictionary = BaseMeta.default_save()
+	# REDESIGN (ENGINE-META, deliberate): queues follow the Research Hall level
+	# (was 2 base slots + gem-bought slots 3/4). Hall L4 = the old 2 queues.
+	_hall(L, 4)
 	L["coins"] = 50
 	_check("lab cost table", Labs.cost("dmg", 0) == 80 and Labs.cost("dmg", 1) == 144 and Labs.cost("coin", 0) == 60)
 	_check("lab duration table", Labs.duration(L, "dmg", 0) == 300 and Labs.duration(L, "speed", 1) == 5400)
@@ -362,44 +365,41 @@ func _meta_stages() -> void:
 	lev = Labs.rush(L, 0, NOW)
 	_check("AC-13 rush completes now", _evts(lev, "lab_rushed").size() == 1 and int(L["gems"]) == 2 and Labs.level(L, "speed") == 1)
 	_check("A4 speed steps follow speed lab", Labs.speed_steps(L) == [1.0, 1.5] and Labs.speed_steps(BaseMeta.default_save()) == [1.0])
-	L["gems"] = 59
-	_check("AC-13 slot 3 needs 60 gems", Labs.buy_slot(L).is_empty() and Labs.slots(L) == 2)
-	L["gems"] = 60 + 150
-	_check("AC-13 slot 3 = 60, slot 4 = 150, max 4", not Labs.buy_slot(L).is_empty() and int(L["gems"]) == 150 and not Labs.buy_slot(L).is_empty() and int(L["gems"]) == 0 and Labs.slots(L) == 4 and Labs.buy_slot(L).is_empty())
-	L["labs"]["lvls"]["labspeed"] = 10
+	var hq: Dictionary = BaseMeta.default_save()
+	var qok: Array = []
+	for hl in [1, 3, 4, 7, 8, 10]:
+		_hall(hq, int(hl))
+		qok.append(Labs.slots(hq))
+	var nohall: Dictionary = BaseMeta.default_save()
+	nohall["outpost"]["buildings"] = {}
+	_check("AC-20 queues 1/2/3 at Hall L1/L4/L8, 0 without a Hall", qok == [1, 1, 2, 2, 3, 3] and Labs.slots(nohall) == 0 and Labs.start(nohall, "dmg", NOW).is_empty())
+	_check("AC-20 every LabDB project + Part Analysis + Crate Theory", LabDB.IDS.size() == 12 and LabDB.DEFS.has("part_analysis") and LabDB.DEFS.has("crate_theory") and String(LabDB.DEFS["offcap"]["name"]) == "Storage Tech" and String(LabDB.DEFS["offrate"]["name"]) == "Logistics Tech")
+	L["research"]["lvls"]["labspeed"] = 10
 	_check("lab speed floors at 0.4x", is_equal_approx(Labs.speed_mult(L), 0.4) and Labs.duration(L, "dmg", 0) == 120)
-	L["labs"]["lvls"]["dmg"] = 30
+	L["research"]["lvls"]["dmg"] = 30
 	_check("maxed track cannot start", Labs.start(L, "dmg", NOW).is_empty())
 	var lm: Dictionary = Labs.modifiers(L)
 	_check("lab modifiers: +5%/lvl dmg", is_equal_approx(float(lm["dmg"]), 1.5) and is_equal_approx(float(lm["coin"]), 0.05))
 
-	# --- Stage 15: offline (AC-17/18) ---------------------------------------
+	# --- Stage 15: offline = Outpost accrual (REDESIGN, deliberate) ---------
+	# Offline.gd is gone: the away pay is what the Outpost stored, capped by
+	# each building's storage; Storage/Logistics Tech replace offcap/offrate.
 	var O: Dictionary = BaseMeta.default_save()
-	O["best_coin_rate"] = 100.0
-	_check("AC-17 last_seen 0 pays 0", int(Offline.compute(O, NOW)["coins"]) == 0)
+	O["coins"] = 1000
+	var om: String = _op_build(O, "mill", 4, 4, 0, NOW)
+	_check("AC-17 last_seen 0 pays 0", int(Outpost.away_report(O, NOW + 3600)["coins"]) == 0)
 	O["last_seen"] = NOW
-	_check("AC-17 under 5 min pays 0", int(Offline.compute(O, NOW + 299)["coins"]) == 0)
-	_check("offline 10 min = 15% rate", int(Offline.compute(O, NOW + 600)["coins"]) == 150)
-	_check("AC-17 capped at 4 h", int(Offline.compute(O, NOW + 86400)["minutes"]) == 240)
-	O["labs"]["lvls"]["offcap"] = 8
-	_check("AC-17 cap max 12 h", int(Offline.compute(O, NOW + 86400)["minutes"]) == 720)
-	var back_t: int = NOW - 5000
-	_check("AC-17 clock backwards pays 0 + resets", int(Offline.compute(O, back_t)["coins"]) == 0 and int(O["last_seen"]) == back_t)
-	var ok18: bool = true
-	for lvl in LabDB.max_of("offrate") + 1:
-		O["labs"]["lvls"]["offrate"] = lvl
-		ok18 = ok18 and Offline.rate_per_min(O) <= 0.20 * float(O["best_coin_rate"]) + 0.0001
-	_check("AC-18 offline rate <= 20% of best active at every offrate lvl", ok18)
-	O["labs"]["lvls"]["offrate"] = 0
-	O["last_seen"] = NOW
-	O["coins"] = 0
-	var oev: Array = Offline.claim(O, NOW + 600, false)
-	_check("offline claim pays + stamps last_seen", int(O["coins"]) == 150 and int(O["last_seen"]) == NOW + 600 and _evts(oev, "offline").size() == 1)
-	O["last_seen"] = NOW
-	_check("offline x2 needs 2 gems", Offline.claim(O, NOW + 600, true).is_empty() and int(O["last_seen"]) == NOW)
-	O["gems"] = 2
-	Offline.claim(O, NOW + 600, true)
-	_check("offline x2 doubles for 2 gems", int(O["coins"]) == 450 and int(O["gems"]) == 0)
+	_check("AC-17 under 5 min pays 0", int(Outpost.away_report(O, NOW + 299)["coins"]) == 0)
+	_check("away 1 h = Mill output (60/h)", absf(float(Outpost.away_report(O, NOW + 3600)["coins"]) - 60.0) < 0.01 and int(Outpost.away_report(O, NOW + 3600)["minutes"]) == 60)
+	_check("AC-17 capped at 8 h of storage", absf(float(Outpost.away_report(O, NOW + 86400)["coins"]) - 480.0) < 0.01)
+	O["research"]["lvls"]["offcap"] = 4
+	O["research"]["lvls"]["offrate"] = 2
+	_check("Storage Tech +10%/L, Logistics Tech +5%/L", absf(Outpost.cap(O, om) - 60.0 * 1.10 * 8.0 * 1.4) < 0.01 and absf(Outpost.rate(O, om) - 66.0) < 0.01)
+	O["research"]["lvls"]["offcap"] = 0
+	O["research"]["lvls"]["offrate"] = 0
+	var c18: int = int(O["coins"])
+	var oev: Array = Outpost.claim_away(O, NOW + 600)
+	_check("away claim pays + stamps last_seen", int(O["coins"]) == c18 + 10 and int(O["last_seen"]) == NOW + 600 and _evts(oev, "offline").size() == 1)
 
 	# --- Stage 16: missions + streak (AC-28..30) ----------------------------
 	var M: Dictionary = BaseMeta.default_save()
@@ -515,9 +515,9 @@ func _meta_stages() -> void:
 	var R: Dictionary = BaseMeta.normalize(C)
 	R["best_wave_by_tier"] = {"1": 40, "2": 50}
 	R["tier"] = 3
-	R["labs"]["lvls"]["dmg"] = 4
-	R["labs"]["lvls"]["startcash"] = 2
-	R["labs"]["lvls"]["reroll"] = 1
+	R["research"]["lvls"]["dmg"] = 4
+	R["research"]["lvls"]["startcash"] = 2
+	R["research"]["lvls"]["reroll"] = 1
 	R["runs"] = 2
 	R = BaseMeta.normalize(R)
 	var rm: Dictionary = BaseMeta.run_mods(R)
@@ -553,10 +553,10 @@ func _engine_b_stages() -> void:
 	var S0 = TowerState.new()
 	S0.setup(7, sv)
 	var core0: float = float(_weapon(S0, "core")["dmg"])
-	sv["labs"]["lvls"]["dmg"] = 4
-	sv["labs"]["lvls"]["hp"] = 2
-	sv["labs"]["lvls"]["startcash"] = 2
-	sv["labs"]["lvls"]["reroll"] = 1
+	sv["research"]["lvls"]["dmg"] = 4
+	sv["research"]["lvls"]["hp"] = 2
+	sv["research"]["lvls"]["startcash"] = 2
+	sv["research"]["lvls"]["reroll"] = 1
 	sv["cards"]["owned"] = {"c_dmg": {"lvl": 1, "copies": 0}, "c_reroll": {"lvl": 1, "copies": 0}, "c_hp": {"lvl": 1, "copies": 0}}
 	sv["cards"]["equipped"] = ["c_dmg", "c_reroll"]
 	var S = TowerState.new()
@@ -1484,8 +1484,8 @@ func _pc_mode_stages() -> void:
 	S._hit(e2, 10.0, [], true)
 	_check("PC-E6 Ironclad: non-crit -20%, crit full", is_equal_approx(999.0 - float(e1["hp"]), 8.0) and is_equal_approx(999.0 - float(e2["hp"]), 10.0))
 	var lab: Dictionary = BaseMeta.default_save()
-	lab["labs"]["lvls"]["startcash"] = 2
-	lab["labs"]["lvls"]["dmg"] = 4
+	lab["research"]["lvls"]["startcash"] = 2
+	lab["research"]["lvls"]["dmg"] = 4
 	var SL = _mod_run([], lab)
 	S = _mod_run(["poverty"], lab)
 	_check("PC-E6 Austerity: start cash 0", is_equal_approx(SL.cash, 30.0) and is_equal_approx(S.cash, 0.0))
@@ -1643,7 +1643,7 @@ func _pc_save_stages() -> void:
 	var slot_ok: bool = String(BaseMeta.slot_of(m, _c(6))["id"]) == "armory" and int(BaseMeta.slot_of(m, _c(6))["lvl"]) == 4 and String(BaseMeta.slot_of(m, _c(7))["id"]) == "gun" and String(BaseMeta.slot_of(m, _c(0))["id"]) == "mine" and String(BaseMeta.slot_of(m, _c(24))["id"]) == "vault" and (m["slots"] as Dictionary).size() == 4
 	_check("PC-E9 v2 -> v3: version, cells offset (r+1,c+1)", int(m["version"]) == 3 and slot_ok and _c(6) == 16 and _c(24) == 40)
 	_check("PC-E9 v2 -> v3: unlocks land on ring 2", (m["unlocked"] as Array) == [_c(0), _c(4), _c(24)] and BaseMeta.cell_ring(_c(0)) == 2)
-	_check("PC-E9 v2 -> v3 keeps meta fields", int(m["coins"]) == 4321 and int(m["gems"]) == 12 and int(m["core"]["dmg"]) == 3 and int(m["runs"]) == 9 and int(m["best_wave_by_tier"]["1"]) == 44 and int(m["tier"]) == 2 and int(m["labs"]["lvls"]["dmg"]) == 3 and int(m["stats"]["kills"]) == 999 and int(m["stats"]["bosses"]) == 4)
+	_check("PC-E9 v2 -> v3 keeps meta fields", int(m["coins"]) == 4321 and int(m["gems"]) == 12 and int(m["core"]["dmg"]) == 3 and int(m["runs"]) == 9 and int(m["best_wave_by_tier"]["1"]) == 44 and int(m["tier"]) == 2 and int(m["research"]["lvls"]["dmg"]) == 3 and int(m["stats"]["kills"]) == 999 and int(m["stats"]["bosses"]) == 4)
 	_check("PC-E9 v3 blocks filled", (m["history"] as Array).is_empty() and int(m["endless"]["best"]) == 0 and (m["stats"] as Dictionary).has("kills_by_kind"))
 	var mm: Dictionary = BaseMeta.migrate(v2)
 	_check("PC-E9 target modes remapped", String((mm["target_modes"] as Dictionary)[str(_c(7))]) == "first")
@@ -1803,7 +1803,7 @@ func _pc_shell_stages() -> void:
 	for i in BaseMeta.N:
 		if i != BaseMeta.CORE_SLOT and not BaseMeta.is_inner(i):
 			full.append(i)
-	var labs_max: Dictionary = BaseMeta.default_save()["labs"]
+	var labs_max: Dictionary = BaseMeta.default_save()["research"]
 	var cases: Dictionary = {
 		"ACH_FIRST_RUN": [{}, [{"t": "run_start"}, {"t": "game_over", "wave": 3, "build": []}], -1.0],
 		"ACH_WAVE_25": [{}, [{"t": "run_start"}, {"t": "core_hit", "dmg": 1.0}, {"t": "wave", "wave": 25}], -1.0],
@@ -1819,7 +1819,7 @@ func _pc_shell_stages() -> void:
 		"ACH_ALL_SYNERGY": [{}, [{"t": "synergies", "n": AchievementDB.SYNERGY_TARGET}], -1.0],
 		"ACH_ECO_ONLY": [{}, [{"t": "game_over", "wave": 30, "build": ["", "mine", "bounty"]}], -1.0],
 		"ACH_NO_ECO": [{}, [{"t": "game_over", "wave": 60, "build": ["gun", "", "armory"]}], -1.0],
-		"ACH_LABS_MAX": [{"labs": {"lvls": {"speed": 3}}}, [{"t": "meta"}], -1.0],
+		"ACH_LABS_MAX": [{"research": {"lvls": {"speed": 3}, "running": []}}, [{"t": "meta"}], -1.0],
 		"ACH_CARD_MAX": [{"cards": {"owned": {"c_test": {"lvl": CardDB.MAX_LVL, "copies": 0}}}}, [{"t": "meta"}], -1.0],
 		"ACH_MOD_3": [{}, [{"t": "run_start", "modifiers": ["swarm", "haste", "noperks"]}, {"t": "core_hit", "dmg": 1.0}, {"t": "wave", "wave": 51}], -1.0],
 		"ACH_GLASS_50": [{}, [{"t": "run_start", "modifiers": ["glass"]}, {"t": "core_hit", "dmg": 1.0}, {"t": "wave", "wave": 50}], -1.0],
@@ -3262,3 +3262,12 @@ func _outpost_stages() -> void:
 	for id in OutpostDB.DECOR.keys():
 		arts = arts and FileAccess.file_exists("res://art/" + String(id) + ".svg")
 	_check("OP every building band + decor has an SVG", arts)
+
+
+
+## Set the pre-placed Research Hall's level (queue tests).
+func _hall(sv: Dictionary, lvl: int) -> void:
+	var bl: Dictionary = sv["outpost"]["buildings"]
+	for k in bl.keys():
+		if String((bl[k] as Dictionary)["id"]) == "research":
+			(bl[k] as Dictionary)["lvl"] = lvl

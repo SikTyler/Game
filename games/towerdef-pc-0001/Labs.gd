@@ -1,31 +1,50 @@
 extends RefCounted
-## Real-time research (SPEC A3/A4). Pure static rules over save["labs"]:
-##   {lvls:{id:int}, slots:int(2..4), running:[{track,to_lvl,start,end}]}
-## Every time function takes `now` (unix seconds) so tests are deterministic.
+## Real-time research in the Outpost's Research Hall (SPEC A3/A4, REDESIGN
+## SPEC §3.3). Pure static rules over save["research"] (was "labs" in v3):
+##   {lvls:{id:int}, running:[{track,to_lvl,start,end}]}
+## Queue count = Research Hall level (1/2/3 at Hall L1/L4/L8; 0 without a
+## Hall); gem-bought lab slots are gone. Scholar decor next to the Hall speeds
+## research (Outpost.hall_speed). Every time function takes `now`.
 
 const Stats := preload("res://Stats.gd")
 const LabDB := preload("res://data/LabDB.gd")
 const Missions := preload("res://Missions.gd")
 const TuneRef := preload("res://Tune.gd")
+const Outpost := preload("res://Outpost.gd")
 
-const MIN_SLOTS: int = 2
-const MAX_SLOTS: int = 4
+const MIN_SLOTS: int = 1
+const MAX_SLOTS: int = 3
+
+
+static func default_block() -> Dictionary:
+	var lv: Dictionary = {}
+	for id in LabDB.IDS:
+		lv[id] = 0
+	return {"lvls": lv, "running": []}
+
+
+static func _rb(s: Dictionary) -> Dictionary:
+	if not (s.get("research", null) is Dictionary):
+		s["research"] = default_block()
+	var r: Dictionary = s["research"]
+	if not (r.get("lvls", null) is Dictionary):
+		r["lvls"] = default_block()["lvls"]
+	if not (r.get("running", null) is Array):
+		r["running"] = []
+	return r
 
 
 static func level(s: Dictionary, id: String) -> int:
-	var labs: Dictionary = s["labs"]
-	var lv: Dictionary = labs["lvls"]
-	return int(lv.get(id, 0))
+	return int((_rb(s)["lvls"] as Dictionary).get(id, 0))
 
 
 static func running(s: Dictionary) -> Array:
-	var labs: Dictionary = s["labs"]
-	return labs["running"]
+	return _rb(s)["running"]
 
 
+## Queues = Research Hall level band (AC-20).
 static func slots(s: Dictionary) -> int:
-	var labs: Dictionary = s["labs"]
-	return int(labs["slots"])
+	return Outpost.research_queues(s)
 
 
 static func cost(id: String, lvl: int) -> int:
@@ -44,7 +63,7 @@ static func duration(s: Dictionary, id: String, lvl: int) -> int:
 	var d: Dictionary = LabDB.DEFS.get(id, {})
 	if d.is_empty():
 		return 0
-	return int(float(d["dur_base"]) * pow(float(d["dur_growth"]), float(lvl)) * speed_mult(s))
+	return int(float(d["dur_base"]) * pow(float(d["dur_growth"]), float(lvl)) * speed_mult(s) / Outpost.hall_speed(s))
 
 
 static func is_running(s: Dictionary, id: String) -> bool:
@@ -80,7 +99,7 @@ static func start(s: Dictionary, id: String, now: int) -> Array:
 static func claim(s: Dictionary, now: int) -> Array:
 	var ev: Array = []
 	var keep: Array = []
-	var labs: Dictionary = s["labs"]
+	var labs: Dictionary = _rb(s)
 	var lv: Dictionary = labs["lvls"]
 	for r in running(s):
 		var e: Dictionary = r
@@ -118,27 +137,6 @@ static func rush(s: Dictionary, slot: int, now: int) -> Array:
 	var ev: Array = [{"t": "lab_rushed", "gems": g, "slot": slot}]
 	ev.append_array(claim(s, now))
 	return ev
-
-
-static func slot_cost(s: Dictionary) -> int:
-	var n: int = slots(s)
-	if n == 2:
-		return TuneRef.int_of("lab_slot3_gems", 60)
-	if n == 3:
-		return TuneRef.int_of("lab_slot4_gems", 150)
-	return 0
-
-
-static func buy_slot(s: Dictionary) -> Array:
-	var n: int = slots(s)
-	if n >= MAX_SLOTS:
-		return []
-	var c: int = slot_cost(s)
-	if int(s["gems"]) < c:
-		return []
-	s["gems"] = int(s["gems"]) - c
-	(s["labs"] as Dictionary)["slots"] = n + 1
-	return [{"t": "lab_slot", "n": n + 1, "gems": c}]
 
 
 static func progress(s: Dictionary, slot: int, now: int) -> float:

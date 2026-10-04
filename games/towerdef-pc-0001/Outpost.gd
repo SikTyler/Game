@@ -645,6 +645,32 @@ static func collect(s: Dictionary, uid: String, now: int) -> Array:
 	return ev
 
 
+## "While you were away" (replaces Offline.gd): what the Outpost stored since
+## last_seen. {coins, scrap, gems, keys, minutes}; zero under 5 minutes or on
+## a first boot (last_seen 0) — the Outpost accrual itself is the offline pay.
+static func away_report(s: Dictionary, now: int) -> Dictionary:
+	var last: int = int(s.get("last_seen", 0))
+	var out: Dictionary = pending(s, now)
+	out["minutes"] = 0 if last <= 0 or now < last else (now - last) / 60
+	if last <= 0 or now - last < TuneRef.int_of("offline_min", 300):
+		for k in ["coins", "scrap", "gems", "keys"]:
+			out[k] = 0.0
+	return out
+
+
+## Collect the away report (boot modal): every building, Relay level ignored.
+static func claim_away(s: Dictionary, now: int) -> Array:
+	var ev: Array = collect_all(s, now, true)
+	s["last_seen"] = now
+	var tot: Dictionary = {"coins": 0, "scrap": 0, "gems": 0, "keys": 0}
+	for e in ev:
+		if String((e as Dictionary)["t"]) == "collect":
+			tot[String(e["res"])] = int(tot[String(e["res"])]) + int(e["n"])
+	if int(tot["coins"]) + int(tot["scrap"]) + int(tot["gems"]) + int(tot["keys"]) > 0:
+		ev.append({"t": "offline", "coins": int(tot["coins"]), "scrap": int(tot["scrap"]), "gems": int(tot["gems"]), "keys": int(tot["keys"])})
+	return ev
+
+
 static func collect_all_unlocked(s: Dictionary) -> bool:
 	return int(_o(s)["relay_lvl"]) >= 3
 

@@ -37,8 +37,6 @@ static func build_labs(m) -> void:
 			var slot: int = k
 			if rc > 0:
 				m._btn("Rush %d gem%s" % [rc, "" if rc == 1 else "s"], Rect2(548, y + 4, 156, 66), func() -> void: m.meta_act(Labs.rush(m.save, slot, m.now())), int(s["gems"]) >= rc, GEM).add_theme_font_size_override("font_size", 20)
-		elif k == Labs.slots(s) and k < Labs.MAX_SLOTS:
-			m._btn("Buy slot  %d gems" % Labs.slot_cost(s), Rect2(420, y + 4, 284, 66), func() -> void: m.meta_act(Labs.buy_slot(m.save)), int(s["gems"]) >= Labs.slot_cost(s), GEM).add_theme_font_size_override("font_size", 20)
 	for k in LabDB.IDS.size():
 		var id: String = LabDB.IDS[k]
 		var d: Dictionary = LabDB.DEFS[id]
@@ -63,7 +61,7 @@ static func build_labs(m) -> void:
 static func draw_labs(m, t: int) -> void:
 	var s: Dictionary = m.save
 	var run: Array = Labs.running(s)
-	m._text("LABS — research runs in real time", Vector2(360, 182), 22, TEXT)
+	m._text("RESEARCH HALL — research runs in real time", Vector2(360, 182), 22, TEXT)
 	for k in Labs.MAX_SLOTS:
 		var y: float = SLOT_Y + float(k) * SLOT_H
 		var r := Rect2(16, y, 688, 72)
@@ -84,7 +82,7 @@ static func draw_labs(m, t: int) -> void:
 		else:
 			m._panel(r, Color("2a3038"), Color("1a1f25"))
 			m._icon("icon_lock", Rect2(28, y + 16, 40, 40), Color(1, 1, 1, 0.6))
-			m._text("Locked lab slot", Vector2(84, y + 44), 20, DIM, HORIZONTAL_ALIGNMENT_LEFT, 300.0)
+			m._text("Research Hall L%d opens this queue" % (4 if k == 1 else 8), Vector2(84, y + 44), 20, DIM, HORIZONTAL_ALIGNMENT_LEFT, 420.0)
 	m._text("RESEARCH TRACKS", Vector2(360, TRACK_Y - 6), 18, DIM)
 
 

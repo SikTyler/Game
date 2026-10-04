@@ -221,7 +221,7 @@ static func check_save(save: Dictionary, now: int = 0) -> Array:
 			out.append_array(unlock(save, "ACH_RING_3", now))
 		if cells >= AchievementDB.FULL_BASE_CELLS:
 			out.append_array(unlock(save, "ACH_FULL_BASE", now))
-	if save.get("labs", null) is Dictionary:
+	if save.get("research", null) is Dictionary:
 		for id in LabDB.DEFS.keys():
 			if Labs.level(save, String(id)) >= int((LabDB.DEFS[id] as Dictionary)["max"]):
 				out.append_array(unlock(save, "ACH_LABS_MAX", now))

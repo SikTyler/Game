@@ -440,7 +440,7 @@ static func spend_meta(save: Dictionary, policy: String) -> void:
 const Labs := preload("res://Labs.gd")
 const Cards := preload("res://Cards.gd")
 const Missions := preload("res://Missions.gd")
-const Offline := preload("res://Offline.gd")
+const Outpost := preload("res://Outpost.gd")
 const Tiers := preload("res://Tiers.gd")
 const LabDB := preload("res://data/LabDB.gd")
 const ModifierDB := preload("res://data/ModifierDB.gd")
@@ -483,18 +483,12 @@ static func _gems_spend(save: Dictionary, rng: RandomNumberGenerator) -> void:
 		guard += 1
 		var own: int = Cards.owned(save).size()
 		var want: String = "chest"
-		if Labs.slots(save) < 3:
-			want = "lab"
-		elif Cards.slots(save) < 3 and own >= 3:
+		if Cards.slots(save) < 3 and own >= 3:
 			want = "card"
-		elif own >= 4 and Labs.slots(save) < 4:
-			want = "lab"
 		elif Cards.slots(save) < 5 and own > Cards.slots(save) + 1:
 			want = "card"
 		var ev: Array = []
 		match want:
-			"lab":
-				ev = Labs.buy_slot(save)
 			"card":
 				ev = Cards.buy_slot(save)
 			_:
@@ -531,10 +525,12 @@ static func session_open(save: Dictionary, now: int, rng: RandomNumberGenerator,
 	Labs.claim(save, now)
 	Missions.roll(save, now)
 	var c0: int = int(save["coins"])
-	for x in Offline.claim(save, now):
+	var away: int = maxi(0, now - int(save["last_seen"])) / 60 if int(save["last_seen"]) > 0 else 0
+	for x in Outpost.claim_away(save, now):
 		var oe: Dictionary = x
-		led["offline_coins"] = int(led["offline_coins"]) + int(oe["coins"])
-		led["offline_min"] = int(led["offline_min"]) + int(oe["minutes"])
+		if String(oe["t"]) == "offline":
+			led["offline_coins"] = int(led["offline_coins"]) + int(oe["coins"])
+	led["offline_min"] = int(led["offline_min"]) + away
 	Missions.streak_claim(save, now)
 	led["gross_coins"] = int(led["gross_coins"]) + int(save["coins"]) - c0
 	_claim_missions(save)

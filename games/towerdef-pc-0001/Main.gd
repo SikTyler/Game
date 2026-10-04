@@ -2,7 +2,7 @@ extends Node2D
 ## Corehold view. Pure replay of TowerState / meta events + _draw() with ArtDB
 ## textures (primitive fallback when a texture is missing).
 ## Never owns a rule: every tap calls an engine / BaseMeta / Labs / Cards /
-## Missions / Offline action and replays the returned events.
+## Missions / Outpost action and replays the returned events.
 ## Screens: "base" (tabs base|labs|cards|missions), "run", "results".
 ## Meta tab drawing + buttons live in ui/MetaTabs.gd.
 
@@ -17,7 +17,7 @@ const TuneRef := preload("res://Tune.gd")
 const Labs := preload("res://Labs.gd")
 const Cards := preload("res://Cards.gd")
 const Missions := preload("res://Missions.gd")
-const Offline := preload("res://Offline.gd")
+const Outpost := preload("res://Outpost.gd")
 const Tiers := preload("res://Tiers.gd")
 const Art := preload("res://ArtDB.gd")
 const Tabs := preload("res://ui/MetaTabs.gd")
@@ -226,17 +226,19 @@ func field_rect() -> Rect2:
 	return Rect2(lw, HUD_H, vw - lw - rw, vh - HUD_H - HOT_H)
 
 
-## SPEC boot: migrate -> normalize -> Labs.claim -> Missions.roll -> Offline modal.
+## SPEC boot: migrate -> normalize -> Outpost tick -> Labs.claim -> Missions.roll
+## -> "while you were away" modal (the Outpost's stored production).
 func boot(raw: Dictionary, t: int) -> void:
 	save = BaseMeta.normalize(raw)
-	var ev: Array = Labs.claim(save, t)
+	var ev: Array = Outpost.tick(save, t)
+	ev.append_array(Labs.claim(save, t))
 	ev.append_array(Missions.roll(save, t))
-	var off: Dictionary = Offline.compute(save, t)
+	var off: Dictionary = Outpost.away_report(save, t)
 	if int(off["coins"]) > 0:
-		offline_offer = off
+		offline_offer = {"coins": int(off["coins"]), "minutes": int(off["minutes"])}
 	else:
 		offline_offer = {}
-		Offline.claim(save, t)
+		save["last_seen"] = t
 	view_tier = int(save["tier"])
 	screen = "base"
 	tab = "base"
@@ -426,12 +428,8 @@ func meta_act(ev: Array) -> void:
 	_rebuild_ui()
 
 
-func claim_offline(double: bool) -> void:
-	var ev: Array = Offline.claim(save, now(), double)
-	if ev.is_empty() and double:
-		_queue_toasts([{"t": "msg", "text": "Not enough gems"}])
-		_rebuild_ui()
-		return
+func claim_offline(_double: bool = false) -> void:
+	var ev: Array = Outpost.claim_away(save, now())
 	offline_offer = {}
 	meta_act(ev)
 
@@ -564,7 +562,7 @@ func ev_text(e: Dictionary) -> String:
 		"streak_claimed":
 			return "Day %d reward: +%d coins +%d gems" % [int(e["day"]), int(e["coins"]), int(e["gems"])]
 		"offline":
-			return "Collected %d offline coins" % int(e["coins"])
+			return "Collected %d Outpost coins" % int(e["coins"])
 		"tier_unlocked":
 			return "Tier %d unlocked! +%d gems" % [int(e["tier"]), int(e["gems"])]
 		"missions_rolled":
@@ -1081,7 +1079,6 @@ func _rebuild_ui() -> void:
 		"base":
 			if not offline_offer.is_empty():
 				_btn("Collect", Rect2(90, 680, 260, 96), func() -> void: claim_offline(false), true, GOLD)
-				_btn("x2  (2 gems)", Rect2(370, 680, 260, 96), func() -> void: claim_offline(true), int(save["gems"]) >= 2, GEM)
 				return
 			match tab:
 				"base":

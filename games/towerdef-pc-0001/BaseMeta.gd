@@ -42,15 +42,12 @@ const GEM_SOURCES: Array = ["boss", "mission", "streak", "tier", "mine"]
 
 
 static func default_save() -> Dictionary:
-	var lv: Dictionary = {}
-	for id in LabDB.IDS:
-		lv[id] = 0
 	return {
 		"version": VERSION, "coins": 0, "gems": 0,
 		"core": {"dmg": 0, "hp": 0, "regen": 0}, "slots": {}, "unlocked": [],
 		"runs": 0, "best_wave": 0, "tier": 1, "best_wave_by_tier": {"1": 0},
 		"tiers_rewarded": [], "best_coin_rate": 0.0, "speed": 1.0,
-		"labs": {"lvls": lv, "slots": Labs.MIN_SLOTS, "running": []},
+		"research": Labs.default_block(),
 		"cards": {"owned": {}, "equipped": [], "slots": Cards.MIN_SLOTS},
 		"missions": {"day": -1, "list": [], "bonus_claimed": false},
 		"streak": {"day_idx": 0, "last_day": -1, "loops": 0},
@@ -188,19 +185,24 @@ static func normalize(s_in: Dictionary) -> Dictionary:
 		if n2 >= 0 and n2 < N and cell_ring(n2) >= 2 and not un.has(n2):
 			un.append(n2)
 	d["unlocked"] = un
-	# labs
-	var labs_in: Dictionary = s.get("labs", {})
-	var lv_in: Dictionary = labs_in.get("lvls", {})
-	var labs: Dictionary = d["labs"]
+	# research (Research Hall projects; v3 "labs" is read when present)
+	d["outpost"] = Outpost.normalize_block(s.get("outpost", null))
+	var labs_in: Dictionary = {}
+	if s.get("research", null) is Dictionary:
+		labs_in = s["research"]
+	elif s.get("labs", null) is Dictionary:
+		labs_in = s["labs"]
+	var lv_in: Dictionary = labs_in.get("lvls", {}) if labs_in.get("lvls", {}) is Dictionary else {}
+	var labs: Dictionary = d["research"]
 	var lv: Dictionary = labs["lvls"]
 	for id in LabDB.IDS:
 		lv[id] = clampi(int(lv_in.get(id, 0)), 0, LabDB.max_of(String(id)))
-	labs["slots"] = clampi(int(labs_in.get("slots", Labs.MIN_SLOTS)), Labs.MIN_SLOTS, Labs.MAX_SLOTS)
+	var qn: int = Outpost.research_queues(d)
 	var run: Array = []
 	for r in labs_in.get("running", []):
 		var e2: Dictionary = r
 		var tid: String = String(e2.get("track", ""))
-		if not LabDB.DEFS.has(tid) or run.size() >= int(labs["slots"]):
+		if not LabDB.DEFS.has(tid) or run.size() >= qn:
 			continue
 		var dup: bool = false
 		for q in run:
@@ -256,7 +258,6 @@ static func normalize(s_in: Dictionary) -> Dictionary:
 	d["parts"] = Parts.normalize_block(s.get("parts", null))
 	Parts.sanitize_presets(d)
 	d["crates"] = Crates.normalize_block(s.get("crates", null))
-	d["outpost"] = Outpost.normalize_block(s.get("outpost", null))
 	d["core_cores"] = maxi(0, int(s.get("core_cores", 0)))
 	d["insight"] = PickDB.normalize_insight(s.get("insight", {}))
 	d["scrap"] = maxi(0, int(s.get("scrap", 0)))

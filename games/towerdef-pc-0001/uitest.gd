@@ -15,7 +15,7 @@ const MetaSave := preload("res://MetaSave.gd")
 const Labs := preload("res://Labs.gd")
 const Cards := preload("res://Cards.gd")
 const Missions := preload("res://Missions.gd")
-const Offline := preload("res://Offline.gd")
+const Outpost := preload("res://Outpost.gd")
 const Desktop := preload("res://ui/Desktop.gd")
 const Settings := preload("res://Settings.gd")
 const Keybinds := preload("res://Keybinds.gd")
@@ -204,11 +204,15 @@ func _run() -> void:
 	_check("perm unlock button", BaseMeta.is_unlocked(main.save, _c(0)))
 
 	# ---- BOOT: OFFLINE EARNINGS MODAL -----------------------------------------
+	# REDESIGN (ENGINE-META, deliberate): the away pay is the Outpost's stored
+	# production (Offline.gd is gone) — a connected Coin Mill ran for 2 h.
 	main.now_override = T0
 	var boot_save: Dictionary = main.save.duplicate(true)
+	boot_save["coins"] = int(boot_save["coins"]) + 500
+	var mev: Array = Outpost.place(boot_save, "mill", 4, 4, 0, T0 - 7200 - 120)
+	Outpost.tick(boot_save, T0 - 7200)
 	boot_save["last_seen"] = T0 - 7200
-	boot_save["best_coin_rate"] = 20.0
-	var expect_off: int = int(Offline.compute(BaseMeta.normalize(boot_save), T0)["coins"])
+	var expect_off: int = int(Outpost.away_report(BaseMeta.normalize(boot_save), T0)["coins"])
 	main.boot(boot_save, T0)
 	await _frames()
 	_check("offline modal shown at boot", not main.offline_offer.is_empty() and _find("Collect") != null and _find("START RUN") == null)
@@ -255,9 +259,8 @@ func _run() -> void:
 	_press("Rush")
 	await _frames()
 	_check("rush finishes research for gems", Labs.level(main.save, "hp") == 1 and int(main.save["gems"]) < g0)
-	_press("Buy slot")
-	await _frames()
-	_check("buy lab slot", Labs.slots(main.save) == 3)
+	# REDESIGN (deliberate): no gem lab slots; queues follow the Research Hall.
+	_check("research queue count follows the Research Hall", Labs.slots(main.save) == 1 and _find("Buy slot") == null)
 
 	# ---- CARDS TAB -----------------------------------------------------------
 	_press("TAB Cards")
@@ -307,7 +310,7 @@ func _run() -> void:
 	_press("TAB Base")
 	await _frames()
 	_check("back to base tab", main.tab == "base")
-	main.save["labs"]["lvls"]["speed"] = 1
+	main.save["research"]["lvls"]["speed"] = 1
 
 	# ---- OPTIONS / CREDITS (gear) ---------------------------------------------
 	_press("GEAR")

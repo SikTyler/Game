@@ -38,7 +38,7 @@ func _initialize() -> void:
 	save["runs"] = 6
 	save["last_seen"] = T0 - 3 * 3600
 	save["best_coin_rate"] = 12.0
-	save["labs"]["lvls"]["speed"] = 2
+	save["research"]["lvls"]["speed"] = 2
 	main.now_override = T0
 	main.boot(save, T0)
 	await _shot("%s/0_offline.png" % outdir)
