@@ -54,6 +54,7 @@ static func default_save() -> Dictionary:
 		"boss_gems_today": {"day": -1, "n": 0},
 		"settings": {"music": 0.8, "sfx": 1.0, "mute": false},
 		"endless": {"best": 0},
+		"achievements": {"unlocked": {}, "missions_claimed": 0},
 	}
 
 
@@ -240,6 +241,7 @@ static func normalize(s_in: Dictionary) -> Dictionary:
 	var se_in: Dictionary = s.get("settings", {})
 	var en_in: Dictionary = s.get("endless", {}) if s.get("endless", {}) is Dictionary else {}
 	d["endless"] = {"best": maxi(0, int(en_in.get("best", 0)))}
+	d["achievements"] = _achievements(s.get("achievements", {}))
 	d["settings"] = {"music": clampf(float(se_in.get("music", 0.8)), 0.0, 1.0), "sfx": clampf(float(se_in.get("sfx", 1.0)), 0.0, 1.0), "mute": bool(se_in.get("mute", false))}
 	# speed snaps to an unlocked step
 	var steps: Array = Labs.speed_steps(d)
@@ -540,3 +542,16 @@ static func set_speed(s: Dictionary, v: float) -> bool:
 		return false
 	s["speed"] = v
 	return true
+
+
+## save["achievements"] (PC_SPEC §4 v3): {unlocked:{id: unix_ts}, missions_claimed}.
+## Achievements.gd owns the rules; this only keeps the shape valid.
+static func _achievements(src: Variant) -> Dictionary:
+	var d: Dictionary = src if src is Dictionary else {}
+	var un: Dictionary = {}
+	var u_in: Variant = d.get("unlocked", {})
+	if u_in is Dictionary:
+		var u: Dictionary = u_in
+		for k in u.keys():
+			un[String(k)] = maxi(0, int(u[k]))
+	return {"unlocked": un, "missions_claimed": maxi(0, int(d.get("missions_claimed", 0)))}

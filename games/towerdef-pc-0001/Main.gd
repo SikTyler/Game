@@ -27,6 +27,9 @@ const Menus := preload("res://ui/Menus.gd")
 const FxPool := preload("res://vfx/FxPool.gd")
 const Juice := preload("res://vfx/Juice.gd")
 const BurstsScript := preload("res://vfx/Bursts.gd")
+const Settings := preload("res://Settings.gd")
+const SteamService := preload("res://SteamService.gd")
+const Achievements := preload("res://Achievements.gd")
 
 const W: float = 720.0
 const H: float = 1280.0
@@ -46,6 +49,8 @@ const TAB_IDS: Array = ["base", "labs", "cards", "missions"]
 const TAB_NAMES: Array = ["Base", "Labs", "Cards", "Missions"]
 
 var save: Dictionary = {}
+var settings: Dictionary = {}        # global user://settings.cfg (Settings.gd), never in a slot
+var ach_run: Dictionary = {}         # Achievements.new_run() context for the live run
 var S: RefCounted = null
 var screen: String = "base"
 var tab: String = "base"
@@ -93,6 +98,10 @@ var dust: Array = []
 
 func _ready() -> void:
 	font = ThemeDB.fallback_font
+	settings = Settings.read()
+	Settings.apply(settings, get_tree())
+	SteamService.init()
+	ach_run = Achievements.new_run()
 	meta_rng.seed = int(Time.get_ticks_usec() % 1000000007)
 	ui = Control.new()
 	ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -243,6 +252,7 @@ func _save() -> void:
 ## Every meta action funnels through here: toast, persist, rebuild.
 func meta_act(ev: Array) -> void:
 	if not ev.is_empty():
+		ev.append_array(Achievements.on_events(save, ach_run, ev, now()))
 		_queue_toasts(ev)
 		_meta_sfx(ev)
 		_save()
@@ -376,6 +386,8 @@ func ev_text(e: Dictionary) -> String:
 			return "Equipped %s" % String((CardDB.DEFS[String(e["card"])] as Dictionary)["name"])
 		"card_unequipped":
 			return "Unequipped %s" % String((CardDB.DEFS[String(e["card"])] as Dictionary)["name"])
+		"achievement":
+			return "Achievement: " + String(e.get("name", ""))
 		"mission_claimed":
 			return "Mission reward +%d gems" % int(e["gems"])
 		"mission_bonus":
@@ -446,6 +458,9 @@ const EVENT_CLIP: Dictionary = {
 
 func _handle(events: Array) -> void:
 	var rebuild: bool = false
+	var ach: Array = Achievements.on_events(save, ach_run, events, now(), float(S.time_alive) if S != null else -1.0)
+	if not ach.is_empty():
+		_queue_toasts(ach)
 	if S != null and screen == "run":
 		for x in Missions.on_run_events(save, events):
 			if String((x as Dictionary)["t"]) == "mission_done":
@@ -595,6 +610,11 @@ func tap_at(pos: Vector2) -> void:
 # ---------------------------------------------------------------- update
 func _process(delta: float) -> void:
 	t_anim += delta
+	SteamService.tick()
+	if S != null and screen == "run":
+		SteamService.update_presence("run", int(S.wave), int(S.tier), String(S.mode), float(S.mod_coin))
+	else:
+		SteamService.update_presence(screen)
 	if fade > 0.0:
 		fade = maxf(0.0, fade - delta)
 		fader.modulate = Color(1, 1, 1, 0.9 * fade / FADE_TIME)

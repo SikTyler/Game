@@ -21,6 +21,11 @@ const PerkDB := preload("res://data/PerkDB.gd")
 const EnemyDB := preload("res://data/EnemyDB.gd")
 const ModifierDB := preload("res://data/ModifierDB.gd")
 const Stats := preload("res://Stats.gd")
+const Settings := preload("res://Settings.gd")
+const Keybinds := preload("res://Keybinds.gd")
+const SteamService := preload("res://SteamService.gd")
+const Achievements := preload("res://Achievements.gd")
+const AchievementDB := preload("res://data/AchievementDB.gd")
 
 var fails: Array = []
 
@@ -1058,6 +1063,7 @@ func _pc_engine_stages() -> void:
 	_pc_mode_stages()
 	_pc_stats_stages()
 	_pc_save_stages()
+	_pc_shell_stages()
 
 
 ## PC-E1 7x7 ring unlocks, PC-E2 build cap.
@@ -1721,3 +1727,192 @@ func _pc_save_stages() -> void:
 	for n in [1, 2, 3]:
 		MetaSave.delete_slot(n, MetaSave.DELETE_CONFIRM)
 	MetaSave.set_active(1)
+
+
+## PC-E11/E12 + PC-E10: settings round-trip, keybind remap, Steam no-op
+## wrapper and the achievement table (via SteamService's mock log).
+func _pc_shell_stages() -> void:
+	# --- Settings (PC-E12) ---------------------------------------------------
+	var d: Dictionary = Settings.defaults()
+	_check("PC-E12 defaults are already normal", JSON.stringify(Settings.normalize(d)) == JSON.stringify(Settings.normalize(Settings.normalize(d))) and String(d["video"]["mode"]) == "windowed")
+	var bad: Dictionary = {"video": {"mode": "sideways", "fps_cap": 77, "ui_scale": 9.0, "resolution": "huge"}, "audio": {"Master": 4.0, "SFX": -1.0}, "keybinds": {"nope": [], "pause": [{"type": "bogus"}]}}
+	var nb: Dictionary = Settings.normalize(bad)
+	_check("PC-E12 normalize clamps garbage", String(nb["video"]["mode"]) == "windowed" and int(nb["video"]["fps_cap"]) == 0 and is_equal_approx(float(nb["video"]["ui_scale"]), Settings.UI_SCALE_MAX) and nb["video"]["resolution"] == Vector2i(1920, 1080) and is_equal_approx(float(nb["audio"]["Master"]), 1.0) and is_equal_approx(float(nb["audio"]["SFX"]), 0.0) and not (nb["keybinds"] as Dictionary).has("nope") and ((nb["keybinds"] as Dictionary)["pause"] as Array).is_empty())
+	var path: String = "user://_selftest_settings.cfg"
+	var s1: Dictionary = Settings.defaults()
+	s1["video"]["mode"] = "borderless"
+	s1["video"]["resolution"] = Vector2i(1600, 900)
+	s1["video"]["vsync"] = "adaptive"
+	s1["video"]["fps_cap"] = 144
+	s1["video"]["ui_scale"] = 1.25
+	s1["audio"]["Music"] = 0.25
+	s1["controls"]["deadzone"] = 0.3
+	s1["controls"]["glyphs"] = "ps5"
+	s1["gameplay"]["colorblind"] = "tritanopia"
+	_check("PC-E12 settings write ok", Settings.write(s1, path) == OK)
+	var r1: Dictionary = Settings.read(path)
+	_check("PC-E12 settings round-trip through ConfigFile", JSON.stringify(r1) == JSON.stringify(Settings.normalize(s1)) and r1["video"]["resolution"] == Vector2i(1600, 900) and String(r1["video"]["mode"]) == "borderless")
+	_check("PC-E12 missing file -> defaults", JSON.stringify(Settings.read("user://_nope_settings.cfg")) == JSON.stringify(Settings.defaults()))
+	Settings.apply(r1)
+	_check("PC-S1 fps cap applies to Engine.max_fps", Engine.max_fps == 144)
+	var mi: int = AudioServer.get_bus_index("Music")
+	_check("PC-S1 audio slider applies to the bus", mi >= 0 and is_equal_approx(AudioServer.get_bus_volume_db(mi), linear_to_db(0.25)))
+	_check("PC-E12 UI bus exists", AudioServer.get_bus_index("UI") >= 0)
+	Settings.apply(Settings.defaults())
+	_check("PC-E12 fps cap unlimited restores 0", Engine.max_fps == 0)
+	_check("PC-S1 fullscreen toggle flips the mode", String(Settings.toggle_fullscreen(Settings.defaults())["video"]["mode"]) == "borderless" and String(Settings.toggle_fullscreen(Settings.toggle_fullscreen(Settings.defaults()))["video"]["mode"]) == "windowed")
+	_check("PC-S1 resolution list filtered to screen", Settings.resolutions_for(Vector2i(1366, 768)) == [Vector2i(1280, 720), Vector2i(1366, 768)] and Settings.clamp_resolution(Vector2i(3840, 2160), Vector2i(1920, 1080)) == Vector2i(1920, 1080))
+	_check("PC-S1 video revert after 10 s unless confirmed", Settings.revert_due(10.0, false) and not Settings.revert_due(9.9, false) and not Settings.revert_due(30.0, true))
+
+	# --- Keybinds ------------------------------------------------------------
+	Keybinds.ensure_actions(0.5, true)
+	var all_ok: bool = true
+	for a in Keybinds.DEFAULTS.keys():
+		if not InputMap.has_action(String(a)) or InputMap.action_get_events(String(a)).is_empty() or not Keybinds.LABELS.has(a):
+			all_ok = false
+	_check("PC-E12 every hotkey action registered with defaults + label", all_ok)
+	var space: InputEventKey = InputEventKey.new()
+	space.keycode = KEY_SPACE
+	space.pressed = true
+	var pad_a: InputEventJoypadButton = InputEventJoypadButton.new()
+	pad_a.button_index = JOY_BUTTON_A
+	pad_a.pressed = true
+	_check("PC-U3 Space triggers pause, pad A triggers confirm", InputMap.event_is_action(space, "pause") and InputMap.event_is_action(pad_a, "confirm"))
+	var ctrl_r: InputEventKey = InputEventKey.new()
+	ctrl_r.keycode = KEY_R
+	ctrl_r.ctrl_pressed = true
+	ctrl_r.pressed = true
+	_check("PC-U3 Ctrl+R is retry", InputMap.event_is_action(ctrl_r, "retry", true) and not InputMap.event_is_action(ctrl_r, "ability_4", true))
+	var dup: Dictionary = {}
+	var clash: String = ""
+	for a in Keybinds.DEFAULTS.keys():
+		for e in Keybinds.default_events(String(a)):
+			var k: String = JSON.stringify(Keybinds.event_to_dict(e))
+			if dup.has(k):
+				clash = "%s/%s" % [dup[k], a]
+			dup[k] = a
+	_check("PC-E12 no two default actions share a binding (%s)" % clash, clash == "")
+	var map0: Dictionary = Keybinds.to_map()
+	var kinds: Dictionary = {}
+	for a in map0.keys():
+		for e in map0[a]:
+			kinds[String((e as Dictionary)["type"])] = true
+	_check("PC-E12 defaults cover key, mouse, joy button and joy axis", kinds.has("key") and kinds.has("mouse") and kinds.has("joy_button") and kinds.has("joy_axis"))
+	var js: String = JSON.stringify(map0)
+	Keybinds.apply_map(JSON.parse_string(js))
+	_check("PC-E12 keybind serialise/deserialise round-trip (via JSON)", JSON.stringify(Keybinds.to_map()) == js)
+	# Remap conflict -> swap (input_helper pattern).
+	var xkey: InputEventKey = InputEventKey.new()
+	xkey.keycode = KEY_X
+	var swapped: String = Keybinds.rebind("upgrade", 0, xkey)
+	_check("PC-E12 remap conflict swaps the bindings", swapped == "sell" and Keybinds.hint("upgrade") == "X" and Keybinds.action_using(xkey, "upgrade") == "" and Keybinds.events_for("sell", false).any(func(e: InputEvent) -> bool: return e is InputEventKey and (e as InputEventKey).keycode == KEY_U))
+	var lb: InputEventJoypadButton = InputEventJoypadButton.new()
+	lb.button_index = JOY_BUTTON_LEFT_SHOULDER
+	Keybinds.rebind("pause", 0, lb)
+	_check("PC-E12 pad slot replaced, key slot kept", Keybinds.events_for("pause", true).size() == 1 and Keybinds.hint("pause", true) == "LB" and Keybinds.hint("pause") == "Space" and Keybinds.events_for("hotbar_prev", true).size() == 1 and Keybinds.hint("hotbar_prev", true) == "Start")
+	# Persist the remap through settings.cfg, reset, reload.
+	var s2: Dictionary = Settings.defaults()
+	Settings.capture_keybinds(s2)
+	Settings.write(s2, path)
+	Keybinds.reset_all()
+	_check("PC-S2 reset restores defaults", Keybinds.hint("upgrade") == "U" and Keybinds.hint("sell") == "X")
+	Settings.apply_controls(Settings.read(path))
+	_check("PC-S2 remap persists in settings.cfg", Keybinds.hint("upgrade") == "X" and Keybinds.hint("pause", true) == "LB")
+	Keybinds.reset_all()
+	_check("PC-U5 glyph paths resolve to vendored PNGs", ResourceLoader.exists(Keybinds.glyph_path(space)) and ResourceLoader.exists(Keybinds.glyph_path(pad_a, "ps5")) and Keybinds.glyph_path(pad_a, "ps5").ends_with("ps5/cross.png") and ResourceLoader.exists(Keybinds.glyph_path(Keybinds.default_events("speed_up")[1], "steamdeck")) and ResourceLoader.exists(Keybinds.glyph_path(Keybinds.default_events("zoom_in")[0])))
+	_check("PC-U5 pad style from joypad name", Keybinds.pad_style("PS5 Controller") == "ps5" and Keybinds.pad_style("Steam Deck") == "steamdeck" and Keybinds.pad_style("Xbox Series Controller") == "xbox")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+
+	# --- SteamService no-op wrapper (PC-E11) ---------------------------------
+	SteamService.reset_mock()
+	_check("PC-E11 no GodotSteam -> init false, inactive", not SteamService.init() and not SteamService.is_active())
+	_check("PC-E11 calls no-op and return false", not SteamService.unlock_achievement("ACH_TEST") and not SteamService.set_stat_int("stat_kills", 3) and not SteamService.set_rich_presence("status", "Menu") and not SteamService.overlay_active())
+	_check("PC-E11 mock log records ops", SteamService.mock_ops("unlock_achievement") == [["ACH_TEST"]] and SteamService.mock_ops("init").size() == 1)
+	SteamService.cloud_write("slot_1.json", "abc".to_utf8_buffer())
+	_check("PC-E11 mock cloud round-trip", SteamService.cloud_read("slot_1.json").get_string_from_utf8() == "abc")
+	_check("PC-E11 rich presence text", SteamService.presence_text("run", 12, 3) == "Run: Wave 12 · T3" and SteamService.presence_text("run", 80, 1, "endless") == "Endless: Wave 80" and SteamService.presence_text("base") == "Base" and SteamService.presence_text("menu") == "Menu")
+	_check("PC-E11 cloud conflict keeps more playtime", SteamService.pick_conflict({"stats": {"play_s": 10.0}}, {"stats": {"play_s": 20.0}}) == "cloud" and SteamService.pick_conflict({"playtime_s": 30.0}, {"playtime_s": 20.0}) == "local")
+	var ps: Dictionary = BaseMeta.default_save()
+	SteamService.reset_mock()
+	SteamService.push_stats(ps)
+	_check("PC-E11 stats mirrored (5 stats + store)", SteamService.mock_ops("set_stat_int").size() == 5 and SteamService.mock_ops("store_stats").size() == 1)
+
+	# --- Achievements (PC-E10) -----------------------------------------------
+	_check("PC-E10 24 achievements, unique ids", AchievementDB.LIST.size() == 24 and AchievementDB.ids().size() == 24)
+	var ring3: int = 0
+	var full: Array = []
+	for i in BaseMeta.N:
+		if i != BaseMeta.CORE_SLOT and not BaseMeta.is_inner(i):
+			full.append(i)
+	var labs_max: Dictionary = BaseMeta.default_save()["labs"]
+	var cases: Dictionary = {
+		"ACH_FIRST_RUN": [{}, [{"t": "run_start"}, {"t": "game_over", "wave": 3, "build": []}], -1.0],
+		"ACH_WAVE_25": [{}, [{"t": "run_start"}, {"t": "core_hit", "dmg": 1.0}, {"t": "wave", "wave": 25}], -1.0],
+		"ACH_WAVE_100": [{}, [{"t": "run_start"}, {"t": "core_hit", "dmg": 1.0}, {"t": "wave", "wave": 100}], -1.0],
+		"ACH_WAVE_250": [{}, [{"t": "run_start", "mode": "endless"}, {"t": "core_hit", "dmg": 1.0}, {"t": "wave", "wave": 250}], -1.0],
+		"ACH_TIER_3": [{"best_wave_by_tier": {"1": 9999, "2": 9999}}, [{"t": "meta"}], -1.0],
+		"ACH_TIER_8": [{"best_wave_by_tier": {"1": 9999, "2": 9999, "3": 9999, "4": 9999, "5": 9999, "6": 9999, "7": 9999}}, [{"t": "meta"}], -1.0],
+		"ACH_FIRST_BOSS": [{}, [{"t": "boss_bounty"}], -1.0],
+		"ACH_BOSS_50": [{"stats": {"bosses": 50}}, [{"t": "meta"}], -1.0],
+		"ACH_KILLS_100K": [{"stats": {"kills": 100000}}, [{"t": "meta"}], -1.0],
+		"ACH_RING_3": [{"unlocked": [ring3]}, [{"t": "meta"}], -1.0],
+		"ACH_FULL_BASE": [{"unlocked": full}, [{"t": "meta"}], -1.0],
+		"ACH_ALL_SYNERGY": [{}, [{"t": "synergies", "n": AchievementDB.SYNERGY_TARGET}], -1.0],
+		"ACH_ECO_ONLY": [{}, [{"t": "game_over", "wave": 30, "build": ["", "mine", "bounty"]}], -1.0],
+		"ACH_NO_ECO": [{}, [{"t": "game_over", "wave": 60, "build": ["gun", "", "armory"]}], -1.0],
+		"ACH_LABS_MAX": [{"labs": {"lvls": {"speed": 3}}}, [{"t": "meta"}], -1.0],
+		"ACH_CARD_MAX": [{"cards": {"owned": {"c_test": {"lvl": CardDB.MAX_LVL, "copies": 0}}}}, [{"t": "meta"}], -1.0],
+		"ACH_MOD_3": [{}, [{"t": "run_start", "modifiers": ["swarm", "haste", "noperks"]}, {"t": "core_hit", "dmg": 1.0}, {"t": "wave", "wave": 51}], -1.0],
+		"ACH_GLASS_50": [{}, [{"t": "run_start", "modifiers": ["glass"]}, {"t": "core_hit", "dmg": 1.0}, {"t": "wave", "wave": 50}], -1.0],
+		"ACH_ENCIRCLED_100": [{}, [{"t": "run_start", "modifiers": ["allsides"]}, {"t": "core_hit", "dmg": 1.0}, {"t": "wave", "wave": 100}], -1.0],
+		"ACH_NO_DAMAGE_10": [{}, [{"t": "run_start"}, {"t": "wave", "wave": 5}, {"t": "wave", "wave": 11}], -1.0],
+		"ACH_SPEEDRUN": [{}, [{"t": "run_start"}, {"t": "core_hit", "dmg": 1.0}, {"t": "wave", "wave": 40}], 590.0],
+		"ACH_STREAK_7": [{"streak": {"day_idx": 7, "last_day": 3, "loops": 0}}, [{"t": "meta"}], -1.0],
+		"ACH_MISSIONS_50": [{}, [], -1.0],
+		"ACH_ENDLESS": [{"best_wave": 50, "best_wave_by_tier": {"1": 50}}, [{"t": "meta"}], -1.0],
+	}
+	for i in BaseMeta.N:
+		if BaseMeta.cell_ring(i) == 3:
+			ring3 = i
+			break
+	(cases["ACH_RING_3"][0] as Dictionary)["unlocked"] = [ring3]
+	var m50: Array = []
+	for k in 50:
+		m50.append({"t": "mission_claimed", "idx": 0, "gems": 1})
+	cases["ACH_MISSIONS_50"][1] = m50
+	_check("PC-E10 every achievement has a synthetic case", cases.size() == 24 and cases.keys().all(func(k: Variant) -> bool: return AchievementDB.ids().has(String(k))))
+	for id in cases.keys():
+		var c: Array = cases[id]
+		var sv: Dictionary = BaseMeta.default_save()
+		for k in (c[0] as Dictionary).keys():
+			sv[k] = (c[0] as Dictionary)[k]
+		var run: Dictionary = Achievements.new_run()
+		SteamService.reset_mock()
+		var got: Array = Achievements.on_events(sv, run, c[1], 100, float(c[2]))
+		var got2: Array = Achievements.on_events(sv, run, c[1], 200, float(c[2]))
+		var fired: int = 0
+		for x in got:
+			if String((x as Dictionary)["id"]) == String(id):
+				fired += 1
+		var steam_n: int = SteamService.mock_ops("unlock_achievement").filter(func(a: Variant) -> bool: return String((a as Array)[0]) == String(id)).size()
+		_check("PC-E10 %s fires exactly once + mirrors to Steam" % id, fired == 1 and Achievements.is_unlocked(sv, String(id)) and got2.filter(func(x: Variant) -> bool: return String((x as Dictionary)["id"]) == String(id)).is_empty() and steam_n == 1 and int(sv["achievements"]["unlocked"][id]) == 100)
+	# Negative cases.
+	var nsv: Dictionary = BaseMeta.default_save()
+	var nrun: Dictionary = Achievements.new_run()
+	Achievements.on_events(nsv, nrun, [{"t": "run_start"}, {"t": "wave", "wave": 5}, {"t": "core_hit", "dmg": 3.0}, {"t": "wave", "wave": 11}], 1, 700.0)
+	Achievements.on_events(nsv, nrun, [{"t": "wave", "wave": 40}], 1, 700.0)
+	Achievements.on_events(nsv, nrun, [{"t": "game_over", "wave": 40, "build": ["gun", "mine"], "duration_s": 300.0}], 1)
+	_check("PC-E10 negatives: damage before w11, slow w40, mixed build", not Achievements.is_unlocked(nsv, "ACH_NO_DAMAGE_10") and not Achievements.is_unlocked(nsv, "ACH_SPEEDRUN") and not Achievements.is_unlocked(nsv, "ACH_ECO_ONLY") and not Achievements.is_unlocked(nsv, "ACH_NO_ECO") and Achievements.is_unlocked(nsv, "ACH_FIRST_RUN"))
+	_check("PC-E10 W250 needs endless", not Achievements.is_unlocked(nsv, "ACH_WAVE_250"))
+	# A real 9-wave normal run fires nothing.
+	var tsv: Dictionary = BaseMeta.normalize(BaseMeta.default_save())
+	var T = TowerState.new()
+	var ev0: Array = T.setup(4321, tsv)
+	_godmode(T)
+	var trun: Dictionary = Achievements.new_run()
+	SteamService.reset_mock()
+	var tev: Array = _sim_waves(T, 9, ev0)
+	var tgot: Array = Achievements.on_events(tsv, trun, tev, 5, float(T.time_alive))
+	_check("PC-E10 no false positives in a 9-wave normal run (%s)" % JSON.stringify(tgot), tgot.is_empty() and Achievements.unlocked_count(tsv) == 0 and SteamService.mock_ops("unlock_achievement").is_empty())
+	_check("PC-E10 achievements survive normalize", BaseMeta.normalize({"achievements": {"unlocked": {"ACH_FIRST_RUN": 5}, "missions_claimed": 3}})["achievements"] == {"unlocked": {"ACH_FIRST_RUN": 5}, "missions_claimed": 3})
+	SteamService.reset_mock()
