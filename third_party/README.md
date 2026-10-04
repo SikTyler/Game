@@ -16,3 +16,17 @@ Every external source used by GameForge / Corehold. Licenses were verified by re
 
 **Not obtainable:** kenney.nl (impact-sounds, interface-sounds, particle-pack) returned HTTP 000 (blocked by proxy); not used.
 **Rejected:** youtd2 (CC-BY-NC assets); Hollow-Vigil, drift-station, awesome-claude-skills (no license).
+
+## Corehold PC edition (games/towerdef-pc-0001 only)
+
+Retrieved 2026-10-04 (git clone --depth 1; commit shown). These rows are credited in `games/towerdef-pc-0001/data/CreditsDB.gd` only (checked by `tools/credits.test.mjs`).
+
+| Name | URL @ commit | License | Taken / planned | Attribution |
+|---|---|---|---|---|
+| controller_icons (Xelu prompts) | https://github.com/rsubtil/controller_icons @ 4246544 | CC0 (glyph PNGs, Xelu); addon code MIT | Vendored unmodified PNGs only: `games/towerdef-pc-0001/art/glyphs/{key,mouse,xbox(=xboxseries),ps5,steamdeck}/` (diagram sheets and the Godot-logo plugin icon excluded); no addon code. MIT text: `licenses/rsubtil-controller-icons.LICENSE` + copy next to the glyphs | Xelu's FREE Controllers & Keyboard PROMPTS, Nicolae (Xelu) Berbece, thoseawesomeguys.com/prompts (courtesy) |
+| Maaack Godot-Input-Remapping | https://github.com/Maaack/Godot-Input-Remapping @ 8c031bf | MIT | Patterns only (remap list + capture flow) for `Keybinds.gd` / settings Controls tab; no files copied. Godot-Game-Template row above covers `app_settings.gd` patterns ported into `Settings.gd` | (c) Marek Belski |
+| godot_input_helper | https://github.com/nathanhoad/godot_input_helper @ ccfad58 | MIT | Patterns ported (no files copied, no autoload): event (de)serialisation, swap-if-taken rebinding, device detection -> `Keybinds.gd` (`licenses/nathanhoad-godot-input-helper.LICENSE`) | (c) 2022-present Nathan Hoad |
+| Godot demo projects | https://github.com/godotengine/godot-demo-projects @ 3e08537 | MIT | Patterns: gui/input_mapping, misc/window_management, gui/multiple_resolutions, misc/joypads -> `Settings.gd`, `Keybinds.gd` (`licenses/godot-demo-projects.LICENSE`) | (c) Godot Engine contributors |
+| godot-ci | https://github.com/abarichello/godot-ci @ 6b5c4c4 | MIT | Workflow structure adapted into `.github/workflows/towerdef-pc-export.yml` (GODOT_VERSION 4.6.3; Steam upload is a manual step) (`licenses/abarichello-godot-ci.LICENSE`) | (c) Barichello |
+
+**PC — not used:** GodotSteam (license UNVERIFIED: GitHub repo archived, Codeberg blocked) — nothing vendored; `SteamService.gd` is our own dynamic-call wrapper. Kenney Input Prompts (kenney.nl blocked). chickensoft GameDemo (C#, read only).
