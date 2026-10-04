@@ -210,3 +210,20 @@ Each step keeps every gate green before commit.
 - **Workers walking roads**: cosmetic; replaced by builder icons on active jobs.
 - **Terrain-aware expansion**: plots are fixed chunks; terrain is decorative except Crystal Veins.
 - **Loadout presets beyond 4**, and part "lock-in" re-rolling of stats: no stat re-rolls at all.
+
+## 10. ENGINE-RUN implementation notes (as built)
+Modules: `PowerModel.gd`, `data/CoreDB.gd`, `Cores.gd`, `data/PickDB.gd`, `Draft.gd` (rewrite), `Specials.gd`, `Troops.gd`, `Drops.gd`; `TowerState.gd` refactored. Deviations / decisions, each covered by selftest:
+- **Grid stays 7x7** (rings 1-3; ring 2 opens at track total 10, ring 3 at 30). The 9x9 / ring-4 field is left to the UI rebuild (arena geometry, enemy stop ring).
+- **Huts and Barricade are 1 cell** (2x2 / 2x1 footprints need the UI field decision). Buildings and huts are single-instance per id; a duplicate pick levels it (L5 cap).
+- Design "cells" for ranges/splash = `pc_cell_px` (78 px).
+- **Every cash amount scales with the run cash index** `1.10^(w-1)·(1+0.5(t-1))`: kill cash, passive cash/s, interest caps, reroll price. Cash-out coins deflate by the index.
+- Armor is flat per hit with a 25% floor. Troop HP scales with enemy dmg growth (1.06^w); troop dmg follows the Damage track and packs.
+- XP no longer opens drafts (cadence = waves 1/2/3, every 2nd, +Epic+ draft on boss waves); each XP level-up banks a free reroll (Refinery's +XP feeds rerolls).
+- Run perks (every 5 waves) are kept unchanged for now.
+- Legacy v3 `save.core` stat levels apply at Core-level-sized additive steps (dmg +6%, HP +5%, regen +4% per level) until save v4 migrates them.
+- Core Cores: boss 5% drop + 2 per tier clear (interim, so Core levels are not hard-gated before ENGINE-META).
+- Loot: `save.scrap`, `save.keys`, `save.core_cores`, and `save.part_drops` (generic `{rarity, source}` waiting for Parts). Insight banks into `save.insight` (counts; per-stat caps). Drops use a separate RNG so loot never perturbs waves.
+- Lance Focus taxes buildings within Core range (in practice the whole 7x7 grid).
+- View compatibility shims: Core cell `upgrade()` = Damage track; `stats.overcharge_step`/`bounty_mult`; `BuildingDB.get_def` falls back to PickDB for non-building cards.
+- **Interim tuning (playtest pacing, Tune keys):** track growth dmg 1.21 / rate 1.23 / range 1.25 / eco 1.20 / armor 1.19 (spec 1.16–1.20 hit every cap by ~w40 against ×1.10 kill cash); `pc_core_cost_base` 250 (spec 200); legacy core steps 3% (DMG lifts every weapon); `pc_bld_dmg` 1.25 (building damage over the PickDB L1 sheet); boss Core Core 25%×tier, +2 per tier clear; first T1 boss ×0.6 HP; `cashout_frac` 0.12 of index-deflated cash; Blood Moon perk coins ×1.25 (was 1.75); modifier coin rewards: Swarm 0, Ironclad 0.20, Elite Guard 0.15, Fresh Start 0.80. Overkill carry (`pc_carry_hops` 2, `pc_carry_frac` 0.6) on single-target Core/Gatling shots. Separate RNG streams (waves / drafts+perks / combat / loot) keep the wave sequence identical whatever the player picks. G2 starter guarantee: below 2 weapon buildings a draft always holds one.
+- **Playtest invariants adapted (design change):** old AC-38 (eco-mix ≥1.10× weapon wave and ≥1.25× coins) → BRIEF AC-30 (mixed frontier > zero-eco and > all-eco); old AC-39 (mono permanent board < 70%) → one-building run < mixed run.

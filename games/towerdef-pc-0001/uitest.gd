@@ -353,7 +353,8 @@ func _run() -> void:
 	_check("start run", main.screen == "run" and main.S != null)
 	_check("sfx: wave_start clip fires on run start", main.sfx.played("wave_start"))
 	var S = main.S
-	_check("perm base carried into run", S.id_at(_c(7)) == "gun" and S.lvl_at(_c(7)) == 2 and bool(S.unlocked[_c(0)]))
+	# REDESIGN (deliberate): the run grid starts empty; permanent buildings stay out of runs.
+	_check("run grid starts empty (perm base stays out of runs)", S.building_count() == 0 and not bool(S.unlocked[_c(0)]))
 	_press("SPD")
 	await _frames()
 	_check("speed pill cycles game speed", absf(S.speed - 1.5) < 0.01 and absf(float(main.save["speed"]) - 1.5) < 0.01)
@@ -361,9 +362,12 @@ func _run() -> void:
 	await _frames()
 	_check("speed pill wraps to 1x", absf(S.speed - 1.0) < 0.01)
 	S.spawn_hold = true
-	S.xp = S.xp_need()
+	# REDESIGN: drafts follow the wave cadence; grant_draft is the tool hook.
+	S.grant_draft()
+	S.draft[0] = load("res://Draft.gd").card_for("gun", S._draft_ctx(""))
+	main._rebuild_ui()
 	await _frames(3)
-	_check("level-up shows draft cards", S.draft.size() == 3 and (_find("NEW") != null or _find("+1") != null))
+	_check("draft shows cards", S.draft.size() == 3 and (_find("NEW") != null or _find("+1") != null))
 	var new_id: String = ""
 	var card_btn: Button = null
 	for c in main.ui.get_children():
@@ -385,27 +389,17 @@ func _run() -> void:
 		_check("sfx: run place clip fires", main.sfx.played("place"))
 	else:
 		_check("draft has a NEW card", false)
-	_click(main.w2s(TowerState.slot_pos(_c(7))))
-	await _frames()
 	S.cash = 500.0
-	main._rebuild_ui()
-	await _frames()
-	var lv: int = S.lvl_at(_c(7))
-	main.sfx.clear_log()
-	_press("Upgrade")
-	await _frames()
-	_check("cash upgrade button", S.lvl_at(_c(7)) == lv + 1)
-	_check("sfx: run upgrade clip fires", main.sfx.played("upgrade"))
-	_click(main.w2s(TowerState.slot_pos(_c(4))))
-	await _frames()
-	_press("Unlock plot")
-	await _frames()
-	_check("run unlock button", bool(S.unlocked[_c(4)]))
+	# REDESIGN (deliberate): buildings level through duplicate picks only and
+	# rings open by Core track total, so cash goes into the Core tracks.
+	_check("cash cannot level a building / unlock a cell", S.upgrade(_c(8)).is_empty() and S.unlock_plot(_c(4)).is_empty())
 	_click(main.w2s(TowerState.slot_pos(_c(12))))
 	await _frames()
+	main.sfx.clear_log()
 	_press("Overcharge")
 	await _frames()
 	_check("core cash upgrade button", S.core_run_lvl == 1)
+	_check("sfx: run upgrade clip fires", main.sfx.played("upgrade"))
 	# Targeting: selected weapon shows a "Target: X" cycle button (real click).
 	var tm0: String = String(S.target_modes[_c(12)])
 	_check("target button shown for selected weapon", _find("Target: Nearest") != null or _find("Target:") != null)
@@ -420,8 +414,9 @@ func _run() -> void:
 	_check("bounty banner clears the grid", String(bpop["text"]).begins_with("BOUNTY") and bpos.y - 30.0 > TowerState.CENTER.y + float(TowerState.SIDE) * 0.5 * TowerState.CELL)
 
 	# ---- REROLL + PERK OVERLAY -----------------------------------------------
-	S.xp = S.xp_need()
+	S.grant_draft()
 	await _frames(3)
+	S.free_reroll = false
 	S.rerolls_left = 1
 	main._rebuild_ui()
 	await _frames()
@@ -767,7 +762,7 @@ func _pc_desktop() -> void:
 	_key(KEY_2)
 	await _frames()
 	_check("PC-U6: perk draft accepts 2", S.perks_taken.size() == perks0 + 1 and S.perk_offer.is_empty())
-	S.xp = S.xp_need()
+	S.grant_draft()
 	for k in 40:
 		if S.draft.size() > 0:
 			break

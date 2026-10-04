@@ -15,7 +15,7 @@ const DEFS: Dictionary = {
 	"p_xp":        {"name": "Scholar",         "fam": "economy", "stack": 1, "tradeoff": false, "desc": "+30% XP", "cost": ""},
 	"p_greed":     {"name": "Greed",           "fam": "economy", "stack": 1, "tradeoff": true,  "desc": "+50% cash & coins", "cost": "Enemies +15% speed, +70% HP"},
 	"p_miser":     {"name": "Miser",           "fam": "economy", "stack": 1, "tradeoff": true,  "desc": "Cash upgrades -30% cost", "cost": "-30% XP"},
-	"p_bloodmoon": {"name": "Blood Moon",      "fam": "economy", "stack": 1, "tradeoff": true,  "desc": "Coins x1.75", "cost": "+25% more enemies"},
+	"p_bloodmoon": {"name": "Blood Moon",      "fam": "economy", "stack": 1, "tradeoff": true,  "desc": "Coins x1.25", "cost": "+25% more enemies"},
 }
 
 const IDS: Array = ["p_dmg", "p_rate", "p_range", "p_glass", "p_frenzy", "p_hp", "p_fort", "p_cash", "p_xp", "p_greed", "p_miser", "p_bloodmoon"]

@@ -3,6 +3,8 @@ extends RefCounted
 ## numbers themselves live in TowerState.compute_stats() so one pure function
 ## owns all the math. Reached via preload + static (no autoloads).
 
+const PickDB := preload("res://data/PickDB.gd")
+
 const DEFS: Dictionary = {
 	"gun":     {"name": "Gun Turret",    "cat": "weapon",  "coin": 15, "desc": "Rapid single-target fire"},
 	"mortar":  {"name": "Mortar",        "cat": "weapon",  "coin": 20, "desc": "Slow, heavy splash shells"},
@@ -20,6 +22,12 @@ const DEFS: Dictionary = {
 	"beacon":    {"name": "Lane Beacon",   "cat": "support", "coin": 20, "desc": "+15%/lv weapon dmg vs the focused lane. Adj Mortar: +25% range"},
 	"refinery":  {"name": "Refinery",      "cat": "eco",     "coin": 24, "desc": "Wave end: 10% of the wave's cash income -> coins (cap 2.5/lv). Adj Mine: +20% output"},
 	"barricade": {"name": "Barricade",     "cat": "support", "coin": 16, "desc": "Wall on its lane: -30% enemy speed, 60 HP/lv, rebuilt each wave"},
+	# Redesign run-only picks (PickDB holds draft text; these give the view a name + colour).
+	"frost":        {"name": "Cryo Spire",     "cat": "weapon",  "coin": 0, "desc": "Slows 30% within 2.5 cells, 3 dmg/s"},
+	"obelisk":      {"name": "Siphon Obelisk", "cat": "support", "coin": 0, "desc": "1% of all damage dealt heals the Core"},
+	"hut_infantry": {"name": "Rifle Barracks", "cat": "support", "coin": 0, "desc": "3 Riflemen roam the lane and taunt"},
+	"hut_sapper":   {"name": "Sapper Den",     "cat": "support", "coin": 0, "desc": "2 Sappers charge elites and bosses and explode"},
+	"hut_drone":    {"name": "Drone Nest",     "cat": "support", "coin": 0, "desc": "4 Drones fly out and hunt flyers first"},
 }
 
 const IDS: Array = ["gun", "mortar", "tesla", "armory", "bulwark", "mine", "oilmill", "bounty"]
@@ -39,8 +47,17 @@ static func ids() -> Array:
 	return IDS
 
 
+## Buildings first; any other roguelite pick (pack / special / Insight) gets a
+## view-compatible def from PickDB so the current draft UI can name it.
 static func get_def(id: String) -> Dictionary:
-	return DEFS.get(id, {})
+	if DEFS.has(id):
+		return DEFS[id]
+	var pd: Dictionary = PickDB.get_def(id)
+	if pd.is_empty():
+		return {}
+	var tags: Array = pd.get("tags", [])
+	var cat: String = "eco" if tags.has("eco") else ("weapon" if (tags.has("dps") or tags.has("aoe")) else "support")
+	return {"name": String(pd["name"]), "cat": cat, "coin": 0, "desc": String(pd["desc"])}
 
 
 static func cat_of(id: String) -> String:

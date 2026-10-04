@@ -10,6 +10,8 @@ const DEFS: Dictionary = {
 	"elite":   {"hp": 30.0,  "spd": 32.0, "dmg": 12.0, "cash": 5.0,  "xp": 5.0,  "coin": 1.0,  "size": 24.0},
 	"splitter": {"hp": 18.0, "spd": 38.0, "dmg": 6.0,  "cash": 2.0,  "xp": 2.0,  "coin": 0.4,  "size": 22.0},
 	"mite":    {"hp": 3.0,   "spd": 95.0, "dmg": 1.5,  "cash": 0.5,  "xp": 0.5,  "coin": 0.05, "size": 10.0},
+	# Courier (REDESIGN §2.6): rare loot runner, 2x drone HP, 3x speed, harmless.
+	"courier": {"hp": 12.0,  "spd": 135.0, "dmg": 0.0, "cash": 5.0,  "xp": 2.0,  "coin": 2.0,  "size": 18.0},
 	"boss":    {"hp": 200.0, "spd": 22.0, "dmg": 18.0, "cash": 25.0, "xp": 15.0, "coin": 10.0, "size": 44.0},
 }
 
