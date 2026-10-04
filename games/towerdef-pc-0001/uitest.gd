@@ -16,6 +16,10 @@ const Labs := preload("res://Labs.gd")
 const Cards := preload("res://Cards.gd")
 const Missions := preload("res://Missions.gd")
 const Offline := preload("res://Offline.gd")
+const Desktop := preload("res://ui/Desktop.gd")
+const Settings := preload("res://Settings.gd")
+const Keybinds := preload("res://Keybinds.gd")
+const BuildingDB := preload("res://data/BuildingDB.gd")
 const T0: int = 1800000000
 
 var main: Node2D
@@ -78,6 +82,80 @@ func _press(prefix: String) -> bool:
 	return true
 
 
+## Desktop chrome (main.dui) lookups: exact "key" meta.
+func _findd(key: String) -> Button:
+	for c in main.dui.get_children():
+		if c is Button and _label(c as Button) == key and not (c as Button).is_queued_for_deletion():
+			return c
+	return null
+
+
+func _pressd(key: String) -> bool:
+	var b: Button = _findd(key)
+	if b == null:
+		print("UITEST note: no desktop button '%s'" % key)
+		return false
+	_click(b.get_global_rect().get_center())
+	return true
+
+
+func _mouse(pos: Vector2, button: MouseButton, pressed: bool) -> void:
+	main.last_tap_ms = -1000
+	var ev := InputEventMouseButton.new()
+	ev.button_index = button
+	ev.pressed = pressed
+	ev.position = pos
+	ev.global_position = pos
+	root.push_input(ev, true)
+
+
+func _motion(pos: Vector2) -> void:
+	var ev := InputEventMouseMotion.new()
+	ev.position = pos
+	ev.global_position = pos
+	root.push_input(ev, true)
+
+
+func _key(code: Key, ctrl: bool = false, shift: bool = false) -> void:
+	for pressed in [true, false]:
+		var ev := InputEventKey.new()
+		ev.keycode = code
+		ev.physical_keycode = code
+		ev.ctrl_pressed = ctrl
+		ev.shift_pressed = shift
+		ev.pressed = pressed
+		root.push_input(ev, true)
+
+
+func _pad_button(b: JoyButton) -> void:
+	for pressed in [true, false]:
+		var ev := InputEventJoypadButton.new()
+		ev.button_index = b
+		ev.pressed = pressed
+		ev.device = 0
+		root.push_input(ev, true)
+
+
+func _pad_axis(axis: JoyAxis, v: float) -> void:
+	var ev := InputEventJoypadMotion.new()
+	ev.axis = axis
+	ev.axis_value = v
+	ev.device = 0
+	root.push_input(ev, true)
+
+
+func _cell_scr(i: int) -> Vector2:
+	return main.w2s(TowerState.slot_pos(i))
+
+
+func _no_overlap(rects: Array) -> bool:
+	for a in rects.size():
+		for b in range(a + 1, rects.size()):
+			if (rects[a] as Rect2).grow(-1.0).intersects((rects[b] as Rect2).grow(-1.0)):
+				return false
+	return true
+
+
 func _frames(n: int = 2) -> void:
 	for k in n:
 		await process_frame
@@ -89,6 +167,12 @@ func _run() -> void:
 	main = scene.instantiate()
 	root.add_child(main)
 	await _frames()
+	# ---- PC MAIN MENU / SLOT PICKER (PC-U6) -----------------------------------
+	_check("PC: boots to the main menu", main.screen == "menu")
+	_check("PC: slot picker shows 3 slots", _findd("SLOT 1 PLAY") != null and _findd("SLOT 2 PLAY") != null and _findd("SLOT 3 PLAY") != null)
+	_pressd("SLOT 1 PLAY")
+	await _frames()
+	_check("PC: slot 1 loads to the base", main.screen == "base" and MetaSave.active == 1)
 	main.save = BaseMeta.default_save()
 	main.save["coins"] = 1000   # PC ring-2 corner cell costs 600
 	main._rebuild_ui()
@@ -96,7 +180,7 @@ func _run() -> void:
 
 	# ---- BASE SCREEN ---------------------------------------------------------
 	_check("boots to base screen", main.screen == "base")
-	_click(TowerState.slot_pos(_c(7)))
+	_click(main.w2s(TowerState.slot_pos(_c(7))))
 	await _frames()
 	_check("tap selects slot", main.sel == _c(7))
 	_check("sfx node owned by Main (no autoload)", main.sfx != null and main.sfx.get_parent() == main and AudioServer.get_bus_index("SFX") >= 0 and AudioServer.get_bus_index("Music") >= 0)
@@ -113,7 +197,7 @@ func _run() -> void:
 	_press("Core DMG")
 	await _frames()
 	_check("core upgrade button", int(main.save["core"]["dmg"]) == 1)
-	_click(TowerState.slot_pos(_c(0)))
+	_click(main.w2s(TowerState.slot_pos(_c(0))))
 	await _frames()
 	_press("Unlock slot")
 	await _frames()
@@ -295,13 +379,13 @@ func _run() -> void:
 		_click(card_btn.get_global_rect().get_center())
 		await _frames()
 		_check("card tap enters place mode", S.pending_place == new_id)
-		_click(TowerState.slot_pos(_c(8)))
+		_click(main.w2s(TowerState.slot_pos(_c(8))))
 		await _frames()
 		_check("slot tap places building", S.id_at(_c(8)) == new_id and S.pending_place == "")
 		_check("sfx: run place clip fires", main.sfx.played("place"))
 	else:
 		_check("draft has a NEW card", false)
-	_click(TowerState.slot_pos(_c(7)))
+	_click(main.w2s(TowerState.slot_pos(_c(7))))
 	await _frames()
 	S.cash = 500.0
 	main._rebuild_ui()
@@ -312,12 +396,12 @@ func _run() -> void:
 	await _frames()
 	_check("cash upgrade button", S.lvl_at(_c(7)) == lv + 1)
 	_check("sfx: run upgrade clip fires", main.sfx.played("upgrade"))
-	_click(TowerState.slot_pos(_c(4)))
+	_click(main.w2s(TowerState.slot_pos(_c(4))))
 	await _frames()
 	_press("Unlock plot")
 	await _frames()
 	_check("run unlock button", bool(S.unlocked[_c(4)]))
-	_click(TowerState.slot_pos(_c(12)))
+	_click(main.w2s(TowerState.slot_pos(_c(12))))
 	await _frames()
 	_press("Overcharge")
 	await _frames()
@@ -348,7 +432,7 @@ func _run() -> void:
 	_press(dk)
 	await _frames()
 	if S.pending_place != "":
-		_click(TowerState.slot_pos(int(S.free_slots()[0])))
+		_click(main.w2s(TowerState.slot_pos(int(S.free_slots()[0]))))
 		await _frames()
 	_check("rerolled draft resolves", S.draft.is_empty() and S.pending_place == "")
 	S.perk_pending = 1
@@ -412,6 +496,8 @@ func _run() -> void:
 	var disk2: Dictionary = BaseMeta.normalize(MetaSave.read())
 	_check("abandon bank persisted", int(disk2["coins"]) == int(main.save["coins"]))
 
+	await _pc_desktop()
+
 	MetaSave.clear()
 	if fail_count == 0:
 		print("UITEST OK")
@@ -419,3 +505,334 @@ func _run() -> void:
 	else:
 		print("UITEST FAIL: %d checks failed" % fail_count)
 		quit(1)
+
+
+# ============================================================ PC DESKTOP UI
+func _pc_desktop() -> void:
+	var settings_before: Dictionary = Settings.read()
+	_pressd("DBACK")
+	await _frames()
+	_check("PC: results Back to Base (hotbar)", main.screen == "base")
+	main.save["coins"] = 5000
+	main.settings["controls"]["tooltip_delay"] = 0.0
+	main._rebuild_ui()
+	await _frames()
+
+	# ---- PC-U1 layout -----------------------------------------------------
+	var hud := Rect2(0, 0, main.vw, main.HUD_H)
+	var hot := Rect2(0, main.vh - main.HOT_H, main.vw, main.HOT_H)
+	var lr: Rect2 = Desktop.left_rect(main)
+	var rr: Rect2 = Desktop.right_rect(main)
+	var col := Rect2(main.col_pos, Vector2(main.W, main.H) * main.col_s)
+	_check("PC-U1: HUD, left, centre, right, hotbar do not overlap at 1920x1080", main.vw >= 1919.0 and _no_overlap([hud, hot, lr, rr, col]), "%s" % [[hud, hot, lr, rr, col]])
+	for res in [Vector2i(1280, 720), Vector2i(1280, 800)]:
+		root.size = res
+		await _frames(3)
+		var vis := Rect2(Vector2.ZERO, main.get_viewport().get_visible_rect().size)
+		var inside: bool = true
+		for c in main.dui.get_children():
+			if c is Control and not (c as Control).is_queued_for_deletion() and not vis.encloses((c as Control).get_rect()):
+				inside = false
+				print("UITEST note: outside ", _label(c as Button) if c is Button else c.name, " ", (c as Control).get_rect(), " vis ", vis)
+		_check("PC-U1: every control in the viewport at %dx%d (re-laid out)" % [res.x, res.y], inside and absf(main.vw - vis.size.x) < 1.0)
+	root.size = Vector2i(1920, 1080)
+	await _frames(3)
+
+	# ---- PC-U2 tooltips / press mode / height ------------------------------
+	var bad: Array = []
+	for host in [main.dui, main.ui]:
+		for c in host.get_children():
+			if c is Button and (c as Button).visible and not (c as Button).is_queued_for_deletion():
+				var b: Button = c
+				if b.tooltip_text == "" or b.action_mode != BaseButton.ACTION_MODE_BUTTON_PRESS:
+					bad.append(_label(b))
+				if host == main.dui and b.size.y < 40.0:
+					bad.append(_label(b) + " h")
+	_check("PC-U2: every button has a tooltip, press action, >= 40 px", bad.is_empty(), str(bad))
+	_check("PC-U2: tooltip box ignores the mouse", main.tipbox.mouse_filter == Control.MOUSE_FILTER_IGNORE and main.dui.mouse_filter == Control.MOUSE_FILTER_IGNORE)
+	# hover -> tooltip appears (button, then a cell)
+	var sb: Button = _findd("HUD Stats")
+	_motion(sb.get_global_rect().get_center())
+	await _frames(3)
+	_check("PC: hovering a button shows its tooltip", main.tipbox.visible and main.tip_label.text.contains("Lifetime"), main.tip_label.text)
+	_motion(_cell_scr(TowerState.CORE_SLOT))
+	await _frames(3)
+	_check("PC: hovering a cell shows a building tooltip", main.tipbox.visible and main.tip_label.text.begins_with("The Core"), main.tip_label.text)
+	_motion(Vector2(main.vw * 0.5, 30))
+	await _frames(2)
+
+	# ---- PC-U4 drag-to-place / right-click / wheel ---------------------------
+	var free: int = -1
+	for i in TowerState.N:
+		if free < 0 and i != TowerState.CORE_SLOT and BaseMeta.is_unlocked(main.save, i) and BaseMeta.slot_of(main.save, i).is_empty() and BaseMeta.place_ok(i, "gun"):
+			free = i
+	if free < 0:
+		free = _c(13)
+		BaseMeta.demolish(main.save, free)
+		main._rebuild_ui()
+		await _frames()
+	var hb: Button = _findd("HOT Gun Turret")
+	var hp: Vector2 = hb.get_global_rect().get_center()
+	_motion(hp)
+	_mouse(hp, MOUSE_BUTTON_LEFT, true)
+	await _frames()
+	_motion(_cell_scr(free))
+	await _frames(2)
+	_mouse(_cell_scr(free), MOUSE_BUTTON_LEFT, false)
+	await _frames()
+	_check("PC-U4: drag from hotbar to a valid cell places", String(BaseMeta.slot_of(main.save, free).get("id", "")) == "gun")
+	var locked: int = 0   # ring-3 corner, locked on a fresh save
+	_check("PC-U4: test cell 0 is locked", not BaseMeta.is_unlocked(main.save, locked))
+	hb = _findd("HOT Gun Turret")
+	hp = hb.get_global_rect().get_center()
+	_motion(hp)
+	_mouse(hp, MOUSE_BUTTON_LEFT, true)
+	await _frames()
+	_motion(_cell_scr(locked))
+	await _frames(3)
+	_check("PC-U4: drag ghost over a locked cell shows the reason", String(main.get_meta("ghost_reason", "")) == "Locked cell", String(main.get_meta("ghost_reason", "")))
+	_mouse(_cell_scr(locked), MOUSE_BUTTON_LEFT, false)
+	await _frames()
+	_check("PC-U4: drop on a locked cell does not place", BaseMeta.slot_of(main.save, locked).is_empty() and main.drag_id == "")
+	_mouse(_cell_scr(free), MOUSE_BUTTON_RIGHT, true)
+	_mouse(_cell_scr(free), MOUSE_BUTTON_RIGHT, false)
+	await _frames()
+	_check("PC-U4: right-click opens the info popover with Upgrade/Sell", main.overlay == "info" and main.info_cell == free and _findd("INFO UPGRADE") != null and _findd("INFO SELL") != null)
+	_pressd("INFO UPGRADE")
+	await _frames()
+	_check("PC-U4: popover Upgrade upgrades", int(BaseMeta.slot_of(main.save, free).get("lvl", 0)) == 2)
+	_pressd("INFO SELL")
+	await _frames()
+	_check("PC-U4: popover Sell demolishes", BaseMeta.slot_of(main.save, free).is_empty() and main.overlay == "")
+	var c0: Vector2 = _cell_scr(TowerState.CORE_SLOT)
+	_mouse(c0, MOUSE_BUTTON_WHEEL_UP, true)
+	await _frames()
+	_check("PC-U4: wheel up zooms in", absf(main.zoom - 1.1) < 0.001, str(main.zoom))
+	for k in 10:
+		_mouse(main.w2s(TowerState.CENTER), MOUSE_BUTTON_WHEEL_UP, true)
+	await _frames()
+	_check("PC-U4: zoom clamps at 1.4", absf(main.zoom - 1.4) < 0.001, str(main.zoom))
+	for k in 12:
+		_mouse(main.w2s(TowerState.CENTER), MOUSE_BUTTON_WHEEL_DOWN, true)
+	await _frames()
+	_check("PC-U4: zoom clamps at 0.8", absf(main.zoom - 0.8) < 0.001, str(main.zoom))
+	main.zoom = 1.0
+	_click(_cell_scr(TowerState.CORE_SLOT))
+	await _frames()
+	_check("PC: click still selects a cell after zooming", main.sel == TowerState.CORE_SLOT)
+
+	# ---- PC-U3 hotkeys -------------------------------------------------------
+	main.sel = -1
+	_key(KEY_1)
+	await _frames()
+	var first: String = String(BuildingDB.all_ids()[0])
+	_check("PC-U3: 1 arms hotbar slot 1", main.armed == first, main.armed)
+	_key(KEY_ESCAPE)
+	await _frames()
+	_check("PC-U3: Esc cancels the armed building", main.armed == "")
+	_key(KEY_1)
+	await _frames()
+	_click(_cell_scr(free))
+	await _frames()
+	_check("PC-U3: armed building places on click", String(BaseMeta.slot_of(main.save, free).get("id", "")) == first)
+	_key(KEY_ESCAPE)
+	main.sel = free
+	await _frames()
+	_key(KEY_U)
+	await _frames()
+	_check("PC-U3: U upgrades the selection", int(BaseMeta.slot_of(main.save, free).get("lvl", 0)) == 2)
+	_key(KEY_X)
+	await _frames()
+	_check("PC-U3: X sells the selection", BaseMeta.slot_of(main.save, free).is_empty())
+	_key(KEY_L)
+	await _frames()
+	_check("PC-U3: L opens the Labs tab", main.tab == "labs")
+	_key(KEY_B)
+	await _frames()
+	_key(KEY_H)
+	await _frames()
+	_check("PC-U3: H opens stats", main.overlay == "stats")
+	_key(KEY_ESCAPE)
+	await _frames()
+	_check("PC-U3: Esc closes the overlay", main.overlay == "")
+
+	# ---- PC-U5 controller --------------------------------------------------
+	main.sel = TowerState.CORE_SLOT
+	_pad_axis(JOY_AXIS_LEFT_X, 1.0)
+	await _frames()
+	_pad_axis(JOY_AXIS_LEFT_X, 1.0)   # still held: no repeat
+	await _frames()
+	_check("PC-U5: stick moves the grid cursor once per push", main.sel == TowerState.CORE_SLOT + 1, str(main.sel))
+	_check("PC-U5: glyphs switch to the pad", main.last_device == "pad" and Desktop.hint(main, "cancel") == "B")
+	_pad_axis(JOY_AXIS_LEFT_X, 0.0)
+	await _frames()
+	main.armed = first
+	_pad_button(JOY_BUTTON_A)
+	await _frames()
+	_check("PC-U5: A places the armed building at the cursor", String(BaseMeta.slot_of(main.save, TowerState.CORE_SLOT + 1).get("id", "")) == first)
+	var dead: Array = []
+	for c in main.dui.get_children():
+		if c is Button and not (c as Button).disabled:
+			if (c as Button).focus_mode != Control.FOCUS_ALL or (c as Button).find_next_valid_focus() == null:
+				dead.append(_label(c as Button))
+	_check("PC-U5: base focus chain has no dead ends (pad)", dead.is_empty(), str(dead))
+	main.set_overlay("settings")
+	await _frames()
+	var dead2: int = 0
+	for c in main.dui.get_children():
+		if c is Button and (c as Button).focus_mode != Control.FOCUS_ALL:
+			dead2 += 1
+	_check("PC-U5: settings buttons are all focusable (pad)", dead2 == 0)
+	main.set_overlay("")
+	_key(KEY_ESCAPE)   # back to keyboard/mouse
+	await _frames()
+	_check("PC-U5: keyboard switches glyphs back", main.last_device == "kbm")
+	main.sel = -1
+
+	# ---- PC-S1/S2 settings + remap ------------------------------------------
+	_pressd("HUD Settings")
+	await _frames()
+	_check("PC-S1: settings opens on 4 tabs", main.overlay == "settings" and _findd("SET TAB Video") != null and _findd("SET TAB Audio") != null and _findd("SET TAB Controls") != null and _findd("SET TAB Gameplay") != null)
+	var vs0: String = String(Settings.normalize(main.settings)["video"]["vsync"])
+	_pressd("SET VSync")
+	await _frames()
+	var vs1: String = String(Settings.normalize(main.settings)["video"]["vsync"])
+	_check("PC-S1: VSync cycles and persists to settings.cfg", vs1 != vs0 and String(Settings.read()["video"]["vsync"]) == vs1)
+	var fps0: int = int(Engine.max_fps)
+	_pressd("SET FPS cap")
+	await _frames()
+	_check("PC-S1: FPS cap applies to the engine", int(Engine.max_fps) != fps0 and int(Engine.max_fps) == int(main.settings["video"]["fps_cap"]))
+	_pressd("SET TAB Audio")
+	await _frames()
+	_check("PC-S1: audio tab lists every bus", _findd("SET Master volume") != null and _findd("SET UI volume") != null)
+	_pressd("SET TAB Controls")
+	await _frames()
+	_pressd("REMAP pause")
+	await _frames()
+	_check("PC-S2: remap button enters capture", main.remap_action == "pause")
+	_key(KEY_P)
+	await _frames()
+	_check("PC-S2: captured key rebinds the action", main.remap_action == "" and Keybinds.hint("pause") == "P", Keybinds.hint("pause"))
+	_check("PC-S2: binding persisted in settings.cfg", (Settings.read()["keybinds"] as Dictionary).has("pause"))
+	_pressd("REMAP pause")
+	await _frames()
+	_key(KEY_U)   # U belongs to "upgrade": swap
+	await _frames()
+	_check("PC-S2: conflicting key swaps bindings", Keybinds.hint("pause") == "U" and Keybinds.hint("upgrade") == "P", "%s / %s" % [Keybinds.hint("pause"), Keybinds.hint("upgrade")])
+	_pressd("KEYS RESET ALL")
+	await _frames()
+	_check("PC-S2: reset all restores defaults", Keybinds.hint("pause") == "Space" and Keybinds.hint("upgrade") == "U")
+	_pressd("SET CLOSE")
+	await _frames()
+
+	# ---- PC-U7 stats / history / achievements --------------------------------
+	_pressd("HUD History")
+	await _frames()
+	var hist: Array = main.save.get("history", [])
+	_check("PC-U7: history lists the save's runs with Retry", main.overlay == "history" and hist.size() >= 2 and _findd("HIST RETRY 0") != null and _findd("HIST RETRY %d" % (mini(12, hist.size()) - 1)) != null)
+	_pressd("REC Stats")
+	await _frames()
+	_check("PC-U7: stats overlay from engine data", main.overlay == "stats" and int(main.save["stats"]["runs"]) == hist.size())
+	_pressd("REC Achievements")
+	await _frames()
+	_check("PC-U7: achievements overlay", main.overlay == "achievements")
+	_pressd("REC Stats")
+	await _frames()
+	_pressd("REC History")
+	await _frames()
+	var want_seed: int = int((hist[hist.size() - 1] as Dictionary)["seed"])
+	_pressd("HIST RETRY 0")
+	await _frames()
+	_check("PC-U7: Retry replays the entry's seed", main.screen == "run" and main.S != null and int(main.S.run_seed) == want_seed and main.last_seed == want_seed)
+
+	# ---- in-run: pause key, draft/perk hotkeys, lane focus, retry -----------
+	var S = main.S
+	_key(KEY_SPACE)
+	await _frames()
+	_check("PC-U3: Space pauses", main.overlay == "pause" and main.is_paused())
+	_key(KEY_SPACE)
+	await _frames()
+	_check("PC-U3: Space resumes", main.overlay == "")
+	var fq: int = S.focus_quad
+	_key(KEY_V)
+	await _frames()
+	_check("PC-U3: V moves the lane focus", S.focus_quad == (fq + 1) % 4)
+	S.perk_pending = 1
+	for k in 40:
+		if S.perk_offer.size() > 0:
+			break
+		await _frames(1)
+	var perks0: int = S.perks_taken.size()
+	_check("PC-U6: perk draft modal on the hotbar", S.perk_offer.size() == 3 and _findd("DPERK " + String(load("res://data/PerkDB.gd").get_def(String(S.perk_offer[1]))["name"])) != null)
+	_key(KEY_2)
+	await _frames()
+	_check("PC-U6: perk draft accepts 2", S.perks_taken.size() == perks0 + 1 and S.perk_offer.is_empty())
+	S.xp = S.xp_need()
+	for k in 40:
+		if S.draft.size() > 0:
+			break
+		await _frames(1)
+	if S.draft.size() > 0:
+		var cell: int = int(S.free_slots()[0]) if S.free_slots().size() > 0 else -1
+		var card: Button = null
+		for c in main.dui.get_children():
+			if c is Button and _label(c as Button).begins_with("DCARD"):
+				card = c
+				break
+		var newc: bool = String((S.draft[0] as Dictionary)["kind"]) == "new"
+		if card != null and cell >= 0 and newc:
+			var cp: Vector2 = card.get_global_rect().get_center()
+			_motion(cp)
+			_mouse(cp, MOUSE_BUTTON_LEFT, true)
+			await _frames()
+			_motion(_cell_scr(cell))
+			await _frames()
+			_mouse(_cell_scr(cell), MOUSE_BUTTON_LEFT, false)
+			await _frames()
+			_check("PC-U4: drag a draft card onto a run cell places it", S.id_at(cell) != "" and S.draft.is_empty())
+		else:
+			_key(KEY_1)
+			await _frames()
+			_check("PC-U3: 1 picks draft card 1", S.draft.is_empty())
+	var seed_now: int = main.last_seed
+	_key(KEY_R, true)
+	await _frames()
+	_check("PC-U3: Ctrl+R retries the same seed", main.S != S and int(main.S.run_seed) == seed_now)
+	main.abandon_run()
+	await _frames(3)
+	_check("PC-U6: death screen shows Retry seed + Back to Base", main.screen == "results" and _findd("RETRY SEED") != null and _findd("DBACK") != null)
+	_pressd("DBACK")
+	await _frames()
+
+	# ---- mode select (endless + modifiers) ----------------------------------
+	_pressd("MODES")
+	await _frames()
+	_check("PC: mode select lists the 9 modifiers", main.overlay == "modes" and _findd("MOD Swarm") != null and _findd("MOD Fresh Start") != null)
+	_check("PC: endless locked below best wave 50", _findd("MODE Endless").disabled == not BaseMeta.endless_unlocked(main.save))
+	_pressd("MOD Swarm")
+	await _frames()
+	_check("PC: toggling a modifier updates run options", (main.run_opts["modifiers"] as Array).has("swarm"))
+	_pressd("MODES START")
+	await _frames()
+	_check("PC: run starts with the chosen modifiers", main.screen == "run" and (main.S.modifiers as Array).has("swarm"))
+	main.abandon_run()
+	await _frames(3)
+	_pressd("DBACK")
+	await _frames()
+
+	# ---- slot delete needs confirmation (PC-U6) ----------------------------
+	_pressd("HUD Menu")
+	await _frames()
+	_check("PC: Menu returns to the slot picker", main.screen == "menu")
+	_check("PC: slot 1 exists on disk", MetaSave.slot_exists(1))
+	_pressd("SLOT 1 DELETE")
+	await _frames()
+	_check("PC-U6: delete asks for confirmation first", main.confirm_del == 1 and MetaSave.slot_exists(1) and _findd("SLOT 1 CONFIRM") != null)
+	_pressd("SLOT 1 CONFIRM")
+	await _frames()
+	_check("PC-U6: confirmed delete removes the slot", not MetaSave.slot_exists(1))
+	_pressd("SLOT 1 PLAY")
+	await _frames()
+	_check("PC: new game in the emptied slot", main.screen == "base" and int(main.save["runs"]) == 0)
+	Settings.write(settings_before)   # leave the player's settings.cfg as found
+	Settings.apply(settings_before)

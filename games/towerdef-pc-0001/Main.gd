@@ -30,6 +30,9 @@ const BurstsScript := preload("res://vfx/Bursts.gd")
 const Settings := preload("res://Settings.gd")
 const SteamService := preload("res://SteamService.gd")
 const Achievements := preload("res://Achievements.gd")
+const Desktop := preload("res://ui/Desktop.gd")
+const Keybinds := preload("res://Keybinds.gd")
+const Stats := preload("res://Stats.gd")
 
 const W: float = 720.0
 const H: float = 1280.0
@@ -94,6 +97,40 @@ var flash: float = 0.0
 var heal_flash: float = 0.0
 var level_burst: float = 0.0
 var dust: Array = []
+# ---- PC desktop layout (ui/Desktop.gd). The mobile portrait view is kept as a
+# centre column (col_pos/col_s) inside a 1920x1080 landscape frame with a top
+# HUD, left build/info panel, right meta panel and a bottom hotbar.
+const HUD_H: float = 60.0
+const HOT_H: float = 112.0
+var vw: float = 1920.0
+var vh: float = 1080.0
+var col_pos: Vector2 = Vector2.ZERO
+var col_s: float = 1.0
+var panel_w: float = 440.0
+var zoom: float = 1.0                 # battlefield wheel zoom (0.8 - 1.4)
+var dui: Control                      # desktop chrome Controls (unscaled)
+var tipbox: PanelContainer            # hover tooltip (topmost, ignores mouse)
+var tip_label: Label
+var mouse_pos: Vector2 = Vector2(-1, -1)
+var tip_text: String = ""
+var tip_t: float = 0.0
+var stat_tips: Array = []             # [[Rect2, text]] regions drawn by Desktop.draw
+var drag_id: String = ""              # base: building dragged from the hotbar
+var drag_card: int = -1               # run: draft card dragged from the hotbar
+var drag_start: Vector2 = Vector2.ZERO
+var armed: String = ""                # base: hotbar building armed for click-to-place
+var info_cell: int = -1               # right-click info popover cell
+var last_device: String = "kbm"       # "kbm" | "pad" (glyph / hint switching)
+var pad_style: String = "xbox"
+var remap_action: String = ""         # settings: action waiting for a key
+var set_tab_id: String = "video"      # settings menu tab
+var keymap_page: int = 0
+var confirm_del: int = 0              # slot picker: slot awaiting delete confirm
+var run_opts: Dictionary = {"mode": "normal", "modifiers": []}
+var last_seed: int = 0
+var show_left: bool = true
+var show_right: bool = true
+var menu_msg: String = ""
 
 
 func _ready() -> void:
@@ -110,12 +147,28 @@ func _ready() -> void:
 	bursts = BurstsScript.new()
 	add_child(bursts)   # before ui: particles under the HUD widgets
 	add_child(ui)
+	dui = Control.new()
+	dui.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(dui)
+	tipbox = PanelContainer.new()
+	tipbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tipbox.visible = false
+	tipbox.add_theme_stylebox_override("panel", Desktop.tip_style())
+	tip_label = Label.new()
+	tip_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tip_label.add_theme_font_size_override("font_size", 18)
+	tip_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tip_label.custom_minimum_size = Vector2(320, 0)
+	tipbox.add_child(tip_label)
+	add_child(tipbox)
 	fader = ColorRect.new()
 	fader.color = Color(0.05, 0.06, 0.08, 1.0)
 	fader.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	fader.size = Vector2(W, H)
 	fader.modulate = Color(1, 1, 1, 0)
 	add_child(fader)
+	get_viewport().size_changed.connect(_on_resize)
+	_layout()
 	sfx = SfxScript.new()
 	sfx.name = "Sfx"
 	add_child(sfx)
@@ -124,6 +177,53 @@ func _ready() -> void:
 	for k in 40:
 		dust.append(Vector3(r.randf() * W, r.randf() * ARENA_BOTTOM, r.randf_range(4.0, 14.0)))
 	boot(MetaSave.read(), now())
+	screen = "menu"   # PC: boot to the main menu / save-slot picker
+	_rebuild_ui()
+
+
+## Recompute the landscape frame from the live viewport size (resizable window).
+func _layout() -> void:
+	var vs: Vector2 = get_viewport().get_visible_rect().size
+	vw = maxf(vs.x, 1024.0)
+	vh = maxf(vs.y, 600.0)
+	col_s = (vh - HUD_H - HOT_H) / H
+	var col_w: float = W * col_s
+	col_pos = Vector2(floorf((vw - col_w) * 0.5), HUD_H)
+	panel_w = clampf((vw - col_w) * 0.5 - 16.0, 300.0, 460.0)
+	ui.position = col_pos
+	ui.scale = Vector2(col_s, col_s)
+	fader.size = Vector2(vw, vh)
+
+
+func _on_resize() -> void:
+	_layout()
+	_rebuild_ui()
+
+
+## Battlefield transform: column space, zoomed around the arena centre.
+func world_xform() -> Transform2D:
+	var col := Transform2D(0.0, Vector2(col_s, col_s), 0.0, col_pos)
+	var z := Transform2D(0.0, Vector2(zoom, zoom), 0.0, TowerState.CENTER - TowerState.CENTER * zoom)
+	return col * z
+
+
+## World (engine) point -> viewport point, and back.
+func w2s(p: Vector2) -> Vector2:
+	return world_xform() * p
+
+
+func s2w(p: Vector2) -> Vector2:
+	return world_xform().affine_inverse() * p
+
+
+func s2col(p: Vector2) -> Vector2:
+	return (p - col_pos) / col_s
+
+
+func field_rect() -> Rect2:
+	var lw: float = panel_w if show_left else 0.0
+	var rw: float = panel_w if show_right else 0.0
+	return Rect2(lw, HUD_H, vw - lw - rw, vh - HUD_H - HOT_H)
 
 
 ## SPEC boot: migrate -> normalize -> Labs.claim -> Missions.roll -> Offline modal.
@@ -174,7 +274,7 @@ static func fmt_num(v: int) -> String:
 
 
 # ------------------------------------------------------------------ flow
-func start_run() -> void:
+func start_run(seed_override: int = 0) -> void:
 	if not Tiers.is_unlocked(save, view_tier):
 		return
 	BaseMeta.select_tier(save, view_tier)
@@ -182,10 +282,18 @@ func start_run() -> void:
 	_clear_fx()
 	run_missions = 0
 	last_breakdown = {}
-	_handle(S.setup(TuneRef.seed_of(int(Time.get_ticks_usec() % 1000000)), save, now()))
+	var sd: int = seed_override if seed_override != 0 else TuneRef.seed_of(int(Time.get_ticks_usec() % 1000000))
+	last_seed = sd
+	var opts: Dictionary = run_opts.duplicate(true)
+	if String(opts.get("mode", "normal")) == "endless" and not BaseMeta.endless_unlocked(save):
+		opts["mode"] = "normal"
+	_handle(S.setup(sd, save, now(), opts))
 	screen = "run"
 	sel = -1
 	overlay = ""
+	armed = ""
+	drag_id = ""
+	drag_card = -1
 	_fade_in()
 	_rebuild_ui()
 
@@ -204,6 +312,62 @@ func go_base() -> void:
 	_rebuild_ui()
 
 
+## PC main menu / save-slot picker.
+func go_menu() -> void:
+	if S != null and screen == "run":
+		return
+	_save()
+	screen = "menu"
+	overlay = ""
+	confirm_del = 0
+	sel = -1
+	_fade_in()
+	_rebuild_ui()
+
+
+func load_slot(n: int) -> void:
+	if not MetaSave.set_active(n):
+		return
+	menu_msg = ""
+	boot(MetaSave.read(), now())
+	_fade_in()
+
+
+func ask_delete(n: int) -> void:
+	confirm_del = n
+	_rebuild_ui()
+
+
+func delete_slot(n: int) -> void:
+	if confirm_del == n and MetaSave.delete_slot(n, MetaSave.DELETE_CONFIRM):
+		menu_msg = "Slot %d deleted" % n
+		if MetaSave.active == n:
+			save = BaseMeta.normalize({})
+	confirm_del = 0
+	_rebuild_ui()
+
+
+func copy_slot(n: int) -> void:
+	for d in range(1, MetaSave.SLOT_COUNT + 1):
+		if not MetaSave.slot_exists(d) and MetaSave.copy_slot(n, d):
+			menu_msg = "Copied slot %d to slot %d" % [n, d]
+			_rebuild_ui()
+			return
+	menu_msg = "No empty slot to copy into"
+	_rebuild_ui()
+
+
+## History "Retry": same seed, tier, mode and modifiers (Stats.retry_opts).
+func retry_entry(e: Dictionary) -> void:
+	var o: Dictionary = Stats.retry_opts(e)
+	run_opts = {"mode": String(o["mode"]), "modifiers": (o["modifiers"] as Array).duplicate()}
+	if Tiers.is_unlocked(save, int(o["tier"])):
+		view_tier = int(o["tier"])
+	screen = "base"
+	overlay = ""
+	start_run(int(o["seed"]))
+
+
 ## Short fade-from-dark on screen changes (Maaack scene-loader fade, inlined).
 func _fade_in() -> void:
 	fade = FADE_TIME
@@ -213,7 +377,10 @@ func _fade_in() -> void:
 ## engine is not ticked (game time frozen).
 func set_overlay(id: String) -> void:
 	overlay = id
-	sel = -1
+	if not (id in ["info"]):
+		sel = -1
+	remap_action = ""
+	confirm_del = 0
 	_rebuild_ui()
 
 
@@ -560,7 +727,63 @@ func _handle(events: Array) -> void:
 
 
 # ----------------------------------------------------------------- input
+## Desktop pre-GUI input: remap capture, mouse tracking (hover tooltips),
+## drag-to-place release, right-click info, wheel zoom, device switching.
+func _input(event: InputEvent) -> void:
+	if Keybinds.is_pad(event):
+		if last_device != "pad":
+			last_device = "pad"
+			if event.device >= 0:
+				pad_style = Keybinds.pad_style(Input.get_joy_name(event.device))
+			_rebuild_ui()
+	elif event is InputEventKey or event is InputEventMouseButton:
+		if last_device != "kbm":
+			last_device = "kbm"
+			_rebuild_ui()
+	if remap_action != "":
+		Desktop.capture_remap(self, event)
+		return
+	if event is InputEventMouseMotion:
+		mouse_pos = (event as InputEventMouseMotion).position
+		return
+	if not (event is InputEventMouseButton):
+		return
+	var mb: InputEventMouseButton = event
+	mouse_pos = mb.position
+	var in_field: bool = field_rect().has_point(mb.position) and overlay == "" and screen != "menu" and screen != "results"
+	if mb.button_index == MOUSE_BUTTON_LEFT and not mb.pressed and (drag_id != "" or drag_card >= 0):
+		_end_drag(mb.position)
+		get_viewport().set_input_as_handled()
+		return
+	if not mb.pressed or not in_field:
+		return
+	match mb.button_index:
+		MOUSE_BUTTON_RIGHT:
+			var i: int = slot_at(s2w(mb.position))
+			if i >= 0:
+				open_info(i)
+				get_viewport().set_input_as_handled()
+		MOUSE_BUTTON_WHEEL_UP:
+			set_zoom(zoom + (-0.1 if bool(_ctl("invert_zoom")) else 0.1))
+			get_viewport().set_input_as_handled()
+		MOUSE_BUTTON_WHEEL_DOWN:
+			set_zoom(zoom + (0.1 if bool(_ctl("invert_zoom")) else -0.1))
+			get_viewport().set_input_as_handled()
+
+
+func _ctl(key: String) -> Variant:
+	var c: Variant = settings.get("controls", {})
+	return (c as Dictionary).get(key, false) if c is Dictionary else false
+
+
+func set_zoom(z: float) -> void:
+	zoom = clampf(snappedf(z, 0.01), 0.8, 1.4)
+
+
 func _unhandled_input(event: InputEvent) -> void:
+	if Desktop.handle_action(self, event):
+		get_viewport().set_input_as_handled()
+		return
 	var pos: Vector2 = Vector2.ZERO
 	var pressed: bool = false
 	if event is InputEventScreenTouch:
@@ -572,7 +795,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		pos = mb.position
 	if not pressed:
 		return
-	# Android emulates a mouse click from each touch — drop the duplicate.
 	var t: int = Time.get_ticks_msec()
 	if t - last_tap_ms < 60:
 		return
@@ -592,18 +814,85 @@ func slot_at(pos: Vector2) -> int:
 	return y * TowerState.SIDE + x
 
 
+## `pos` is a viewport point (mouse); cells are hit-tested in world space.
 func tap_at(pos: Vector2) -> void:
-	if screen == "results" or not offline_offer.is_empty() or overlay != "":
+	if screen == "menu" or screen == "results" or not offline_offer.is_empty() or overlay != "":
 		return
-	if screen == "base" and (tab != "base" or pos.y < 150.0 or pos.y > 640.0):
+	if not field_rect().has_point(pos):
 		return
-	if screen == "run" and pos.y > ARENA_BOTTOM:
+	var cp: Vector2 = s2col(pos)
+	if screen == "base" and (tab != "base" or cp.y < 150.0 or cp.y > 640.0):
 		return
-	var i: int = slot_at(pos)
+	if screen == "run" and cp.y > ARENA_BOTTOM:
+		return
+	var i: int = slot_at(s2w(pos))
 	if screen == "run" and S != null and S.pending_place != "" and i >= 0:
 		_handle(S.place(i))
 		return
+	if screen == "base" and armed != "" and i >= 0 and BaseMeta.is_unlocked(save, i) and BaseMeta.slot_of(save, i).is_empty():
+		sel = i
+		_base_act(BaseMeta.try_place(save, i, armed), "place")
+		return
 	sel = i
+	_rebuild_ui()
+
+
+func open_info(i: int) -> void:
+	sel = i
+	info_cell = i
+	set_overlay("info")
+
+
+## Hotbar press starts a drag; release over a cell places, release in place
+## (no movement) arms the building / picks the card instead.
+func begin_drag_building(id: String) -> void:
+	drag_id = id
+	drag_card = -1
+	drag_start = mouse_pos
+
+
+func begin_drag_card(idx: int) -> void:
+	drag_card = idx
+	drag_id = ""
+	drag_start = mouse_pos
+
+
+func _end_drag(pos: Vector2) -> void:
+	var id: String = drag_id
+	var card: int = drag_card
+	drag_id = ""
+	drag_card = -1
+	var moved: bool = pos.distance_to(drag_start) > 12.0
+	var i: int = slot_at(s2w(pos)) if field_rect().has_point(pos) else -1
+	if screen == "base" and id != "":
+		if moved and i >= 0:
+			sel = i
+			if Desktop.place_reason(self, i, id) == "":
+				_base_act(BaseMeta.try_place(save, i, id), "place")
+				return
+			sfx_play("click")
+		elif not moved:
+			arm(id)
+			return
+	elif screen == "run" and S != null and card >= 0:
+		if moved and i >= 0:
+			var cd: Dictionary = S.draft[card] if card < S.draft.size() else {}
+			if not cd.is_empty() and Desktop.place_reason(self, i, String(cd["id"])) == "":
+				_handle(S.choose_card(card))
+				if S.pending_place != "":
+					_handle(S.place(i))
+				return
+		elif not moved and card < S.draft.size():
+			_handle(S.choose_card(card))
+			return
+	_rebuild_ui()
+
+
+func arm(id: String) -> void:
+	armed = "" if armed == id else id
+	if armed != "" and sel >= 0 and BaseMeta.is_unlocked(save, sel) and BaseMeta.slot_of(save, sel).is_empty():
+		_base_act(BaseMeta.try_place(save, sel, armed), "place")
+		return
 	_rebuild_ui()
 
 
@@ -664,6 +953,7 @@ func _process(delta: float) -> void:
 		if d.x > W:
 			d.x = 0.0
 		dust[k] = d
+	Desktop.update_tip(self, delta)
 	queue_redraw()
 
 
@@ -684,6 +974,7 @@ func _btn(text: String, rect: Rect2, cb: Callable, enabled: bool = true, col: Co
 	b.size = rect.size
 	b.focus_mode = Control.FOCUS_NONE
 	b.action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
+	b.tooltip_text = text.replace("\n", " — ")
 	b.disabled = not enabled
 	b.clip_text = true
 	b.add_theme_font_size_override("font_size", 22)
@@ -707,6 +998,10 @@ func _btn(text: String, rect: Rect2, cb: Callable, enabled: bool = true, col: Co
 func _card(rect: Rect2, lines: Array, icon_id: String, cb: Callable, enabled: bool, col: Color, key: String, layout: String = "tall", icon_sz: float = 64.0) -> Button:
 	var b: Button = _btn("", rect, cb, enabled, col)
 	b.set_meta("key", key)
+	var tip: String = key
+	for ln in lines:
+		tip += "\n" + String((ln as Array)[0])
+	b.tooltip_text = tip
 	var x0: float = 10.0
 	var y: float = 10.0
 	var tex: Texture2D = Art.tex(icon_id) if icon_id != "" else null
@@ -772,6 +1067,13 @@ func _rebuild_ui() -> void:
 	for c in ui.get_children():
 		ui.remove_child(c)
 		c.queue_free()
+	if dui != null:
+		for c in dui.get_children():
+			dui.remove_child(c)
+			c.queue_free()
+		Desktop.build(self)
+	if overlay != "" and overlay in Desktop.OVERLAYS:
+		return
 	if overlay != "":
 		Menus.build(self)
 		return
@@ -948,18 +1250,27 @@ func _bar(r: Rect2, frac: float, col: Color) -> void:
 
 
 func _draw() -> void:
-	draw_rect(Rect2(0, 0, W, H), BG)
+	draw_rect(Rect2(0, 0, vw, vh), BG)
+	if screen == "menu":
+		Desktop.draw(self)
+		if overlay != "" and not (overlay in Desktop.OVERLAYS):
+			draw_set_transform(col_pos, 0.0, Vector2(col_s, col_s))
+			Menus.draw(self)
+			draw_set_transform(Vector2.ZERO)
+		return
+	Desktop.draw_field(self)
 	var off: Vector2 = juice.offset()
+	var wx: Transform2D = Transform2D(0.0, off * col_s) * world_xform()
 	if bursts != null:
-		bursts.position = off
-	draw_set_transform(off)
+		bursts.transform = wx
+	draw_set_transform_matrix(wx)
 	_draw_background()
 	if screen != "base" or tab == "base":
 		_draw_base()
 	if screen != "base" and S != null:
 		RunView.draw_links(self)
 		RunView.draw_world(self)
-	draw_set_transform(Vector2.ZERO)
+	draw_set_transform(col_pos, 0.0, Vector2(col_s, col_s))
 	if flash > 0.0:
 		draw_rect(Rect2(0, 0, W, H), Color(0.9, 0.15, 0.2, flash * 0.5))
 	if heal_flash > 0.0:
@@ -968,8 +1279,10 @@ func _draw() -> void:
 		_draw_meta()
 	else:
 		RunView.draw_hud(self)
-	if overlay != "":
+	if overlay != "" and not (overlay in Desktop.OVERLAYS):
 		Menus.draw(self)
+	draw_set_transform(Vector2.ZERO)
+	Desktop.draw(self)
 
 
 func _draw_background() -> void:
@@ -996,6 +1309,9 @@ func _draw_base() -> void:
 	draw_rect(plate, Color("12161b"))
 	draw_rect(plate, RUST.darkened(0.3), false, 3.0)
 	var placing: bool = screen == "run" and S != null and S.pending_place != ""
+	for ring in [1, 2]:   # PC 7x7 ring boundaries (ring 1 | ring 2 | ring 3)
+		var rh: float = (float(ring) + 0.5) * c + 2.0
+		draw_rect(Rect2(TowerState.CENTER - Vector2(rh, rh), Vector2(rh * 2.0, rh * 2.0)), Color(RUST, 0.22 if ring == 1 else 0.14), false, 2.0)
 	for i in TowerState.N:
 		var p: Vector2 = TowerState.slot_pos(i)
 		var sc: float = 1.0
@@ -1125,8 +1441,8 @@ func _draw_meta() -> void:
 
 
 func _draw_base_tab() -> void:
-	_text("PERMANENT BASE", Vector2(360, 196), 26, TEXT)
-	_text("Runs %d  ·  Perm level cap %d  ·  Tier %d unlocked" % [int(save["runs"]), BaseMeta.perm_lvl_cap(save), Tiers.highest(save)], Vector2(360, 232), 18, DIM)
+	_text("PERMANENT BASE", Vector2(360, 186), 26, TEXT)
+	_text("Runs %d  ·  Perm level cap %d  ·  Tier %d unlocked" % [int(save["runs"]), BaseMeta.perm_lvl_cap(save), Tiers.highest(save)], Vector2(360, 214), 18, DIM)
 	var hint: String = "Tap a slot to build your permanent base"
 	if sel == BaseMeta.CORE_SLOT:
 		hint = "The Core — upgrade it below"
@@ -1135,12 +1451,12 @@ func _draw_base_tab() -> void:
 		if not e.is_empty():
 			var d: Dictionary = BuildingDB.get_def(String(e["id"]))
 			hint = "%s Lv%d" % [String(d["name"]), int(e["lvl"])]
-			_text(String(d["desc"]), Vector2(360, 310), 18, DIM)
+			_text(String(d["desc"]), Vector2(360, 270), 16, DIM)
 		elif BaseMeta.is_unlocked(save, sel):
 			hint = "Empty slot — pick a building"
 		else:
 			hint = "Locked outer slot"
-	_text(hint, Vector2(360, 284), 22, TEXT)
+	_text(hint, Vector2(360, 246), 22, TEXT)
 	_text("PERMANENT CORE", Vector2(360, 650), 18, DIM)
 	if sel >= 0 and sel != BaseMeta.CORE_SLOT and BaseMeta.is_unlocked(save, sel) and BaseMeta.slot_of(save, sel).is_empty():
 		_text("BUILD (permanent)", Vector2(360, 762), 18, DIM)
