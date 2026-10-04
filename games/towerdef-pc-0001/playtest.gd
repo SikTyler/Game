@@ -67,9 +67,166 @@ const GATES: Array = ["solvent", "first_goal_reachable", "progressable", "no_dea
 const EXTRA_SEEDS: Array = [5151, 6262]   # AC-38/AC-40 re-checked on more seeds (thin margins)
 
 
+static var QUIET: bool = false      # child jobs buffer their log instead of printing
+static var LOGBUF: Array = []
+
+
+## Every report line goes through here: printed in the parent, buffered in a
+## child job (the parent prints each job's buffer in a fixed order).
+static func say(line: String) -> void:
+	LOGBUF.append(line)
+	if not QUIET:
+		print(line)
+
+
 func _initialize() -> void:
-	MetaSave.clear()
+	var args: Dictionary = {}
+	for a in OS.get_cmdline_user_args():
+		var p: PackedStringArray = String(a).split("=", true, 1)
+		args[p[0]] = p[1] if p.size() > 1 else "1"
 	var seed0: int = TuneRef.seed_of(SEED_DEFAULT)
+	if args.has("job"):
+		# Child worker: run one job, write {log, r} to dir/<job>.bin, exit.
+		QUIET = true
+		var dir: String = String(args.get("dir", ""))
+		var r: Dictionary = run_job(String(args["job"]), seed0, dir)
+		var f := FileAccess.open(dir.path_join(_job_file(String(args["job"]))), FileAccess.WRITE)
+		f.store_buffer(var_to_bytes({"log": LOGBUF, "r": r}))
+		f.close()
+		quit(0)
+		return
+	if args.has("only"):
+		# Debug: one job in-process, verbose (no gates).
+		FORGE_DUMP = String(args.get("dump", ""))
+		FORGE_RESUME = String(args.get("resume", ""))
+		var o: Dictionary = run_job(String(args["only"]), seed0, OS.get_user_data_dir())
+		if String(args["only"]).begins_with("forge"):
+			print("ONLY " + JSON.stringify(redesign_checks({String(args["only"]): o})))
+		elif not String(args["only"]).begins_with("main"):
+			print("ONLY " + JSON.stringify(o))
+		quit(0)
+		return
+	MetaSave.clear()
+	var t0: int = Time.get_ticks_msec()
+	var R: Dictionary = run_jobs(seed0, args.has("serial"), int(args.get("workers", "4")))
+	var m: Dictionary = combine(R)
+	m["runtime_s"] = snappedf(float(Time.get_ticks_msec() - t0) / 1000.0, 0.1)
+	print("PLAYTEST METRICS " + JSON.stringify(m))
+	for key in GATES + RD_GATES:
+		if not bool(m.get(key, false)):
+			fail_count += 1
+			print("PLAYTEST FAIL: " + key)
+	for jf in R.get("_failed", []):
+		fail_count += 1
+		print("PLAYTEST FAIL: job " + String(jf) + " crashed")
+	MetaSave.clear()
+	if fail_count == 0:
+		print("PLAYTEST OK")
+		quit(0)
+	else:
+		quit(1)
+
+
+# ------------------------------------------------------------- job runner
+# The audit is split into independent deterministic jobs (each one owns its
+# saves and RNG seeds) so it can fan out over CPU cores: the parent re-launches
+# this script headless once per job (`-- job=<name> dir=<tmp>`), at most
+# `workers` at a time, and merges the results. Phase-B jobs replay the day-7 /
+# day-20 snapshots the "main" job writes (var_to_bytes: exact). `-- serial`
+# runs every job in-process (same results; for debugging).
+const JOBS_A: Array = ["main", "forge:balanced", "forge:eco", "forge:single", "forge:damage", "strat", "seed:0", "seed:1", "pol"]
+const JOBS_B: Array = ["perks", "mods", "mono"]
+
+
+static func _job_file(job: String) -> String:
+	return job.replace(":", "_") + ".bin"
+
+
+static func run_job(job: String, seed0: int, dir: String) -> Dictionary:
+	var p: PackedStringArray = job.split(":")
+	match p[0]:
+		"pol":
+			return job_policies(seed0)
+		"main":
+			return job_main(seed0, dir)
+		"strat":
+			return job_strat(seed0)
+		"seed":
+			return job_seed(seed0, int(EXTRA_SEEDS[int(p[1])]))
+		"perks", "mods", "mono":
+			var snaps: Dictionary = {}
+			for d in [7, 20]:
+				var f := FileAccess.open(dir.path_join("snap%d.bin" % d), FileAccess.READ)
+				snaps[d] = bytes_to_var(f.get_buffer(f.get_length()))
+				f.close()
+			match p[0]:
+				"perks":
+					return job_perks(seed0, snaps)
+				"mods":
+					return job_mods(seed0, snaps)
+				_:
+					return job_mono(seed0, snaps)
+		"forge":
+			return forge_campaign(seed0, p[1])
+	return {}
+
+
+func run_jobs(seed0: int, serial: bool, workers: int) -> Dictionary:
+	var dir: String = OS.get_user_data_dir().path_join("pt_jobs")
+	DirAccess.make_dir_recursive_absolute(dir)
+	var R: Dictionary = {}
+	var failed: Array = []
+	var order: Array = ["main"] + JOBS_B + JOBS_A.slice(1)
+	if serial:
+		for job in order:
+			LOGBUF = []
+			R[job] = run_job(String(job), seed0, dir)
+	else:
+		var exe: String = OS.get_executable_path()
+		var proj: String = ProjectSettings.globalize_path("res://")
+		var pending: Array = order.duplicate()
+		var running: Dictionary = {}     # job -> pid
+		var done: Dictionary = {}
+		while pending.size() > 0 or running.size() > 0:
+			for job in running.keys():
+				if not OS.is_process_running(int(running[job])):
+					running.erase(job)
+					done[job] = true
+					var path: String = dir.path_join(_job_file(String(job)))
+					if FileAccess.file_exists(path):
+						var f := FileAccess.open(path, FileAccess.READ)
+						var res: Variant = bytes_to_var(f.get_buffer(f.get_length()))
+						f.close()
+						DirAccess.remove_absolute(path)
+						var rd: Dictionary = res
+						for line in rd["log"]:
+							print(String(line))
+						R[job] = rd["r"]
+					else:
+						failed.append(job)
+						R[job] = {}
+			var k: int = 0
+			while k < pending.size() and running.size() < maxi(1, workers):
+				var job: String = String(pending[k])
+				if JOBS_B.has(job) and not done.has("main"):
+					k += 1
+					continue
+				pending.remove_at(k)
+				var pid: int = OS.create_process(exe, ["--headless", "--path", proj, "--script", "res://playtest.gd", "--", "job=" + job, "dir=" + dir])
+				if pid <= 0:
+					failed.append(job)
+					R[job] = {}
+					done[job] = true
+				else:
+					running[job] = pid
+			OS.delay_msec(100)
+	for d in [7, 20]:
+		DirAccess.remove_absolute(dir.path_join("snap%d.bin" % d))
+	R["_failed"] = failed
+	return R
+
+
+static func job_policies(seed0: int) -> Dictionary:
 	var camp: Dictionary = {}
 	for pol in ["balanced", "eco", "weapon", "mono:gun", "mono:mortar", "mono:tesla"]:
 		camp[pol] = campaign(pol, seed0)
@@ -96,7 +253,7 @@ func _initialize() -> void:
 	for k in range(1, bal.size()):
 		if int(bal[k]) < int(bal[k - 1]) - 2:
 			spiral = true
-	var m: Dictionary = {
+	return {
 		"first_wave": first_wave, "first_coins": int(first["coins"]), "first_levels": int(first["level"]),
 		"first_time_s": snappedf(float(first["time"]), 0.1),
 		"balanced_waves": bal, "eco_waves": eco, "weapon_waves": wpn,
@@ -108,18 +265,6 @@ func _initialize() -> void:
 		"no_trivial_dominant": float(maxi(eco_best, wpn_best)) <= float(bal_best) * 1.15,
 		"mono_best": mono8, "ac39_no_mono": mono8_ok,
 	}
-	m.merge(campaign_checks(seed0))
-	print("PLAYTEST METRICS " + JSON.stringify(m))
-	for key in GATES:
-		if not bool(m[key]):
-			fail_count += 1
-			print("PLAYTEST FAIL: " + key)
-	MetaSave.clear()
-	if fail_count == 0:
-		print("PLAYTEST OK")
-		quit(0)
-	else:
-		quit(1)
 
 
 static func campaign(policy: String, seed0: int) -> Dictionary:
@@ -131,7 +276,7 @@ static func campaign(policy: String, seed0: int) -> Dictionary:
 		if r == 0:
 			first = res
 		waves.append(int(res["wave"]))
-		print("PLAYTEST run %s #%d: wave %d lv %d kills %d coins %d (%.0fs) bank=%d" % [policy, r + 1, res["wave"], res["level"], res["kills"], res["coins"], res["time"], save["coins"]])
+		say("PLAYTEST run %s #%d: wave %d lv %d kills %d coins %d (%.0fs) bank=%d" % [policy, r + 1, res["wave"], res["level"], res["kills"], res["coins"], res["time"], save["coins"]])
 		spend_meta(save, policy)
 	return {"waves": waves, "first": first}
 
@@ -176,6 +321,27 @@ static func _card_score(S, policy: String, c: Dictionary) -> float:
 				sc += 12.0
 			elif weapon:
 				sc += 6.0
+		"spec_eco", "single", "damage":
+			# Redesign specs = the balanced line re-weighted: spec_eco takes up to
+			# 3 eco picks from wave 6; single keeps few buildings and stacks the
+			# Core (Core Surge, damage packs, Overdrive); damage takes one eco pick
+			# and every damage card.
+			var ne2: int = _counts(S).y
+			if eco:
+				var cap: int = {"spec_eco": 3, "single": 2, "damage": 1}[policy]
+				var from: int = 6 if policy == "spec_eco" else TuneRef.int_of("bot_eco_from", 12)
+				sc += 11.0 if (nw >= 1 and S.wave >= from and S.wave < 20 and ne2 < cap) else -2.0
+			elif weapon:
+				if policy == "single":
+					sc += 11.0 if nw < 1 + S.wave / 10 else 4.0
+				else:
+					sc += 11.0 if nw < 3 + S.wave / 5 else 9.0
+			elif fam == "pack" and tags.has("dps"):
+				sc += 12.0 if (policy == "single" and id == "pk_core") else (10.0 if policy != "spec_eco" else 9.0)
+			elif fam == "special":
+				sc += (6.0 if policy == "single" and id == "sp_overdrive" else 0.0) + (3.0 if ["sp_orbital", "sp_overdrive", "sp_timewarp", "sp_emp"].has(id) else 1.0)
+			elif fam == "hut":
+				sc += 2.5
 		_:
 			# balanced = the weapon line plus an early eco engine: the first two
 			# eco picks before wave 12 come first (they compound all run), then
@@ -241,9 +407,17 @@ static func _track_weight(S, policy: String, t: String) -> float:
 			return {"eco": 0.4, "dmg": 1.0, "rate": 1.4, "range": 3.0, "armor": 1.6}[t]
 		"weapon":
 			return {"eco": 99.0, "dmg": 0.8, "rate": 1.0, "range": 2.0, "armor": 1.4}[t]
+		"spec_eco":
+			return {"eco": 0.3 if S.wave < 35 else 1.2, "dmg": 0.8, "rate": 1.0, "range": 2.0, "armor": 0.9 if hp_frac < 0.5 else 1.4}[t]
+		"single":
+			return {"eco": 0.5 if S.wave < 25 else 1.8, "dmg": 0.7, "rate": 0.85, "range": 2.0 if int(S.tracks["range"]) < 6 else 6.0, "armor": 0.9 if hp_frac < 0.5 else 1.4}[t]
 	var w: Dictionary = {"dmg": 0.8, "rate": 1.0, "range": 2.0, "eco": TuneRef.num("bot_eco_w", 0.35) if S.wave < TuneRef.int_of("bot_eco_until", 30) else TuneRef.num("bot_eco_w_late", 1.6), "armor": 0.9 if hp_frac < 0.5 else 1.4}
 	if int(S.tracks["range"]) >= 6:
 		w["range"] = 6.0
+	# Boss prep: the last waves before a boss wave go to damage, not eco.
+	var be: int = int(S.boss_every)
+	if S.wave >= maxi(be, TuneRef.int_of("bot_boss_prep_from", 0)) and be - S.wave % be <= TuneRef.int_of("bot_boss_prep", 3):
+		w["eco"] = float(w["eco"]) * 4.0
 	return float(w[t])
 
 
@@ -478,6 +652,15 @@ static func _part_score(id: String, lvl: int, policy: String, core: String = "ba
 		v *= 1.5
 	if policy == "weapon" and (plus.has("dmg") or plus.has("core_dmg") or plus.has("rate") or plus.has("crit")):
 		v *= 1.5
+	# Redesign specs (forge campaign): the spec's focus keys are worth more;
+	# a single-weapon (Core) build discounts building-only benefits.
+	if policy == "single" or policy == "damage":
+		for k in plus.keys():
+			if (SPEC_KEYS[policy] as Array).has(String(k)):
+				v *= SPEC_PART_W
+				break
+		if policy == "single" and (plus.has("bld_dmg") or plus.has("bld_rate") or plus.has("dmg_per_bld")):
+			v *= 0.5
 	return v
 
 
@@ -614,10 +797,28 @@ static func camp_run(save: Dictionary, policy: String, seed_value: int, now: int
 	var t: float = 0.0
 	var acc: float = 0.0
 	var res: Dictionary = {}
+	var rw: Dictionary = {}          # wave -> effective DPS at the wave's start
+	var whp: Dictionary = {}         # wave -> HP spawned in it (bosses, elites, tier multipliers)
+	var wt: Dictionary = {}          # wave -> seconds of it played
+	var lw: int = -1
+	var last_eid: int = -1
 	while not S.over and t < MAX_SIM_S:
 		var ev: Array = S.tick(DT)
 		t += DT
 		acc += DT
+		if S.wave != lw:
+			lw = S.wave
+			rw[lw] = PowerModel.effective_dps(S.power_snapshot())
+		wt[S.wave] = float(wt.get(S.wave, 0.0)) + DT * S.speed
+		var ne: int = S.enemies.size()
+		var k: int = ne - 1
+		while k >= 0 and int((S.enemies[k] as Dictionary)["eid"]) > last_eid:
+			var ed: Dictionary = S.enemies[k]
+			if String(ed["kind"]) != "courier":
+				whp[S.wave] = float(whp.get(S.wave, 0.0)) + float(ed["max_hp"])
+			k -= 1
+		if ne > 0:
+			last_eid = maxi(last_eid, int((S.enemies[ne - 1] as Dictionary)["eid"]))
 		if acc >= 0.5:
 			acc = 0.0
 			ev.append_array(bot_step(S, policy, perk_pref))
@@ -628,7 +829,22 @@ static func camp_run(save: Dictionary, policy: String, seed_value: int, now: int
 			if String(e.get("t", "")) == "game_over":
 				res = e
 	var coins: int = int(res.get("coins", int(S.coins_run)))
-	return {"wave": S.wave, "tier": S.tier, "coins": coins, "real_s": t, "gems": S.gems_run, "perks": S.perks_taken.duplicate(), "mode": S.mode, "mutations": S.mutations_taken.size()}
+	# POWER_MODEL §2.3 / §9 probes. R(w) = effective DPS (PowerModel over the
+	# engine's power_snapshot) / the HP the engine actually spawned per second
+	# of wave w (PM-1's "measured spawn HP/s": composition, elites + shields,
+	# bosses and tier multipliers included). Frontier = the death wave with the
+	# build the run died with; early = w*/2 with the build of that moment; wall
+	# = the frontier requirement grown to w*+5 by PowerModel's D(w) curve.
+	var snap: Dictionary = S.power_snapshot()
+	var dps: float = PowerModel.effective_dps(snap)
+	var wave_s: float = TuneRef.num("wave_time", 25.0)
+	var front: float = dps / maxf(0.001, float(whp.get(S.wave, 0.0)) / clampf(float(wt.get(S.wave, wave_s)), wave_s / 3.0, wave_s))
+	var we: int = maxi(1, S.wave / 2)
+	var early: float = float(rw.get(we, 0.0)) / maxf(0.001, float(whp.get(we, 0.0)) / wave_s)
+	var wall: float = front * PowerModel.required_dps(S.wave, S.tier) / maxf(0.001, PowerModel.required_dps(S.wave + 5, S.tier))
+	return {"wave": S.wave, "tier": S.tier, "coins": coins, "real_s": t, "gems": S.gems_run, "perks": S.perks_taken.duplicate(), "mode": S.mode, "mutations": S.mutations_taken.size(),
+		"r_front": front, "r_early": early, "r_wall": wall,
+		"r_hp": PowerModel.hp_ratio(snap, S.wave, S.tier), "timeout": not S.over}
 
 
 static func _gems_spend(save: Dictionary, rng: RandomNumberGenerator) -> void:
@@ -766,7 +982,7 @@ static func campaign_days(seed0: int, policy: String = "balanced", n_days: int =
 			"progress_key": hi * 1000 + bit,
 		}
 		days.append(row)
-		print("CAMPAIGN " + policy + " day %2d: T%d best@T%d w%d best w%d | coins gross %d bank %d | gems %d (earned %d) | labs %d cards %d | core L%d parts %d outpost %d/h (x%.3f)" % [d + 1, hi, hi, bit, row["best_wave"], row["coins_gross"], row["bank"], row["gems"], row["gems_earned"], lab_sum, row["cards"], row["core_lvl"], row["parts"], int(op_h), float(row["outpost_ratio"])])
+		say("CAMPAIGN " + policy + " day %2d: T%d best@T%d w%d best w%d | coins gross %d bank %d | gems %d (earned %d) | labs %d cards %d | core L%d parts %d outpost %d/h (x%.3f)" % [d + 1, hi, hi, bit, row["best_wave"], row["coins_gross"], row["bank"], row["gems"], row["gems_earned"], lab_sum, row["cards"], row["core_lvl"], row["parts"], int(op_h), float(row["outpost_ratio"])])
 		if d + 1 == 7 or d + 1 == 20:
 			snaps[d + 1] = save.duplicate(true)
 	return {"days": days, "save": save, "led": led, "rate": rate, "t2_day": t2_day, "t3_day": t3_day, "snaps": snaps}
@@ -776,15 +992,20 @@ static func campaign_days(seed0: int, policy: String = "balanced", n_days: int =
 const SHARD_PRIO: Array = ["root_forge", "might", "bulwark_p", "prosperity", "head_start", "outpost_p", "starting_cash", "builder2", "shard_yield", "scrap_p", "crate_luck", "tempo", "banish_plus", "wide_draft", "core_ceiling", "retain"]
 
 
+## Weighted cost per node (lower = bought first): a walled player puts its
+## shards into raw power first, then the economy / speed nodes.
+const SHARD_W: Dictionary = {"root_forge": 0.1, "might": 1.0, "bulwark_p": 1.3, "head_start": 1.5, "prosperity": 2.0, "outpost_p": 2.5, "starting_cash": 2.5}
+
+
 static func spend_shards(save: Dictionary) -> void:
 	var guard: int = 0
 	while guard < 100:
 		guard += 1
 		var best: String = ""
-		var bc: int = 1 << 30
+		var bc: float = INF
 		for id in SHARD_PRIO:
 			if Reforge.can_buy(save, String(id)):
-				var c: int = ReforgeDB.cost(String(id), Reforge.node(save, String(id)))
+				var c: float = float(ReforgeDB.cost(String(id), Reforge.node(save, String(id)))) * float(SHARD_W.get(String(id), 3.0))
 				if c < bc:
 					bc = c
 					best = String(id)
@@ -796,57 +1017,6 @@ static func spend_shards(save: Dictionary) -> void:
 ## the tree already holds (REDESIGN_SPEC §3.4 loop table: 12, 15, 28, 50).
 static func wants_reforge(save: Dictionary) -> bool:
 	return Reforge.can_reforge(save) and Reforge.shards_now(save) >= maxi(TuneRef.int_of("pc_bot_reforge_min", 12), int(save["reforge"]["cum_shards"]))
-
-
-## AC-28 Reforge loops (report): from the day-30 save, keep playing sessions;
-## reforge whenever wants_reforge(); a loop's length is the sessions it takes
-## to get back to the progress key (tier*1000 + best wave in it) held before
-## that Reforge. Each loop should take <= 70% of the previous one.
-static func reforge_loops(seed0: int, start: Dictionary, loops: int = 2, max_days: int = 14) -> Dictionary:
-	var save: Dictionary = start.duplicate(true)
-	var rng := RandomNumberGenerator.new()
-	rng.seed = seed0 + 99
-	var led: Dictionary = {"offline_coins": 0, "offline_min": 0, "gross_coins": 0, "run_coins": 0, "run_min": 0.0}
-	var rate: Dictionary = {}
-	var rows: Array = []
-	var run_idx: int = 0
-	var now: int = int(save["last_seen"]) + 3600
-	for L in loops:
-		var waited: int = 0
-		while not wants_reforge(save) and waited < max_days * 4:
-			waited += 1
-			now = _loop_session(save, now, rng, led, rate, seed0, run_idx)
-			run_idx += 1
-		if not wants_reforge(save):
-			rows.append({"loop": L + 1, "reforged": false, "sessions_waited": waited})
-			break
-		var key0: int = Tiers.highest(save) * 1000 + Tiers.best_in(save, Tiers.highest(save))
-		var ev: Array = Reforge.reforge(save, now)
-		spend_shards(save)
-		var n: int = 0
-		while n < max_days * 4:
-			n += 1
-			now = _loop_session(save, now, rng, led, rate, seed0, run_idx)
-			run_idx += 1
-			if Tiers.highest(save) * 1000 + Tiers.best_in(save, Tiers.highest(save)) >= key0:
-				break
-		var back: bool = Tiers.highest(save) * 1000 + Tiers.best_in(save, Tiers.highest(save)) >= key0
-		rows.append({"loop": L + 1, "reforged": true, "shards": int((ev[0] as Dictionary)["shards"]), "key_before": key0, "sessions_back": n, "regained": back, "sessions_waited": waited})
-		print("REFORGE loop %d: %s" % [L + 1, JSON.stringify(rows.back())])
-	var ok: bool = rows.size() >= 2 and bool((rows[0] as Dictionary).get("regained", false)) and bool((rows[1] as Dictionary).get("regained", false)) and float((rows[1] as Dictionary)["sessions_back"]) <= 0.7 * float((rows[0] as Dictionary)["sessions_back"])
-	return {"rows": rows, "ac28_ok": ok}
-
-
-static func _loop_session(save: Dictionary, now0: int, rng: RandomNumberGenerator, led: Dictionary, rate: Dictionary, seed0: int, run_idx: int) -> int:
-	var now: int = maxi(now0 + 8 * 3600, int(save["last_seen"]) + 60)
-	session_open(save, now, rng, led)
-	var t: int = pick_tier(save, rate, run_idx)
-	BaseMeta.select_tier(save, t)
-	var r: Dictionary = camp_run(save, "balanced", seed0 + 5000 + run_idx * 131, now, "")
-	rate[t] = float(r["coins"]) / maxf(0.1, float(r["real_s"]) / 60.0)
-	save["last_seen"] = now + int(r["real_s"])
-	_claim_missions(save)
-	return now
 
 
 static func _gems_total(save: Dictionary) -> int:
@@ -871,16 +1041,177 @@ static func snap_eval(snap: Dictionary, policy: String, seeds: Array, perk_pref:
 	return {"wave": w / n, "coins": c / n}
 
 
-## The campaign-level invariants (ECONOMY.md §6 / BRIEF AC-38..41).
-func campaign_checks(seed0: int) -> Dictionary:
+## ---- legacy campaign jobs (ECONOMY.md §6 / BRIEF AC-38..41, PC_BALANCE) ----
+## The 30-day balanced campaign; writes the day-7 / day-20 snapshots for the
+## phase-B jobs.
+static func job_main(seed0: int, dir: String) -> Dictionary:
 	var C: Dictionary = campaign_days(seed0)
-	var days: Array = C["days"]
-	var led: Dictionary = C["led"]
-	var save: Dictionary = C["save"]
+	for d in [7, 20]:
+		var f := FileAccess.open(dir.path_join("snap%d.bin" % d), FileAccess.WRITE)
+		f.store_buffer(var_to_bytes((C["snaps"] as Dictionary)[d]))
+		f.close()
+	return {"days": C["days"], "led": C["led"], "gem_log": (C["save"] as Dictionary)["gem_log"], "t2_day": C["t2_day"], "t3_day": C["t3_day"]}
+
+
+## AC-38 (strategy level): a week of pure-weapon / pure-eco play from the same fresh save.
+static func job_strat(seed0: int) -> Dictionary:
+	var wk: int = 7
+	var out: Dictionary = {}
+	for p in ["weapon", "eco"]:
+		var Cp: Dictionary = campaign_days(seed0, String(p), wk)
+		var dp: Dictionary = (Cp["days"] as Array)[wk - 1]
+		out[p] = {"key": int(dp["progress_key"]), "coins": int(dp["coins_gross"]), "best_wave": int(dp["best_wave"])}
+	return out
+
+
+## AC-38 / AC-40 on an extra seed (the eco-mix margin and early pace are seed-sensitive).
+static func job_seed(seed0: int, xs: int) -> Dictionary:
+	var wk: int = 7
+	var sd: int = seed0 + xs
+	var Cb: Dictionary = campaign_days(sd, "balanced", wk)
+	var Cw: Dictionary = campaign_days(sd, "weapon", wk)
+	var db: Dictionary = (Cb["days"] as Array)[wk - 1]
+	var dw: Dictionary = (Cw["days"] as Array)[wk - 1]
+	var d1: int = int(((Cb["days"] as Array)[0] as Dictionary)["best_wave"])
+	var row: Dictionary = {"bal_wave": int(db["best_wave"]), "wpn_wave": int(dw["best_wave"]), "bal_coins": int(db["coins_gross"]), "wpn_coins": int(dw["coins_gross"]), "t2_day": int(Cb["t2_day"]), "day1": d1}
+	row["ok"] = int(row["bal_wave"]) > int(row["wpn_wave"]) and int(row["t2_day"]) >= 3 and int(row["t2_day"]) <= 5 and d1 >= 18 and d1 <= 32
+	return {"sd": sd, "row": row}
+
+
+## AC-39 same-save mono boards (report) + in-run policy on the same frozen save (report).
+static func job_mono(seed0: int, snaps: Dictionary) -> Dictionary:
+	var mono: Dictionary = {}
+	var mono_ok: bool = true
+	var mseeds: Array = [seed0 + 11, seed0 + 23]
+	for mday in [7, 20]:
+		var msnap: Dictionary = snaps[mday]
+		var mb: float = float(snap_eval(msnap, "balanced", mseeds)["wave"])
+		var row: Dictionary = {"balanced": snappedf(mb, 0.1)}
+		for mid in ["gun", "mortar", "tesla"]:
+			var ms: Dictionary = msnap.duplicate(true)
+			var sl: Dictionary = ms["slots"]
+			for k in sl.keys():
+				(sl[k] as Dictionary)["id"] = String(mid)
+			var mw: float = float(snap_eval(ms, "mono:" + String(mid), mseeds)["wave"])
+			row[mid] = snappedf(mw, 0.1)
+			if mw >= 0.70 * mb:
+				mono_ok = false   # report only (same-save probe); gate is the fresh-save AC-39
+		mono["d%d" % mday] = row
+	say("AC-39 mono boards (same save): " + JSON.stringify(mono))
+	var seeds: Array = [seed0 + 11, seed0 + 23, seed0 + 37]
+	var pol: Dictionary = {}
+	for day in [7, 20]:
+		var snap: Dictionary = snaps[day]
+		for p in ["balanced", "weapon", "eco"]:
+			pol["d%d_%s" % [day, p]] = snap_eval(snap, String(p), seeds)
+		say("IN-RUN POLICY day %d (same save): balanced %s | weapon %s | eco %s" % [day, JSON.stringify(pol["d%d_balanced" % day]), JSON.stringify(pol["d%d_weapon" % day]), JSON.stringify(pol["d%d_eco" % day])])
+	return {"mono": mono, "mono_ok": mono_ok, "pol": pol}
+
+
+## I-4: no dominant perk — always-take-X policies on the day-20 save. A perk
+## dominates when it out-earns the median by > 20% WITHOUT costing waves.
+static func job_perks(seed0: int, snaps: Dictionary) -> Dictionary:
+	var snap20: Dictionary = snaps[20]
+	var perk_rows: Dictionary = {}
+	var cv: Array = []
+	var wv: Array = []
+	for pid in PerkDB.IDS:
+		var r: Dictionary = snap_eval(snap20, "balanced", [seed0 + 11, seed0 + 23], String(pid))
+		perk_rows[pid] = {"wave": snappedf(float(r["wave"]), 0.1), "coins": int(r["coins"])}
+		cv.append(float(r["coins"]))
+		wv.append(float(r["wave"]))
+	cv.sort()
+	wv.sort()
+	var c_med: float = (float(cv[5]) + float(cv[6])) / 2.0
+	var w_med: float = (float(wv[5]) + float(wv[6])) / 2.0
+	var dominant: Array = []
+	var top_ratio: float = 0.0
+	for pid in perk_rows.keys():
+		var pr: Dictionary = perk_rows[pid]
+		var ratio: float = float(pr["coins"]) / maxf(1.0, c_med)
+		top_ratio = maxf(top_ratio, ratio)
+		if ratio > 1.2 and float(pr["wave"]) >= w_med:
+			dominant.append(pid)
+	say("PERKS day 20 (always-take-X): " + JSON.stringify(perk_rows))
+	return {"rows": perk_rows, "dominant": dominant, "top_ratio": top_ratio}
+
+
+## PC-E14 refinery probe, PC-E16 modifiers / fairness, endless.
+static func job_mods(seed0: int, snaps: Dictionary) -> Dictionary:
+	var seeds: Array = [seed0 + 11, seed0 + 23, seed0 + 37]
+	var snap20: Dictionary = snaps[20]
+	# PC-E14: a Refinery + Mine economy must not out-earn the same board without
+	# Refineries by > 15%. Same frozen day-7 / day-20 save; the probe turns every
+	# other permanent Mine into a Refinery (so each sits next to a Mine: S11
+	# Smelter), and both boards are played by the same eco-leaning in-run policy.
+	var refin: Dictionary = {}
+	var refin_ok: bool = true
+	for rday in [7, 20]:
+		var rsnap: Dictionary = snaps[rday]
+		var rp: Dictionary = rsnap.duplicate(true)
+		var nmine: int = 0
+		var rsl: Dictionary = rp["slots"]
+		for k in rsl.keys():
+			var re: Dictionary = rsl[k]
+			if String(re["id"]) == "mine":
+				if nmine % 2 == 0:
+					re["id"] = "refinery"
+				nmine += 1
+		var rb: Dictionary = snap_eval(rsnap, "refinery", seeds)
+		var rr: Dictionary = snap_eval(rp, "refinery", seeds)
+		var ratio: float = float(rr["coins"]) / maxf(1.0, float(rb["coins"]))
+		refin["d%d" % rday] = {"with_refinery": rr, "without": rb, "coin_ratio": snappedf(ratio, 0.001)}
+		if ratio > 1.15:
+			refin_ok = false
+	say("PC REFINERY vs balanced: " + JSON.stringify(refin))
+	# PC-E16 (subset): every challenge modifier stays winnable to wave 25 on the
+	# day-20 save, and an endless run plays past its first mutation.
+	# PC_BALANCE fairness: each modifier's coin reward tracks its measured cost
+	# (same save, same seeds vs no modifier): net coins 0.9-1.4x, and a modifier
+	# that costs <= 1.5 waves may not pay > 1.25x (no free coins).
+	var mod_rows: Dictionary = {}
+	var mods_ok: bool = true
+	var fair_ok: bool = true
+	var modseeds: Array = [seed0 + 11, seed0 + 58]
+	var mbase: Dictionary = snap_eval(snap20, "balanced", modseeds)
+	mod_rows["_base"] = {"wave": snappedf(float(mbase["wave"]), 0.1), "coins": roundi(float(mbase["coins"]))}
+	for mid in ModifierDB.IDS:
+		var mr: Dictionary = snap_eval(snap20, "balanced", modseeds, "", {"modifiers": [mid]})
+		var cr: float = float(mr["coins"]) / maxf(1.0, float(mbase["coins"]))
+		var dw: float = float(mr["wave"]) - float(mbase["wave"])
+		mod_rows[mid] = {"wave": snappedf(float(mr["wave"]), 0.1), "dwave": snappedf(dw, 0.1), "coin_ratio": snappedf(cr, 0.01)}
+		mods_ok = mods_ok and float(mr["wave"]) >= 25.0
+		fair_ok = fair_ok and cr >= 0.9 and cr <= 1.4 and not (dw >= -1.5 and cr > 1.25)
+	say("PC MODIFIERS day 20: " + JSON.stringify(mod_rows))
+	var esnap: Dictionary = snap20.duplicate(true)
+	var endless_ok: bool = BaseMeta.endless_unlocked(esnap)
+	var er: Dictionary = {}
+	if endless_ok:
+		BaseMeta.select_tier(esnap, Tiers.highest(esnap))
+		er = camp_run(esnap, "balanced", seed0 + 11, NOW0, "", false, {"mode": "endless"})
+		endless_ok = String(er["mode"]) == "endless" and int(er["wave"]) > ModifierDB.MUTATION_EVERY and int(er["mutations"]) >= 1
+		# endless pays roughly a normal run (0.8-1.15x the same-seed baseline):
+		# a real alternative, not a replacement for tier progression.
+		var eb: Dictionary = snap_eval(snap20, "balanced", [seed0 + 11])
+		er["coin_ratio"] = snappedf(float(er["coins"]) / maxf(1.0, float(eb["coins"])), 0.01)
+		endless_ok = endless_ok and float(er["coin_ratio"]) >= 0.8 and float(er["coin_ratio"]) <= 1.15
+	say("PC ENDLESS day 20: " + JSON.stringify(er))
+	return {"refin": refin, "refin_ok": refin_ok, "mod_rows": mod_rows, "mods_ok": mods_ok, "fair_ok": fair_ok, "er": er, "endless_ok": endless_ok}
+
+
+## Merge every job into the METRICS dict (legacy keys unchanged) + the
+## redesign campaign gates (RD_GATES).
+static func combine(R: Dictionary) -> Dictionary:
+	var m: Dictionary = (R.get("pol", {}) as Dictionary).duplicate(true)
+	var M: Dictionary = R.get("main", {})
+	if M.is_empty():
+		return m
+	var days: Array = M["days"]
+	var led: Dictionary = M["led"]
 	var keys: Array = []
 	for r in days:
 		keys.append(int((r as Dictionary)["progress_key"]))
-	var t3: int = int(C["t3_day"])
+	var t3: int = int(M["t3_day"])
 	# I-7: no 5-day window without a gain in (tier, best wave in highest tier) until T3
 	var stall_days: Array = []
 	var stop: int = t3 if t3 > 0 else DAYS
@@ -903,11 +1234,12 @@ func campaign_checks(seed0: int) -> Dictionary:
 		if int(keys[d]) <= int(keys[d - 3]):
 			early = false
 	# AC-41 / I-10: gems
-	var gl: Dictionary = save["gem_log"]
-	var gtot: int = _gems_total(save)
+	var gl: Dictionary = M["gem_log"]
+	var gtot: int = 0
 	var gmax: int = 0
 	var gsrc: String = ""
 	for k in gl.keys():
+		gtot += int(gl[k])
 		if int(gl[k]) > gmax:
 			gmax = int(gl[k])
 			gsrc = String(k)
@@ -915,18 +1247,16 @@ func campaign_checks(seed0: int) -> Dictionary:
 	# I-6: offline vs active coins/min
 	var active_rate: float = float(led["run_coins"]) / maxf(0.1, float(led["run_min"]))
 	var off_rate: float = float(led["offline_coins"]) / maxf(1.0, float(led["offline_min"]))
-	# AC-38 (strategy level): a week of pure-weapon / pure-eco play from the same fresh save
 	var wk: int = 7
 	var bal7: Dictionary = days[wk - 1]
 	var strat: Dictionary = {"balanced": {"key": int(bal7["progress_key"]), "coins": int(bal7["coins_gross"]), "best_wave": int(bal7["best_wave"])}}
+	var ST: Dictionary = R.get("strat", {})
 	for p in ["weapon", "eco"]:
-		var Cp: Dictionary = campaign_days(seed0, String(p), wk)
-		var dp: Dictionary = (Cp["days"] as Array)[wk - 1]
-		strat[p] = {"key": int(dp["progress_key"]), "coins": int(dp["coins_gross"]), "best_wave": int(dp["best_wave"])}
+		strat[p] = ST.get(p, {"key": 0, "coins": 0, "best_wave": 0})
 	var sb: Dictionary = strat["balanced"]
 	var sw: Dictionary = strat["weapon"]
 	var se: Dictionary = strat["eco"]
-	print("STRATEGY week 1: balanced %s | weapon %s | eco %s" % [JSON.stringify(sb), JSON.stringify(sw), JSON.stringify(se)])
+	say("STRATEGY week 1: balanced %s | weapon %s | eco %s" % [JSON.stringify(sb), JSON.stringify(sw), JSON.stringify(se)])
 	var mix_w: bool = int(sb["key"]) >= int(sw["key"]) and int(sb["coins"]) > int(sw["coins"])
 	var mix_e: bool = int(sb["key"]) > int(se["key"]) and int(sb["coins"]) > int(se["coins"])
 	# AC-38 (adapted to REDESIGN_BRIEF AC-30 / G1): the mixed policy reaches a
@@ -934,148 +1264,34 @@ func campaign_checks(seed0: int) -> Dictionary:
 	# the weapon wave and >= 1.25x its coins; coins now follow waves only, and
 	# the redesign wants viable specs, not an eco premium — PM-10.)
 	var ac38: bool = int(sb["best_wave"]) > int(sw["best_wave"]) and int(sb["best_wave"]) > int(se["best_wave"])
-	# AC-39: a mono-building board reaches < 70% of the balanced best wave. Same
-	# frozen day-7 / day-20 save (same coins invested, same slot levels) with every
-	# permanent slot rebuilt as one id, played by a bot that only upgrades that id.
-	var mono: Dictionary = {}
-	var mono_ok: bool = true
-	var mseeds: Array = [seed0 + 11, seed0 + 23]
-	for mday in [7, 20]:
-		var msnap: Dictionary = (C["snaps"] as Dictionary)[mday]
-		var mb: float = float(snap_eval(msnap, "balanced", mseeds)["wave"])
-		var row: Dictionary = {"balanced": snappedf(mb, 0.1)}
-		for mid in ["gun", "mortar", "tesla"]:
-			var ms: Dictionary = msnap.duplicate(true)
-			var sl: Dictionary = ms["slots"]
-			for k in sl.keys():
-				(sl[k] as Dictionary)["id"] = String(mid)
-			var mw: float = float(snap_eval(ms, "mono:" + String(mid), mseeds)["wave"])
-			row[mid] = snappedf(mw, 0.1)
-			if mw >= 0.70 * mb:
-				mono_ok = false   # report only (same-save probe); gate is the fresh-save AC-39
-		mono["d%d" % mday] = row
-	print("AC-39 mono boards (same save): " + JSON.stringify(mono))
-	# AC-38 / AC-40 on extra seeds (the eco-mix margin and early pace are seed-sensitive).
 	var seed_rows: Dictionary = {}
 	var seeds_ok: bool = true
-	for xs in EXTRA_SEEDS:
-		var sd: int = seed0 + int(xs)
-		var Cb: Dictionary = campaign_days(sd, "balanced", wk)
-		var Cw: Dictionary = campaign_days(sd, "weapon", wk)
-		var db: Dictionary = (Cb["days"] as Array)[wk - 1]
-		var dw: Dictionary = (Cw["days"] as Array)[wk - 1]
-		var d1: int = int(((Cb["days"] as Array)[0] as Dictionary)["best_wave"])
-		var row: Dictionary = {"bal_wave": int(db["best_wave"]), "wpn_wave": int(dw["best_wave"]), "bal_coins": int(db["coins_gross"]), "wpn_coins": int(dw["coins_gross"]), "t2_day": int(Cb["t2_day"]), "day1": d1}
-		row["ok"] = int(row["bal_wave"]) > int(row["wpn_wave"]) and int(row["t2_day"]) >= 3 and int(row["t2_day"]) <= 5 and d1 >= 18 and d1 <= 32
-		seeds_ok = seeds_ok and bool(row["ok"])
-		seed_rows[str(sd)] = row
-	print("SEEDS week 1: " + JSON.stringify(seed_rows))
-	# In-run policy on the SAME frozen save (report): what drafting eco vs weapons does mid-run
-	var seeds: Array = [seed0 + 11, seed0 + 23, seed0 + 37]
-	var pol: Dictionary = {}
-	for day in [7, 20]:
-		var snap: Dictionary = (C["snaps"] as Dictionary)[day]
-		for p in ["balanced", "weapon", "eco"]:
-			pol["d%d_%s" % [day, p]] = snap_eval(snap, String(p), seeds)
-		print("IN-RUN POLICY day %d (same save): balanced %s | weapon %s | eco %s" % [day, JSON.stringify(pol["d%d_balanced" % day]), JSON.stringify(pol["d%d_weapon" % day]), JSON.stringify(pol["d%d_eco" % day])])
-	# I-4: no dominant perk — always-take-X policies on the day-20 save. A perk
-	# dominates when it out-earns the median by > 20% WITHOUT costing waves.
-	var snap20: Dictionary = (C["snaps"] as Dictionary)[20]
-	var perk_rows: Dictionary = {}
-	var cv: Array = []
-	var wv: Array = []
-	for pid in PerkDB.IDS:
-		var r: Dictionary = snap_eval(snap20, "balanced", [seed0 + 11, seed0 + 23], String(pid))
-		perk_rows[pid] = {"wave": snappedf(float(r["wave"]), 0.1), "coins": int(r["coins"])}
-		cv.append(float(r["coins"]))
-		wv.append(float(r["wave"]))
-	cv.sort()
-	wv.sort()
-	var c_med: float = (float(cv[5]) + float(cv[6])) / 2.0
-	var w_med: float = (float(wv[5]) + float(wv[6])) / 2.0
-	var dominant: Array = []
-	var top_ratio: float = 0.0
-	for pid in perk_rows.keys():
-		var pr: Dictionary = perk_rows[pid]
-		var ratio: float = float(pr["coins"]) / maxf(1.0, c_med)
-		top_ratio = maxf(top_ratio, ratio)
-		if ratio > 1.2 and float(pr["wave"]) >= w_med:
-			dominant.append(pid)
-	print("PERKS day 20 (always-take-X): " + JSON.stringify(perk_rows))
-	# PC-E14: a Refinery + Mine economy must not out-earn the same board without
-	# Refineries by > 15%. Same frozen day-7 / day-20 save; the probe turns every
-	# other permanent Mine into a Refinery (so each sits next to a Mine: S11
-	# Smelter), and both boards are played by the same eco-leaning in-run policy.
-	var refin: Dictionary = {}
-	var refin_ok: bool = true
-	for rday in [7, 20]:
-		var rsnap: Dictionary = (C["snaps"] as Dictionary)[rday]
-		var rp: Dictionary = rsnap.duplicate(true)
-		var nmine: int = 0
-		var rsl: Dictionary = rp["slots"]
-		for k in rsl.keys():
-			var re: Dictionary = rsl[k]
-			if String(re["id"]) == "mine":
-				if nmine % 2 == 0:
-					re["id"] = "refinery"
-				nmine += 1
-		var rb: Dictionary = snap_eval(rsnap, "refinery", seeds)
-		var rr: Dictionary = snap_eval(rp, "refinery", seeds)
-		var ratio: float = float(rr["coins"]) / maxf(1.0, float(rb["coins"]))
-		refin["d%d" % rday] = {"with_refinery": rr, "without": rb, "coin_ratio": snappedf(ratio, 0.001)}
-		if ratio > 1.15:
-			refin_ok = false
-	print("PC REFINERY vs balanced: " + JSON.stringify(refin))
-	# PC-E16 (subset): every challenge modifier stays winnable to wave 25 on the
-	# day-20 save, and an endless run plays past its first mutation.
-	# PC_BALANCE fairness: each modifier's coin reward tracks its measured cost
-	# (same save, same seeds vs no modifier): net coins 0.9-1.4x, and a modifier
-	# that costs <= 1.5 waves may not pay > 1.25x (no free coins).
-	var mod_rows: Dictionary = {}
-	var mods_ok: bool = true
-	var fair_ok: bool = true
-	var modseeds: Array = [seed0 + 11, seed0 + 58]
-	var mbase: Dictionary = snap_eval(snap20, "balanced", modseeds)
-	mod_rows["_base"] = {"wave": snappedf(float(mbase["wave"]), 0.1), "coins": roundi(float(mbase["coins"]))}
-	for mid in ModifierDB.IDS:
-		var mr: Dictionary = snap_eval(snap20, "balanced", modseeds, "", {"modifiers": [mid]})
-		var cr: float = float(mr["coins"]) / maxf(1.0, float(mbase["coins"]))
-		var dw: float = float(mr["wave"]) - float(mbase["wave"])
-		mod_rows[mid] = {"wave": snappedf(float(mr["wave"]), 0.1), "dwave": snappedf(dw, 0.1), "coin_ratio": snappedf(cr, 0.01)}
-		mods_ok = mods_ok and float(mr["wave"]) >= 25.0
-		fair_ok = fair_ok and cr >= 0.9 and cr <= 1.4 and not (dw >= -1.5 and cr > 1.25)
-	print("PC MODIFIERS day 20: " + JSON.stringify(mod_rows))
-	var esnap: Dictionary = snap20.duplicate(true)
-	var endless_ok: bool = BaseMeta.endless_unlocked(esnap)
-	var er: Dictionary = {}
-	if endless_ok:
-		BaseMeta.select_tier(esnap, Tiers.highest(esnap))
-		er = camp_run(esnap, "balanced", seed0 + 11, NOW0, "", false, {"mode": "endless"})
-		endless_ok = String(er["mode"]) == "endless" and int(er["wave"]) > ModifierDB.MUTATION_EVERY and int(er["mutations"]) >= 1
-		# endless pays roughly a normal run (0.8-1.15x the same-seed baseline):
-		# a real alternative, not a replacement for tier progression.
-		var eb: Dictionary = snap_eval(snap20, "balanced", [seed0 + 11])
-		er["coin_ratio"] = snappedf(float(er["coins"]) / maxf(1.0, float(eb["coins"])), 0.01)
-		endless_ok = endless_ok and float(er["coin_ratio"]) >= 0.8 and float(er["coin_ratio"]) <= 1.15
-	print("PC ENDLESS day 20: " + JSON.stringify(er))
+	for k in EXTRA_SEEDS.size():
+		var sr: Dictionary = R.get("seed:%d" % k, {})
+		if sr.is_empty():
+			seeds_ok = false
+			continue
+		seed_rows[str(int(sr["sd"]))] = sr["row"]
+		seeds_ok = seeds_ok and bool((sr["row"] as Dictionary)["ok"])
+	say("SEEDS week 1: " + JSON.stringify(seed_rows))
+	var MO: Dictionary = R.get("mono", {})
+	var PK: Dictionary = R.get("perks", {})
+	var MD: Dictionary = R.get("mods", {})
 	var per_day: Array = []
 	for r in days:
 		var rd: Dictionary = r
 		per_day.append({"day": rd["day"], "tier": rd["tier"], "best_wave_hi_tier": rd["best_wave_hi_tier"], "best_wave": rd["best_wave"], "coins": rd["coins_gross"], "gems": rd["gems_earned"], "labs": rd["labs"], "cards": rd["cards"], "core_lvl": rd["core_lvl"], "parts": rd["parts"], "outpost_h": rd["outpost_h"], "outpost_ratio": rd["outpost_ratio"]})
-	# AC-28 (report until the balance pass): Reforge loops from the day-30 save.
-	var RL: Dictionary = reforge_loops(seed0, save)
-	print("AC-28 REFORGE LOOPS: " + JSON.stringify(RL))
 	var day1: int = int((days[0] as Dictionary)["best_wave"])
 	var last: Dictionary = days[DAYS - 1]
-	return {
-		"campaign_days": per_day, "t2_day": C["t2_day"], "t3_day": t3, "final_tier": int(last["tier"]),
+	m.merge({
+		"campaign_days": per_day, "t2_day": M["t2_day"], "t3_day": t3, "final_tier": int(last["tier"]),
 		"day1_best_wave": day1, "day1_in_target_band": day1 >= 18 and day1 <= 32,
 		"day30_best_wave_hi_tier": int(last["best_wave_hi_tier"]), "stall_days": stall_days,
 		"gems_total": gtot, "gems_per_day": snappedf(gpd, 0.1), "gem_log": gl, "gem_top_source": gsrc,
 		"active_coin_rate": snappedf(active_rate, 0.1), "offline_coin_rate": snappedf(off_rate, 0.1),
-		"strategy_week1": strat, "ac38_strict": ac38, "inrun_policy": pol,
-		"perks_d20": perk_rows, "perk_top_coin_ratio": snappedf(top_ratio, 0.01), "dominant_perks": dominant,
-		"t2_by_day5": int(C["t2_day"]) >= 3 and int(C["t2_day"]) <= 5,
+		"strategy_week1": strat, "ac38_strict": ac38, "inrun_policy": MO.get("pol", {}),
+		"perks_d20": PK.get("rows", {}), "perk_top_coin_ratio": snappedf(float(PK.get("top_ratio", 0.0)), 0.01), "dominant_perks": PK.get("dominant", []),
+		"t2_by_day5": int(M["t2_day"]) >= 3 and int(M["t2_day"]) <= 5,
 		"day1_band": day1 >= 18 and day1 <= 32,
 		"tier3_by_day30": t3 > 0,
 		"no_plateau_before_t3": stall_days.is_empty(),
@@ -1084,12 +1300,373 @@ func campaign_checks(seed0: int) -> Dictionary:
 		"gem_sources_ok": float(gmax) <= 0.5 * float(gtot),
 		"offline_below_active": off_rate <= 0.2 * active_rate,
 		"mix_beats_weapon": mix_w, "mix_beats_eco": mix_e,
-		"no_dominant_perk": dominant.is_empty(),
-		"ac38_eco_mix": ac38, "mono_same_save": mono, "mono_same_save_below_70": mono_ok,
+		"no_dominant_perk": PK.has("dominant") and (PK["dominant"] as Array).is_empty(),
+		"ac38_eco_mix": ac38, "mono_same_save": MO.get("mono", {}), "mono_same_save_below_70": bool(MO.get("mono_ok", false)),
 		"late_stall_days": late_stall, "best_wave_at_t3": bw_t3, "no_plateau_after_t3": late_ok,
 		"seed_runs": seed_rows, "seeds_ok": seeds_ok,
-		"pc_refinery": refin, "pc_refinery_not_dominant": refin_ok,
-		"pc_modifiers_d20": mod_rows, "pc_modifiers_reach_w25": mods_ok, "pc_modifiers_fair": fair_ok,
-		"pc_endless_d20": er, "pc_endless_runs": endless_ok,
-		"ac28_reforge_loops": RL,
+		"pc_refinery": MD.get("refin", {}), "pc_refinery_not_dominant": bool(MD.get("refin_ok", false)),
+		"pc_modifiers_d20": MD.get("mod_rows", {}), "pc_modifiers_reach_w25": bool(MD.get("mods_ok", false)), "pc_modifiers_fair": bool(MD.get("fair_ok", false)),
+		"pc_endless_d20": MD.get("er", {}), "pc_endless_runs": bool(MD.get("endless_ok", false)),
+	})
+	m.merge(redesign_checks(R))
+	return m
+
+
+# ======================================================================
+# REDESIGN CAMPAIGN (POWER_MODEL §9, REDESIGN_SPEC §3.4, REDESIGN_BALANCE.md)
+# One fresh save per archetype spec, played session by session (4 runs a
+# day on the SESSION_H clock) through FORGE_LOOPS Core Reforges. The bot is
+# the competent player for its spec: Outpost first (OP_PLAN), Core levels,
+# crates (token / Keys / Field), installs + levels the parts its spec values,
+# drafts / casts specials / buys cash tracks with the spec's in-run policy,
+# spends shards (SHARD_PRIO) and reforges when its spec says (SPEC_REFORGE)
+# — never before it has regained the previous best. Measured per day: the
+# boss-aware frontier power ratio at the death wave, the early (w*/2) and wall
+# ratios, Outpost/active coin share, gems, loadouts; per loop: sessions to
+# regain the previous best.
+# ======================================================================
+const SPECS: Array = ["balanced", "eco", "single", "damage"]
+const SPEC_RUN: Dictionary = {"balanced": "balanced", "eco": "spec_eco", "single": "single", "damage": "damage"}
+## Part keys a spec over-values when it installs parts (x SPEC_PART_W).
+const SPEC_KEYS: Dictionary = {
+	"eco": ["cash", "cash_flat", "kill_cash", "interest"],
+	"single": ["core_dmg", "boss", "crit", "beam_ramp", "shred"],
+	"damage": ["dmg", "rate", "crit", "bld_dmg", "bld_rate", "chain_dmg", "splash", "dmg_per_bld"],
+}
+const SPEC_PART_W: float = 1.6
+## Reforge when the shards on offer >= max(pc_bot_reforge_min (REDESIGN_SPEC
+## §3.4 loop 1: 7 + 5 = 12), ratio x the shards already earned) — the
+## preview's "worth it" rule (0.5) scaled per spec.
+const SPEC_REFORGE: Dictionary = {"balanced": 0.5, "eco": 0.4, "single": 0.5, "damage": 0.6}
+const FORGE_LOOPS: int = 3
+const FORGE_MAX_SESSIONS: int = 200
+const RD_GATES: Array = ["rd_frontier_band", "rd_early_power", "rd_wall_exists", "rd_no_plateau", "rd_no_runaway",
+	"rd_loops_complete", "rd_loops_faster", "rd_archetypes_viable", "rd_no_dominant_part", "rd_no_dominant_set",
+	"rd_outpost_share", "rd_gems_sane"]
+
+
+## Progress inside the current loop: (tier, best wave in it) for plateau checks.
+static func forge_key(save: Dictionary) -> int:
+	return Tiers.highest(save) * 1000 + Tiers.best_in(save, Tiers.highest(save))
+
+
+## AC-28's "best wave" of the current loop: the highest wave reached on any
+## tier since the last Reforge (best_wave_by_tier resets on Reforge).
+static func loop_wave(save: Dictionary) -> int:
+	var b: int = 0
+	var bw: Dictionary = save.get("best_wave_by_tier", {})
+	for k in bw.keys():
+		b = maxi(b, int(bw[k]))
+	return b
+
+
+static func spec_wants_reforge(save: Dictionary, spec: String) -> bool:
+	var cum: int = int(save["reforge"]["cum_shards"])
+	var need: int = maxi(TuneRef.int_of("pc_bot_reforge_min", 12), int(ceil(TuneRef.num("pc_bot_reforge_ratio_" + spec, float(SPEC_REFORGE.get(spec, 0.5))) * float(cum))))
+	return Reforge.can_reforge(save) and Reforge.shards_now(save) >= need
+
+
+static func _median(a: Array) -> float:
+	if a.is_empty():
+		return 0.0
+	var b: Array = a.duplicate()
+	b.sort()
+	var n: int = b.size()
+	return float(b[n / 2]) if n % 2 == 1 else (float(b[n / 2 - 1]) + float(b[n / 2])) / 2.0
+
+
+static var FORGE_DUMP: String = ""     # debug: write the state right after the first Reforge
+static var FORGE_RESUME: String = ""   # debug: continue from such a state
+
+
+static func forge_campaign(seed0: int, spec: String) -> Dictionary:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed0 + 7
+	var F: Dictionary = {"save": BaseMeta.default_save(), "led": {"offline_coins": 0, "offline_min": 0, "gross_coins": 0, "run_coins": 0, "run_min": 0.0},
+		"rate": {}, "hist": [], "loops": [], "days": [], "day_runs": [], "target": -1, "ref_at": 0, "regained": true, "ses": 0, "timeouts": 0}
+	if FORGE_RESUME != "":
+		var fr := FileAccess.open(FORGE_RESUME, FileAccess.READ)
+		F = bytes_to_var(fr.get_buffer(fr.get_length()))
+		fr.close()
+		rng.state = int(F["rng"])
+	var save: Dictionary = F["save"]
+	var led: Dictionary = F["led"]
+	var rate: Dictionary = F["rate"]
+	var hist: Array = F["hist"]
+	var loops: Array = F["loops"]
+	var days: Array = F["days"]
+	var run_pol: String = String(SPEC_RUN[spec])
+	var cap: int = TuneRef.int_of("pc_forge_max_sessions", FORGE_MAX_SESSIONS)
+	while int(F["ses"]) < cap:
+		var ses: int = int(F["ses"])
+		var d: int = ses / SESSION_H.size()
+		var now: int = maxi(NOW0 + d * 86400 + int(SESSION_H[ses % SESSION_H.size()]) * 3600, int(save["last_seen"]) + 60)
+		session_open(save, now, rng, led, spec)
+		var t: int = pick_tier(save, rate, ses)
+		BaseMeta.select_tier(save, t)
+		var r: Dictionary = camp_run(save, run_pol, seed0 + 1000 + ses * 131, now, _mission_perk(save))
+		var mins: float = maxf(0.1, float(r["real_s"]) / 60.0)
+		rate[t] = float(r["coins"]) / mins
+		led["run_coins"] = int(led["run_coins"]) + int(r["coins"])
+		led["run_min"] = float(led["run_min"]) + mins
+		led["gross_coins"] = int(led["gross_coins"]) + int(r["coins"])
+		save["last_seen"] = now + int(r["real_s"])
+		_claim_missions(save)
+		if bool(r["timeout"]):
+			F["timeouts"] = int(F["timeouts"]) + 1
+		(F["day_runs"] as Array).append(r)
+		ses += 1
+		F["ses"] = ses
+		var key: int = forge_key(save)
+		var lw: int = loop_wave(save)
+		hist.append(lw)
+		if not bool(F["regained"]) and lw >= int(F["target"]):
+			F["regained"] = true
+			(loops.back() as Dictionary)["sessions"] = ses - int(F["ref_at"])
+		if ses % SESSION_H.size() == 0:
+			days.append(_forge_day(save, spec, ses / SESSION_H.size(), key, F["day_runs"], led, rate))
+			F["day_runs"] = []
+		var nref: int = Reforge.count(save)
+		if nref >= FORGE_LOOPS and bool(F["regained"]) and ses % SESSION_H.size() == 0:
+			break
+		if nref < FORGE_LOOPS and bool(F["regained"]) and spec_wants_reforge(save, spec):
+			# AC-28 / POWER_MODEL §6: how long this loop took to first reach the
+			# best wave it now reforges with (the next loop must regain that
+			# same wave in <= 70% of it).
+			var reach: int = ses - int(F["ref_at"])
+			for i in range(int(F["ref_at"]), hist.size()):
+				if int(hist[i]) >= lw:
+					reach = i + 1 - int(F["ref_at"])
+					break
+			if nref == 0:
+				loops.append({"loop": 0, "key": key, "wave": lw, "sessions": 0})
+			(loops.back() as Dictionary)["reach"] = reach
+			var ev: Array = Reforge.reforge(save, int(save["last_seen"]))
+			spend_shards(save)
+			loops.append({"loop": nref + 1, "key": key, "wave": lw, "at_session": ses, "shards": int((ev[0] as Dictionary)["shards"]),
+				"cum_shards": int(save["reforge"]["cum_shards"]), "lifetime_coins": int(led["gross_coins"]), "sessions": -1})
+			F["target"] = lw
+			F["ref_at"] = ses
+			F["regained"] = false
+			if nref == 0 and FORGE_DUMP != "":
+				F["rng"] = rng.state
+				var fw := FileAccess.open(FORGE_DUMP, FileAccess.WRITE)
+				fw.store_buffer(var_to_bytes(F))
+				fw.close()
+	for x in loops:
+		say("REDESIGN %s loop: %s" % [spec, JSON.stringify(x)])
+	return {"spec": spec, "days": days, "loops": loops, "sessions": int(F["ses"]), "timeouts": int(F["timeouts"]),
+		"gem_log": save["gem_log"], "gems_total": _gems_total(save), "best_wave": int(save["best_wave"])}
+
+
+static func _forge_day(save: Dictionary, spec: String, day: int, key: int, runs: Array, led: Dictionary, rate: Dictionary) -> Dictionary:
+	var rf: Array = []
+	var re: Array = []
+	var rwl: Array = []
+	var rhp: Array = []
+	var waves: Array = []
+	for x in runs:
+		var r: Dictionary = x
+		waves.append(int(r["wave"]))
+		if int(r["wave"]) >= 10:
+			rf.append(float(r["r_front"]))
+			re.append(float(r["r_early"]))
+			rwl.append(float(r["r_wall"]))
+			rhp.append(float(r["r_hp"]))
+	var cid: String = Cores.active(save)
+	var load: Array = []
+	for e in Parts.equipped(save, cid):
+		load.append(String((e as Dictionary)["id"]))
+	var sets: Dictionary = {}
+	var sc: Dictionary = Parts.set_counts(save, cid)
+	for k in sc.keys():
+		if int(sc[k]) >= 2:
+			sets[String(k)] = int(sc[k])
+	# Outpost vs active coins per wall-clock hour (POWER_MODEL §5 / AC-27): the
+	# Outpost's live production vs the coins the day's runs paid per hour played.
+	var op_h: float = float(Outpost.production(save)["coins"])
+	var rc: float = 0.0
+	var rs: float = 0.0
+	for x in runs:
+		rc += float((x as Dictionary)["coins"])
+		rs += float((x as Dictionary)["real_s"])
+	var act_h: float = rc / maxf(1.0, rs) * 3600.0
+	var row: Dictionary = {
+		"day": day, "loop": Reforge.count(save), "key": key, "best_wave": int(save["best_wave"]), "waves": waves,
+		"r_front": snappedf(_median(rf), 0.01), "r_early": snappedf(_median(re), 0.01), "r_wall": snappedf(_median(rwl), 0.01), "r_hp": snappedf(_median(rhp), 0.01),
+		"coins": int(led["gross_coins"]), "outpost_h": roundi(op_h), "outpost_ratio": snappedf(op_h / maxf(1.0, act_h), 0.001),
+		"gems": _gems_total(save), "core": cid, "core_lvl": Cores.level(save, cid), "load": load, "sets": sets,
+		"shards": int(save["reforge"]["cum_shards"]),
 	}
+	say("REDESIGN %s day %2d L%d: key %d best w%d runs %s | R front %.2f early %.2f wall %.2f hp %.2f | coins %d outpost %d/h (x%.3f) gems %d | %s L%d %s %s" % [spec, day, row["loop"], key, row["best_wave"], str(waves), row["r_front"], row["r_early"], row["r_wall"], row["r_hp"], row["coins"], row["outpost_h"], row["outpost_ratio"], row["gems"], cid, row["core_lvl"], str(load), str(sets)])
+	return row
+
+
+## The redesign invariants over the four spec campaigns (POWER_MODEL §9,
+## REDESIGN_BRIEF AC-25..AC-30). Daily values are medians of the day's runs
+## (runs that reach wave 10); the ratio bands are asserted per loop (the
+## median of that loop's days), the per-day values are reported.
+static func redesign_checks(R: Dictionary) -> Dictionary:
+	var band: Vector2 = PowerModel.band("frontier")
+	var out: Dictionary = {}
+	var ok: Dictionary = {"band": true, "early": true, "wall": true, "plateau": true, "runaway": true, "complete": true,
+		"faster": true, "outpost": true, "gems": true}
+	var specs: Dictionary = {}
+	var part_n: Dictionary = {}
+	var set4_n: Dictionary = {}
+	var n_load: int = 0
+	var curves: Dictionary = {}
+	for spec in SPECS:
+		var F: Dictionary = R.get("forge:" + String(spec), {})
+		if F.is_empty():
+			ok["complete"] = false
+			continue
+		var days: Array = F["days"]
+		var loops: Array = F["loops"]
+		var by_loop: Dictionary = {}     # loop -> {front: [], early: [], wall: []}
+		var day_in_band: int = 0
+		var opr: Array = []
+		var plateau: Array = []
+		var jumps: Array = []
+		var last_best: int = 0
+		var curve: Array = []
+		for i in days.size():
+			var dr: Dictionary = days[i]
+			var day: int = int(dr["day"])
+			var lp: int = int(dr["loop"])
+			curve.append(int(dr["best_wave"]))
+			if float(dr["r_front"]) > 0.0:
+				var bl: Dictionary = by_loop.get(lp, {"front": [], "early": [], "wall": []})
+				(bl["front"] as Array).append(float(dr["r_front"]))
+				(bl["early"] as Array).append(float(dr["r_early"]))
+				(bl["wall"] as Array).append(float(dr["r_wall"]))
+				by_loop[lp] = bl
+				if float(dr["r_front"]) >= band.x and float(dr["r_front"]) <= band.y:
+					day_in_band += 1
+			if day >= 3:
+				opr.append(float(dr["outpost_ratio"]))
+			# runaway: the all-time best leaps > 25 waves in a day
+			if int(dr["best_wave"]) > last_best + 25 and day > 1:
+				jumps.append(day)
+			last_best = int(dr["best_wave"])
+			# plateau: inside one loop, 5 days without a gain in (tier, best wave in it)
+			if i >= 5 and int((days[i - 5] as Dictionary)["loop"]) == lp and int(dr["key"]) <= int((days[i - 5] as Dictionary)["key"]):
+				plateau.append(day)
+			if day >= 3:
+				n_load += 1
+				for pid in dr["load"]:
+					part_n[String(pid)] = int(part_n.get(String(pid), 0)) + 1
+				for sid in (dr["sets"] as Dictionary).keys():
+					if int((dr["sets"] as Dictionary)[sid]) >= 4:
+						set4_n[String(sid)] = int(set4_n.get(String(sid), 0)) + 1
+		curves[spec] = curve
+		var loop_rows: Dictionary = {}
+		var sp_band: bool = true
+		var sp_early: bool = true
+		var sp_wall: bool = true
+		for lp in by_loop.keys():
+			var bl: Dictionary = by_loop[lp]
+			var f: float = _median(bl["front"])
+			var e: float = _median(bl["early"])
+			var w: float = _median(bl["wall"])
+			loop_rows[str(lp)] = {"front": snappedf(f, 0.01), "early": snappedf(e, 0.01), "wall": snappedf(w, 0.01), "days": (bl["front"] as Array).size()}
+			sp_band = sp_band and f >= band.x and f <= band.y
+			sp_early = sp_early and e >= PowerModel.band("early").x
+			sp_wall = sp_wall and w < PowerModel.band("wall").y
+		# loops: every Reforge regained; loop n regains loop n-1's best in
+		# <= 70% of the sessions loop n-1 needed to first reach it.
+		var times: Array = []
+		for x in loops:
+			times.append([int((x as Dictionary)["sessions"]), int((x as Dictionary).get("reach", -1))])
+		var complete: bool = loops.size() == FORGE_LOOPS + 1 and int((loops.back() as Dictionary)["sessions"]) >= 0
+		var faster: bool = complete
+		if complete:
+			for k in range(1, loops.size()):
+				if float((times[k] as Array)[0]) > 0.70 * float((times[k - 1] as Array)[1]):
+					faster = false
+		var gl: Dictionary = F["gem_log"]
+		var gmax: int = 0
+		for k in gl.keys():
+			gmax = maxi(gmax, int(gl[k]))
+		var gpd: float = float(F["gems_total"]) / maxf(1.0, float(days.size()))
+		var gems_ok: bool = gpd >= 10.0 and gpd <= 30.0 and float(gmax) <= 0.5 * float(F["gems_total"])
+		var op_med: float = _median(opr)
+		var op_ok: bool = op_med >= 0.15 and op_med <= 0.35
+		specs[spec] = {"days": days.size(), "sessions": int(F["sessions"]), "best_wave": int(F["best_wave"]), "loops": loops,
+			"loop_ratios": loop_rows, "days_in_band": snappedf(float(day_in_band) / maxf(1.0, float(days.size())), 0.01),
+			"plateau_days": plateau, "jump_days": jumps, "timeouts": int(F["timeouts"]),
+			"outpost_ratio_median": snappedf(op_med, 0.001), "gems_per_day": snappedf(gpd, 0.1), "gem_log": gl,
+			"best_wave_by_day": curve, "r_front_by_day": days.map(func(x: Dictionary) -> float: return float(x["r_front"])),
+			"outpost_ratio_by_day": days.map(func(x: Dictionary) -> float: return float(x["outpost_ratio"]))}
+		say("REDESIGN %s summary: %s" % [spec, JSON.stringify({"loops": times, "ratios": loop_rows, "outpost_med": snappedf(op_med, 0.001), "gems_day": snappedf(gpd, 0.1), "plateau": plateau, "best": int(F["best_wave"])})])
+		ok["band"] = bool(ok["band"]) and sp_band
+		ok["early"] = bool(ok["early"]) and sp_early
+		ok["wall"] = bool(ok["wall"]) and sp_wall
+		ok["plateau"] = bool(ok["plateau"]) and plateau.is_empty()
+		ok["runaway"] = bool(ok["runaway"]) and jumps.is_empty() and int(F["timeouts"]) == 0
+		ok["complete"] = bool(ok["complete"]) and complete
+		ok["faster"] = bool(ok["faster"]) and faster
+		ok["outpost"] = bool(ok["outpost"]) and op_ok
+		ok["gems"] = bool(ok["gems"]) and gems_ok
+	# PM-10 / AC-29 archetypes, over the days every spec played: progress
+	# value V = mean all-time best wave per day, and the best wave on the last
+	# common day; each spec >= 85% of the best spec on both.
+	var n_common: int = 1 << 30
+	for sp in curves.keys():
+		n_common = mini(n_common, (curves[sp] as Array).size())
+	var arche: Dictionary = {}
+	var ok_arch: bool = curves.size() == SPECS.size() and n_common > 0 and n_common < (1 << 30)
+	if ok_arch:
+		var v: Dictionary = {}
+		var fin: Dictionary = {}
+		var vmax: float = 0.0
+		var fmax: float = 0.0
+		for sp in curves.keys():
+			var c: Array = curves[sp]
+			var sum: float = 0.0
+			for d in n_common:
+				sum += float(c[d])
+			v[sp] = sum / float(n_common)
+			fin[sp] = float(c[n_common - 1])
+			vmax = maxf(vmax, float(v[sp]))
+			fmax = maxf(fmax, float(fin[sp]))
+		for sp in curves.keys():
+			var sv: float = float(v[sp]) / maxf(1.0, vmax)
+			var sf: float = float(fin[sp]) / maxf(1.0, fmax)
+			arche[sp] = {"V": snappedf(float(v[sp]), 0.1), "V_share": snappedf(sv, 0.01), "final_best": int(fin[sp]), "final_share": snappedf(sf, 0.01)}
+			ok_arch = ok_arch and sv >= 0.85 and sf >= 0.85
+		arche["_days"] = n_common
+	var top_part: String = ""
+	var top_rate: float = 0.0
+	var rates: Dictionary = {}
+	for pid in part_n.keys():
+		var pr: float = float(part_n[pid]) / maxf(1.0, float(n_load))
+		rates[pid] = snappedf(pr, 0.01)
+		if pr > top_rate:
+			top_rate = pr
+			top_part = String(pid)
+	var top_set: float = 0.0
+	var set_rates: Dictionary = {}
+	for sid in set4_n.keys():
+		var sr: float = float(set4_n[sid]) / maxf(1.0, float(n_load))
+		set_rates[sid] = snappedf(sr, 0.01)
+		top_set = maxf(top_set, sr)
+	say("REDESIGN archetypes: " + JSON.stringify(arche))
+	say("REDESIGN part pick-rates (loadouts day>=3, all specs): " + JSON.stringify(rates) + " | 4-piece sets: " + JSON.stringify(set_rates))
+	out["redesign"] = {"specs": specs, "archetypes": arche, "part_pick_rate": rates, "top_part": top_part,
+		"top_part_rate": snappedf(top_rate, 0.01), "set4_rate": set_rates}
+	out["rd_frontier_band"] = bool(ok["band"])
+	out["rd_early_power"] = bool(ok["early"])
+	out["rd_wall_exists"] = bool(ok["wall"])
+	out["rd_no_plateau"] = bool(ok["plateau"])
+	out["rd_no_runaway"] = bool(ok["runaway"])
+	out["rd_loops_complete"] = bool(ok["complete"])
+	out["rd_loops_faster"] = bool(ok["faster"])
+	out["rd_archetypes_viable"] = ok_arch
+	out["rd_no_dominant_part"] = n_load > 0 and top_rate <= 0.75
+	out["rd_no_dominant_set"] = top_set <= 0.5
+	out["rd_outpost_share"] = bool(ok["outpost"])
+	out["rd_gems_sane"] = bool(ok["gems"])
+	# AC-28 report keeps its key (the old 2-loop replay from day 30 is superseded by this campaign)
+	out["ac28_reforge_loops"] = (specs.get("balanced", {}) as Dictionary).get("loops", [])
+	return out
