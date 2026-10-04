@@ -488,7 +488,7 @@ static func nominal_rate(s: Dictionary, uid: String, con: Dictionary = {}) -> fl
 		"keyforge":
 			return (1.0 / 24.0 + (1.0 / 10.0 - 1.0 / 24.0) * float(L - 1) / 9.0) * (1.0 + lay) * global_mult(s)
 		"mill":
-			var tm: float = 1.0 + 0.5 * float(Tiers.highest(s) - 1)
+			var tm: float = 1.0 + TuneRef.num("pc_mill_tier", OutpostDB.MILL_TIER) * float(Tiers.highest(s) - 1)
 			return TuneRef.num("pc_mill_rate", float(d["rate"])) * (1.0 + 0.25 * float(L - 1)) * (1.0 + lay) * global_mult(s) * tm
 	# Scrap Refinery (+10% per Reforge scrap_p level).
 	return float(d["rate"]) * (1.0 + 0.25 * float(L - 1)) * (1.0 + lay) * global_mult(s) * (1.0 + 0.10 * float(_node(s, "scrap_p")))

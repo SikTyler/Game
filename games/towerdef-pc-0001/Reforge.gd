@@ -86,7 +86,7 @@ static func can_reforge(s: Dictionary) -> bool:
 
 
 static func shards_now(s: Dictionary) -> int:
-	var k: float = TuneRef.num("pc_reforge_k", 1.0) * (1.0 + 0.1 * float(node(s, "shard_yield")))
+	var k: float = TuneRef.num("pc_reforge_k", ReforgeDB.SHARD_K) * (1.0 + 0.1 * float(node(s, "shard_yield")))
 	var l0: float = TuneRef.num("pc_reforge_l0", 10000.0)
 	var n: int = int(floor(k * sqrt(maxf(0.0, float(_rf(s)["coins_since"])) / l0)))
 	if count(s) == 0:
@@ -179,8 +179,8 @@ static func buy(s: Dictionary, id: String) -> Array:
 ## Run-facing bundle (folded by BaseMeta.run_mods).
 static func run_mods(s: Dictionary) -> Dictionary:
 	return {
-		"rf_dmg": ReforgeDB.amt("might") * float(node(s, "might")),
-		"rf_hp": ReforgeDB.amt("bulwark_p") * float(node(s, "bulwark_p")),
+		"rf_dmg": ReforgeDB.bonus("might", node(s, "might")),
+		"rf_hp": ReforgeDB.bonus("bulwark_p", node(s, "bulwark_p")),
 		"rf_coin": ReforgeDB.amt("prosperity") * float(node(s, "prosperity")),
 		"rf_start_cash": 25 * node(s, "starting_cash"),
 	}

@@ -3313,7 +3313,8 @@ func _reforge_stages() -> void:
 	_check("AC-21 coin gate: 1,000,000 coins since", Reforge.can_reforge({"best_wave_by_tier": {"1": 1}, "reforge": {"coins_since": 1000000, "nodes": {}}}))
 	sv["best_wave_by_tier"] = {"1": 40}
 	_check("AC-21 wave gate: best wave 40", Reforge.can_reforge(sv))
-	_check("AC-21 shards = floor(sqrt(6e5 / 1e4)) + 5 first (loop table: 12)", Reforge.shards_now(sv) == 12 and int(Reforge.preview(sv)["shards"]) == 12 and bool(Reforge.preview(sv)["worth"]))
+	var sh1: int = int(floor(ReforgeDB.SHARD_K * sqrt(60.0))) + 5
+	_check("AC-21 shards = floor(k sqrt(6e5 / 1e4)) + 5 first (k = ReforgeDB.SHARD_K; loop table at k 1: 12)", Reforge.shards_now(sv) == sh1 and int(Reforge.preview(sv)["shards"]) == sh1 and bool(Reforge.preview(sv)["worth"]))
 	# Build a little state to reset.
 	var gu: String = Parts.uid_of(sv, "f_glass")
 	(Parts.item(sv, gu) as Dictionary)["lvl"] = 4
@@ -3334,17 +3335,17 @@ func _reforge_stages() -> void:
 	var ok_keep: bool = Parts.owns(sv, "f_glass") and Parts.equipped(sv, "bastion").size() == 2 and (sv["outpost"]["plots"] as Array) == [0] and (sv["outpost"]["decor"] as Dictionary).size() == 1 and (sv["outpost"]["blueprints"] as Array).size() == 1 and int(sv["outpost"]["buildings"][mu]["x"]) == 4 and int(sv["gems"]) == 77 and int(sv["keys"]) == 3 and int(sv["insight"]["in_dmg"]) == 4 and (sv["cards"]["owned"] as Dictionary).has("c_dmg") and int(sv["best_wave"]) == 39
 	_check("AC-21 keeps: parts + presets, layout/plots/decor/blueprints, gems, Keys, Insight, cards, best wave", ok_keep)
 	_check("AC-21 part levels refund 50% Scrap", int(sv["scrap"]) == PartDB.invested("f_glass", 4) / 2)
-	_check("AC-21 shards banked, count + cum, Lance unlocks, Core Cores", int(sv["shards"]) == 12 and Reforge.count(sv) == 1 and int(sv["reforge"]["cum_shards"]) == 12 and int(sv["reforge"]["coins_since"]) == 0 and Cores.is_owned(sv, "lance") and int(sv["stats"]["reforges"]) == 1)
+	_check("AC-21 shards banked, count + cum, Lance unlocks, Core Cores", int(sv["shards"]) == sh1 and Reforge.count(sv) == 1 and int(sv["reforge"]["cum_shards"]) == sh1 and int(sv["reforge"]["coins_since"]) == 0 and Cores.is_owned(sv, "lance") and int(sv["stats"]["reforges"]) == 1)
 	_check("AC-21 gate re-arms after a Reforge (tier progress reset)", not Reforge.can_reforge(sv))
 	sv["reforge"]["coins_since"] = 2500000
-	_check("R5 2nd Reforge: no first bonus (2.5e6 -> 15)", Reforge.shards_now(sv) == 15)
+	_check("R5 2nd Reforge: no first bonus (2.5e6 -> floor(k x 15.8))", Reforge.shards_now(sv) == int(floor(ReforgeDB.SHARD_K * sqrt(250.0))))
 	var rs: Dictionary = BaseMeta.normalize(JSON.parse_string(JSON.stringify(sv)))
-	_check("AC-21 tree/shards/count survive save/load", int(rs["shards"]) == 12 and Reforge.count(rs) == 1)
+	_check("AC-21 tree/shards/count survive save/load", int(rs["shards"]) == sh1 and Reforge.count(rs) == 1)
 	# Tree: root first, cost base + step*L, max.
-	_check("AC-21 nodes need root_forge", not Reforge.can_buy(sv, "might") and not Reforge.buy(sv, "root_forge").is_empty() and int(sv["shards"]) == 11)
+	_check("AC-21 nodes need root_forge", not Reforge.can_buy(sv, "might") and not Reforge.buy(sv, "root_forge").is_empty() and int(sv["shards"]) == sh1 - 1)
 	Reforge.buy(sv, "might")
 	Reforge.buy(sv, "might")
-	_check("AC-21 cost 2 + L (might: 2 then 3)", Reforge.node(sv, "might") == 2 and int(sv["shards"]) == 6)
+	_check("AC-21 cost 2 + L (might: 2 then 3)", Reforge.node(sv, "might") == 2 and int(sv["shards"]) == sh1 - 6)
 	sv["shards"] = 999
 	for k in 5:
 		Reforge.buy(sv, "banish_plus")
@@ -3359,11 +3360,11 @@ func _reforge_stages() -> void:
 	var B = TowerState.new()
 	B.setup(3, _parts_save(["f_glass", "b_hollow"], "bastion", 1))
 	_equip_all(B.save, [])
-	# Node strengths are ReforgeDB data (balance pass: might 0.6, bulwark 0.4 per level).
-	_check("RF might x2 / bulwark / prosperity levels apply ReforgeDB amt in the run", is_equal_approx(S.dmg_mult, 1.0 + 2.0 * ReforgeDB.amt("might")) and is_equal_approx(S.max_hp_mult, 1.0 + ReforgeDB.amt("bulwark_p")) and is_equal_approx(S.coin_mult, 1.0 + ReforgeDB.amt("prosperity")))
+	# Node strengths are ReforgeDB data (balance pass 2: might x1.6, bulwark x1.35 per level, multiplicative).
+	_check("RF might x2 (multiplicative) / bulwark / prosperity levels apply ReforgeDB amt in the run", is_equal_approx(S.dmg_mult, 1.0 + ReforgeDB.bonus("might", 2)) and is_equal_approx(S.dmg_mult, pow(1.0 + ReforgeDB.amt("might"), 2.0)) and is_equal_approx(S.max_hp_mult, 1.0 + ReforgeDB.bonus("bulwark_p", 1)) and is_equal_approx(S.coin_mult, 1.0 + ReforgeDB.amt("prosperity")))
 	_check("RF head_start + starting_cash + wide_draft + banish+", int(S.tracks["dmg"]) == 1 and int(S.cash) == 25 and int(S._draft_ctx("")["choices"]) == 4 and S.banish_left == 3)
 	_check("RF tempo adds a speed step, builder2 a builder", (Labs.speed_steps(sv) as Array).back() == 1.25 and Outpost.builders(sv) == 2)
-	_check("RF shard_yield +10% (k 1.1)", Reforge.shards_now({"reforge": {"count": 1, "coins_since": 1000000, "nodes": {"shard_yield": 1}}}) == 11)
+	_check("RF shard_yield +10% (k x 1.1)", Reforge.shards_now({"reforge": {"count": 1, "coins_since": 1000000, "nodes": {"shard_yield": 1}}}) == int(floor(ReforgeDB.SHARD_K * 1.1 * 10.0)))
 	Reforge.buy(sv, "bp_mint")
 	_check("RF bp_mint: Mint Ring blueprint + 20% build credit", String((sv["outpost"]["blueprints"] as Array).back()["name"]) == "Mint Ring" and int(sv["outpost"]["credit"]) == (500 * 2 + 2000) / 5)
 	# retain keeps floor(lvl x 10%) of Outpost levels.
@@ -3425,7 +3426,7 @@ func _save_v4_stages() -> void:
 	var away: Dictionary = Outpost.away_report(m, OT0)
 	Outpost.tick(m, OT0)
 	Outpost.tick(m, OT0 + 3600)
-	_check("AC-22 no double offline pay (accrues from the migration time)", int(away["coins"]) == 0 and absf(float(Outpost.pending(m, OT0 + 3600)["coins"]) - OutpostDB.MILL_RATE * 1.5) < 0.01)
+	_check("AC-22 no double offline pay (accrues from the migration time)", int(away["coins"]) == 0 and absf(float(Outpost.pending(m, OT0 + 3600)["coins"]) - OutpostDB.MILL_RATE * (1.0 + OutpostDB.MILL_TIER)) < 0.01)
 	# Idempotent: migrating / normalizing again changes nothing.
 	var m2: Dictionary = BaseMeta.normalize(BaseMeta.migrate(m))
 	_check("AC-22 migration idempotent (v4 -> v4)", JSON.stringify(m2) == JSON.stringify(m) and int(BaseMeta.normalize(BaseMeta.normalize(BaseMeta.migrate(v3)))["coins"]) == 10000 + refund + core_ref)

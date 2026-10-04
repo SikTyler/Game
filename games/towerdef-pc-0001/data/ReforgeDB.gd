@@ -7,10 +7,13 @@ extends RefCounted
 
 const TuneRef := preload("res://Tune.gd")
 
+## Shards = floor(SHARD_K x sqrt(coins since / L0)) (POWER_MODEL §6 k; balance pass 1.0 -> 1.6).
+const SHARD_K: float = 1.6
+
 const NODES: Dictionary = {
 	"root_forge": {"name": "Forge Root", "branch": "root", "base": 1, "step": 0, "max": 1, "desc": "Unlocks the tree and the Lance Core"},
-	"might": {"name": "Might", "branch": "power", "base": 2, "step": 1, "max": 20, "amt": 0.6, "desc": "+60% all damage"},
-	"bulwark_p": {"name": "Bulwark", "branch": "power", "base": 2, "step": 1, "max": 20, "amt": 0.4, "desc": "+40% Core HP"},
+	"might": {"name": "Might", "branch": "power", "base": 2, "step": 1, "max": 20, "amt": 0.6, "stack": "mul", "desc": "x1.6 all damage per level (multiplies)"},
+	"bulwark_p": {"name": "Bulwark", "branch": "power", "base": 2, "step": 1, "max": 20, "amt": 0.35, "stack": "mul", "desc": "x1.35 Core HP per level (multiplies)"},
 	"head_start": {"name": "Head Start", "branch": "power", "base": 4, "step": 2, "max": 5, "desc": "+1 starting level on every cash track"},
 	"core_ceiling": {"name": "Core Ceiling", "branch": "power", "base": 15, "step": 0, "max": 1, "desc": "Core max level 75"},
 	"wide_draft": {"name": "Wide Draft", "branch": "power", "base": 25, "step": 0, "max": 1, "desc": "4 draft choices"},
@@ -42,6 +45,17 @@ const KEEPS: Array = ["Owned parts, stars, set unlocks, set specials", "Cores un
 ## Per-level effect of a stat node (data "amt"; Tune seam pc_rf_<id>).
 static func amt(id: String) -> float:
 	return TuneRef.num("pc_rf_" + id, float((NODES.get(id, {}) as Dictionary).get("amt", 0.0)))
+
+
+## Total bonus of a stat node at level L (POWER_MODEL §4: multiplicative
+## within a branch when data "stack" == "mul": (1+amt)^L - 1; else amt x L).
+## Tune seam pc_rf_stack_<id> = 0 forces additive.
+static func bonus(id: String, lvl: int) -> float:
+	var d: Dictionary = NODES.get(id, {})
+	var a: float = amt(id)
+	if String(d.get("stack", "")) == "mul" and TuneRef.int_of("pc_rf_stack_" + id, 1) != 0:
+		return pow(1.0 + a, float(maxi(0, lvl))) - 1.0
+	return a * float(maxi(0, lvl))
 
 
 static func cost(id: String, lvl: int) -> int:
