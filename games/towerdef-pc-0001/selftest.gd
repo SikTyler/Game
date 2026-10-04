@@ -1057,6 +1057,7 @@ func _pc_engine_stages() -> void:
 	_pc_move_stages()
 	_pc_mode_stages()
 	_pc_stats_stages()
+	_pc_save_stages()
 
 
 ## PC-E1 7x7 ring unlocks, PC-E2 build cap.
@@ -1645,3 +1646,62 @@ func _pc_stats_stages() -> void:
 	var f2: String = _run_fingerprint(BaseMeta.default_save(), ro, 10)
 	var f3: String = _run_fingerprint(BaseMeta.default_save(), {"seed": 31338, "modifiers": ["haste"]}, 10)
 	_check("PC-E8 retry seed reproduces the first 10 waves", int(ro["seed"]) == 31337 and f1.length() > 1000 and f1.hash() == f2.hash() and f1 == f2 and f1 != f3)
+
+
+## PC-E9 save v3 migration + 3 slots + .bak fallback.
+func _pc_save_stages() -> void:
+	# A mobile v2 save (5x5 keys) migrates losslessly onto the 7x7 board.
+	var v2: Dictionary = {
+		"version": 2, "coins": 4321, "gems": 12, "core": {"dmg": 3, "hp": 2, "regen": 1},
+		"slots": {"6": {"id": "armory", "lvl": 4}, "7": {"id": "gun", "lvl": 3}, "0": {"id": "mine", "lvl": 2}, "24": {"id": "vault", "lvl": 1}},
+		"unlocked": [0, 4, 24], "runs": 9, "best_wave": 44, "tier": 2, "best_wave_by_tier": {"1": 44, "2": 3},
+		"target_modes": {"7": "first"}, "stats": {"kills": 999, "bosses": 4},
+		"labs": {"lvls": {"dmg": 3, "coin": 1}, "slots": 2, "running": []},
+	}
+	var m: Dictionary = BaseMeta.normalize(BaseMeta.migrate(v2))
+	var slot_ok: bool = String(BaseMeta.slot_of(m, _c(6))["id"]) == "armory" and int(BaseMeta.slot_of(m, _c(6))["lvl"]) == 4 and String(BaseMeta.slot_of(m, _c(7))["id"]) == "gun" and String(BaseMeta.slot_of(m, _c(0))["id"]) == "mine" and String(BaseMeta.slot_of(m, _c(24))["id"]) == "vault" and (m["slots"] as Dictionary).size() == 4
+	_check("PC-E9 v2 -> v3: version, cells offset (r+1,c+1)", int(m["version"]) == 3 and slot_ok and _c(6) == 16 and _c(24) == 40)
+	_check("PC-E9 v2 -> v3: unlocks land on ring 2", (m["unlocked"] as Array) == [_c(0), _c(4), _c(24)] and BaseMeta.cell_ring(_c(0)) == 2)
+	_check("PC-E9 v2 -> v3 keeps meta fields", int(m["coins"]) == 4321 and int(m["gems"]) == 12 and int(m["core"]["dmg"]) == 3 and int(m["runs"]) == 9 and int(m["best_wave_by_tier"]["1"]) == 44 and int(m["tier"]) == 2 and int(m["labs"]["lvls"]["dmg"]) == 3 and int(m["stats"]["kills"]) == 999 and int(m["stats"]["bosses"]) == 4)
+	_check("PC-E9 v3 blocks filled", (m["history"] as Array).is_empty() and int(m["endless"]["best"]) == 0 and (m["stats"] as Dictionary).has("kills_by_kind"))
+	var mm: Dictionary = BaseMeta.migrate(v2)
+	_check("PC-E9 target modes remapped", String((mm["target_modes"] as Dictionary)[str(_c(7))]) == "first")
+	_check("PC-E9 migrate is idempotent on v3", JSON.stringify(BaseMeta.migrate(m)) == JSON.stringify(m))
+	var rt: Dictionary = BaseMeta.normalize(JSON.parse_string(JSON.stringify(m)))
+	_check("PC-E9 v3 JSON round-trip equality", JSON.stringify(rt) == JSON.stringify(m))
+	# Slots.
+	for n in [1, 2, 3]:
+		MetaSave.delete_slot(n, MetaSave.DELETE_CONFIRM)
+	var s1: Dictionary = BaseMeta.default_save()
+	s1["coins"] = 111
+	var s2: Dictionary = BaseMeta.default_save()
+	s2["coins"] = 222
+	s2["best_wave_by_tier"] = {"1": 41, "2": 7}
+	s2["best_wave"] = 41
+	_check("PC-E9 write slots", MetaSave.write_slot(1, s1) and MetaSave.write_slot(2, s2) and not MetaSave.write_slot(4, s1))
+	_check("PC-E9 slots are independent", int(MetaSave.read_slot(1)["coins"]) == 111 and int(MetaSave.read_slot(2)["coins"]) == 222 and MetaSave.read_slot(3).is_empty() and not MetaSave.slot_exists(3))
+	var sm: Dictionary = MetaSave.slot_summary(2)
+	_check("PC-E9 slot summary", bool(sm["exists"]) and int(sm["best_tier"]) == 2 and int(sm["best_wave"]) == 41 and not bool(MetaSave.slot_summary(3)["exists"]))
+	_check("PC-E9 copy only into an empty slot", not MetaSave.copy_slot(1, 2) and MetaSave.copy_slot(2, 3) and int(MetaSave.read_slot(3)["coins"]) == 222)
+	_check("PC-E9 delete needs the typed confirmation", not MetaSave.delete_slot(3, "yes") and MetaSave.slot_exists(3) and MetaSave.delete_slot(3, MetaSave.DELETE_CONFIRM) and not MetaSave.slot_exists(3))
+	s1["coins"] = 333
+	MetaSave.write_slot(1, s1)
+	var bak: Variant = JSON.parse_string(FileAccess.get_file_as_string(MetaSave.slot_path(1) + ".bak"))
+	_check("PC-E9 .bak holds the previous save, no .tmp left", bak is Dictionary and int((bak as Dictionary)["coins"]) == 111 and not FileAccess.file_exists(MetaSave.slot_path(1) + ".tmp"))
+	var f := FileAccess.open(MetaSave.slot_path(1), FileAccess.WRITE)
+	f.store_string("{ not json")
+	f.close()
+	_check("PC-E9 corrupted primary falls back to .bak", int(MetaSave.read_slot(1)["coins"]) == 111)
+	# Active slot API + legacy mobile save import into slot 1.
+	MetaSave.set_active(2)
+	_check("PC-E9 read()/write() use the active slot", int(MetaSave.read()["coins"]) == 222)
+	MetaSave.set_active(1)
+	MetaSave.delete_slot(1, MetaSave.DELETE_CONFIRM)
+	var lf := FileAccess.open(MetaSave.LEGACY_PATH, FileAccess.WRITE)
+	lf.store_string(JSON.stringify(v2))
+	lf.close()
+	var imp: Dictionary = BaseMeta.normalize(MetaSave.read_slot(1))
+	_check("PC-E9 legacy save.json imports into slot 1 as v3", int(imp["version"]) == 3 and int(imp["coins"]) == 4321 and String(BaseMeta.slot_of(imp, _c(7))["id"]) == "gun" and MetaSave.read_slot(2).get("coins", 0) == 222)
+	for n in [1, 2, 3]:
+		MetaSave.delete_slot(n, MetaSave.DELETE_CONFIRM)
+	MetaSave.set_active(1)

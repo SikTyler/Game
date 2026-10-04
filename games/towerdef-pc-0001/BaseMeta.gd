@@ -1,7 +1,10 @@
 extends RefCounted
 ## Permanent base (the meta layer, The Tower's "workshop" as buildings).
 ## Pure static functions over the save Dictionary — the view writes it to disk
-## via MetaSave. Save v2 shape (SPEC A1 / SYSTEMS §12):
+## via MetaSave (3 slots). Save v3 (PC_SPEC §4) = the v2 shape below on the
+## 7x7 board (cell keys 0..48, core 24) plus stats{} / history[] (Stats.gd),
+## endless{best}. v2 -> v3 maps 5x5 (r,c) to 7x7 (r+1,c+1). v2 shape
+## (SPEC A1 / SYSTEMS §12):
 ##   {version:2, coins, gems, core:{dmg,hp,regen}, slots:{"<idx>":{id,lvl}},
 ##    unlocked:[idx], runs, best_wave, tier, best_wave_by_tier:{"N":w},
 ##    tiers_rewarded:[N], best_coin_rate:float, speed:float,
