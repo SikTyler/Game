@@ -569,7 +569,7 @@ static func _build_modes(m) -> void:
 	var mode: String = String(m.run_opts.get("mode", "normal"))
 	var eu: bool = BaseMeta.endless_unlocked(m.save)
 	btn(m, "Normal", Rect2(x, y, 300, 56), func() -> void: m.run_opts["mode"] = "normal"; m._rebuild_ui(), "Standard run: tier progression counts", true, RUST if mode == "normal" else Color("4a525c"), "MODE Normal")
-	btn(m, "Endless" if eu else "Endless (best wave 50)", Rect2(x + 320, y, 360, 56), func() -> void: m.run_opts["mode"] = "endless"; m._rebuild_ui(), "No wave cap; mutation pick every 25 waves; coins x0.8" + ("" if eu else ". Unlocks at best wave 50."), eu, MAG if mode == "endless" else Color("4a525c"), "MODE Endless", "icon_endless")
+	btn(m, "Endless" if eu else "Endless (best wave 50)", Rect2(x + 320, y, 360, 56), func() -> void: m.run_opts["mode"] = "endless"; m._rebuild_ui(), "No wave cap; mutation pick every 25 waves; coins x0.9" + ("" if eu else ". Unlocks at best wave 50."), eu, MAG if mode == "endless" else Color("4a525c"), "MODE Endless", "icon_endless")
 	var mods: Array = m.run_opts.get("modifiers", [])
 	for k in ModifierDB.IDS.size():
 		var id: String = ModifierDB.IDS[k]
@@ -1270,7 +1270,7 @@ static func _draw_overlay(m) -> void:
 			var mods: Array = m.run_opts.get("modifiers", [])
 			_t(m, "Challenge modifiers (coin rewards stack, capped at x%.1f)" % ModifierDB.COIN_CAP, Vector2(r4.position.x + 40, r4.position.y + 225), 18, DIM, HORIZONTAL_ALIGNMENT_LEFT, 800.0)
 			_t(m, "Coin multiplier: x%.2f" % ModifierDB.coin_mult(mods), Vector2(r4.position.x + 40, r4.position.y + 480), 26, GOLD, HORIZONTAL_ALIGNMENT_LEFT, 600.0)
-			_wrap(m, "Endless: no wave cap, a mutation pick every 25 waves (+10% coins each), banks coins x0.8 and keeps its own best. Modifiers apply to both modes.", Vector2(r4.position.x + 40, r4.position.y + 530), 17, DIM, 1000.0, 3)
+			_wrap(m, "Endless: no wave cap, a mutation pick every 25 waves (+15% coins each), banks coins x0.9 and keeps its own best. Modifiers apply to both modes.", Vector2(r4.position.x + 40, r4.position.y + 530), 17, DIM, 1000.0, 3)
 
 
 static func _draw_stats(m, r: Rect2) -> void:

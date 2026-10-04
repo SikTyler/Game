@@ -1502,12 +1502,17 @@ func _mod_run(mods: Array, sv: Dictionary = {}, seed_value: int = 1234):
 	return S
 
 
+static func _mc(id: String) -> float:
+	return float((ModifierDB.DEFS[id] as Dictionary)["coin"])
+
+
 ## PC-E6 challenge modifiers, PC-E7 endless mode.
 func _pc_mode_stages() -> void:
-	_check("PC-E6 coin mult = min(3, 1 + sum)", is_equal_approx(ModifierDB.coin_mult(["glass"]), 1.4) and is_equal_approx(ModifierDB.coin_mult(["glass", "haste"]), 1.7) and is_equal_approx(ModifierDB.coin_mult(ModifierDB.IDS), 3.0) and is_equal_approx(ModifierDB.coin_mult(["bogus"]), 1.0))
+	_check("PC-E6 coin mult = min(3, 1 + sum)", is_equal_approx(ModifierDB.coin_mult(["glass"]), 1.0 + _mc("glass")) and is_equal_approx(ModifierDB.coin_mult(["glass", "haste"]), 1.0 + _mc("glass") + _mc("haste")) and is_equal_approx(ModifierDB.coin_mult(ModifierDB.IDS), 3.0) and is_equal_approx(ModifierDB.coin_mult(["bogus"]), 1.0))
 	var S0 = _mod_run([])
 	var S = _mod_run(["glass", "haste", "bogus", "glass"])
-	_check("PC-E6 modifiers cleaned + run coin mult applied", S.modifiers == ["glass", "haste"] and is_equal_approx(S.coin_mult, S0.coin_mult * 1.7) and is_equal_approx(S.run_coin_mult(), S0.run_coin_mult() * 1.7))
+	var gh: float = 1.0 + _mc("glass") + _mc("haste")
+	_check("PC-E6 modifiers cleaned + run coin mult applied", S.modifiers == ["glass", "haste"] and is_equal_approx(S.coin_mult, S0.coin_mult * gh) and is_equal_approx(S.run_coin_mult(), S0.run_coin_mult() * gh))
 	_check("PC-E6 Glass Core: max HP -50%", is_equal_approx(float(S.stats["max_hp"]), 50.0) and is_equal_approx(S.hp, 50.0))
 	S.spawn_hold = true
 	S._spawn("drone", [])
@@ -1567,7 +1572,7 @@ func _pc_mode_stages() -> void:
 	N0.setup(5, es)
 	E = TowerState.new()
 	E.setup(5, es, 0, {"mode": "endless"})
-	_check("PC-E7 endless unlocked at wave 50, coins x0.8", E.mode == "endless" and is_equal_approx(E.coin_mult, N0.coin_mult * 0.8))
+	_check("PC-E7 endless unlocked at wave 50, coins x0.9", E.mode == "endless" and is_equal_approx(E.coin_mult, N0.coin_mult * 0.9))
 	E.spawn_hold = true
 	E.wave = 24
 	E.wave_t = E.wave_time - 0.001
@@ -1579,7 +1584,7 @@ func _pc_mode_stages() -> void:
 	var tk: Array = E.choose_mutation(0)
 	E._spawn("drone", [])
 	var vh: float = float(E.enemies[E.enemies.size() - 1]["hp"]) / E.scale()
-	_check("PC-E7 mutation pays +10% coins and buffs enemies", _evts(tk, "mutation_taken").size() == 1 and is_equal_approx(E.run_coin_mult(), cm0 * 1.1) and is_equal_approx(vh, 6.0 * 1.2) and E.mutation_offer.is_empty())
+	_check("PC-E7 mutation pays +15% coins and buffs enemies", _evts(tk, "mutation_taken").size() == 1 and is_equal_approx(E.run_coin_mult(), cm0 * 1.15) and is_equal_approx(vh, 6.0 * 1.2) and E.mutation_offer.is_empty())
 	N0.mode = "normal"
 	N0.wave = 49
 	N0.wave_t = N0.wave_time - 0.001

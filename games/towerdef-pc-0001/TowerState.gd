@@ -258,7 +258,7 @@ func _apply_run_opts(opts: Dictionary) -> Array:
 	if mode != "endless":
 		mode = "normal"
 	mod_coin = ModifierDB.coin_mult(modifiers)
-	mode_coin = TuneRef.num("pc_endless_coin_mult", 0.8) if mode == "endless" else 1.0
+	mode_coin = TuneRef.num("pc_endless_coin_mult", 0.9) if mode == "endless" else 1.0
 	mutations_taken = []
 	mutation_offer = []
 	mutation_pending = 0

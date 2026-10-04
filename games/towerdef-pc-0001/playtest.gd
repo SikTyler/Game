@@ -19,7 +19,9 @@ extends SceneTree
 # lane, cancels cards with no legal cell, buys outer cells for land development
 # once saturated, and picks the mildest endless mutation. PC gates: swapping
 # Mines for Refineries never out-earns the same board by > 15% (PC-E14), every challenge modifier reaches
-# wave 25 on the day-20 save and endless plays past its first mutation (PC-E16).
+# wave 25 on the day-20 save and endless plays past its first mutation (PC-E16);
+# modifier coin rewards are fair vs a same-seed baseline and endless pays
+# 0.8-1.15x a normal run (PC_BALANCE.md).
 # Prints per-run lines + "PLAYTEST METRICS {json}" + exactly "PLAYTEST OK" (exit 0)
 # or "PLAYTEST FAIL: ..." (exit 1). Clears user:// saves at start and end.
 
@@ -44,7 +46,7 @@ const GATES: Array = ["solvent", "first_goal_reachable", "progressable", "no_dea
 	"t2_by_day5", "tier3_by_day30", "no_plateau_before_t3", "early_3day_rise",
 	"gems_per_day_ok", "gem_sources_ok", "offline_below_active", "mix_beats_weapon", "mix_beats_eco", "no_dominant_perk",
 	"ac38_eco_mix", "ac39_no_mono", "day1_band", "no_plateau_after_t3", "seeds_ok",
-	"pc_refinery_not_dominant", "pc_modifiers_reach_w25", "pc_endless_runs"]
+	"pc_refinery_not_dominant", "pc_modifiers_reach_w25", "pc_modifiers_fair", "pc_endless_runs"]
 const EXTRA_SEEDS: Array = [5151, 6262]   # AC-38/AC-40 re-checked on more seeds (thin margins)
 
 
@@ -714,13 +716,23 @@ func campaign_checks(seed0: int) -> Dictionary:
 	print("PC REFINERY vs balanced: " + JSON.stringify(refin))
 	# PC-E16 (subset): every challenge modifier stays winnable to wave 25 on the
 	# day-20 save, and an endless run plays past its first mutation.
+	# PC_BALANCE fairness: each modifier's coin reward tracks its measured cost
+	# (same save, same seeds vs no modifier): net coins 0.9-1.4x, and a modifier
+	# that costs <= 1.5 waves may not pay > 1.25x (no free coins).
 	var mod_rows: Dictionary = {}
 	var mods_ok: bool = true
+	var fair_ok: bool = true
+	var modseeds: Array = [seed0 + 11, seed0 + 58]
+	var mbase: Dictionary = snap_eval(snap20, "balanced", modseeds)
+	mod_rows["_base"] = {"wave": snappedf(float(mbase["wave"]), 0.1), "coins": roundi(float(mbase["coins"]))}
 	for mid in ModifierDB.IDS:
-		var mr: Dictionary = snap_eval(snap20, "balanced", [seed0 + 11], "", {"modifiers": [mid]})
-		mod_rows[mid] = snappedf(float(mr["wave"]), 0.1)
+		var mr: Dictionary = snap_eval(snap20, "balanced", modseeds, "", {"modifiers": [mid]})
+		var cr: float = float(mr["coins"]) / maxf(1.0, float(mbase["coins"]))
+		var dw: float = float(mr["wave"]) - float(mbase["wave"])
+		mod_rows[mid] = {"wave": snappedf(float(mr["wave"]), 0.1), "dwave": snappedf(dw, 0.1), "coin_ratio": snappedf(cr, 0.01)}
 		mods_ok = mods_ok and float(mr["wave"]) >= 25.0
-	print("PC MODIFIERS day 20 (wave): " + JSON.stringify(mod_rows))
+		fair_ok = fair_ok and cr >= 0.9 and cr <= 1.4 and not (dw >= -1.5 and cr > 1.25)
+	print("PC MODIFIERS day 20: " + JSON.stringify(mod_rows))
 	var esnap: Dictionary = snap20.duplicate(true)
 	var endless_ok: bool = BaseMeta.endless_unlocked(esnap)
 	var er: Dictionary = {}
@@ -728,6 +740,11 @@ func campaign_checks(seed0: int) -> Dictionary:
 		BaseMeta.select_tier(esnap, Tiers.highest(esnap))
 		er = camp_run(esnap, "balanced", seed0 + 11, NOW0, "", false, {"mode": "endless"})
 		endless_ok = String(er["mode"]) == "endless" and int(er["wave"]) > ModifierDB.MUTATION_EVERY and int(er["mutations"]) >= 1
+		# endless pays roughly a normal run (0.8-1.15x the same-seed baseline):
+		# a real alternative, not a replacement for tier progression.
+		var eb: Dictionary = snap_eval(snap20, "balanced", [seed0 + 11])
+		er["coin_ratio"] = snappedf(float(er["coins"]) / maxf(1.0, float(eb["coins"])), 0.01)
+		endless_ok = endless_ok and float(er["coin_ratio"]) >= 0.8 and float(er["coin_ratio"]) <= 1.15
 	print("PC ENDLESS day 20: " + JSON.stringify(er))
 	var per_day: Array = []
 	for r in days:
@@ -757,6 +774,6 @@ func campaign_checks(seed0: int) -> Dictionary:
 		"late_stall_days": late_stall, "best_wave_at_t3": bw_t3, "no_plateau_after_t3": late_ok,
 		"seed_runs": seed_rows, "seeds_ok": seeds_ok,
 		"pc_refinery": refin, "pc_refinery_not_dominant": refin_ok,
-		"pc_modifiers_d20": mod_rows, "pc_modifiers_reach_w25": mods_ok,
+		"pc_modifiers_d20": mod_rows, "pc_modifiers_reach_w25": mods_ok, "pc_modifiers_fair": fair_ok,
 		"pc_endless_d20": er, "pc_endless_runs": endless_ok,
 	}

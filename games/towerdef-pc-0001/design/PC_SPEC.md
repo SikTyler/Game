@@ -136,20 +136,22 @@ The eco/defense tradeoff is preserved because Refinery is the only new eco build
 ## 3. Modes
 
 ### 3.1 Endless mode
-Unlocked after you reach wave 50 in any tier. There is no tier wave target. HP scaling continues past wave 100 with a soft exponent (`pc_endless_hp_exp=1.12`). Every 25 waves the player chooses one of 3 **mutation cards** (enemy buffs that pay +10% coins each). Leaderboard hooks: `SteamService.upload_score("endless_best_wave")`, which is a no-op offline. Banking works as in normal mode, but coins are ×0.8 (`pc_endless_coin_mult=0.8`) so endless does not replace tier progression.
+Unlocked after you reach wave 50 in any tier. There is no tier wave target. HP scaling continues past wave 100 with a soft exponent (`pc_endless_hp_exp=1.12`). Every 25 waves the player chooses one of 3 **mutation cards** (enemy buffs that pay +15% coins each). Leaderboard hooks: `SteamService.upload_score("endless_best_wave")`, which is a no-op offline. Banking works as in normal mode, but coins are ×0.9 (`pc_endless_coin_mult=0.9`, retuned in PC_BALANCE.md) so endless does not replace tier progression.
 
 ### 3.2 Challenge modifiers (pick any before a run; rewards stack additively, then cap at ×3.0)
 | id | name | effect | coin mult |
 |---|---|---|---|
-| glass | Glass Core | Core max HP −50% | +0.40 |
-| swarm | Swarm | +60% enemy count, −30% HP each | +0.25 |
-| ironclad | Ironclad | All enemies take −20% damage from non-crit hits | +0.35 |
-| poverty | Austerity | Start cash 0, kill cash −30% | +0.30 |
-| allsides | Encircled | All 4 quadrants from wave 1 | +0.45 |
-| noperks | Purist | No perk drafts | +0.30 |
-| haste | Haste | Enemy speed +25% | +0.30 |
-| elitist | Elite Guard | Elite weight ×3, from T1 | +0.35 |
-| nolabs | Fresh Start | Lab bonuses disabled for the run | +0.50 |
+| glass | Glass Core | Core max HP −50% | +0.15 |
+| swarm | Swarm | +60% enemy count, −30% HP each | +0.10 |
+| ironclad | Ironclad | All enemies take −20% damage from non-crit hits | +0.30 |
+| poverty | Austerity | Start cash 0, kill cash −30% | +0.10 |
+| allsides | Encircled | All 4 quadrants from wave 1 | +0.10 |
+| noperks | Purist | No perk drafts | +0.55 |
+| haste | Haste | Enemy speed +25% | +0.10 |
+| elitist | Elite Guard | Elite weight ×3, from T1 | +0.40 |
+| nolabs | Fresh Start | Lab bonuses disabled for the run | +0.60 |
+
+Rewards retuned from the original spec by measured difficulty (see PC_BALANCE.md).
 
 Modifiers are a pure data module `data/ModifierDB.gd` and are applied in `TowerState.setup(opts.modifiers)`. Achievements key off them.
 
@@ -258,7 +260,7 @@ static func reset_mock() -> void
 | PC-E4 | S | `move_building` is free between waves or when paused, costs 10% during a wave, swaps occupied targets, and emits `building_moved`. |
 | PC-E5 | S | Spawn quadrant count per wave follows the §2.3 schedule. `wave_telegraph` precedes `wave_start` by `pc_telegraph_s` and its counts match the actual spawns. Same seed gives the same directions. |
 | PC-E6 | S | Each of the 9 modifiers applies its effect. The coin multiplier is `min(3.0, 1+Σ)`. Purist suppresses `perk_offer`. Encircled forces 4 quadrants from wave 1. |
-| PC-E7 | S | Endless needs best_wave ≥ 50. It has no wave cap, offers a mutation every 25 waves, and banks coins ×0.8. |
+| PC-E7 | S | Endless needs best_wave ≥ 50. It has no wave cap, offers a mutation every 25 waves, and banks coins ×0.9. |
 | PC-E8 | S | Stats are updated only through `on_event`. History keeps 50 entries (the 51st evicts the oldest). Retry-seed reproduces an identical first 10 waves (event hash equality). |
 | PC-E9 | S | Save v3: v2 migrates to v3 losslessly (5x5 → 7x7 offset), JSON round-trip equality holds, slots 1–3 are independent, and a corrupted primary falls back to `.bak`. |
 | PC-E10 | S | Achievements: each of the 24 conditions fires exactly once from synthetic event streams, with no false positives in a 10-wave normal run, and each unlock calls `SteamService.unlock_achievement` (seen in mock_log). |
