@@ -7,7 +7,7 @@
   "concept": {
     "theme": {
       "premise": "a lone frontier mining outpost whose drill-core tower holds out against endless waves of blocky scrap-machines, rebuilding a little stronger after every fall",
-      "tone": "tense, gritty, deeply satisfying — the steady grind of a base that keeps getting stronger",
+      "tone": "tense, gritty, deeply satisfying \u2014 the steady grind of a base that keeps getting stronger",
       "mood_keywords": [
         "industrial",
         "blocky",
@@ -17,7 +17,7 @@
       "setting": "a scorched rust-and-slate frontier plateau under a dusty dusk sky"
     },
     "genre": "incremental roguelite tower defense",
-    "core_loop": "A central core tower auto-fires at continuous waves (~25s each) of machines that always walk to the center. Kills pay CASH (spent live on temporary in-run levels for any tapped building), XP (a full bar opens a seeded 3-card building DRAFT while time slows to 20% — place a new run-only building in a free slot or +1 an owned type) and COINS (banked at death to permanently place/upgrade buildings and core stats on the persistent 5x5 base between runs). The live decision every pick and every cash spend: the 24 base slots are scarce and each goes to eco OR defense — building eco (Mine, Oil Mill, Bounty Office) gains faster leveling and cash but gives up the firepower to survive the next spike; adjacency (Armory beside weapons, Oil Mill beside Mines) makes placement matter. Difficulty: enemy HP/damage x1.12 per wave, spawn rate ramps to a MAX cap, and every 10th wave is a boss spike that punishes greedy bases.",
+    "core_loop": "A central core tower auto-fires at continuous waves (~25s each) of machines that always walk to the center. Kills pay CASH (spent live on temporary in-run levels for any tapped building), XP (a full bar opens a seeded 3-card building DRAFT while time slows to 20% \u2014 place a new run-only building in a free slot or +1 an owned type) and COINS (banked at death to permanently place/upgrade buildings and core stats on the persistent 5x5 base between runs). The live decision every pick and every cash spend: the 24 base slots are scarce and each goes to eco OR defense \u2014 building eco (Mine, Oil Mill, Bounty Office) gains faster leveling and cash but gives up the firepower to survive the next spike; adjacency (Armory beside weapons, Oil Mill beside Mines) makes placement matter. Difficulty: enemy HP/damage x1.12 per wave, spawn rate ramps to a MAX cap, and every 10th wave is a boss spike that punishes greedy bases.",
     "mechanics": [
       "central core tower auto-targeting nearest enemy in range",
       "continuous waves with Drone/Skitter/Hauler enemies and a boss every 10th wave; HP/damage scale per wave, spawn rate capped",
@@ -30,12 +30,12 @@
       "persistent save of base layout, levels and coins",
       "core HP, death -> results screen -> base screen -> new run"
     ],
-    "art_direction": "flat blocky top-down primitives on dark slate (#1b2027) with rust-orange accents; category colour-coding — weapons cyan, eco amber, support green, enemies red/magenta squares & triangles, core white with a pulsing ring; background: faint build-grid with drifting dust motes so no dead space; feedback: muzzle flash + hit flash, floating cash pops, screen shake + red vignette on core damage, radial burst on level-up, squash-pop when a building is placed or upgraded",
+    "art_direction": "flat blocky top-down primitives on dark slate (#1b2027) with rust-orange accents; category colour-coding \u2014 weapons cyan, eco amber, support green, enemies red/magenta squares & triangles, core white with a pulsing ring; background: faint build-grid with drifting dust motes so no dead space; feedback: muzzle flash + hit flash, floating cash pops, screen shake + red vignette on core damage, radial burst on level-up, squash-pop when a building is placed or upgraded",
     "target_platforms": [
       "windows",
       "linux"
     ],
-    "differentiation_notes": "The Tower's proven idle-TD loop, but every upgrade — in-run draft, in-run cash and permanent workshop — is a physical building competing for 24 scarce adjacency-sensitive slots, turning stat-button menus into a spatial eco-vs-defense base-building puzzle. PC/Steam edition: independent desktop copy of the mobile game (1920x1080 landscape, mouse/keyboard/controller UI, larger base and battlefield, Steam shell, endless/challenge modes, stats and save slots)."
+    "differentiation_notes": "The Tower's proven idle-TD loop, but every upgrade \u2014 in-run draft, in-run cash and permanent workshop \u2014 is a physical building competing for 24 scarce adjacency-sensitive slots, turning stat-button menus into a spatial eco-vs-defense base-building puzzle. PC/Steam edition: independent desktop copy of the mobile game (1920x1080 landscape, mouse/keyboard/controller UI, larger base and battlefield, Steam shell, endless/challenge modes, stats and save slots)."
   },
   "build": {
     "engine": "godot",
@@ -719,5 +719,16 @@
       }
     ],
     "notes": "Sfx.gd is a Main-owned Node (no autoload): 8-player round-robin pool on bus SFX, per-clip rate limit (50-90 ms) + 4/frame cap, looping theme on bus Music (41.4 s, 116 bpm A-minor industrial chiptune, loop-exact). Buses in default_bus_layout.tres; volume/mute in save.settings. Dummy audio driver (headless) logs clips without starting playback to avoid exit leaks. uitest asserts click/place/upgrade/card_open/wave_start/game_over clips fire."
+  },
+  "validation": {
+    "opens_in_editor": true,
+    "runs": true,
+    "core_loop_functional": true,
+    "interaction_functional": true,
+    "issues": [
+      "validator (2026-10-04): headless --import + --quit-after 120 boot clean (no SCRIPT ERROR/ERROR:/Failed to load); SELFTEST OK; UITEST OK; PLAYTEST OK (pc_modifiers_fair, pc_endless_runs, progressable, no_death_spiral)",
+      "playtest-audit (advisory): Encircled (allsides) lets the bot reach +1.5 waves; coin bonus cut to +0.05 (1.07x) so it pays only a token reward",
+      "playtest-audit (advisory): pure-eco is far weaker (best wave 7); eco pays off only mixed with weapons, as designed"
+    ]
   }
 }

@@ -10,7 +10,7 @@ This pass is for the PC edition only (`games/towerdef-pc-0001`). The mobile copy
 | swarm | +0.25 | +0.10 | cost about 1 wave but paid 1.35x |
 | ironclad | +0.35 | +0.30 | costs 2.5 waves; trimmed slightly |
 | poverty (Austerity) | +0.30 | +0.10 | cost 0 waves but paid 1.30x |
-| allsides (Encircled) | +0.45 | +0.10 | the bot reached a *higher* wave (+0.7 to +1.5) because the 7x7 ring covers all four lanes, yet it paid 1.46x |
+| allsides (Encircled) | +0.45 | +0.05 | the bot reached a *higher* wave (+0.7 to +1.5) because the 7x7 ring covers all four lanes, yet it paid 1.46x |
 | noperks (Purist) | +0.30 | +0.55 | costs about 6 waves and paid only 1.03x |
 | haste | +0.30 | +0.10 | cost 0 waves but paid 1.29x |
 | elitist | +0.35 | +0.40 | costs 4 to 5 waves |
@@ -30,7 +30,7 @@ Baseline: wave 55.0, 42,989 coins per run.
 | Swarm | -1.5 | 1.16 |
 | Ironclad | -2.5 | 1.21 |
 | Austerity | 0.0 | 1.10 |
-| Encircled | +1.5 | 1.12 |
+| Encircled | +1.5 | 1.07 |
 | Purist | -6.0 | 1.19 |
 | Haste | 0.0 | 1.09 |
 | Elite Guard | -4.0 | 1.34 |
@@ -72,3 +72,5 @@ At 1x speed, active runs last 8 to 12 minutes, which fits a PC sitting. With gam
 
 - From days 19 to 28 the best wave stays at 60 to 61 at T4. The gates pass because the progress key includes tier, but the late T4 curve is flat. A future pass could add a T5 or tune `hp_growth_hi` for T4.
 - Modifier difficulty is measured by one bot. Haste, Austerity, and Glass Core probably feel harder to humans than the 0-wave cost the bot shows. Revisit after human playtests.
+
+Follow-up (fix round): Encircled made the bot's run *easier* (+1.5 waves) yet still paid 1.12x. Its coin bonus is cut from +0.10 to +0.05 (measured 1.07x), so a modifier that helps the bot pays only a token bonus.

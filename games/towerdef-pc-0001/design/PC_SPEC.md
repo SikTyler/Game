@@ -145,7 +145,7 @@ Unlocked after you reach wave 50 in any tier. There is no tier wave target. HP s
 | swarm | Swarm | +60% enemy count, −30% HP each | +0.10 |
 | ironclad | Ironclad | All enemies take −20% damage from non-crit hits | +0.30 |
 | poverty | Austerity | Start cash 0, kill cash −30% | +0.10 |
-| allsides | Encircled | All 4 quadrants from wave 1 | +0.10 |
+| allsides | Encircled | All 4 quadrants from wave 1 | +0.05 |
 | noperks | Purist | No perk drafts | +0.55 |
 | haste | Haste | Enemy speed +25% | +0.10 |
 | elitist | Elite Guard | Elite weight ×3, from T1 | +0.40 |

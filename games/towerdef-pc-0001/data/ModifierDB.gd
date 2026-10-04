@@ -10,7 +10,7 @@ const DEFS: Dictionary = {
 	"swarm":    {"name": "Swarm",       "coin": 0.10, "desc": "+60% enemies, -30% HP each"},
 	"ironclad": {"name": "Ironclad",    "coin": 0.30, "desc": "Enemies take -20% damage from non-crit hits"},
 	"poverty":  {"name": "Austerity",   "coin": 0.10, "desc": "Start with $0, kill cash -30%"},
-	"allsides": {"name": "Encircled",   "coin": 0.10, "desc": "All 4 lanes attack from wave 1"},
+	"allsides": {"name": "Encircled",   "coin": 0.05, "desc": "All 4 lanes attack from wave 1"},
 	"noperks":  {"name": "Purist",      "coin": 0.55, "desc": "No perk drafts"},
 	"haste":    {"name": "Haste",       "coin": 0.10, "desc": "Enemy speed +25%"},
 	"elitist":  {"name": "Elite Guard", "coin": 0.40, "desc": "Elite weight x3, elites from Tier 1"},
