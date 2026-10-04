@@ -773,7 +773,7 @@ func _rebuild_ui() -> void:
 		"run":
 			_build_run_ui()
 		"results":
-			_btn("BACK TO BASE", Rect2(160, 1110, 400, 96), go_base)
+			_btn("BACK TO BASE", Rect2(160, 1110, 400, 96), go_base).add_theme_font_size_override("font_size", 26)
 
 
 func _build_meta_chrome() -> void:

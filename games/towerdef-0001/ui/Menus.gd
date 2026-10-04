@@ -92,16 +92,16 @@ static func _build_options(m) -> void:
 	_slider(m, MUSIC_Y, "music")
 	_slider(m, SFX_Y, "sfx")
 	var muted: bool = bool((m.save["settings"] as Dictionary)["mute"])
-	var mb: Button = m._btn("Sound: OFF (tap to unmute)" if muted else "Sound: ON (tap to mute)", Rect2(80, 664, 560, 96), m.toggle_mute_ui, true, ENEMY if muted else GEM)
+	var mb: Button = _modal(m._btn("Sound: OFF (tap to unmute)" if muted else "Sound: ON (tap to mute)", Rect2(80, 664, 560, 96), m.toggle_mute_ui, true, ENEMY if muted else GEM))
 	mb.set_meta("key", "MUTE")
-	m._btn("Credits", Rect2(80, 780, 560, 96), func() -> void: m.set_overlay("credits"), true, DIM)
-	m._btn("Back", Rect2(80, 896, 560, 96), func() -> void: m.set_overlay("pause" if m.screen == "run" else ""), true, RUST)
+	_modal(m._btn("Credits", Rect2(80, 780, 560, 96), func() -> void: m.set_overlay("credits"), true, DIM))
+	_modal(m._btn("Back", Rect2(80, 896, 560, 96), func() -> void: m.set_overlay("pause" if m.screen == "run" else ""), true, RUST))
 
 
 static func _build_pause(m) -> void:
-	m._btn("Resume", Rect2(80, 420, 560, 110), func() -> void: m.set_overlay(""), true, GEM).add_theme_font_size_override("font_size", 32)
-	m._btn("Options", Rect2(80, 560, 560, 96), func() -> void: m.set_overlay("options"), true, DIM)
-	m._btn("Abandon run", Rect2(80, 760, 560, 96), m.abandon_run, true, ENEMY)
+	m._btn("Resume", Rect2(80, 420, 560, 110), func() -> void: m.set_overlay(""), true, GEM).add_theme_font_size_override("font_size", 30)
+	_modal(m._btn("Options", Rect2(80, 560, 560, 96), func() -> void: m.set_overlay("options"), true, DIM))
+	_modal(m._btn("Abandon run", Rect2(80, 760, 560, 96), m.abandon_run, true, ENEMY))
 
 
 static func _build_credits(m) -> void:
@@ -126,4 +126,10 @@ static func _build_credits(m) -> void:
 		box.add_child(lb)
 	sc.add_child(box)
 	m.ui.add_child(sc)
-	m._btn("Back", Rect2(80, 896, 560, 96), func() -> void: m.set_overlay("options"), true, RUST)
+	_modal(m._btn("Back", Rect2(80, 896, 560, 96), func() -> void: m.set_overlay("options"), true, RUST))
+
+
+## One font size for every modal (pause/options/credits) button so menus read as one set.
+static func _modal(b: Button) -> Button:
+	b.add_theme_font_size_override("font_size", 26)
+	return b
