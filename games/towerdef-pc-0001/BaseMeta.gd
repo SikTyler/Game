@@ -22,6 +22,8 @@ const Cards := preload("res://Cards.gd")
 const Missions := preload("res://Missions.gd")
 const TuneRef := preload("res://Tune.gd")
 const Stats := preload("res://Stats.gd")
+const Cores := preload("res://Cores.gd")
+const PickDB := preload("res://data/PickDB.gd")
 
 const VERSION: int = 3
 ## PC 7x7 base (PC_SPEC §2.1): rings by Chebyshev distance from the core cell
@@ -55,6 +57,9 @@ static func default_save() -> Dictionary:
 		"settings": {"music": 0.8, "sfx": 1.0, "mute": false},
 		"endless": {"best": 0},
 		"achievements": {"unlocked": {}, "missions_claimed": 0},
+		# Redesign ENGINE-RUN blocks (additive; save v4 folds them in).
+		"cores": Cores.default_block(), "core_cores": 0, "insight": {},
+		"scrap": 0, "keys": 0, "part_drops": [],
 	}
 
 
@@ -242,6 +247,18 @@ static func normalize(s_in: Dictionary) -> Dictionary:
 	var en_in: Dictionary = s.get("endless", {}) if s.get("endless", {}) is Dictionary else {}
 	d["endless"] = {"best": maxi(0, int(en_in.get("best", 0)))}
 	d["achievements"] = _achievements(s.get("achievements", {}))
+	d["cores"] = Cores.normalize_block(s.get("cores", null), Cores.max_level(s))
+	d["core_cores"] = maxi(0, int(s.get("core_cores", 0)))
+	d["insight"] = PickDB.normalize_insight(s.get("insight", {}))
+	d["scrap"] = maxi(0, int(s.get("scrap", 0)))
+	d["keys"] = maxi(0, int(s.get("keys", 0)))
+	var pd: Array = []
+	for x in s.get("part_drops", []):
+		if x is Dictionary and pd.size() < 200:
+			pd.append({"rarity": String((x as Dictionary).get("rarity", "common")), "source": String((x as Dictionary).get("source", "kill"))})
+	d["part_drops"] = pd
+	if s.get("reforge", null) is Dictionary:
+		d["reforge"] = (s["reforge"] as Dictionary).duplicate(true)
 	d["settings"] = {"music": clampf(float(se_in.get("music", 0.8)), 0.0, 1.0), "sfx": clampf(float(se_in.get("sfx", 1.0)), 0.0, 1.0), "mute": bool(se_in.get("mute", false))}
 	# speed snaps to an unlocked step
 	var steps: Array = Labs.speed_steps(d)
@@ -512,7 +529,31 @@ static func bank(s: Dictionary, coins: int, wave: int, tier: int = 1, run_minute
 			tr.append(n)
 			var g: int = TuneRef.int_of("tier_gems", 10)
 			Missions.add_gems(s, "tier", g)
-			ev.append({"t": "tier_unlocked", "tier": n, "gems": g})
+			# Redesign: every tier clear also pays Core Cores (Core level gates).
+			var ccs: int = TuneRef.int_of("pc_tier_corecores", 2)
+			s["core_cores"] = int(s.get("core_cores", 0)) + ccs
+			ev.append({"t": "tier_unlocked", "tier": n, "gems": g, "core_cores": ccs})
+	return ev
+
+
+## Bank a run's loot (REDESIGN §2.6): Scrap and Keys into the wallet; part
+## drops wait in save.part_drops for the Parts module to resolve into parts.
+static func bank_loot(s: Dictionary, loot: Dictionary) -> Array:
+	var ev: Array = []
+	var sc: int = maxi(0, int(loot.get("scrap", 0)))
+	var ky: int = maxi(0, int(loot.get("keys", 0)))
+	var cc: int = maxi(0, int(loot.get("core_cores", 0)))
+	s["scrap"] = int(s.get("scrap", 0)) + sc
+	s["keys"] = int(s.get("keys", 0)) + ky
+	s["core_cores"] = int(s.get("core_cores", 0)) + cc
+	if not (s.get("part_drops", null) is Array):
+		s["part_drops"] = []
+	var pd: Array = s["part_drops"]
+	for p in loot.get("parts", []):
+		pd.append((p as Dictionary).duplicate())
+	if sc > 0 or ky > 0 or cc > 0 or not (loot.get("parts", []) as Array).is_empty():
+		ev.append({"t": "loot_banked", "scrap": sc, "keys": ky, "core_cores": cc, "parts": (loot.get("parts", []) as Array).size()})
+	ev.append_array(Cores.check_unlocks(s))
 	return ev
 
 
