@@ -77,14 +77,14 @@ static func level(s: Dictionary, id: String = "") -> int:
 	return 1
 
 
-## 40, or 50 with the Reforge node core_ceiling (save.reforge.nodes).
+## 60, or 75 with the Reforge node core_ceiling (save.reforge.nodes).
 static func max_level(s: Dictionary) -> int:
 	var rf: Variant = s.get("reforge", null)
 	if rf is Dictionary:
 		var nodes: Variant = (rf as Dictionary).get("nodes", {})
 		if nodes is Dictionary and int((nodes as Dictionary).get("core_ceiling", 0)) > 0:
-			return CoreDB.MAX_LVL_CEILING
-	return CoreDB.MAX_LVL
+			return CoreDB.max_lvl_ceiling()
+	return CoreDB.max_lvl()
 
 
 static func level_cost(lvl: int) -> Dictionary:

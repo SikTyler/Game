@@ -10,7 +10,7 @@ extends RefCounted
 
 ## Coin Mill L1 coins/h (SYSTEMS 60 is "the tuning knob"; 150 measured so the
 ## Outpost replaces the old Offline pay in the playtest campaign).
-const MILL_RATE: float = 150.0
+const MILL_RATE: float = 600.0
 const W: int = 14
 const H: int = 10
 const RELAY: Vector2i = Vector2i(2, 4)       # top-left of the 2x2 Relay

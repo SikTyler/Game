@@ -5,15 +5,17 @@ extends RefCounted
 ## keeps a share of Outpost building levels through a Reforge (R6). Every
 ## node but the root needs root_forge.
 
+const TuneRef := preload("res://Tune.gd")
+
 const NODES: Dictionary = {
 	"root_forge": {"name": "Forge Root", "branch": "root", "base": 1, "step": 0, "max": 1, "desc": "Unlocks the tree and the Lance Core"},
-	"might": {"name": "Might", "branch": "power", "base": 2, "step": 1, "max": 20, "desc": "+5% all damage"},
-	"bulwark_p": {"name": "Bulwark", "branch": "power", "base": 2, "step": 1, "max": 20, "desc": "+5% Core HP"},
+	"might": {"name": "Might", "branch": "power", "base": 2, "step": 1, "max": 20, "amt": 0.6, "desc": "+60% all damage"},
+	"bulwark_p": {"name": "Bulwark", "branch": "power", "base": 2, "step": 1, "max": 20, "amt": 0.4, "desc": "+40% Core HP"},
 	"head_start": {"name": "Head Start", "branch": "power", "base": 4, "step": 2, "max": 5, "desc": "+1 starting level on every cash track"},
-	"core_ceiling": {"name": "Core Ceiling", "branch": "power", "base": 15, "step": 0, "max": 1, "desc": "Core max level 50"},
+	"core_ceiling": {"name": "Core Ceiling", "branch": "power", "base": 15, "step": 0, "max": 1, "desc": "Core max level 75"},
 	"wide_draft": {"name": "Wide Draft", "branch": "power", "base": 25, "step": 0, "max": 1, "desc": "4 draft choices"},
 	"banish_plus": {"name": "Banish+", "branch": "power", "base": 6, "step": 0, "max": 2, "desc": "+1 banish per run"},
-	"prosperity": {"name": "Prosperity", "branch": "economy", "base": 2, "step": 1, "max": 20, "desc": "+6% coins earned"},
+	"prosperity": {"name": "Prosperity", "branch": "economy", "base": 2, "step": 1, "max": 20, "amt": 0.06, "desc": "+6% coins earned"},
 	"outpost_p": {"name": "Outpost Output", "branch": "economy", "base": 3, "step": 1, "max": 10, "desc": "+8% Outpost production"},
 	"starting_cash": {"name": "Starting Cash", "branch": "economy", "base": 2, "step": 1, "max": 10, "desc": "+25 starting run cash"},
 	"shard_yield": {"name": "Shard Yield", "branch": "economy", "base": 5, "step": 2, "max": 10, "desc": "+10% Reforge shards"},
@@ -35,6 +37,11 @@ const TEMPLATES: Dictionary = {
 }
 const RESETS: Array = ["Coins", "Core levels", "Part levels (50% Scrap refund)", "Outpost building levels and Relay", "Research levels", "Tier progress (back to Tier 1)"]
 const KEEPS: Array = ["Owned parts, stars, set unlocks, set specials", "Cores unlocked", "Cards, gems, Keys, Scrap, Insight", "Outpost layout, plots, decor, blueprints", "Achievements, stats, shards and the tree"]
+
+
+## Per-level effect of a stat node (data "amt"; Tune seam pc_rf_<id>).
+static func amt(id: String) -> float:
+	return TuneRef.num("pc_rf_" + id, float((NODES.get(id, {}) as Dictionary).get("amt", 0.0)))
 
 
 static func cost(id: String, lvl: int) -> int:

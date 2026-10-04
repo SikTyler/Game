@@ -59,11 +59,11 @@ const BOSSY: Array = ["boss", "elite"]
 ## pc_track_growth_<id> override.
 const TRACK_IDS: Array = ["dmg", "rate", "range", "eco", "armor"]
 const TRACKS: Dictionary = {
-	"dmg": {"name": "Damage", "base": 20.0, "growth": 1.21, "cap": 60, "desc": "x1.08 Core + building dmg"},
-	"rate": {"name": "Rate", "base": 30.0, "growth": 1.23, "cap": 40, "desc": "+3% Core attack rate"},
+	"dmg": {"name": "Damage", "base": 20.0, "growth": 1.21, "cap": 120, "desc": "x1.08 Core + building dmg"},
+	"rate": {"name": "Rate", "base": 30.0, "growth": 1.23, "cap": 60, "desc": "+3% Core attack rate"},
 	"range": {"name": "Range", "base": 40.0, "growth": 1.25, "cap": 20, "desc": "+0.1 Core range"},
 	"eco": {"name": "Eco", "base": 25.0, "growth": 1.20, "cap": 50, "desc": "+0.4 cash/s, interest cap +5"},
-	"armor": {"name": "Armor", "base": 25.0, "growth": 1.19, "cap": 60, "desc": "+5% HP, +0.2 regen, +0.5 armor"},
+	"armor": {"name": "Armor", "base": 25.0, "growth": 1.19, "cap": 120, "desc": "+5% HP, +0.2 regen, +0.5 armor"},
 }
 ## Ring -> track-level total that opens it (ring 1 is open at start).
 const RING_OPEN: Dictionary = {2: 10, 3: 30}
@@ -1263,7 +1263,7 @@ func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF, quad: int = -1, 
 			# stays gentle and the extra toughness phases in by wave 30.
 			var r0: float = TuneRef.num("boss_ramp_from", 10.0)
 			var ramp: float = clampf((float(wave) - r0) / 20.0, 0.0, 1.0)
-			var bm: float = TuneRef.num("boss_hp_hi", 0.5) if tier >= 2 else 1.0 + (TuneRef.num("boss_hp_t1", 2.5) - 1.0) * ramp
+			var bm: float = TuneRef.num("boss_hp_hi", 0.5) if tier >= 2 else 1.0 + (TuneRef.num("boss_hp_t1", 3.0) - 1.0) * ramp
 			if tier == 1 and wave <= 10:
 				bm *= TuneRef.num("pc_first_boss", 0.6)   # the very first boss teaches, it does not wall
 			e["hp"] = float(e["hp"]) * bm

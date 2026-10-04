@@ -1994,7 +1994,7 @@ func _core_stages() -> void:
 	var rt: Dictionary = BaseMeta.normalize(JSON.parse_string(JSON.stringify(u)))
 	_check("CORE block survives JSON + normalize", Cores.active(rt) == "foundry" and Cores.is_owned(rt, "foundry") and Cores.level(rt, "foundry") == 1)
 	var bad: Dictionary = BaseMeta.normalize({"cores": {"active": "hive", "owned": ["hive", "lance", "x"], "levels": {"lance": 999}}})
-	_check("CORE normalize drops unknown ids, clamps levels, active falls back", Cores.active(bad) == "bastion" and Cores.owned(bad) == ["bastion", "lance"] and Cores.level(bad, "lance") == 40)
+	_check("CORE normalize drops unknown ids, clamps levels, active falls back", Cores.active(bad) == "bastion" and Cores.owned(bad) == ["bastion", "lance"] and Cores.level(bad, "lance") == CoreDB.MAX_LVL)
 	# Core level scales its sheet (dmg x1.06, HP x1.05, regen x1.04, cash x1.04).
 	var A = _core_run("bastion", 1)
 	var B = _core_run("bastion", 11)
@@ -3359,7 +3359,8 @@ func _reforge_stages() -> void:
 	var B = TowerState.new()
 	B.setup(3, _parts_save(["f_glass", "b_hollow"], "bastion", 1))
 	_equip_all(B.save, [])
-	_check("RF might +10% dmg, bulwark +5% HP, prosperity +6% coins in the run", is_equal_approx(S.dmg_mult, 1.10) and is_equal_approx(S.max_hp_mult, 1.05) and is_equal_approx(S.coin_mult, 1.06))
+	# Node strengths are ReforgeDB data (balance pass: might 0.6, bulwark 0.4 per level).
+	_check("RF might x2 / bulwark / prosperity levels apply ReforgeDB amt in the run", is_equal_approx(S.dmg_mult, 1.0 + 2.0 * ReforgeDB.amt("might")) and is_equal_approx(S.max_hp_mult, 1.0 + ReforgeDB.amt("bulwark_p")) and is_equal_approx(S.coin_mult, 1.0 + ReforgeDB.amt("prosperity")))
 	_check("RF head_start + starting_cash + wide_draft + banish+", int(S.tracks["dmg"]) == 1 and int(S.cash) == 25 and int(S._draft_ctx("")["choices"]) == 4 and S.banish_left == 3)
 	_check("RF tempo adds a speed step, builder2 a builder", (Labs.speed_steps(sv) as Array).back() == 1.25 and Outpost.builders(sv) == 2)
 	_check("RF shard_yield +10% (k 1.1)", Reforge.shards_now({"reforge": {"count": 1, "coins_since": 1000000, "nodes": {"shard_yield": 1}}}) == 11)

@@ -179,8 +179,8 @@ static func buy(s: Dictionary, id: String) -> Array:
 ## Run-facing bundle (folded by BaseMeta.run_mods).
 static func run_mods(s: Dictionary) -> Dictionary:
 	return {
-		"rf_dmg": 0.05 * float(node(s, "might")),
-		"rf_hp": 0.05 * float(node(s, "bulwark_p")),
-		"rf_coin": 0.06 * float(node(s, "prosperity")),
+		"rf_dmg": ReforgeDB.amt("might") * float(node(s, "might")),
+		"rf_hp": ReforgeDB.amt("bulwark_p") * float(node(s, "bulwark_p")),
+		"rf_coin": ReforgeDB.amt("prosperity") * float(node(s, "prosperity")),
 		"rf_start_cash": 25 * node(s, "starting_cash"),
 	}

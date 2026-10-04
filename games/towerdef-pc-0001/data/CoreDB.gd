@@ -30,9 +30,11 @@ const DEFS: Dictionary = {
 		"l20": "Two rings per pulse"},
 }
 
+const TuneRef := preload("res://Tune.gd")
+
 const IDS: Array = ["bastion", "foundry", "lance", "tempest"]
-const MAX_LVL: int = 40
-const MAX_LVL_CEILING: int = 50     # with the Reforge node core_ceiling
+const MAX_LVL: int = 60
+const MAX_LVL_CEILING: int = 75     # with the Reforge node core_ceiling
 ## Per-level multipliers (REDESIGN_SPEC §2.1).
 const PER_LVL: Dictionary = {"dmg": 1.06, "hp": 1.05, "regen": 1.04, "cash": 1.04}
 const UNLOCK_TEXT: Dictionary = {
@@ -53,7 +55,16 @@ static func has(id: String) -> bool:
 
 ## Stat multiplier of a Core at level L for one of PER_LVL's stats.
 static func lvl_mult(stat: String, lvl: int) -> float:
-	return pow(float(PER_LVL.get(stat, 1.0)), float(clampi(lvl, 1, MAX_LVL_CEILING) - 1))
+	return pow(float(PER_LVL.get(stat, 1.0)), float(clampi(lvl, 1, max_lvl_ceiling()) - 1))
+
+
+## Level caps (Tune seams pc_core_max / pc_core_max_ceiling; defaults = the consts).
+static func max_lvl() -> int:
+	return TuneRef.int_of("pc_core_max", MAX_LVL)
+
+
+static func max_lvl_ceiling() -> int:
+	return TuneRef.int_of("pc_core_max_ceiling", MAX_LVL_CEILING)
 
 
 ## Breakpoint trait strength: x1.25 at L10, x1.5 at L30.
