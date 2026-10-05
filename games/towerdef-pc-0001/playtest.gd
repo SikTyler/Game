@@ -1481,7 +1481,7 @@ static func combine(R: Dictionary) -> Dictionary:
 		# FEEDBACK-1 (new gate): a brand-new player's first run is short
 		# (5-8 real minutes at 1x) so they reach the meta features sooner.
 		"first_run_s": snappedf(float(M.get("first_run_s", -1.0)), 0.1),
-		"first_run_short": float(M.get("first_run_s", -1.0)) >= 200.0 and float(M.get("first_run_s", -1.0)) <= 300.0,   # owner FB1: short, hard early runs (was 300-480 s)
+		"first_run_short": float(M.get("first_run_s", -1.0)) >= 300.0 and float(M.get("first_run_s", -1.0)) <= 480.0,   # owner FB2: short first runs ~5-8 min on the larger x4 horde map (FB1 was 200-300 s, orig 300-480 s)
 		"tier3_by_day30": t3 > 0,
 		"no_plateau_before_t3": stall_days.is_empty(),
 		"early_3day_rise": early,
