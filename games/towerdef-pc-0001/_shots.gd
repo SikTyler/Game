@@ -280,6 +280,22 @@ func _initialize() -> void:
 	await _shot("%s/20_720p_battle.png" % outdir)
 	get_root().size = Vector2i(1920, 1080)
 	await _wait(6)
+	# HORDE P5/P6: dense horde with full gore + F3 overlay
+	S.horde_mult = 10
+	main.settings["video"]["gore"] = "full"
+	main.dbg_overlay = true
+	var hp_keep: float = float(S.stats["max_hp"])
+	S.stats["max_hp"] = 1.0e9
+	S.hp = 1.0e9
+	var hev: Array = []
+	for k in 900:
+		S._spawn("drone" if k % 3 != 0 else "skitter", hev)
+	await _wait(150)
+	await _shot("%s/21_horde_gore.png" % outdir)
+	S.stats["max_hp"] = hp_keep
+	S.hp = hp_keep
+	main.dbg_overlay = false
+	main.settings["video"]["gore"] = "low"
 	live_S = null
 	S.wind_used = true
 	S.hp = -1.0
