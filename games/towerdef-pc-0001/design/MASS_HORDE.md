@@ -465,3 +465,12 @@ alone 4.8 ms); it is a logged, not asserted, target.
   read per-kind counts from C# at 10k+.
 - Save/Load of live bodies (A10) not implemented: saves stay wave-boundary.
 - Over 20k alive the pile cost grows super-linearly; keep the D3 alive cap (16,384).
+- **playtest.gd FAILS 7 balance gates after the engine swap** (run once, 34 min, 2026-10-05):
+  `mix_beats_weapon`, `first_run_short` (first run 494 s), `no_plateau_after_t3`,
+  `rd_frontier_band`, `rd_no_runaway`, `ac29_wave_gap`, `ac25_fresh_wall`. All other
+  playtest invariants pass (no death spiral, first goal reachable, determinism seeds, etc.).
+  Cause: the motion model changed (open-ground buildings are flowed around instead of
+  attacked; liquid pressure at the Core), which moves the balance of the still-shipping
+  split-model waves. These are balance gates for the pre-FB3 model; per D8 they are to be
+  re-aimed at H1–H12 by the balance/playtest role together with the D3 waves. Not weakened
+  here.
