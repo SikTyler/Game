@@ -107,11 +107,11 @@ static func _build_topbar(m) -> void:
 	var x: float = m.vw - 8.0
 	var items: Array = []
 	if m.screen == "run":
-		items.append(["Pause [%s]" % hint(m, "pause"), "Pause the run (engine time freezes)", func() -> void: m.set_overlay("pause"), "HUD Pause", "icon_pause"])
+		items.append(["Pause", "Pause the run (engine time freezes)", func() -> void: m.set_overlay("pause"), "HUD Pause", "icon_pause"])
 	else:
 		items.append(["Menu", "Save slots and quit", m.go_menu, "HUD Menu", "icon_menu"])
 	items.append(["Settings", "Video, audio, controls (key remapping) and gameplay", func() -> void: m.set_overlay("settings"), "HUD Settings", "icon_gear"])
-	items.append(["Records [%s]" % hint(m, "tab_stats"), "Lifetime stats, run history and achievements", func() -> void: m.set_overlay("stats"), "HUD Stats", "icon_stats"])
+	items.append(["Records", "Lifetime stats, run history and achievements", func() -> void: m.set_overlay("stats"), "HUD Stats", "icon_stats"])
 	for it in items:
 		var a: Array = it
 		var w: float = 168.0
@@ -552,7 +552,9 @@ static func update_tip(m, delta: float) -> void:
 	var show: bool = t != "" and m.tip_t >= delay and m.drag_card < 0 and m.drag_part == "" and not m.op_drag and not m.op_pan
 	m.tipbox.visible = show
 	if show:
-		m.tip_label.text = t
+		if m.tip_label.text != t:
+			m.tip_label.text = t
+			m.tip_rich.text = Kit.tip_bbcode(t)
 		m.tipbox.reset_size()
 		var sz: Vector2 = m.tipbox.get_combined_minimum_size()
 		var p: Vector2 = m.mouse_pos + Vector2(18, 22)

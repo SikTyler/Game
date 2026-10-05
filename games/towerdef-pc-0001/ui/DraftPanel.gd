@@ -2,8 +2,9 @@ extends RefCounted
 ## Left panel of the run screen (REDESIGN_SPEC §5 draft panel): the open draft
 ## (3-4 cards: rarity frame, family icon, name, effect, tags, "Lv N->N+1" for
 ## duplicates; reroll with its cost; banish), perk / mutation offers, the
-## placement prompt, or — when nothing is offered — build / info for the
-## hovered or selected cell plus this run's picks and loot. Cards are hit
+## placement prompt, or — when nothing is offered — the PERKS menu: every
+## stat buff taken this run (gold perks, upgrade packs, insights, mutations).
+## Owner feedback #1: no Build/Info block and no hotkey callouts here. Cards are hit
 ## buttons over drawn art; press + drag a NEW building card onto a cell to
 ## place it in one motion.
 
@@ -44,35 +45,66 @@ static func build(m) -> void:
 		for k in ids.size():
 			var idx: int = k
 			var r: Rect2 = card_rect(m, k, ids.size())
-			var key: String = Kit.hint(m, "ability_%d" % (k + 1))
 			match String(off["kind"]):
 				"draft":
 					var cd: Dictionary = ids[k]
-					var tip: String = "%s\n%s\n[%s] take  ·  drag a new building onto a cell" % [String(PickDB.get_def(String(cd["id"])).get("name", "")), String(PickDB.get_def(String(cd["id"])).get("desc", "")), key]
+					var tip: String = "%s\n%s\n%s" % [String(PickDB.get_def(String(cd["id"])).get("name", "")), String(PickDB.get_def(String(cd["id"])).get("desc", "")), String(card_type(m, cd)["how"])]
 					var hb: Button = Kit.hit(m, r, func() -> void: _press_card(m, idx), tip, "DCARD %d %s" % [k, String(cd["id"])], true, Kit.ENEMY if m.banish_mode else Kit.GOLD)
 					hb.set_meta("card", k)
 				"perk":
 					var pid: String = String(ids[k])
 					var d: Dictionary = PerkDB.get_def(pid)
-					Kit.hit(m, r, func() -> void: m._handle(S.choose_perk(idx)); m._rebuild_ui(), "%s\n%s [%s]" % [String(d["name"]), String(d["desc"]), key], "DPERK " + String(d["name"]))
+					Kit.hit(m, r, func() -> void: m._handle(S.choose_perk(idx)); m._rebuild_ui(), "%s\n%s\nClick to take this perk" % [String(d["name"]), String(d["desc"])], "DPERK " + String(d["name"]))
 				"mutation":
 					var mid: String = String(ids[k])
 					var md: Dictionary = ModifierDB.MUTATIONS.get(mid, {})
-					Kit.hit(m, r, func() -> void: m._handle(S.choose_mutation(idx)); m._rebuild_ui(), "%s\n%s [%s]" % [String(md.get("name", mid)), String(md.get("desc", "")), key], "DMUT " + String(md.get("name", mid)), true, Kit.MAG)
+					Kit.hit(m, r, func() -> void: m._handle(S.choose_mutation(idx)); m._rebuild_ui(), "%s\n%s" % [String(md.get("name", mid)), String(md.get("desc", ""))], "DMUT " + String(md.get("name", mid)), true, Kit.MAG)
 		if String(off["kind"]) == "draft":
 			var by: float = lr.end.y - 112.0
 			var bw: float = (lr.size.x - 40.0) * 0.5
 			var rc: int = S.reroll_cost()
 			var rl: String = "Reroll (free)" if rc == 0 else "Reroll  $%d" % rc
-			Kit.btn(m, "%s [%s]" % [rl, Kit.hint(m, "reroll")], Rect2(lr.position.x + 14, by, bw, 48), m.reroll, "Re-roll the whole hand: 1 free per draft, then cash that doubles", rc == 0 or S.cash >= float(rc), Kit.GEM, "Reroll", "ui_reroll", 16)
-			Kit.btn(m, "Banish (%d) [%s]" % [S.banish_left, Kit.hint(m, "banish")], Rect2(lr.position.x + 26 + bw, by, bw, 48), m.toggle_banish, "Banish mode: the next card you click leaves this run's pool and is replaced", S.banish_left > 0, Kit.ENEMY if m.banish_mode else Kit.NEUTRAL, "Banish", "ui_banish", 16)
+			Kit.btn(m, rl, Rect2(lr.position.x + 14, by, bw, 48), m.reroll, "Re-roll the whole hand: 1 free per draft, then cash that doubles", rc == 0 or S.cash >= float(rc), Kit.GEM, "Reroll", "ui_reroll", 16)
+			Kit.btn(m, "Banish (%d)" % S.banish_left, Rect2(lr.position.x + 26 + bw, by, bw, 48), m.toggle_banish, "Banish mode: the next card you click leaves this run's pool and is replaced", S.banish_left > 0, Kit.ENEMY if m.banish_mode else Kit.NEUTRAL, "Banish", "ui_banish", 16)
 		return
 	if S.pending_place != "":
-		Kit.btn(m, "Cancel placement [%s]" % Kit.hint(m, "cancel"), Rect2(lr.position.x + 14, lr.position.y + 250, lr.size.x - 28, 48), func() -> void: m._handle(S.cancel_place()); m._rebuild_ui(), "Skip placing this building (the pick is spent)", true, Kit.NEUTRAL, "CANCEL PLACE")
+		Kit.btn(m, "Cancel placement", Rect2(lr.position.x + 14, lr.position.y + 250, lr.size.x - 28, 48), func() -> void: m._handle(S.cancel_place()); m._rebuild_ui(), "Skip placing this building (the pick is spent)", true, Kit.NEUTRAL, "CANCEL PLACE")
 
 
 ## Card press: pad = take immediately; mouse = start a drag (release in place
 ## takes the card; release over a cell places a NEW building there).
+## Owner feedback #1: what a draft card GIVES, impossible to misread —
+## BUILDING (placed on the grid), UPGRADE (drag onto / click an existing
+## building), PERK (instant stat buff, listed under Perks) or ABILITY.
+static func card_type(m, cd: Dictionary) -> Dictionary:
+	var S = m.S
+	var id: String = String(cd.get("id", ""))
+	var nm: String = String(PickDB.get_def(id).get("name", id))
+	var kind: String = String(cd.get("kind", ""))
+	var rw: String = String(cd.get("reward", ""))
+	if kind == "new":
+		var dup: bool = bool(cd.get("dup", false))
+		return {"type": "BUILDING", "col": Color("4fb3ff"), "icon": "ui_blueprint",
+			"sub": "Place another %s on the grid" % nm if dup else "Place it on a grid cell",
+			"how": "BUILDING: drag onto an empty cell (or click, then click a cell)"}
+	if kind == "plus":
+		return {"type": "UPGRADE", "col": Kit.GREEN, "icon": "icon_tier",
+			"sub": "Drag onto your %s  ·  Lv%d -> %d" % [nm, int(cd.get("lvl", 1)), int(cd.get("to", 2))],
+			"how": "UPGRADE: drag onto your %s (or click, then click it)" % nm}
+	if rw == "ability" or kind == "special":
+		var have: bool = S != null and S.specials.any(func(s: Variant) -> bool: return String((s as Dictionary)["id"]) == id)
+		return {"type": "ABILITY", "col": Kit.GEM, "icon": "ui_cooldown",
+			"sub": "+1 copy (faster cooldown)" if have else "New ability icon at the bottom",
+			"how": "ABILITY: click to add it to your floating abilities"}
+	var sub: String = "Instant stat buff  ·  listed under Perks"
+	if kind == "pack" and S != null:
+		sub = "Instant stat buff  ·  %d/%d  ·  under Perks" % [S.pack_n(id) + 1, PickDB.max_of(id)]
+	elif kind == "insight":
+		sub = "Permanent insight  ·  banked at run end"
+	return {"type": "PERK", "col": Kit.GOLD, "icon": "icon_streak", "sub": sub,
+		"how": "PERK: click to take it now (no placing)"}
+
+
 static func _press_card(m, k: int) -> void:
 	if String(m.last_device) == "pad" or m.banish_mode:
 		m.pick_card(k)
@@ -153,21 +185,16 @@ static func _draw_card(m, r: Rect2, cd: Dictionary, k: int) -> void:
 	var isz: float = minf(r.size.y - 44.0, 92.0)
 	Kit.panel(m, Rect2(r.position.x + 10, r.position.y + 34, isz, isz), Color(rc, 0.5), Color("101418"), 1)
 	Kit.icon(m, id, Rect2(r.position.x + 14, r.position.y + 38, isz - 8, isz - 8))
-	# Owner feedback #1: every card names its reward type up front.
-	var head: String = String(FAM_LABEL.get(fam, fam.to_upper()))
-	var rw: String = String(cd.get("reward", ""))
-	if String(cd.get("kind", "")) == "plus":
-		head = "UPGRADE (click a building)  Lv%d -> %d" % [int(cd.get("lvl", 1)), int(cd.get("to", 2))]
-	elif String(cd.get("kind", "")) == "new" and (fam == "building" or fam == "hut"):
-		head = "BUILDING (place on grid)" + ("  · another copy" if bool(cd.get("dup", false)) else "")
-	elif rw == "perk":
-		head = "PERK (instant stat buff)"
-	elif fam == "special" and S.specials.any(func(s: Variant) -> bool: return String((s as Dictionary)["id"]) == id):
-		head = "SPECIAL  +1 copy"
-	elif fam == "pack":
-		head = "UPGRADE PACK  %d/%d" % [S.pack_n(id) + 1, PickDB.max_of(id)]
-	Kit.t(m, head, Vector2(r.position.x + 12, r.position.y + 24), 14, rc, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 70)
-	Kit.t(m, rar.capitalize(), Vector2(r.end.x - 46, r.position.y + 24), 13, rc, HORIZONTAL_ALIGNMENT_RIGHT, 120.0)
+	# Owner feedback #1: a type banner (icon + colour + label) on every card.
+	var ct: Dictionary = card_type(m, cd)
+	var tcol: Color = ct["col"]
+	var br := Rect2(r.position.x + 3, r.position.y + 3, r.size.x - 6, 26)
+	m.draw_rect(br, Color(tcol, 0.28))
+	m.draw_rect(Rect2(br.position, Vector2(6, br.size.y)), tcol)
+	Kit.icon(m, String(ct["icon"]), Rect2(br.position.x + 10, br.position.y + 2, 22, 22))
+	Kit.t(m, String(ct["type"]), Vector2(br.position.x + 38, br.position.y + 20), 16, tcol.lightened(0.25), HORIZONTAL_ALIGNMENT_LEFT, 110.0)
+	Kit.t(m, String(ct["sub"]), Vector2(br.position.x + 38 + 110, br.position.y + 19), 13, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, br.size.x - 160.0 - 64.0)
+	Kit.t(m, rar.capitalize(), Vector2(br.end.x - 8, br.position.y + 19), 13, rc, HORIZONTAL_ALIGNMENT_RIGHT, 70.0)
 	var tx: float = r.position.x + 22.0 + isz
 	var tw: float = r.end.x - tx - 10.0
 	Kit.t(m, String(d.get("name", id)), Vector2(tx, r.position.y + 58), 21, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, tw)
@@ -184,11 +211,7 @@ static func _draw_card(m, r: Rect2, cd: Dictionary, k: int) -> void:
 		Kit.icon(m, "tag_" + tag, Rect2(cx + 2, r.end.y - 27, 18, 18))
 		Kit.t(m, tag, Vector2(cx + 20, r.end.y - 13), 12, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, cw - 20)
 		cx += cw + 4.0
-	# hotkey badge
-	var hk: String = Kit.hint(m, "ability_%d" % (k + 1))
-	Kit.panel(m, Rect2(r.end.x - 36, r.position.y + 6, 28, 24), Kit.EDGE, Color("101317"), 1)
-	Kit.t(m, hk, Vector2(r.end.x - 22, r.position.y + 24), 15, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, 28.0)
-
+	
 
 static func _draw_simple(m, r: Rect2, icon_id: String, head: String, name: String, desc: String, col: Color, k: int) -> void:
 	Kit.panel(m, r, col, Color(col.darkened(0.82), 0.95), 3)
@@ -198,75 +221,59 @@ static func _draw_simple(m, r: Rect2, icon_id: String, head: String, name: Strin
 	var tx: float = r.position.x + 24.0 + isz
 	Kit.t(m, name, Vector2(tx, r.position.y + 58), 21, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, r.end.x - tx - 10)
 	Kit.wrap(m, desc, Vector2(tx, r.position.y + 70), 15, Kit.DIM, r.end.x - tx - 10, 4)
-	Kit.t(m, Kit.hint(m, "ability_%d" % (k + 1)), Vector2(r.end.x - 22, r.position.y + 24), 15, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, 28.0)
+	
 
-
-## No offer: hovered / selected cell info, then this run's build and loot.
+## No offer: the PERKS menu (owner feedback #1) — every stat buff this run.
 static func _draw_info(m, lr: Rect2, x: float, w: float) -> void:
-	var S = m.S
 	var y: float = lr.position.y + 34.0
-	Kit.t(m, "BUILD / INFO", Vector2(x, y), 20, Kit.RUST, HORIZONTAL_ALIGNMENT_LEFT, w)
-	var focus: int = m.sel
-	if m.field_rect().has_point(m.mouse_pos):
-		var hv: int = m.slot_at(m.s2w(m.mouse_pos))
-		if hv >= 0:
-			focus = hv
+	Kit.icon(m, "icon_streak", Rect2(x, y - 24, 30, 30))
+	Kit.t(m, "PERKS", Vector2(x + 38, y), 22, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, w - 38)
+	var rows: Array = perk_rows(m)
+	Kit.t(m, "%d taken" % rows.size(), Vector2(x + w, y), 15, Kit.DIM, HORIZONTAL_ALIGNMENT_RIGHT, 120.0)
 	y += 16.0
-	if focus >= 0:
-		var id: String = "core_" + String(S.core_id) if focus == TowerState.CORE_SLOT else S.id_at(focus)
-		var lines: PackedStringArray = load("res://ui/Battle.gd").cell_text(m, focus).split("\n")
-		var body: String = "\n".join(lines.slice(1))
-		var bh: float = m.font.get_multiline_string_size(body, HORIZONTAL_ALIGNMENT_LEFT, w - 24, 15, 7).y
-		Kit.panel(m, Rect2(x, y, w, 96 + bh), Kit.EDGE, Kit.PANEL2)
-		if id != "":
-			Kit.icon(m, id, Rect2(x + 12, y + 12, 64, 64))
-		Kit.t(m, lines[0], Vector2(x + 88, y + 50), 19, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w - 96)
-		Kit.wrap(m, body, Vector2(x + 12, y + 86), 15, Kit.DIM, w - 24, 7)
-		y += 110.0 + bh
-	else:
-		y += Kit.wrap(m, "Hover a cell for details. Drafts arrive after waves 1, 2, 3, then every 2nd wave (plus an Epic+ draft on boss waves). Cash buys Core tracks on the right.", Vector2(x, y + 6), 15, Kit.DIM, w, 5) + 24.0
-	# run build summary
-	Kit.head(m, "THIS RUN", Vector2(x, y + 10), w)
-	y += 22.0
-	var blds: int = S.building_count()
-	Kit.row(m, "Buildings  ·  huts", "%d  ·  %d" % [blds - S.hut_count(), S.hut_count()], Vector2(x, y + 18), w, Kit.TEXT, "Buildings on the grid (huts included) — duplicates level them to L5", 15)
-	Kit.row(m, "Grid", "%dx%d" % [int(S.grid_n), int(S.grid_n)], Vector2(x, y + 40), w, Kit.TEXT, "Run grid size — research Grid Expansion for a bigger one", 15)
-	Kit.row(m, "Troops", str(S.troops.filter(func(t: Variant) -> bool: return String((t as Dictionary).get("state", "")) != "dead").size()), Vector2(x, y + 62), w, Kit.TEXT, "Troops roaming out from your huts", 15)
-	y += 76.0
-	# packs owned
-	var px: float = x
-	for pid in S.packs.keys():
-		if px + 40.0 > x + w:
+	if rows.is_empty():
+		Kit.wrap(m, "No perks yet. PERK cards (gold banner) and the gold perk picks every few waves are instant stat buffs — they gather here.", Vector2(x, y + 10), 15, Kit.DIM, w, 5)
+		return
+	var sec: String = ""
+	var rh: float = clampf((lr.end.y - y - 30.0) / float(rows.size() + 4), 30.0, 52.0)
+	for rv in rows:
+		var row: Dictionary = rv
+		if String(row["sec"]) != sec:
+			sec = String(row["sec"])
+			Kit.head(m, sec, Vector2(x, y + 22), w, row["col"])
+			y += 30.0
+		if y + rh > lr.end.y - 8.0:
+			Kit.t(m, "...", Vector2(x, y + 16), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w)
 			break
-		Kit.icon(m, String(pid), Rect2(px, y, 34, 34))
-		Kit.t(m, "x%d" % int(S.packs[pid]), Vector2(px + 20, y + 36), 12, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, 30.0)
-		m.stat_tips.append([Rect2(px, y, 34, 34), "%s x%d\n%s" % [String(PickDB.get_def(String(pid)).get("name", "")), int(S.packs[pid]), String(PickDB.get_def(String(pid)).get("desc", ""))]])
-		px += 40.0
-	if not S.packs.is_empty():
-		y += 46.0
+		var rr := Rect2(x, y, w, rh - 4.0)
+		Kit.panel(m, rr, Color(row["col"] as Color, 0.6), Kit.PANEL2, 1)
+		Kit.icon(m, String(row["icon"]), Rect2(x + 4, y + 2, rh - 8.0, rh - 8.0))
+		Kit.t(m, String(row["name"]), Vector2(x + rh + 2.0, y + rh * 0.5 + 2.0), 16, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w - rh - 50.0)
+		if String(row["n"]) != "":
+			Kit.t(m, String(row["n"]), Vector2(rr.end.x - 8, y + rh * 0.5 + 2.0), 16, row["col"], HORIZONTAL_ALIGNMENT_RIGHT, 50.0)
+		m.stat_tips.append([rr, "%s\n%s" % [String(row["name"]), String(row["desc"])]])
+		y += rh
+
+
+## Rows for the Perks menu: gold perks, stat perks (packs), insights, mutations.
+static func perk_rows(m) -> Array:
+	var S = m.S
+	var out: Array = []
+	var seen: Dictionary = {}
+	for pid in S.perks_taken:
+		var id: String = String(pid)
+		seen[id] = int(seen.get(id, 0)) + 1
+	for id in seen.keys():
+		var d: Dictionary = PerkDB.get_def(String(id))
+		var dsc: String = String(d.get("desc", "")) + ("\nCost: " + String(d["cost"]) if bool(d.get("tradeoff", false)) else "")
+		out.append({"sec": "GOLD PERKS", "col": Kit.GOLD, "icon": "perk_" + String(id).substr(2), "name": String(d.get("name", id)), "n": "x%d" % int(seen[id]) if int(seen[id]) > 1 else "", "desc": dsc})
+	for pid in S.packs.keys():
+		var pd: Dictionary = PickDB.get_def(String(pid))
+		out.append({"sec": "STAT PERKS", "col": Color("e8c26a"), "icon": String(pid), "name": String(pd.get("name", pid)), "n": "x%d" % int(S.packs[pid]), "desc": String(pd.get("desc", ""))})
 	for iid in S.insight_found:
-		Kit.icon(m, String(iid), Rect2(x, y, 26, 26))
-		Kit.t(m, String(PickDB.get_def(String(iid)).get("name", "")), Vector2(x + 32, y + 19), 14, Kit.RARITY["insight"], HORIZONTAL_ALIGNMENT_LEFT, w - 32)
-		y += 28.0
-	# loot so far
-	var lt: Dictionary = S.loot
-	var parts: int = (lt.get("parts", []) as Array).size()
-	var bits: Array = []
-	if parts > 0:
-		bits.append("%d part%s" % [parts, "" if parts == 1 else "s"])
-	if int(lt.get("scrap", 0)) > 0:
-		bits.append("%d Scrap" % int(lt["scrap"]))
-	if int(lt.get("keys", 0)) > 0:
-		bits.append("%d Keys" % int(lt["keys"]))
-	if int(lt.get("core_cores", 0)) > 0:
-		bits.append("%d Core Cores" % int(lt["core_cores"]))
-	Kit.row(m, "Loot", ", ".join(bits) if not bits.is_empty() else "none yet", Vector2(x, y + 20), w, Kit.SCRAP, "Banked when the run ends: bosses, marked elites and Couriers drop parts", 15)
-	# hotkey legend
-	var leg: Array = [["hotbar_1", "Specials (1-4)"], ["ability_1", "Draft picks (Q W E R)"], ["track_1", "Core tracks (Shift+1-5)"], ["reroll", "Reroll"], ["pause", "Pause"]]
-	var ly: float = lr.end.y - 22.0 * float(leg.size()) - 12.0
-	if ly > y + 40.0:
-		Kit.head(m, "HOTKEYS", Vector2(x, ly - 8), w, Kit.DIM)
-		for k in leg.size():
-			var a: Array = leg[k]
-			Kit.t(m, Kit.hint(m, String(a[0])), Vector2(x, ly + 16 + k * 22.0), 14, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, 100.0)
-			Kit.t(m, String(a[1]), Vector2(x + 104, ly + 16 + k * 22.0), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w - 104)
+		var idf: Dictionary = PickDB.get_def(String(iid))
+		out.append({"sec": "INSIGHTS", "col": Kit.RARITY["insight"], "icon": String(iid), "name": String(idf.get("name", iid)), "n": "", "desc": String(idf.get("desc", "")) + "\nBanked permanently at run end"})
+	for mid in S.mutations_taken:
+		var md: Dictionary = ModifierDB.MUTATIONS.get(String(mid), {})
+		out.append({"sec": "MUTATIONS", "col": Kit.MAG, "icon": "icon_endless", "name": String(md.get("name", mid)), "n": "", "desc": String(md.get("desc", ""))})
+	return out

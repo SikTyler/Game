@@ -35,6 +35,7 @@ const Keybinds := preload("res://Keybinds.gd")
 const CoreBay := preload("res://ui/CoreBay.gd")
 const OutpostView := preload("res://ui/OutpostView.gd")
 const Hotbar := preload("res://ui/Hotbar.gd")
+const BattleUI := preload("res://ui/Battle.gd")
 const T0: int = 1800000000
 
 var main: Node2D
@@ -741,7 +742,11 @@ func _run_screen() -> void:
 	_audit("run")
 	# PC-U1 run layout
 	var top := Rect2(0, 0, main.vw, main.TOP_H)
-	_check("PC-U1: top bar, left, field, right, hotbar do not overlap at 1920x1080", main.vw >= 1919.0 and _no_overlap([top, main.left_rect(), main.field_rect(), main.right_rect(), main.hot_rect()]))
+	# FEEDBACK-1 (deliberate): the bottom bar is gone — abilities float inside
+	# the field — so the hotbar rect left the no-overlap set and must now sit
+	# INSIDE the field, with the side panels reaching the window bottom.
+	_check("PC-U1: top bar, left, field, right do not overlap at 1920x1080", main.vw >= 1919.0 and _no_overlap([top, main.left_rect(), main.field_rect(), main.right_rect()]))
+	_check("FB1: no bottom bar (panels reach the bottom; abilities float inside the field)", main.field_rect().end.y >= main.vh - 0.5 and main.left_rect().end.y >= main.vh - 0.5 and main.field_rect().encloses(main.hot_rect()))
 	_check("PC-U1: the whole 7x7 grid is inside the field", main.field_rect().has_point(_cell_scr(0)) and main.field_rect().has_point(_cell_scr(TowerState.N - 1)))
 	await _frames(2)
 	var cash_tips: int = 0
@@ -752,6 +757,12 @@ func _run_screen() -> void:
 		if String((st as Array)[1]).begins_with("Core HP"):
 			hp_tips += 1
 	_check("PC-G6: cash and Core HP are shown once (right panel only)", cash_tips == 1 and hp_tips == 1, "%d/%d" % [cash_tips, hp_tips])
+	var kill_tip: bool = false
+	for st in main.stat_tips:
+		if String((st as Array)[1]).begins_with("Enemies killed") and ((st as Array)[0] as Rect2).position.x >= main.right_rect().position.x:
+			kill_tip = true
+	_check("FB1: enemies killed is shown in the right Core panel", kill_tip)
+	_check("FB1: the left bar is the Perks menu (no Build/Info)", load("res://ui/DraftPanel.gd").perk_rows(main).is_empty())
 	for res in [Vector2i(1280, 720), Vector2i(1280, 800)]:
 		root.size = res
 		await _frames(3)
@@ -779,6 +790,7 @@ func _run_screen() -> void:
 	_motion(_find("TRACK Eco").get_global_rect().get_center())
 	await _frames(3)
 	_check("RUN: hovering a track shows its tooltip", main.tipbox.visible and main.tip_label.text.begins_with("Eco track"), main.tip_label.text)
+	_check("FB1: tooltips render a bold header + icon stat lines, no hotkey callouts", main.tip_rich.text.begins_with("[b]") and main.tip_rich.text.contains("[img") and not main.tip_label.text.contains("Shift"), main.tip_rich.text)
 	_motion(_cell_scr(TowerState.CORE_SLOT))
 	await _frames(3)
 	_check("RUN: hovering the Core shows its attack + trait", main.tipbox.visible and main.tip_label.text.contains("Core") and main.tip_label.text.contains("Trait"), main.tip_label.text)
@@ -788,6 +800,11 @@ func _run_screen() -> void:
 	main._rebuild_ui()
 	await _frames(2)
 	_check("RUN: the draft panel shows the cards", S.draft.size() >= 3 and _findp("DCARD 0") != null and _findp("DCARD 2") != null)
+	var DP = load("res://ui/DraftPanel.gd")
+	var Dr = load("res://Draft.gd")
+	_check("FB1: draft cards name their type (BUILDING vs PERK vs ABILITY)", String(DP.card_type(main, Dr.card_for("gun", S._draft_ctx("")))["type"]) == "BUILDING" and String(DP.card_type(main, Dr.card_for("pk_arsenal", S._draft_ctx("")))["type"]) == "PERK" and String(DP.card_type(main, Dr.card_for("sp_emp", S._draft_ctx("")))["type"]) == "ABILITY")
+	_check("FB1: a non-weapon duplicate says drag onto your <Building>", String(DP.card_type(main, {"id": "mine", "fam": "building", "kind": "plus", "reward": "upgrade", "lvl": 1, "to": 2})["sub"]).begins_with("Drag onto your Gold Mine"))
+	_check("FB1: no hotkey callouts on the draft buttons", _find("Reroll") != null and not _find("Reroll").text.contains("[") and not _find("Banish").text.contains("["))
 	_audit("draft")
 	var hand0: String = JSON.stringify(S.draft)
 	_press("Reroll")
@@ -814,6 +831,13 @@ func _run_screen() -> void:
 	await _frames()
 	_check("RUN: Q takes draft card 1 (place mode)", S.draft.is_empty() and S.pending_place == "gun", "draft %s pending '%s' perk %d mut %d over %s" % [str(S.draft.map(func(c: Dictionary) -> String: return String(c["id"]))), S.pending_place, S.perk_offer.size(), S.mutation_offer.size(), str(S.over)])
 	var cell: int = TowerState.CORE_RING[0]
+	_motion(_cell_scr(cell))
+	await _frames(2)
+	_check("FB1: placing shows the building as the cursor on a valid (green) cell", String(main.get_meta("ghost_id", "")) == "gun" and String(main.get_meta("ghost_reason", "x")) == "")
+	_check("FB1: the placement preview has a range radius", float(BattleUI.preview_range(main, "gun")["r"]) > TowerState.CELL)
+	_motion(_cell_scr(TowerState.CORE_SLOT))
+	await _frames(2)
+	_check("FB1: an invalid cell turns the preview red with a reason", String(main.get_meta("ghost_reason", "")) != "")
 	_click(_cell_scr(cell))
 	await _frames()
 	_check("RUN: click a glowing cell places it", S.id_at(cell) == "gun" and S.pending_place == "")
@@ -832,6 +856,9 @@ func _run_screen() -> void:
 	_click(_cell_scr(cell))
 	await _frames()
 	var tm0: String = String(S.target_modes[cell])
+	await _frames(2)
+	_check("FB1: clicking a building shows its range circle", int(main.get_meta("range_shown", -1)) == cell and float(BattleUI.range_of(main, cell).get("r", 0.0)) > 0.0)
+	_check("FB1: non-weapon buildings show an aura range", String(BattleUI.preview_range(main, "mine")["kind"]) == "aura")
 	_press("Target:")
 	await _frames()
 	_check("RUN: Target button cycles the weapon's mode", String(S.target_modes[cell]) != tm0)
@@ -845,6 +872,10 @@ func _run_screen() -> void:
 	main._rebuild_ui()
 	await _frames()
 	_check("RUN: the hotbar shows the specials", _find("SPECIAL 1") != null and not _find("SPECIAL 1").disabled and _find("SPECIAL 3").disabled)
+	_check("FB1: abilities float over the bottom of the field", main.field_rect().encloses(_find("SPECIAL 1").get_global_rect()))
+	S.perks_taken.append("p_dmg")
+	_check("FB1: taken gold perks are listed under Perks", (DP.perk_rows(main) as Array).any(func(r: Dictionary) -> bool: return String(r["sec"]) == "GOLD PERKS"))
+	S.perks_taken.erase("p_dmg")
 	var casts0: int = S.special_casts
 	_key(KEY_1)
 	await _frames()

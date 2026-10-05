@@ -51,12 +51,16 @@ static func build(m) -> void:
 		var tid: String = TowerState.TRACK_IDS[k]
 		var c: int = S.track_cost(tid)
 		var td: Dictionary = TowerState.TRACKS[tid]
-		var tip: String = "%s\nLevel %d / %d  ·  next $%d  [%s]" % [String(TRACK_TIP[tid]), int(S.tracks[tid]), int(S.track_cap(tid)), maxi(0, c), Kit.hint(m, "track_%d" % (k + 1))]
+		var tip: String = "%s\nLevel %d / %d  ·  next $%d\n%s  ·  %s" % [String(TRACK_TIP[tid]), int(S.tracks[tid]), int(S.track_cap(tid)), maxi(0, c), String(td["desc"]), String(td.get("minus", ""))]
 		Kit.hit(m, Rect2(x, ty + k * (th + 6.0), w, th), func() -> void: m.buy_track(tid), tip, "TRACK " + String(td["name"]), c >= 0 and S.cash >= float(c), Kit.GREEN)
 	if m.sel >= 0 and S.is_weapon_slot(m.sel) and m.sel != TowerState.CORE_SLOT:
-		var lr: Rect2 = m.left_rect()
 		var i: int = m.sel
-		Kit.btn(m, "Target: %s" % String(S.target_modes[i]).capitalize(), Rect2(lr.position.x + 16, lr.end.y - 60, lr.size.x - 32, 46), func() -> void: m._handle(S.cycle_target_mode(i)); m._rebuild_ui(), "Cycle this weapon's targeting mode (nearest / first / strongest / weakest)", true, Kit.ENEMY, "Target:")
+		# floats on the field just under the selected weapon (left bar = Perks)
+		var cs: float = TowerState.CELL * m.world_scale()
+		var cp: Vector2 = m.w2s(TowerState.slot_pos(i)) + Vector2(0, cs * 0.5 + 6.0)
+		var fr0: Rect2 = m.field_rect()
+		var tr0 := Rect2(clampf(cp.x - 110.0, fr0.position.x + 4.0, fr0.end.x - 224.0), clampf(cp.y, fr0.position.y + 4.0, fr0.end.y - 150.0), 220, 40)
+		Kit.btn(m, "Target: %s" % String(S.target_modes[i]).capitalize(), tr0, func() -> void: m._handle(S.cycle_target_mode(i)); m._rebuild_ui(), "Cycle this weapon's targeting mode (nearest / first / strongest / weakest)", true, Kit.ENEMY, "Target:")
 
 
 static func track_h(m) -> float:
@@ -143,8 +147,8 @@ static func special_fx(m, ev: Dictionary) -> void:
 # ================================================================ tooltips
 static func world_tip(m, p: Vector2) -> String:
 	var S = m.S
-	if S == null:
-		return ""
+	if S == null or S.pending_place != "" or m.drag_card >= 0:
+		return ""   # the placement preview carries the cell state
 	var wp: Vector2 = m.s2w(p)
 	var best: float = 22.0
 	var found: Dictionary = {}
@@ -182,6 +186,62 @@ static func cell_text(m, i: int) -> String:
 	return "%s  Lv%d / %d  (%s)\nHP %d / %d\n%s%s" % [String(d["name"]), S.lvl_at(i), PickDB.max_of(id), String(d["rarity"]).capitalize(), int(S.bld_hp[i]), int(S.bld_max(i)), String(d["desc"]), up]
 
 
+# ================================================================== ranges
+## Base weapon reach in cells (TowerState weapon table) for a building that is
+## not on the grid yet (placement preview).
+const BASE_RANGE: Dictionary = {"gun": 3.0, "mortar": 4.5, "tesla": 3.0, "flak": 3.5, "railgun": 7.0, "frost": 2.5}
+
+
+## World-space reach of the building on cell i: weapons use their live range,
+## every other building its aura (the 8 neighbouring cells). {} = none.
+static func range_of(m, i: int) -> Dictionary:
+	var S = m.S
+	if S == null or i < 0:
+		return {}
+	for wv in (S.stats.get("weapons", []) as Array):
+		var wd: Dictionary = wv
+		if int(wd.get("slot", -2)) == i:
+			return {"r": float(wd.get("range", 0.0)), "kind": "weapon"}
+	if i != TowerState.CORE_SLOT and S.id_at(i) != "":
+		return {"r": TowerState.CELL * 1.5, "kind": "aura"}
+	return {}
+
+
+## Reach of `id` if it were placed now (live range of a placed twin, else base).
+static func preview_range(m, id: String) -> Dictionary:
+	var S = m.S
+	if BASE_RANGE.has(id):
+		for wv in (S.stats.get("weapons", []) as Array):
+			var wd: Dictionary = wv
+			if String(wd.get("kind", "")) == id:
+				return {"r": float(wd.get("range", 0.0)), "kind": "weapon"}
+		return {"r": float(BASE_RANGE[id]) * TowerState.cpx(), "kind": "weapon"}
+	return {"r": TowerState.CELL * 1.5, "kind": "aura"}
+
+
+static func draw_reach(m, c: Vector2, rg: Dictionary, col: Color) -> void:
+	if rg.is_empty():
+		return
+	var r: float = float(rg["r"])
+	if String(rg["kind"]) == "aura":
+		var rect := Rect2(c - Vector2(r, r), Vector2(r, r) * 2.0)
+		m.draw_rect(rect, Color(col, 0.08))
+		m.draw_rect(rect, Color(col, 0.6), false, 2.0)
+		return
+	m.draw_circle(c, r, Color(col, 0.07))
+	m.draw_arc(c, r, 0, TAU, 96, Color(col, 0.6), 2.0)
+
+
+## Owner feedback #1: clicking (selecting) any building shows its range.
+static func _draw_ranges(m) -> void:
+	var S = m.S
+	if m.sel >= 0 and m.sel != TowerState.CORE_SLOT and S.id_at(m.sel) != "":
+		draw_reach(m, TowerState.slot_pos(m.sel), range_of(m, m.sel), Kit.GEM)
+		m.set_meta("range_shown", m.sel)
+	else:
+		m.set_meta("range_shown", -1)
+
+
 # ===================================================================== draw
 static func draw(m, off: Vector2) -> void:
 	var S = m.S
@@ -194,6 +254,7 @@ static func draw(m, off: Vector2) -> void:
 			if gt != null:
 				m.draw_texture_rect(gt, m.gore.call("ground_rect"), false)   # HORDE P5 corpse/blood layer
 		_draw_grid(m)
+		_draw_ranges(m)
 		_draw_world(m)
 		_draw_fx(m)
 		m.draw_set_transform(Vector2.ZERO)
@@ -203,9 +264,9 @@ static func draw(m, off: Vector2) -> void:
 	if m.heal_flash > 0.0:
 		m.draw_rect(fr, Color(0.4, 0.9, 0.4, m.heal_flash * 0.3))
 	if S != null:
+		Hotbar.draw(m)
 		DraftPanel.draw(m)
 		_draw_right(m)
-		Hotbar.draw(m)
 		_draw_ghost(m)
 	if m.screen == "results":
 		_draw_results(m)
@@ -431,8 +492,14 @@ static func _draw_fx(m) -> void:
 			continue
 		var a: float = float(fd["t"]) / maxf(0.01, float(fd["life"]))
 		var tc: Color = fd["color"]
-		m.draw_line(fd["a"], fd["b"], Color(tc, 0.25 * a), float(fd["w"]) * 3.0)
-		m.draw_line(fd["a"], fd["b"], Color(tc, a), float(fd["w"]))
+		m.draw_line(fd["a"], fd["b"], Color(tc, 0.18 * a), float(fd["w"]) * 3.0)
+		m.draw_line(fd["a"], fd["b"], Color(tc, 0.55 * a), float(fd["w"]))
+		# Owner feedback #1: every shot draws a visible projectile travelling
+		# from the muzzle to the target over the tracer's life.
+		var hp: Vector2 = (fd["a"] as Vector2).lerp(fd["b"] as Vector2, minf(1.0, (1.0 - a) * 1.6))
+		var pr: float = 3.0 + float(fd["w"]) * 1.2
+		m.draw_circle(hp, pr * 1.9, Color(tc, 0.3))
+		m.draw_circle(hp, pr, Color(tc.lightened(0.5), 1.0))
 	for fd2 in m.rings.items:
 		if float(fd2["t"]) <= 0.0:
 			continue
@@ -487,8 +554,9 @@ static func _draw_field_hud(m, fr: Rect2) -> void:
 		prompt = "Banish: click a draft card to remove it from this run"
 	if prompt != "":
 		var pw: float = minf(fr.size.x - 20.0, 24.0 + m.font.get_string_size(prompt, HORIZONTAL_ALIGNMENT_LEFT, -1, 17).x)
-		Kit.panel(m, Rect2(cx - pw * 0.5, fr.end.y - 54, pw, 40), Kit.GOLD, Color(0.14, 0.12, 0.06, 0.92))
-		Kit.t(m, prompt, Vector2(cx, fr.end.y - 27), 17, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, pw - 16.0)
+		var py: float = m.hot_rect().position.y - 48.0   # above the floating abilities
+		Kit.panel(m, Rect2(cx - pw * 0.5, py, pw, 40), Kit.GOLD, Color(0.14, 0.12, 0.06, 0.92))
+		Kit.t(m, prompt, Vector2(cx, py + 27), 17, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, pw - 16.0)
 	if m.insight_t > 0.0:
 		var a: float = clampf(m.insight_t, 0.0, 1.0)
 		var s: float = 1.0 + maxf(0.0, m.insight_t - 2.0) * 0.6
@@ -499,28 +567,63 @@ static func _draw_field_hud(m, fr: Rect2) -> void:
 		Kit.t(m, "%s — banked permanently at run end" % m.insight_name, Vector2(r.position.x + 100, r.position.y + 68), 17, Color(Kit.TEXT, a), HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 110)
 
 
-## Drag ghost for a draft card over the grid (green / red with the reason).
+## Placement preview (owner feedback #1): while a building is being placed —
+## a dragged NEW-building card or a taken pick waiting for a cell — the cursor
+## becomes the building with its range radius, tinted green (valid) or red
+## (invalid, with the reason) on the hovered cell.
 static func _draw_ghost(m) -> void:
 	var S = m.S
-	if m.drag_card < 0 or m.drag_card >= S.draft.size() or m.mouse_pos.distance_to(m.drag_start) <= 12.0:
+	var id: String = ""
+	var is_new: bool = true
+	if m.drag_card >= 0 and m.drag_card < S.draft.size() and m.mouse_pos.distance_to(m.drag_start) > 12.0:
+		id = String((S.draft[m.drag_card] as Dictionary)["id"])
+		is_new = String((S.draft[m.drag_card] as Dictionary).get("kind", "")) == "new"
+	elif S.pending_place != "" and m.field_rect().has_point(m.mouse_pos):
+		id = S.pending_place
+	elif S.pending_upgrade != "" and m.field_rect().has_point(m.mouse_pos):
+		id = S.pending_upgrade
+		is_new = false
+	if id == "":
+		m.set_meta("ghost_reason", "")
+		m.set_meta("ghost_id", "")
 		return
-	var id: String = String((S.draft[m.drag_card] as Dictionary)["id"])
 	var reason: String = "Drop on a cell"
+	var cs: float = TowerState.CELL * m.world_scale()
+	var at: Vector2 = m.mouse_pos
+	var ok: bool = false
 	if m.field_rect().has_point(m.mouse_pos):
 		var i: int = m.slot_at(m.s2w(m.mouse_pos))
 		if i >= 0:
-			reason = place_reason(m, i, id) if String((S.draft[m.drag_card] as Dictionary).get("kind", "")) == "new" else "Release to take this pick"
-			var cs: float = TowerState.CELL * m.world_scale()
-			var cp: Vector2 = m.w2s(TowerState.slot_pos(i))
-			var cr := Rect2(cp - Vector2(cs, cs) * 0.5, Vector2(cs, cs))
-			var ok: bool = reason == "" or reason.begins_with("Release")
+			if is_new:
+				reason = place_reason(m, i, id)
+			elif S.pending_upgrade != "" or (m.drag_card >= 0 and String((S.draft[m.drag_card] as Dictionary).get("kind", "")) == "plus"):
+				reason = "" if S.id_at(i) == id else "Drop on your %s" % pick_name(id)
+			else:
+				reason = "Release to take this pick"
+			ok = reason == "" or reason.begins_with("Release")
+			at = m.w2s(TowerState.slot_pos(i))
+			var cr := Rect2(at - Vector2(cs, cs) * 0.5, Vector2(cs, cs))
 			m.draw_rect(cr, Color(Kit.GREEN, 0.25) if ok else Color(Kit.ENEMY, 0.25))
 			m.draw_rect(cr, Kit.GREEN if ok else Kit.ENEMY, false, 3.0)
-	Kit.icon(m, id, Rect2(m.mouse_pos - Vector2(30, 30), Vector2(60, 60)), Color(1, 1, 1, 0.85))
-	if reason != "":
-		Kit.panel(m, Rect2(m.mouse_pos + Vector2(36, -16), Vector2(300, 34)), Kit.ENEMY, Color(0.1, 0.05, 0.05, 0.92))
-		Kit.t(m, reason, m.mouse_pos + Vector2(48, 8), 16, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, 280.0)
+			if is_new and (S.pending_place != "" or m.drag_card >= 0):
+				var rg: Dictionary = preview_range(m, id)
+				var sr: float = float(rg["r"]) * m.world_scale()
+				var rc: Color = Kit.GREEN if ok else Kit.ENEMY
+				if String(rg["kind"]) == "aura":
+					var ar := Rect2(at - Vector2(sr, sr), Vector2(sr, sr) * 2.0)
+					m.draw_rect(ar, Color(rc, 0.08))
+					m.draw_rect(ar, Color(rc, 0.7), false, 2.0)
+				else:
+					m.draw_circle(at, sr, Color(rc, 0.08))
+					m.draw_arc(at, sr, 0, TAU, 96, Color(rc, 0.7), 2.0)
+	var gs: float = maxf(48.0, cs * 0.9)
+	Kit.icon(m, id, Rect2(at - Vector2(gs, gs) * 0.5, Vector2(gs, gs)), Color(0.6, 1.0, 0.6, 0.85) if ok else Color(1.0, 0.55, 0.55, 0.8))
+	if reason != "" and not ok:
+		var tw: float = 24.0 + m.font.get_string_size(reason, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
+		Kit.panel(m, Rect2(m.mouse_pos + Vector2(36, -16), Vector2(tw, 34)), Kit.ENEMY, Color(0.1, 0.05, 0.05, 0.92))
+		Kit.t(m, reason, m.mouse_pos + Vector2(48, 8), 16, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, tw - 16.0)
 	m.set_meta("ghost_reason", reason)
+	m.set_meta("ghost_id", id)
 
 
 static func _draw_right(m) -> void:
@@ -560,6 +663,12 @@ static func _draw_right(m) -> void:
 	Kit.t(m, "interest %d%% (cap %d)" % [int(round(float(st.get("interest_rate", 0.0)) * 100.0)), int(float(st.get("interest_cap", 0.0)))], Vector2(x + w, y + 6), 13, Kit.DIM, HORIZONTAL_ALIGNMENT_RIGHT, w * 0.5)
 	m.stat_tips.append([Rect2(x, y - 34, w, 44), "Run cash: buys Core tracks and rerolls. Earned per second, per kill (x1.10 per wave) and as interest each wave on banked cash up to the cap."])
 	y += 30.0
+	# Owner feedback #1: enemies killed lives in the Core panel (bodies counted)
+	Kit.icon(m, "mis_kill", Rect2(x, y - 4, 30, 30))
+	Kit.t(m, "Enemies killed", Vector2(x + 38, y + 18), 17, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w * 0.5)
+	Kit.t(m, Kit.fmt(float(S.kills)), Vector2(x + w, y + 20), 24, Kit.ENEMY, HORIZONTAL_ALIGNMENT_RIGHT, w * 0.5)
+	m.stat_tips.append([Rect2(x, y - 4, w, 30), "Enemies killed this run\nEvery body in a horde counts  ·  %d enemies on the field now" % S.enemy_count()])
+	y += 56.0
 	# stats
 	var cw: Dictionary = (st["weapons"] as Array).back()
 	var rows: Array = [
@@ -591,9 +700,7 @@ static func _draw_right(m) -> void:
 		Kit.icon(m, String(TRACK_ICON[tid]), Rect2(r.position.x + 8, r.position.y + (th - 36) * 0.5, 36, 36), Color.WHITE if can else Color(1, 1, 1, 0.5))
 		Kit.t(m, "%s  Lv %d" % [String(td["name"]), int(S.tracks[tid])], Vector2(r.position.x + 52, r.position.y + th * 0.45), 18, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w - 150)
 		Kit.t(m, "%s  ·  %s" % [String(td["desc"]), String(td.get("minus", ""))], Vector2(r.position.x + 52, r.position.y + th * 0.45 + 18), 13, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w - 150)
-		Kit.t(m, ("$%s" % Kit.fmt(float(c))) if c >= 0 else "MAX", Vector2(r.end.x - 34, r.position.y + th * 0.45), 18, Kit.GREEN if can else Kit.DIM, HORIZONTAL_ALIGNMENT_RIGHT, 100.0)
-		Kit.panel(m, Rect2(r.end.x - 30, r.position.y + th * 0.5 - 2, 24, 22), Kit.EDGE, Color("101317"), 1)
-		Kit.t(m, "%d" % (k + 1), Vector2(r.end.x - 18, r.position.y + th * 0.5 + 15), 13, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, 24.0)
+		Kit.t(m, ("$%s" % Kit.fmt(float(c))) if c >= 0 else "MAX", Vector2(r.end.x - 10, r.position.y + th * 0.45), 18, Kit.GREEN if can else Kit.DIM, HORIZONTAL_ALIGNMENT_RIGHT, 100.0)
 
 
 static func _draw_results(m) -> void:

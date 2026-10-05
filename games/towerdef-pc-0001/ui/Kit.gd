@@ -202,3 +202,45 @@ static func hint(m, action: String) -> String:
 	if h == "" and pad:
 		h = Keybinds.hint(action, false)
 	return h
+
+
+## Owner feedback #1 tooltip layout: the first line is a bold gold header; the
+## rest splits into one stat line per row (" · " / ". " separators), each led
+## by a related icon (damage, HP, rate, range, cash, coins, ...).
+const TIP_ICONS: Array = [
+	["cooldown", "ui_cooldown"], ["dmg", "in_dmg"], ["damage", "in_dmg"], ["crit", "in_dmg"],
+	["hp", "in_hp"], ["regen", "in_hp"], ["armor", "pk_fort"], ["shield", "elite_shield"],
+	["rate", "in_rate"], ["speed", "icon_speed"], ["range", "pk_optics"], ["cell", "pk_optics"],
+	["coin", "cur_coin"], ["cash", "cur_cash"], ["$", "cur_cash"], ["interest", "cur_cash"],
+	["scrap", "cur_scrap"], ["key", "cur_key"], ["level", "icon_tier"], ["lv", "icon_tier"],
+	["click", "icon_info"], ["drag", "icon_info"], ["wave", "icon_clock"], ["kill", "mis_kill"],
+]
+
+
+static func tip_icon(line: String) -> String:
+	var l: String = line.to_lower()
+	for e in TIP_ICONS:
+		var a: Array = e
+		if l.contains(String(a[0])):
+			return String(a[1])
+	return ""
+
+
+static func tip_bbcode(t: String) -> String:
+	var lines: PackedStringArray = t.split("\n")
+	if lines.is_empty():
+		return ""
+	var head: String = lines[0].replace("[", "(").replace("]", ")")
+	var out: String = "[b][color=#%s]%s[/color][/b]" % [GOLD.to_html(false), head]
+	var rows: Array = []
+	for k in range(1, lines.size()):
+		for part in lines[k].split("  ·  "):
+			var p: String = String(part).strip_edges()
+			if p != "":
+				rows.append(p.replace("[", "(").replace("]", ")"))
+	for r in rows:
+		var row: String = String(r)
+		var ic: String = tip_icon(row)
+		var lead: String = "[img=18x18]res://art/%s.svg[/img] " % ic if ic != "" and Art.tex(ic) != null else "[color=#%s]•[/color] " % DIM.to_html(false)
+		out += "\n" + lead + row
+	return out

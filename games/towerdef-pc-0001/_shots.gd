@@ -239,6 +239,11 @@ func _initialize() -> void:
 	if not placed:
 		S.draft.clear()
 		S.pending_place = "gun"
+	# FEEDBACK-1: cursor over a free cell -> building preview + range radius
+	for i in TowerState.N:
+		if S.pending_place != "" and S.in_grid(i) and bool(S.unlocked[i]) and S.id_at(i) == "" and S.can_place(i, S.pending_place):
+			main.mouse_pos = main.w2s(TowerState.slot_pos(i))
+			break
 	main._rebuild_ui()
 	await _wait(3)
 	await _shot("%s/15_place.png" % outdir)
@@ -252,6 +257,10 @@ func _initialize() -> void:
 		if S.wave >= 22 and S.enemy_count() > 16 and S.draft.is_empty() and S.pending_place == "" and S.perk_offer.is_empty():
 			break
 	main.sel = TowerState.CORE_SLOT
+	for i in TowerState.N:   # FEEDBACK-1: a selected building shows its range
+		if i != TowerState.CORE_SLOT and S.is_weapon_slot(i) and S.id_at(i) != "":
+			main.sel = i
+			break
 	_quiet()
 	main._rebuild_ui()
 	await _wait(14)

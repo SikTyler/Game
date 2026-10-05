@@ -116,6 +116,7 @@ var zoom: float = 1.0                # battlefield wheel zoom (0.8 - 1.4)
 # tooltips
 var tipbox: PanelContainer
 var tip_label: Label
+var tip_rich: RichTextLabel
 var mouse_pos: Vector2 = Vector2(-1, -1)
 var tip_text: String = ""
 var tip_t: float = 0.0
@@ -190,7 +191,23 @@ func _ready() -> void:
 	tip_label.add_theme_font_size_override("font_size", 17)
 	tip_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	tip_label.custom_minimum_size = Vector2(320, 0)
-	tipbox.add_child(tip_label)
+	# tip_label holds the canonical text; tip_rich renders it structured
+	# (header + one stat line per row with icons; owner feedback #1).
+	tip_label.visible = false
+	var tvb := VBoxContainer.new()
+	tvb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tvb.add_child(tip_label)
+	tip_rich = RichTextLabel.new()
+	tip_rich.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tip_rich.bbcode_enabled = true
+	tip_rich.fit_content = true
+	tip_rich.scroll_active = false
+	tip_rich.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tip_rich.custom_minimum_size = Vector2(340, 0)
+	tip_rich.add_theme_font_size_override("normal_font_size", 16)
+	tip_rich.add_theme_font_size_override("bold_font_size", 19)
+	tvb.add_child(tip_rich)
+	tipbox.add_child(tvb)
 	add_child(tipbox)
 	fader = ColorRect.new()
 	fader.color = Color(0.05, 0.06, 0.08, 1.0)
@@ -227,19 +244,21 @@ func _on_resize() -> void:
 
 # ---------------------------------------------------------------- frames
 func left_rect() -> Rect2:
-	return Rect2(0, TOP_H, side_w, vh - TOP_H - HOT_H)
+	return Rect2(0, TOP_H, side_w, vh - TOP_H)
 
 
 func right_rect() -> Rect2:
-	return Rect2(vw - side_w, TOP_H, side_w, vh - TOP_H - HOT_H)
+	return Rect2(vw - side_w, TOP_H, side_w, vh - TOP_H)
 
 
+## Owner feedback #1: no bottom bar — abilities float over the bottom of the field.
 func hot_rect() -> Rect2:
-	return Rect2(0, vh - HOT_H, vw, HOT_H)
+	var fr: Rect2 = field_rect()
+	return Rect2(fr.position.x, fr.end.y - HOT_H, fr.size.x, HOT_H)
 
 
 func field_rect() -> Rect2:
-	return Rect2(side_w, TOP_H, vw - 2.0 * side_w, vh - TOP_H - HOT_H)
+	return Rect2(side_w, TOP_H, vw - 2.0 * side_w, vh - TOP_H)
 
 
 ## Hub content area (below the top bar and the hub nav row).
