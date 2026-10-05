@@ -496,17 +496,27 @@ Code: `data/EnemyDB.gd` (`MASS`, `MASS_MIX`, `TIER_B`), `TowerState.gd` (`mass`,
 ### C2. Roster (D1/D2) as built
 `EnemyDB.MASS` holds the D2 table (hp, dmg, spd, cash/xp/coin **weights**, size = 2 x radius).
 Deviations, all deliberate and re-derived from bot runs (D10):
-- **Per-body HP growth** is `hp_growth(tier) / 1.11 x 1.04` (T1 ~1.096 / wave; heavies x1.015),
-  not D2's 1.035. With 1.035 the total wave HP grew x1.149 / wave against a player whose power grows
-  on the classic curve: a fresh bot reached wave 73 (1,800 s cap) and the run never ended. The body
-  count still carries most of the growth (x1.11); the body HP carries the rest of the tier curve.
-  Global `mass_hp_k` = 0.5 (x the existing `pc_enemy_hp` 2.5).
-- **Contact damage** x `mass_dmg_k` 0.6 (and x1.02^(w-1) growth as designed): with D2's values a
-  fresh first run walled at wave 8-11; at 0.6 the fresh wall is wave 12-15 (FB2 "short first runs").
-- **Elites and bosses keep the classic HP curve** (D2 says they keep their curves); the boss also
-  keeps the classic contact damage (D2's 40 per hit walled the first boss at wave 10). Elites use
-  the designed 8 contact damage. Elites spawn `floor(w/5)` from wave 5 at every tier (+1 at T2-3,
-  +2 at T4+; x3 with Elite Guard).
+- **Per-body HP growth** is `hp_growth(tier) / 1.11 x 1.006` (T1 1.060 / wave, T2 1.070, T3+
+  1.047; heavies x1.015), not D2's 1.035, re-derived in three bot passes (2026-10-05):
+  1. D2's 1.035 with the bot's power on the classic curve: a fresh bot reached wave 73 (1,800 s cap).
+  2. `hp_growth / 1.11 x 1.04` (1.096): the campaign plateaued at T1 wave 33 for 5 days (never T2).
+  3. 1.060: T2 on day 3-5 and the campaign keeps climbing (see C7 for the gate numbers).
+  The body count carries most of the growth (x1.11 / wave); `mass_hp_k` = 0.5 (x `pc_enemy_hp` 2.5).
+- **Tier HP** for designed bodies is `max(1, Tiers.hp_mult / tierB)` (1.0 at T1-T6): a tier's threat
+  is its body count (D7: "tier HP multipliers stay modest"). With the classic x1.5 per tier on top of
+  tierB x1.6, T2 was ~2.4x T1 at the same wave and the campaign stalled at T2 wave 38 for 8 days.
+- **Contact damage** x `mass_dmg_k` 0.4 with the classic per-wave damage growth (1.06, not D2's
+  1.02): with 1.02 the Core's armor / regen tracks out-grew the swarm and an unkillable pile grew to
+  16,000 bodies (a bot run that never ended). At 0.4 the fresh first run walls at wave 12-14.
+- **Core pressure** (D2 "the Core loses to pressure"): melee bodies within 48 px beyond the Core's
+  contact ring hit it too (C# `pressBand`, `mass_press`), so a pile of 300 drains the Core, not only
+  its front rank of ~20. Without it a large pile could not kill an armored Core (immune runs).
+- **Armor** against a mass hit removes the same fraction it removed from a classic drone's hit at
+  that wave (share = hit / classic drone hit), so armor stays a % reduction, never a full block.
+- **Elites and bosses keep the classic HP curve** (D2 says they keep their curves); the boss keeps
+  the classic contact damage x0.5 (`mass_boss_dmg`; D2's 40 per hit walled the first boss at wave
+  10). Elites use the designed 8 contact damage. Elites spawn `floor(w/5)` from wave 5 at every tier
+  (+1 at T2-3, +2 at T4+; x3 with Elite Guard).
 - **Sapper**: C# `KC_SAPPER` detonates on the first structure face it presses (sealed or not) and
   is reaped with no reward and no kill credit (`F_BOOM`); the blast is `bld / dmg` (12.5) x its Core
   hit. Its own structure-seeking flow field is **not** built (open item): it follows the shared
@@ -516,8 +526,10 @@ Deviations, all deliberate and re-derived from bot runs (D10):
   stops at the shield. "Protects the bodies directly behind it" is modelled only through that stop.
 - **Broodsac** releases 6 designed swarmlings (`mass_brood`), worth 0 cash (their value is inside the
   Broodsac's share), counted in the wave so the clear waits for them.
-- **Not built** (open items): the Warlord's +20% speed aura, Spitters aiming at buildings/walls (they
-  still fire at the Core from 230 px), per-unit separation weights / mass in C# (mass = radius^2).
+- **Spitter**: holds at 230 px and lobs at the nearest standing building or wall within 282 px
+  (x1.5 its Core hit); only with none in reach does it hit the Core (a siege on the defence).
+- **Not built** (open items): the Warlord's +20% speed aura, per-unit separation weights / mass in
+  C# (mass = radius^2).
 - Art: `art/sapper.svg` (bomb-carrying crawler, lit fuse) and `art/shield.svg` (front plate facing
   the direction of travel), same 64 px outline style as the roster; Intel / tooltips use the D1 names
   (Swarmling, Grunt, Runner, Brute, Spitter, Sapper, Shieldbearer, Broodsac, Warlord, Behemoth).
@@ -544,8 +556,13 @@ Deviations, all deliberate and re-derived from bot runs (D10):
 | Cryo | -50% in the field (slowed bodies block the ones behind: the C# front-blocking rule = viscosity), Brittle x1.25 on chilled elites/bosses, freeze-shatter 20% max HP to up to 4 neighbours; direct damage x0.1 (it is the force multiplier) | |
 - **Overkill smash** (every weapon, mass only): a killing hit's surplus x0.6 carries into the nearest
   touching body, up to 3 hops. Without it damage upgrades stopped buying kills once the swarm was
-  one-shot (a x60-damage bot died at wave 36, a x1 bot at 24: the run was purely throughput-bound,
-  which flattened meta progression). With it: x1 -> w13, x4 -> w26, x20 -> w40.
+  one-shot (a x60-damage bot died at wave 36, a x4 bot at 24: the run was purely throughput-bound,
+  which flattened meta progression). With it (and the final HP curve): x4 -> w24, x20 -> w49,
+  x80 -> w60. Each kill's nearest-body query is cheap because a kill no longer dirties the C#
+  query hash (queries skip dead slots).
+- **power_snapshot** (the POWER_MODEL R probes) uses mass crowd factors instead of the classic
+  multi-target factors: Gun 3, Tesla 5, Mortar 4, Flamer 3, Railgun 3, Cryo 1, Core attack x1.5 (about
+  a third of the dense-field H8 factors: in-game density is lower).
 - **Troops** cleave: every troop attack also hits up to 3 more bodies in a 90 deg arc in reach.
 - **Specials**: the Orbital Strike adds a shock wave (radial impulse 2r) that parts the sea; EMP /
   Time Warp already act on every body. Tempest's Static chain uses C# nearest-N (no 10k sort).
@@ -601,6 +618,11 @@ in the H2 probe); H12 is the existing `no_death_spiral`.
 - **H8 re-aimed**: the Cryo Spire is excluded from the kill-share rule and must instead lift a Gun's
   kills by >= 10% (D4 makes it the force multiplier with 5-20 direct kills/s, which cannot be 25% of
   a Mortar's). The Railgun's Lv5 exemption requires its elite/boss single-target DPS to lead.
-- **Harness LOD** (`BOT_LOD_CAP` 2500, campaign jobs only): the 30-day campaign plays hundreds of
-  runs; a wave planned above 2,500 bodies spawns one body per k carrying k x HP / damage / pool
-  share / kill count. All first runs (T1 wave <= 28) and every H-gate run at 1:1.
+- **Harness LOD** (`BOT_LOD_CAP` 1200, campaign jobs only): the 30-day campaign plays hundreds of
+  runs (a T2 wave-46 run is ~30 s of wall time at 2,500); a wave planned above 1,200 bodies spawns one
+  body per k carrying k x HP / damage / pool share / kill count. Every first run (T1 wave <= 21) and
+  every H-gate run at 1:1.
+- **first_run_short** (owner FB2, same 300-480 s band) is now read from the median of the 16 fresh
+  first runs (`fresh_median_s`) instead of one seed's run: with hundreds of bodies a single run's
+  wall moves +-5 waves with the draft (one seed died at wave 8, the median at 12-14). The single-seed
+  value is still reported (`first_run_short_single`).

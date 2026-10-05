@@ -58,9 +58,9 @@ const FIRST_GOAL_WAVE: int = 5
 ## MASS_HORDE harness fidelity (documented in MASS_HORDE §Content): the 30-day
 ## campaign plays hundreds of runs, so a wave planned above this many bodies
 ## spawns one body per k = ceil(B / cap) carrying k x HP / damage / pool share
-## / kill count. Waves up to the cap (every T1 wave <= 28, i.e. every first
+## / kill count. Waves up to the cap (every T1 wave <= 21, i.e. every first
 ## run, H7) are simulated 1:1; the H1/H2/H8 mass gates always run at 1:1.
-const BOT_LOD_CAP: int = 2500
+const BOT_LOD_CAP: int = 1200
 const PROGRESS_GAIN: int = 5
 const SEED_DEFAULT: int = 4242
 const MIX_ECO_UNTIL: int = 15
