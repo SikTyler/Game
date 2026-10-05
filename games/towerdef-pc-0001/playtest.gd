@@ -1156,10 +1156,15 @@ const SPEC_PROBE_N: int = 6
 ## full set is live in the run (its 4-piece fx reaches Parts.run_fx), none
 ## is a trap (median wave >= balanced probe - SET_TRAP_W) and none is
 ## dominant (median wave <= best spec + 3, the AC-29 spread).
-## REPORT ONLY (not in RD_GATES yet): Swarm is a known trap (~w26 on the
-## day-20 save); see REDESIGN_BALANCE.md open issues.
-const SET_PROBE_N: int = 4
+## The full band (set4_fair) stays REPORT ONLY: Bulwark / Swarm sit on its
+## lower edge and Lancer just over its upper edge, so it would flip on seed
+## noise. Gated instead (set4_no_trap): every full set is live and no set
+## median falls below SET_TRAP_FRAC of the balanced probe — the class of
+## failure Swarm had (w25 vs w80, its Queen Engine holding the Core's fire)
+## before the Swarm 4-piece lifted queen_hold. See REDESIGN_BALANCE.md.
+const SET_PROBE_N: int = 6
 const SET_TRAP_W: float = 8.0
+const SET_TRAP_FRAC: float = 0.75
 static func job_sets(seed0: int, snaps: Dictionary) -> Dictionary:
 	var rows: Dictionary = {}
 	for sid in SetDB.IDS:
@@ -1198,20 +1203,22 @@ static func job_sets(seed0: int, snaps: Dictionary) -> Dictionary:
 
 static func set_checks(P: Dictionary, S: Dictionary) -> Dictionary:
 	if P.size() < SetDB.IDS.size() or S.size() < SPECS.size():
-		return {"set4_probe": {}, "set4_fair": false}
+		return {"set4_probe": {}, "set4_fair": false, "set4_no_trap": false}
 	var best: float = 0.0
 	for sp in SPECS:
 		best = maxf(best, float((S[sp] as Dictionary)["median_wave"]))
 	var bal: float = float((S["balanced"] as Dictionary)["median_wave"])
 	var ok: bool = true
-	var rep: Dictionary = {"lo": bal - SET_TRAP_W, "hi": best + 3.0}
+	var nt: bool = true
+	var rep: Dictionary = {"lo": bal - SET_TRAP_W, "hi": best + 3.0, "trap": bal * SET_TRAP_FRAC}
 	for sid in SetDB.IDS:
 		var row: Dictionary = P[sid]
 		var w: float = float(row["median_wave"])
 		rep[sid] = w
 		ok = ok and bool(row["live"]) and w >= bal - SET_TRAP_W and w <= best + 3.0
+		nt = nt and bool(row["live"]) and w >= bal * SET_TRAP_FRAC
 	say("SET 4-piece band: " + JSON.stringify(rep))
-	return {"set4_probe": rep, "set4_fair": ok}
+	return {"set4_probe": rep, "set4_fair": ok, "set4_no_trap": nt}
 static func job_specs(seed0: int, snaps: Dictionary) -> Dictionary:
 	var rows: Dictionary = {}
 	for spec in SPECS:
@@ -1554,7 +1561,7 @@ const FORGE_LOOPS: int = 3
 const FORGE_MAX_SESSIONS: int = 200
 const RD_GATES: Array = ["rd_frontier_band", "rd_early_power", "rd_wall_exists", "rd_no_plateau", "rd_no_runaway",
 	"rd_loops_complete", "rd_loops_faster", "rd_archetypes_viable", "rd_no_dominant_part", "rd_no_dominant_set",
-	"rd_outpost_share", "rd_gems_sane", "rd_ac27_storage_fill", "ac29_spec_identity", "ac29_wave_gap", "ac25_fresh_wall", "fresh_median_first_goal"]
+	"rd_outpost_share", "rd_gems_sane", "rd_ac27_storage_fill", "ac29_spec_identity", "ac29_wave_gap", "ac25_fresh_wall", "fresh_median_first_goal", "set4_no_trap"]
 
 
 ## Progress inside the current loop: (tier, best wave in it) for plateau checks.

@@ -251,10 +251,10 @@ Slots: Frame (F), Barrel (B), Capacitor (C), Engine (E). Set tag in brackets.
 | set | members (choose any 4 for the full set) | 2-piece | 4-piece | special part unlocked (Legendary, has a drawback too) |
 |---|---|---|---|---|
 | Bulwark | f_bulkhead, f_regenmesh, f_mirror, e_bastionheart | +15% Core HP | Core immune to dmg for 2 s after dropping below 30% (once per wave) | **Citadel Heart** (E): +50% HP, +3 armor; -15% rate |
-| Mint | f_ledgerframe, b_bounty, c_interest, e_mintpress | +10% cash/s | Interest is paid every 15 s instead of per wave | **Golden Ratio** (C): cash/s x1.4; specials cost 5% banked cash to cast |
+| Mint | f_ledgerframe, b_bounty, c_interest, e_mintpress | +10% cash/s | **Dividend:** +20% all damage at Eco track 50, scaled by Eco level (was: interest every 15 s; changed in the AC-29 eco pass) | **Golden Ratio** (C): cash/s x1.4; specials cost 5% banked cash to cast |
 | Lancer | b_hollow, b_focuslens, c_scope, e_railcore | +10% Core dmg | Core attack pierces 1 extra enemy | **Singularity Lens** (B): Lance/Core hits shred 5% armor (stacks x5); -1 range |
 | Storm | b_scatter, b_ringcaster, c_battery, c_capacitor_arc | +1 chain everywhere | every 10th Core attack is a free Pulse Ring | **Eye of the Storm** (F): pulse rings x2 dmg; Core HP -15% |
-| Swarm | f_hivecomb, b_droneport, c_pheromone, e_queen | troops +15% HP and dmg | troops gain 1% lifesteal on hit and heal the Core 0.5 HP per kill | **Brood Mother** (E): +1 hut max (4); buildings -10% dmg |
+| Swarm | f_hivecomb, b_droneport, c_pheromone, e_queen | troops +15% HP and dmg | troops gain 1% lifesteal on hit and heal the Core 0.5 HP per kill; lifts the Queen Engine hold-fire; +13% all damage (AC-29 set pass) | **Brood Mother** (E): +1 hut max (4); buildings -10% dmg |
 
 ### 3.4 Crates
 Pity counters are per crate type and are saved.

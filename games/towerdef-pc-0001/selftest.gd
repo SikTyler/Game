@@ -2842,7 +2842,7 @@ func _parts_rule_stages() -> void:
 	var ms: Dictionary = _parts_save(["f_ledgerframe", "b_bounty", "c_interest", "e_mintpress"], "bastion", 40)
 	_equip_all(ms, ["f_ledgerframe", "b_bounty"])
 	var fx2: Dictionary = Parts.run_fx(ms, "bastion")
-	_check("AC-13 2-piece active at 2 distinct members", int(Parts.set_counts(ms, "bastion").get("mint", 0)) == 2 and is_equal_approx(float(fx2.get("cash", 0.0)), 0.10) and not fx2.has("interest_fast") and Parts.any_set2(ms))
+	_check("AC-13 2-piece active at 2 distinct members", int(Parts.set_counts(ms, "bastion").get("mint", 0)) == 2 and is_equal_approx(float(fx2.get("cash", 0.0)), 0.10) and not fx2.has("dividend") and Parts.any_set2(ms))
 	var cev: Array = []
 	for id in ["c_interest", "e_mintpress"]:
 		var u2: String = Parts.uid_of(ms, String(id))
@@ -2851,7 +2851,14 @@ func _parts_rule_stages() -> void:
 				cev.append_array(Parts.equip(ms, "bastion", k, u2))
 				break
 	var fx4: Dictionary = Parts.run_fx(ms, "bastion")
-	_check("AC-13 4-piece active + full set unlocks Golden Ratio once", is_equal_approx(float(fx4.get("interest_fast", 0.0)), 1.0) and _evts(cev, "set_complete").size() == 1 and _evts(cev, "special_part_unlocked").size() == 1 and Parts.owns(ms, "golden_ratio") and (ms["parts"]["sets_completed"] as Array) == ["mint"])
+	_check("AC-13 4-piece active + full set unlocks Golden Ratio once", is_equal_approx(float(fx4.get("dividend", 0.0)), 0.20) and _evts(cev, "set_complete").size() == 1 and _evts(cev, "special_part_unlocked").size() == 1 and Parts.owns(ms, "golden_ratio") and (ms["parts"]["sets_completed"] as Array) == ["mint"])
+	# Mint 4-piece Dividend: all damage scales with the Eco track (x1.20 at Eco 50).
+	var dv := TowerState.new()
+	dv.setup(7, ms.duplicate(true))
+	var dv0: float = float(dv.stats["dmg_all"])
+	dv.tracks["eco"] = 50
+	dv.recompute()
+	_check("AC-13 Mint 4-piece Dividend: +20% all damage at Eco 50", is_equal_approx(float(dv.stats["dmg_all"]) / dv0, 1.20), "%.4f" % (float(dv.stats["dmg_all"]) / dv0))
 	var ms2: Dictionary = BaseMeta.normalize(JSON.parse_string(JSON.stringify(ms)))
 	_check("AC-13 set unlock + special persist through save/load", (ms2["parts"]["specials_unlocked"] as Array).has("golden_ratio") and Parts.owns(ms2, "golden_ratio"))
 	_check("AC-13 completing again does not re-grant", Parts.check_sets(ms2, "bastion").is_empty())
@@ -2954,15 +2961,26 @@ func _parts_engine_stages() -> void:
 	var Hv = _parts_run(["f_hivecomb", "b_droneport"], "bastion", 40)
 	var tm: Dictionary = Hv._troop_mods()
 	_check("RUN Hivecomb +1 troop/hut, Drone Port +1 drone, troop HP -31% (+15% Swarm 2-piece)", int(tm["extra"]) == 1 and int(tm["extra_drone"]) == 1 and is_equal_approx(float(tm["hp_mult"]), float(B40._troop_mods()["hp_mult"]) * (1.0 - 0.31 + 0.15)))
-	# Mint 4-piece: interest every 15 s instead of per wave.
+	# Swarm 4-piece lifts the Queen Engine hold-fire (+13% all damage).
+	var Sw = _parts_run(["f_hivecomb", "b_droneport", "c_pheromone", "e_queen"], "bastion", 40)
+	_check("RUN Swarm 4-piece: Queen hold-fire lifted, +13% all damage", is_zero_approx(Sw.pf("queen_hold")) and is_equal_approx(Sw.pf("dmg"), 0.13) and Sw.pf("troop_ls") > 0.0)
+	# Mint 4-piece Dividend in a run: all damage x(1 + 0.20 * Eco/50).
 	var Mi = _parts_run(["f_ledgerframe", "b_bounty", "c_interest", "e_mintpress"], "bastion", 40)
+	var mi0: float = float(Mi.stats["dmg_all"])
+	Mi.tracks["eco"] = 25
+	Mi.recompute()
+	_check("RUN Mint 4-piece Dividend: +10% all damage at Eco 25", is_equal_approx(float(Mi.stats["dmg_all"]) / mi0, 1.10), "%.4f" % (float(Mi.stats["dmg_all"]) / mi0))
+	# interest_fast engine fx (was the Mint 4-piece until the AC-29 eco pass;
+	# no data source carries it now, the mechanic stays covered): interest
+	# every 15 s instead of per wave.
+	Mi.pfx["interest_fast"] = 1
 	Mi.spawn_hold = true
 	Mi.wave_started = true
 	Mi.cash = 100.0
 	var iev: Array = []
 	for k in 160:
 		Mi._step(0.1, iev)
-	_check("RUN Mint 4-piece pays interest every 15 s", _evts(iev, "interest").size() == 1)
+	_check("RUN interest_fast fx pays interest every 15 s", _evts(iev, "interest").size() == 1)
 	# Lancer 4-piece: Core shots pierce one extra enemy.
 	var Lp = _parts_run(["b_hollow", "b_focuslens", "c_scope", "e_railcore"], "bastion", 40)
 	_check("RUN Lancer 4-piece: pierce 1", int(_weapon(Lp, "core")["pierce"]) == 1)

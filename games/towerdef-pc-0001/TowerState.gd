@@ -587,6 +587,8 @@ func compute_stats() -> Dictionary:
 	var dmg_all: float = dmg_mult * od_dmg * legacy_dmg * dmg_track * (1.0 + 0.12 * float(pack_n("pk_arsenal"))) * (1.0 + 0.40 * float(pack_n("pk_gambit"))) * (1.0 + float(ins.get("in_dmg", 0.0)))
 	# Parts: all-damage (+ Bastion Heart per building, max 12 buildings).
 	dmg_all *= maxf(0.1, 1.0 + pf("dmg") + pf("dmg_per_bld") * float(mini(12, nb)))
+	# Mint 4-piece Dividend: the Eco track pays out as damage (full at Eco 50).
+	dmg_all *= 1.0 + pf("dividend") * float(mini(50, int(tracks["eco"]))) / 50.0
 	var rate_all: float = (1.0 + 0.08 * float(pack_n("pk_overclock"))) * (1.0 + float(ins.get("in_rate", 0.0)))
 	var range_add: float = 0.5 * float(pack_n("pk_optics"))
 	st["dmg_all"] = dmg_all

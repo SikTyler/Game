@@ -160,3 +160,70 @@ No assertion was loosened.
 - **4-piece set probe** (`job_sets`, report only, not in RD_GATES): every set's 4-piece fx
   goes live. Band: bulwark 72, mint 78, lancer 83, storm 76.5. **Swarm is a trap at ~w25**
   (troop parts only).
+
+## AC-29 eco pass + Swarm 4-piece (Mint Dividend, set4_no_trap)
+
+Same-save probes (day-20 save, 6 seeds, medians). "Before" = `78e472b`.
+
+| Metric | Before | After |
+|---|---|---|
+| Median wave balanced / eco / single / damage | 80 / 76.5 / 80.5 / 80 | 80 / **79** / 80.5 / 80 |
+| Wave gap (<= 3) | eco 4.0 **FAIL** | 0.5 / 1.5 / 0 / 0.5 OK |
+| Eco coins per run vs balanced (>= 1.20) | 1.48 | 1.51 |
+| Single boss DPS vs balanced (>= 1.25) | 3.55 | unchanged (passes) |
+| 4-piece band bulwark / mint / lancer / storm / swarm (6 seeds) | 72 / 78 / 83 / 76.5 / **25.5** (4 seeds) | 72 / 79.5 / 84.5 / 76.5 / **72** |
+| Top part pick-rate | f_glass 0.69 | f_glass 0.69 |
+| AC-28 loop speed median 1/2/3 | 0.04 / 0.51 / 0.45 | same |
+| Playtest | FAIL ac29_wave_gap | **PLAYTEST OK** (new gate set4_no_trap included) |
+
+**Was the eco bot incompetent? No.** Diagnosis on the probe (debug print of end-of-run
+tracks/cash): every spec has Eco 50 / Rate 60 / Range 20 maxed; eco actually has *more*
+Damage/Armor levels (75-79 / 78-83) than balanced (67-72 / 69-74) and still dies holding
+8-36M unspent cash. Track costs grow 1.19-1.23x per level, so late cash converts to almost
+nothing. Policy probes (all no effect or worse, reverted): stop buying Eco late, longer
+boss-prep window (5 waves) with x3 eco weight, banking a reserve of interest_cap/rate and
+releasing it before bosses, paying for rerolls out of surplus cash, and playing the eco
+loadout with the balanced or damage in-run policy (76.5-78 median). The in-run policy is
+not the lever; eco's cash has no late sink and its Mint parts tax damage.
+
+**Fix (data + one engine hook):** the Mint 4-piece `interest_fast` (interest every 15 s,
+worthless once cash is saturated) is replaced by **Dividend**: all damage x(1 + 0.20 x
+Eco level / 50). New fx key `dividend` (VAL [1.0, 1.0], PCT, tooltip). Set budget:
+Mint 4-piece 0.182 <= 1.2B 0.204. Sweep: 0.07 -> eco 76.5 (fail), 0.15 -> 79, 0.20 -> 79
+(coins 1.51x), 0.30 -> 79. Only an equipped full Mint set gets it, so the other specs are
+untouched (their probe rows are bit-identical). The `interest_fast` engine path stays and
+keeps a selftest (fx injected directly).
+
+**Swarm 4-piece trap (task 3).** Cause: Queen Engine's drawback `queen_hold` (Core holds
+fire while 3+ troops live) is permanent once the full set is on, and the Core is the main
+weapon. Swarm 4-piece is now `{troop_ls: 1, queen_hold: -1, dmg: 0.13}` (value 0.280 <=
+1.2B 0.288): the full set lifts the hold-fire. Lifting alone gave median 70; +13% all
+damage gives 72. CoreBay set tooltip now lists every 4-piece fx (it showed only the first
+key). Selftest: new run check for the lifted hold + 13% dmg.
+
+**set4 gating.** SET_PROBE_N 4 -> 6. The full band (`set4_fair`: >= balanced - 8 and <=
+best spec + 3) stays REPORT ONLY: Bulwark and Swarm sit exactly on 72 and Lancer at 84.5
+is 1 over 83.5, so it would flip on seed noise. New RD gate **`set4_no_trap`**: every full
+set is live and its median >= 0.75 x balanced probe (60). It catches the real failure
+class (w25 vs w80) with a 12-wave margin. Lancer (full set > single spec's own loadout)
+is an open item, not a trap.
+
+**no_death_spiral (task 2) — not loosened further, documented.** Legacy campaign:
+balanced [20,20,20,20,30,20,20,20]; fresh x16 first runs: twelve at w20, one w30, four
+at w10 (R early 2.3-9.0). Results quantise to boss walls (every 10th wave at T1), so a
+single draft that misses a weapon drops a whole wall step; the current rule (later half's
+median vs first half > 2 lower, or any run > 2 below run 1) still fires on any real
+downward trend. Run 1 is w20 and no run falls below it. The real fix is the open
+fresh-save meta stall (coins bank unspent: 668 -> 3803 across the 8 runs, Core Cores
+gate the Core levels); that is a design call and is not done here.
+
+**Fragile gates (task 4).** This run's margins: rd_wall_exists wall median 0.55 / 0.53 /
+0.54 / 0.48 vs < 0.6; rd_loops_faster 0.04 / 0.51 / 0.45 vs 0.70; seeds_ok both extra
+seeds pass (bal 63 / 60 vs weapon 40, t2 day 3, day1 30 — day1 is 2 off its 32 ceiling);
+top part f_glass 0.69 vs 0.75. Only the set probe got more seeds. The forge campaigns
+behind wall/loops/part rates are one seed per spec and are the bulk of the 8-minute
+runtime, so doubling them doubles the gate. **Not done; open.**
+**Balanced AC-28 loop 3 = 4.0 is a ratio artifact.** Loop 2 regained loop 1's best in 1
+session (reach 1), so loop 3's 4 sessions gives 4/1. The gate is the median (0.45). A
+per-spec sanity floor on the denominator (e.g. max(reach, 3)) would remove the artifact.
+That is proposed only; the gate is unchanged.

@@ -80,7 +80,7 @@ const VAL: Dictionary = {
 	"troop_respawn": [0.8, -1.5], "queen_hold": [0.3, -0.3], "hut_max": [1.0, 0.6], "luck": [0.6, 0.2],
 	"perk_choices": [0.3, 0.33], "dmg_per_bld": [1.0, 8.0], "ring_delay": [0.3, -0.25], "reflect": [0.6, 3.0],
 	"special_tax": [0.3, -8.0], "shred": [1.0, 10.0], "pulse_dmg": [0.7, 1.0],
-	"last_stand": [0.5, 0.3], "interest_fast": [0.5, 0.3], "pierce": [0.7, 0.4], "storm_pulse": [0.5, 0.3], "troop_ls": [0.3, 0.3],
+	"last_stand": [0.5, 0.3], "interest_fast": [0.5, 0.3], "dividend": [1.0, 1.0], "pierce": [0.7, 0.4], "storm_pulse": [0.5, 0.3], "troop_ls": [0.3, 0.3],
 }
 ## Tooltip text per fx key ("{v}" gets the formatted value).
 const FX_TEXT: Dictionary = {
@@ -97,11 +97,11 @@ const FX_TEXT: Dictionary = {
 	"luck": "{v} draft Luck", "perk_choices": "{v} perk choice", "dmg_per_bld": "{v} damage per building (max 12)",
 	"ring_delay": "grid rings open one step later", "reflect": "reflects {v} of contact damage", "special_tax": "specials cost {v} of banked cash",
 	"shred": "Core hits shred {v} armor (stacks x5)", "pulse_dmg": "{v} pulse ring damage",
-	"last_stand": "Core immune 2 s after dropping below 30% HP (once per wave)", "interest_fast": "interest is paid every 15 s",
+	"last_stand": "Core immune 2 s after dropping below 30% HP (once per wave)", "interest_fast": "interest is paid every 15 s", "dividend": "{v} all damage at Eco track 50 (scales with Eco level)",
 	"pierce": "Core attack pierces 1 extra enemy", "storm_pulse": "every 10th Core attack fires a free Pulse Ring",
 	"troop_ls": "troops lifesteal 1% and heal the Core 0.5 HP per kill",
 }
-const PCT_KEYS: Array = ["dmg", "core_dmg", "bld_dmg", "rate", "bld_rate", "core_hp", "regen", "cash", "kill_cash", "crit", "interest", "special_dmg", "special_cd", "chain_dmg", "core_single", "beam_ramp", "boss", "normal_dmg", "troop_hp", "troop_dmg", "troop_respawn", "dmg_per_bld", "reflect", "special_tax", "shred", "pulse_dmg"]
+const PCT_KEYS: Array = ["dmg", "core_dmg", "bld_dmg", "rate", "bld_rate", "core_hp", "regen", "cash", "kill_cash", "crit", "interest", "special_dmg", "special_cd", "chain_dmg", "core_single", "beam_ramp", "boss", "normal_dmg", "troop_hp", "troop_dmg", "troop_respawn", "dmg_per_bld", "reflect", "special_tax", "shred", "pulse_dmg", "dividend"]
 const UNSIGNED_PCT: Array = ["reflect", "special_tax", "shred"]
 
 

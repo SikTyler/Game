@@ -397,7 +397,11 @@ static func _draw_view(m, s: Dictionary, core: String) -> void:
 		var two: Array = []
 		for key in (sd["two"] as Dictionary).keys():
 			two.append(PartDB.fmt_fx(String(key), float(sd["two"][key])))
-		m.stat_tips.append([Rect2(bx, y - 6, bw - 4, 46), "%s set (%s)\n2 pieces: %s\n4 pieces: %s\nComplete it once to unlock the special part %s." % [String(sd["name"]), String(sd["spec"]), ", ".join(two), String((sd["four"] as Dictionary).keys()[0]).replace("_", " "), String(PartDB.get_def(String(sd["special"])).get("name", ""))]])
+		var four: Array = []
+		for key in (sd["four"] as Dictionary).keys():
+			var fv: float = float(sd["four"][key])
+			four.append("the Core fires even while 3+ troops live" if (String(key) == "queen_hold" and fv < 0.0) else PartDB.fmt_fx(String(key), fv))
+		m.stat_tips.append([Rect2(bx, y - 6, bw - 4, 46), "%s set (%s)\n2 pieces: %s\n4 pieces: %s\nComplete it once to unlock the special part %s." % [String(sd["name"]), String(sd["spec"]), ", ".join(two), ", ".join(four), String(PartDB.get_def(String(sd["special"])).get("name", ""))]])
 	y += 60.0
 	Kit.head(m, "INSTALLED TOTALS (this loadout)", Vector2(v.position.x + 16, y), v.size.x - 32)
 	var fx: Dictionary = Parts.run_fx(s, core)
