@@ -467,7 +467,7 @@ static func entity_tip(s: Dictionary, u: String) -> String:
 	if id == "relay":
 		var f: Dictionary = Factory._f(s)
 		var r: Dictionary = Factory.rate_now(s)
-		lines.append("Converts goods into currencies (measured steady state):")
+		lines.append("Turns goods into currencies (steady state):")
 		lines.append("+%s coins/min  ·  +%s scrap/min  ·  +%s keys/h  ·  +%s data/min" % [Kit.fmt(float(r["coins"]) * 60.0), _f1(float(r["scrap"]) * 60.0), _f1(float(r["keys"]) * 3600.0), _f1(float(r["data"]) * 60.0)])
 		var ir: Dictionary = f.get("items_rate", {})
 		for it in DB.ITEM_IDS:
@@ -779,9 +779,10 @@ static func _draw_ghost(m, s: Dictionary, cp: float) -> void:
 			var dst: Rect2 = cell_rect(m, c.x + int(d.x), c.y + int(d.y))
 			m.draw_rect(src, Color(0.35, 0.82, 0.94, 0.6), false, 2.0)
 			m.draw_rect(dst, Color(1.0, 0.83, 0.28, 0.6), false, 2.0)
-	if cells.size() == 1 and String(m.op_msg) == "":
+	if cells.size() == 1:
 		var err2: String = Factory.place_error(s, id, (cells[0][0] as Vector2i).x, (cells[0][0] as Vector2i).y, int(m.op_rot))
-		if err2 != "":
+		m.set_meta("op_ghost", {"id": id, "cell": cells[0][0], "err": err2})
+		if err2 != "" and String(m.op_msg) == "":
 			Kit.t(m, String(ERR.get(err2, err2)), m.mouse_pos + Vector2(18, -14), 15, Color("ff8a8a"), HORIZONTAL_ALIGNMENT_LEFT, 360.0)
 
 
@@ -836,7 +837,7 @@ static func _draw_palette(m, s: Dictionary) -> void:
 		Kit.panel(m, r, Kit.GOLD if armed else Kit.EDGE, Color("1a1f26") if unlocked else Color("14171b"), 3 if armed else 2)
 		var isz: float = 50.0
 		Kit.icon(m, _art_id(id), Rect2(r.get_center().x - isz * 0.5, r.position.y + 6, isz, isz), Color.WHITE if unlocked else Color(1, 1, 1, 0.35))
-		Kit.t(m, String(d["name"]), Vector2(r.get_center().x, r.position.y + 72), 13, Kit.TEXT if unlocked else Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 4)
+		Kit.t(m, String(d["name"]), Vector2(r.get_center().x, r.position.y + 72), 12 if String(d["name"]).length() > 13 else 13, Kit.TEXT if unlocked else Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 4)
 		Kit.t(m, Kit.fmt(float(d["coins"])) if unlocked else "Research", Vector2(r.get_center().x, r.position.y + 89), 13, (Kit.GOLD if int(s["coins"]) >= int(d["coins"]) else Color("ff8a8a")) if unlocked else Kit.LAB, HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 4)
 		if k < 9:
 			Kit.t(m, str(k + 1), r.position + Vector2(6, 16), 12, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, 20)
