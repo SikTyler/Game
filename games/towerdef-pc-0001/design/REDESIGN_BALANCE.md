@@ -81,7 +81,7 @@ starting point of this pass). "After" = this commit.
 
 ## Open issues (found, not fixed here)
 
-- **Fresh-save meta stall.** In the legacy 8-run campaign the Bastion stops at L7. Core
+- **Fresh-save meta stall.** (Meta-economy pass: addressed — Core levels below L15 now cost coins only, `pc_core_cc_from`; floor(L/5) Core Cores from L15.) In the legacy 8-run campaign the Bastion stops at L7. Core
   levels 5+ need Core Cores, and T1 boss drops are 25%, so ~4.5k coins sit unspent. Raising
   `pc_boss_corecore_p` to 0.75 or making Core levels cheaper did not flatten the seed
   variance on its own. This needs a design call (for example a T1 Core Core from the
