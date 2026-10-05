@@ -46,6 +46,12 @@ var quad: PackedInt32Array = PackedInt32Array()
 var shred_n: PackedInt32Array = PackedInt32Array()
 var flags: PackedInt32Array = PackedInt32Array()
 var next_free: PackedInt32Array = PackedInt32Array()
+var cur_s: PackedFloat64Array = PackedFloat64Array()   # Phase 3: current seek speed (accelerates to spd)
+# Phase 3 separation grid (rebuilt inside move(), old positions = Jacobi read)
+const SEP_CS: float = 32.0
+const SEP_GW: int = 48
+var _head: PackedInt32Array = PackedInt32Array()
+var _link: PackedInt32Array = PackedInt32Array()
 
 var free_head: int = -1
 var order: PackedInt32Array = PackedInt32Array()   # live slots, spawn order
@@ -72,7 +78,7 @@ func clear() -> void:
 	size.clear(); atk_cd.clear(); slow_t.clear(); slow_m.clear(); fire_cd.clear(); shock_t.clear()
 	hit_t.clear(); taunt_t.clear(); share.clear(); kind.clear()
 	eid.clear(); shield.clear(); max_shield.clear(); shock_src.clear(); quad.clear(); shred_n.clear()
-	flags.clear(); next_free.clear()
+	flags.clear(); next_free.clear(); cur_s.clear()
 	free_head = -1
 	order.clear()
 	eid_slot.clear()
@@ -88,7 +94,7 @@ func _grow() -> void:
 	size.resize(c); atk_cd.resize(c); slow_t.resize(c); slow_m.resize(c); fire_cd.resize(c); shock_t.resize(c)
 	hit_t.resize(c); taunt_t.resize(c); share.resize(c); kind.resize(c)
 	eid.resize(c); shield.resize(c); max_shield.resize(c); shock_src.resize(c); quad.resize(c); shred_n.resize(c)
-	flags.resize(c); next_free.resize(c)
+	flags.resize(c); next_free.resize(c); cur_s.resize(c)
 	# chain the new slots onto the free list, lowest index first
 	for s in range(c - 1, old - 1, -1):
 		next_free[s] = free_head
@@ -107,7 +113,7 @@ func alloc(id: int, k: String, p: Vector2) -> int:
 	size[s] = 16.0; atk_cd[s] = 0.0; slow_t[s] = 0.0; slow_m[s] = 1.0; fire_cd[s] = 0.0; shock_t[s] = 0.0
 	hit_t[s] = 0.0; taunt_t[s] = 0.0; share[s] = 1.0; kind[s] = k
 	eid[s] = id; shield[s] = 0; max_shield[s] = 0; shock_src[s] = -1; quad[s] = -1; shred_n[s] = 0
-	flags[s] = 0
+	flags[s] = 0; cur_s[s] = 0.0
 	eid_slot[id] = s
 	order.append(s)
 	dirty = true
@@ -150,18 +156,68 @@ func has_exit(s: int) -> bool:
 	return (flags[s] & F_EXIT) != 0
 
 
-## The per-substep hot pass (timers, courier run, taunt pin, seek the Core,
-## building block + attack, ranged / melee attack timers), in spawn order.
-## `blk` (empty = no buildings) flags grid cells holding a standing building:
-## a body whose leading edge touches one stops and attacks it (owner feedback
-## #1: buildings in the way are destroyed first). Effects are returned as an
-## ordered action log.
-func move(dt: float, frozen: bool, center: Vector2, stop_r: float, r_stop: float, r_fire: float, blk: PackedByteArray, side: int, cell: float) -> PackedInt32Array:
+## Knockback impulse (Phase 4): v / mass, mass = (size/16)^2. Bosses and
+## couriers are immune (today's pulse rule).
+func knock(s: int, v: Vector2) -> void:
+	var k: String = kind[s]
+	if k == "boss" or k == "courier":
+		return
+	var m: float = size[s] / 16.0
+	vel[s] = vel[s] + v / maxf(0.25, m * m)
+	dirty = true
+
+
+## Radial impulse with linear falloff (mortar / pulse / specials).
+func radial_knock(c: Vector2, r: float, k: float) -> void:
+	if r <= 0.0 or k == 0.0:
+		return
+	for s in order:
+		if hp[s] <= 0.0:
+			continue
+		var d: Vector2 = pos[s] - c
+		var l: float = d.length()
+		if l > 0.0 and l <= r:
+			knock(s, d / l * k * (1.0 - 0.5 * l / r))
+
+
+## The per-substep hot pass, ONE loop in spawn order (HORDE Phase 3+4):
+## timers, courier run, taunt pin, seek the Core with acceleration up to the
+## max speed, soft separation from grid neighbours (Jacobi: reads the
+## positions as they were at substep start, weighted by mass so heavy bodies
+## shove light ones), knockback velocity with exponential friction, the Core
+## stop ring as a hard wall, and the contact rule: only a body actually
+## touching a building (leading edge in a standing building's cell) or the
+## Core ring (|p-C| <= stop + size/2) attacks. Effects are an ordered action
+## log replayed by TowerState. `prm` = [accel_k, sep_k, sep_cap, friction].
+func move(dt: float, frozen: bool, center: Vector2, stop_r: float, r_stop: float, r_fire: float, blk: PackedByteArray, side: int, cell: float, prm: PackedFloat64Array = PackedFloat64Array([6.0, 0.5, 0.35, 6.0])) -> PackedInt32Array:
 	var acts: PackedInt32Array = PackedInt32Array()
 	var has_b: bool = not blk.is_empty()
 	var half: int = side / 2
+	var accel_k: float = prm[0]
+	var sep_k: float = prm[1]
+	var sep_cap: float = prm[2]
+	var fr: float = exp(-prm[3] * dt)
+	# --- separation grid over the old positions (linked cell lists)
+	var old: PackedVector2Array = pos.duplicate()
+	var gw: int = SEP_GW
+	var ox: float = center.x - SEP_CS * gw * 0.5
+	var oy: float = center.y - SEP_CS * gw * 0.5
+	var do_sep: bool = sep_k > 0.0 and order.size() > 1 and not frozen
+	var reach: int = int(ceil(max_size / SEP_CS))
+	if do_sep:
+		if _head.size() != gw * gw:
+			_head.resize(gw * gw)
+		_head.fill(-1)
+		if _link.size() < capacity():
+			_link.resize(capacity())
+		for ri in range(order.size() - 1, -1, -1):
+			var q: int = order[ri]
+			var qp: Vector2 = old[q]
+			var ci: int = clampi(int((qp.y - oy) / SEP_CS), 0, gw - 1) * gw + clampi(int((qp.x - ox) / SEP_CS), 0, gw - 1)
+			_link[q] = _head[ci]
+			_head[ci] = q
 	for e in order:
-		var p: Vector2 = pos[e]
+		var p: Vector2 = old[e]
 		var st: float = slow_t[e]
 		var mult: float = slow_m[e] if st > 0.0 else 1.0
 		var st2: float = maxf(0.0, st - dt)
@@ -184,16 +240,17 @@ func move(dt: float, frozen: bool, center: Vector2, stop_r: float, r_stop: float
 				pos[e] = p + dd.normalized() * stp
 			continue
 		var taunt: float = taunt_t[e]
-		if taunt > 0.0:
-			taunt_t[e] = maxf(0.0, taunt - dt)
-			continue   # pinned by a Rifleman (it is hitting the troop instead)
+		var pinned: bool = taunt > 0.0
+		if pinned:
+			taunt_t[e] = maxf(0.0, taunt - dt)   # pinned by a Rifleman (hitting the troop)
 		var ranged: bool = k == "ranged"
 		var stop: float = r_stop if ranged else stop_r
 		var to_c: Vector2 = center - p
 		var dist: float = to_c.length()
-		if dist > stop + 0.001:
+		var mv: Vector2 = Vector2.ZERO
+		var bc: int = -1
+		if not pinned and dist > stop + 0.001:
 			var dir: Vector2 = to_c / dist
-			var bc: int = -1
 			if has_b:
 				var ahead: Vector2 = p + dir * (size[e] * 0.5 + 2.0) - center
 				var col: int = int(floor(ahead.x / cell + 0.5)) + half
@@ -201,7 +258,7 @@ func move(dt: float, frozen: bool, center: Vector2, stop_r: float, r_stop: float
 				if col >= 0 and col < side and row >= 0 and row < side and blk[row * side + col] == 1:
 					bc = row * side + col
 			if bc >= 0:
-				# blocked by a building: attack it (ranged at their fire cadence)
+				cur_s[e] = 0.0
 				atk_cd[e] = atk_cd[e] - dt
 				if atk_cd[e] <= 0.0:
 					atk_cd[e] = r_fire if ranged else 1.0
@@ -209,9 +266,65 @@ func move(dt: float, frozen: bool, center: Vector2, stop_r: float, r_stop: float
 					acts.append(e)
 					acts.append(bc)
 			else:
-				var step: float = minf(dist - stop, spd[e] * mult * dt)
-				pos[e] = p + dir * step
-		elif ranged:
+				var vmax: float = spd[e] * mult
+				var cs: float = minf(vmax, cur_s[e] + vmax * accel_k * dt)
+				cur_s[e] = cs
+				mv = dir * minf(dist - stop, cs * dt)
+		else:
+			cur_s[e] = 0.0
+		# soft separation (mass-weighted, capped per substep)
+		if do_sep:
+			var push: Vector2 = Vector2.ZERO
+			var si: float = size[e]
+			var mi: float = si * si
+			var cx: int = clampi(int((p.x - ox) / SEP_CS), 0, gw - 1)
+			var cy: int = clampi(int((p.y - oy) / SEP_CS), 0, gw - 1)
+			for yy in range(maxi(0, cy - reach), mini(gw - 1, cy + reach) + 1):
+				for xx in range(maxi(0, cx - reach), mini(gw - 1, cx + reach) + 1):
+					var j: int = _head[yy * gw + xx]
+					while j >= 0:
+						if j != e and kind[j] != "courier":
+							var dv: Vector2 = p - old[j]
+							var sj: float = size[j]
+							var rr: float = (si + sj) * 0.5
+							var d2: float = dv.length_squared()
+							if d2 < rr * rr:
+								var l: float = sqrt(d2)
+								var w: float = sj * sj / (mi + sj * sj)
+								if l > 0.0001:
+									push += dv / l * ((rr - l) * w)
+								else:
+									# exact overlap: split by slot parity (deterministic)
+									push += Vector2(1.0 if e > j else -1.0, 0.0) * (rr * w)
+						j = _link[j]
+			if push != Vector2.ZERO:
+				push *= sep_k
+				var cap: float = si * sep_cap
+				var pl: float = push.length()
+				if pl > cap:
+					push *= cap / pl
+				mv += push
+		# knockback velocity + friction
+		var kv: Vector2 = vel[e]
+		if kv != Vector2.ZERO:
+			mv += kv * dt
+			kv *= fr
+			if kv.length_squared() < 0.01:
+				kv = Vector2.ZERO
+			vel[e] = kv
+		var np: Vector2 = p + mv
+		var rel: Vector2 = np - center
+		var nd: float = rel.length()
+		if nd < stop and nd > 0.0:
+			np = center + rel / nd * stop   # the stop ring is a wall
+			nd = stop
+		pos[e] = np
+		if pinned or bc >= 0:
+			continue
+		# contact rule: only the touching rank attacks
+		if nd > stop + size[e] * 0.5 + 0.5:
+			continue
+		if ranged:
 			fire_cd[e] = fire_cd[e] - dt
 			if fire_cd[e] <= 0.0:
 				fire_cd[e] = fire_cd[e] + r_fire

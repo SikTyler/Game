@@ -144,10 +144,10 @@ func _initialize() -> void:
 	S = _fresh()
 	S.spawn_hold = true
 	S.xp = S.xp_need()
-	ev = S.tick(0.01)
+	ev = S.tick(0.05)
 	_check("XP level-up banks a reroll, opens no draft", S.level == 2 and S.draft.is_empty() and S.rerolls_left == 1 and _evts(ev, "levelup").size() == 1)
 	S.wave_t = S.wave_time - 0.001
-	ev = S.tick(0.01)
+	ev = S.tick(0.05)
 	_check("wave 1 cleared opens a 3-card draft", S.wave == 2 and S.draft.size() == 3 and _evts(ev, "draft_offer").size() == 1)
 	var eco_n: int = 0
 	for c in S.draft:
@@ -226,7 +226,7 @@ func _initialize() -> void:
 	S.hp = -1.0
 	S.spawn_hold = true
 	S.stats["regen"] = 0.0
-	ev = S.tick(0.01)
+	ev = S.tick(0.05)
 	_check("death event + over", S.over and String(ev.back()["t"]) == "dead")
 	_check("coins banked to save", int(save["coins"]) == 42 and int(save["runs"]) == 1 and int(save["best_wave"]) == 1)
 
@@ -606,17 +606,71 @@ func _last(S) -> Dictionary:
 	return l.back() if not l.is_empty() else {}
 
 
+## HORDE Phases 3+4: fixed substeps, separation, contact rule, knockback.
+func _horde_p34() -> void:
+	var S = _fresh()
+	S.spawn_hold = true
+	var n0: float = S.time_alive
+	S.tick(0.02)
+	_check("P3 fixed substep: a 0.02 s frame runs no step (accumulates)", S.time_alive == n0)
+	S.tick(0.03)
+	_check("P3 fixed substep: the carried remainder runs exactly one SUBSTEP", is_equal_approx(S.time_alive - n0, TowerState.SUBSTEP))
+	# separation: two overlapping drones far from the Core are pushed apart
+	S = _fresh()
+	S.spawn_hold = true
+	var a: Dictionary = _enemy("drone", TowerState.CENTER + Vector2(-2, -300), 50.0)
+	var b: Dictionary = _enemy("drone", TowerState.CENTER + Vector2(2, -300), 50.0)
+	a["spd"] = 0.0
+	b["spd"] = 0.0
+	S.set_enemies([a, b])
+	var d0: float = S.en.pos[0].distance_to(S.en.pos[1])
+	S._move_enemies(0.05, [])
+	_check("P3 separation pushes overlapping bodies apart (deterministic)", S.en.pos[0].distance_to(S.en.pos[1]) > d0)
+	# contact rule: a body behind the front rank never hits the Core
+	S = _fresh()
+	S.spawn_hold = true
+	var f: Dictionary = _enemy("drone", TowerState.CENTER + Vector2(0, TowerState.STOP_R), 50.0)
+	var r: Dictionary = _enemy("drone", TowerState.CENTER + Vector2(0, TowerState.STOP_R + 40.0), 50.0)
+	f["spd"] = 0.0
+	r["spd"] = 0.0
+	S.set_enemies([f, r])
+	var cev: Array = []
+	S._move_enemies(0.05, cev)
+	var hits: Array = _evts(cev, "core_hit")
+	_check("P3 contact rule: only the touching front rank attacks the Core", hits.size() == 1)
+	# knockback: impulse, friction, mass resists, bosses immune
+	S = _fresh()
+	S.spawn_hold = true
+	var lt: Dictionary = _enemy("drone", TowerState.CENTER + Vector2(0, -300), 50.0)
+	var hv: Dictionary = _enemy("hauler", TowerState.CENTER + Vector2(300, 0), 50.0)
+	var bs: Dictionary = _enemy("boss", TowerState.CENTER + Vector2(-300, 0), 50.0)
+	lt["size"] = 16.0
+	hv["size"] = 32.0
+	S.set_enemies([lt, hv, bs])
+	S.en.knock(0, Vector2(0, -100))
+	S.en.knock(1, Vector2(100, 0))
+	S.en.knock(2, Vector2(-100, 0))
+	_check("P4 knock: v/mass (2x size = 1/4 speed), boss immune", is_equal_approx(S.en.vel[0].length(), 100.0) and is_equal_approx(S.en.vel[1].length(), 25.0) and S.en.vel[2] == Vector2.ZERO)
+	S.en.spd[0] = 0.0
+	var y0: float = S.en.pos[0].y
+	S._move_enemies(0.05, [])
+	_check("P4 knock moves the body and friction decays it", S.en.pos[0].y < y0 and S.en.vel[0].length() < 100.0)
+
+
 ## HORDE Phase 1 gates: the 120 s seeded golden (recorded from the Dict
 ## implementation before the SoA port) and the store/hash invariants.
 ## FEEDBACK-1 (deliberate): no lanes, building blocking, live drafts, new
 ## tracks and difficulty change the sim, so the golden was re-recorded from
 ## this build (bit-identity to the Dict impl only held while rules matched).
-const HORDE_FP_GOLDEN: String = "782857cc84a30b94b4c5540fb64ff08a998c6228768f6e611d92500c01f666af"
+## HORDE P3+P4 (deliberate): fixed substeps + separation + contact rule +
+## knockback change the motion, so the golden was re-recorded again.
+const HORDE_FP_GOLDEN: String = "9376f2623b5decc493ff065eddff9f3daab94f977e75df9a8d93e0428a6a1fbd"
 func _horde_stages() -> void:
 	var FP = load("res://horde_fp.gd")
 	var got: String = FP.run_all()
 	_check("HORDE 120 s seeded fingerprint matches the recorded golden (%s)" % got.left(8), got == HORDE_FP_GOLDEN)
 	_check("HORDE fingerprint is deterministic (two runs)", FP.run_all() == got)
+	_horde_p34()
 	var S = _fresh()
 	S.spawn_hold = true
 	var a: Dictionary = _enemy("drone", TowerState.CENTER + Vector2(0, -300), 5.0)
@@ -715,7 +769,7 @@ func _engine_b_stages() -> void:
 	_check("B1 enemy hp x tier hp_mult", is_equal_approx(float(S.enemy_list()[0]["hp"]), 6.0 * 1.5 * TowerState.difficulty_hp()))   # FB1: x difficulty
 	S.set_enemies([])
 	S.wave_t = S.wave_time - 0.001
-	S.tick(0.01)
+	S.tick(0.05)
 	_check("B1 wave coins x coin_mult", is_equal_approx(S.coins_run, 2.0 * 1.6))
 	S.draft = [{"kind": "new", "id": "gun"}]
 	var rr: Array = S.reroll_draft()
@@ -781,7 +835,7 @@ func _engine_b_stages() -> void:
 	var c_before: int = int(S.coins_run)
 	S.hp = -1.0
 	S.stats["regen"] = 0.0
-	var dev: Array = S.tick(0.01)
+	var dev: Array = S.tick(0.05)
 	var go: Array = _evts(dev, "game_over")
 	_check("AC-22 game_over itemises cash-out (12% of index-deflated cash)", go.size() == 1 and int(go[0]["breakdown"]["cashout"]) == 120 and int(go[0]["coins"]) == c_before + 120 and not (go[0]["breakdown"] as Dictionary).has("gems"))
 	_check("death banks coins (no gems)", int(sv3["coins"]) == c_before + 120 and not sv3.has("gems"))
@@ -904,7 +958,7 @@ func _engine_b_stages() -> void:
 	S.recompute()
 	S.cash = 100.0
 	S.wave_t = S.wave_time - 0.001
-	var vev: Array = S.tick(0.01)
+	var vev: Array = S.tick(0.05)
 	_check("interest: Core 2% + Vault 2% of banked cash", _evts(vev, "interest").size() == 1 and absf(float(_evts(vev, "interest")[0]["amt"]) - 4.0) < 0.05)
 	S.cash = 1.0e6
 	vev = []
@@ -990,7 +1044,7 @@ func _engine_b_stages() -> void:
 	S.spawn_hold = true
 	S.wave = 4
 	S.wave_t = S.wave_time - 0.001
-	var pev: Array = S.tick(0.01)
+	var pev: Array = S.tick(0.05)
 	var had_draft: bool = S.draft.size() == 3
 	S.draft = [Draft.card_for("pk_arsenal", S._draft_ctx(""))]
 	pev.append_array(S.choose_card(0))
@@ -999,7 +1053,7 @@ func _engine_b_stages() -> void:
 	S.spawn_hold = true
 	S.wave = 4
 	S.wave_t = S.wave_time - 0.001
-	pev = S.tick(0.01)
+	pev = S.tick(0.05)
 	_check("AC-23 perk queues behind the draft", S.draft.size() == 3 and S.perk_offer.is_empty() and S.perk_pending == 1)
 	S.draft = [Draft.card_for("gun", S._draft_ctx(""))]
 	S.choose_card(0)
@@ -1052,10 +1106,10 @@ func _engine_b_stages() -> void:
 	S.setup(3, sv8)
 	S.spawn_hold = true
 	S.hp = -1.0
-	var wev: Array = S.tick(0.01)
+	var wev: Array = S.tick(0.05)
 	_check("AC-33 Second Wind revives at card %", _evts(wev, "revive").size() == 1 and not S.over and S.hp > 0.2 * float(S.stats["max_hp"]) and S.hp <= 0.255 * float(S.stats["max_hp"]))
 	S.hp = -1.0
-	wev = S.tick(0.01)
+	wev = S.tick(0.05)
 	_check("AC-33 Second Wind only once", S.over and _evts(wev, "revive").is_empty())
 	S = TowerState.new()
 	S.setup(3, sv8)
@@ -1064,7 +1118,7 @@ func _engine_b_stages() -> void:
 	S.wave = 3
 	S.wave_t = S.wave_time - 0.001
 	var kv: int = S.kills
-	wev = S.tick(0.01)
+	wev = S.tick(0.05)
 	var sk: Array = _evts(wev, "wave_skip")
 	_check("AC-33 Wave Skip jumps 2 waves with 50% coins", S.wave == 5 and sk.size() == 1 and int(sk[0]["skipped"]) == 4 and is_equal_approx(S.coins_run, 4.0 * 0.5 + 5.0) and S.kills == kv)
 	_check("skip landing on a perk wave still queues a perk", S.perk_offer.size() == 3 or S.perk_pending > 0)
@@ -1554,7 +1608,7 @@ func _pc_building_stages() -> void:
 	var mi: int = _rc(3, 1)
 	S.bld_hp[mi] = 1.0
 	S.wave_t = S.wave_time - 0.001
-	bev = S.tick(0.01)
+	bev = S.tick(0.05)
 	_check("FB1 wave start repairs 50% of building HP (x1.06 growth)", _evts(bev, "bld_repair").size() == 1 and is_equal_approx(S.bld_max(mi), 40.0 * 1.06) and absf(float(S.bld_hp[mi]) - (1.0 + (40.0 * 1.06 - 40.0) + 0.5 * 40.0 * 1.06)) < 0.01)
 	# Outer rings reach further (+8% per ring past 1).
 	S = _open_run()
@@ -1672,7 +1726,7 @@ func _pc_mode_stages() -> void:
 	S.spawn_hold = true
 	S.wave = 4
 	S.wave_t = S.wave_time - 0.001
-	var pev: Array = S.tick(0.01)
+	var pev: Array = S.tick(0.05)
 	_check("PC-E6 Purist suppresses perk_offer", S.wave == 5 and _evts(pev, "perk_offer").is_empty() and S.perk_offer.is_empty() and S.perk_pending == 0)
 	S = _mod_run(["elitist"])
 	var el: bool = false
@@ -1703,7 +1757,7 @@ func _pc_mode_stages() -> void:
 	E.spawn_hold = true
 	E.wave = 24
 	E.wave_t = E.wave_time - 0.001
-	var mev: Array = E.tick(0.01)
+	var mev: Array = E.tick(0.05)
 	var mo: Array = _evts(mev, "mutation_offer")
 	_check("PC-E7 mutation offer at wave 25 (3 distinct)", E.wave == 25 and mo.size() == 1 and E.mutation_offer.size() == 3 and E.mutation_offer[0] != E.mutation_offer[1] and E.mutation_offer[1] != E.mutation_offer[2] and is_equal_approx(E.time_scale(), 1.0))   # FB1: sim stays live
 	E.mutation_offer = ["m_vigor", "m_rush", "m_horde"]
@@ -1716,18 +1770,18 @@ func _pc_mode_stages() -> void:
 	N0.wave = 49
 	N0.wave_t = N0.wave_time - 0.001
 	N0.spawn_hold = true
-	_check("PC-E7 normal mode never offers mutations", _evts(N0.tick(0.01), "mutation_offer").is_empty())
+	_check("PC-E7 normal mode never offers mutations", _evts(N0.tick(0.05), "mutation_offer").is_empty())
 	E.wave = 120
 	_check("PC-E7 soft HP exponent past wave 100", is_equal_approx(E.scale(), pow(E.hp_growth, 99.0) * pow(1.12, 20.0)))
 	E.wave = 130
 	E.wave_t = E.wave_time - 0.001
 	E.mutation_offer.clear()
-	E.tick(0.01)
+	E.tick(0.05)
 	_check("PC-E7 no wave cap", E.wave == 131 and not E.over)
 	var bw_before: Dictionary = (es["best_wave_by_tier"] as Dictionary).duplicate()
 	E.hp = -1.0
 	E.stats["regen"] = 0.0
-	var dev: Array = E.tick(0.01)
+	var dev: Array = E.tick(0.05)
 	var go: Array = _evts(dev, "game_over")
 	_check("PC-E7 endless banks its own best, not the tier ladder", E.over and go.size() == 1 and String(go[0]["mode"]) == "endless" and int(es["endless"]["best"]) == 131 and JSON.stringify(es["best_wave_by_tier"]) == JSON.stringify(bw_before))
 
@@ -2329,7 +2383,10 @@ func _core_attack_stages() -> void:
 	_sync(S, inside + [outer])
 	var all_hit: bool = true
 	for en in inside:
-		all_hit = all_hit and is_equal_approx(999.0 - float(en["hp"]), 6.0) and (en["pos"] as Vector2).distance_to(TowerState.CENTER) > 205.0
+		# HORDE Phase 4 (deliberate): the pulse knock is an outward impulse
+		# (velocity), not a 12 px teleport; displacement happens in the move pass.
+		var ks: int = S.en.slot_of(int(en["eid"]))
+		all_hit = all_hit and is_equal_approx(999.0 - float(en["hp"]), 6.0) and ks >= 0 and S.en.vel[ks].dot((S.en.pos[ks] - TowerState.CENTER)) > 0.0
 	_check("ATK pulse: every enemy in range once + knockback; outer untouched", all_hit and is_equal_approx(float(outer["hp"]), 999.0) and (_evts(ev, "core_attack")[0]["targets"] as Array).size() == 3)
 	S.pulse_n = 4
 	S.cooldowns[TowerState.CORE_SLOT] = 0.0
@@ -2477,7 +2534,7 @@ func _draft_stages() -> void:
 	var guar: Dictionary = {}
 	for w in range(1, 13):
 		S.wave_t = S.wave_time - 0.001
-		var ev: Array = S.tick(0.01)
+		var ev: Array = S.tick(0.05)
 		for d in _evts(ev, "draft_offer"):
 			opened.append(w)
 			if String(d["guarantee"]) == "epic":

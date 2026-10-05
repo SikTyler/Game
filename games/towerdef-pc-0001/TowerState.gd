@@ -54,6 +54,12 @@ const STOP_R: float = 34.0        # melee contact distance from the Core centre
 const MAX_LVL: int = 5           # building / hut level cap (duplicate picks)
 const MAX_ENEMIES: int = 220
 const SUBSTEP: float = 0.05
+var step_acc: float = 0.0   # Phase 3 fixed-substep accumulator (game seconds)
+## Phase 4 knockback: per-weapon impulse factor (px/s at a full-HP hit on a
+## 16 px body); set by _fire/_core_fire around each weapon's hits.
+const KNOCK_W: Dictionary = {"gun": 0.6, "railgun": 1.6, "flak": 0.5, "tesla": 0.3, "mortar": 0.0, "core": 1.0}
+var _kb_k: float = 0.0
+var _kb_from: Vector2 = Vector2.ZERO
 const CORE_RING: Array = [48, 49, 50, 59, 61, 70, 71, 72]
 const TARGET_MODES: Array = ["nearest", "first", "strongest", "weakest"]
 const HIT_FLASH: float = 0.12   # view reads e["hit_t"] for the white hit flash
@@ -984,14 +990,16 @@ func tick(delta: float) -> Array:
 	var ev: Array = []
 	if over:
 		return ev
-	var d: float = maxf(0.0, delta) * speed
-	var n: int = maxi(1, int(ceil(d / SUBSTEP - 0.000001)))
-	var sub: float = d / float(n)
-	for k in n:
+	# HORDE Phase 3 (C8, owner: "Phase 3"): truly fixed-length substeps. Game
+	# time accumulates; every whole SUBSTEP runs one _step(SUBSTEP). A frame
+	# shorter than a substep may run none (the remainder carries over).
+	step_acc += maxf(0.0, delta) * speed
+	while step_acc >= SUBSTEP - 0.000001:
+		step_acc -= SUBSTEP
 		if over:
 			break
 		var at: int = ev.size()
-		_step(sub, ev)
+		_step(SUBSTEP, ev)
 		if horde_mult > 1:
 			aggregate_events(ev, at)
 	return ev
@@ -1105,6 +1113,7 @@ func _step(sub: float, ev: Array) -> void:
 	_tick_buffs(dt, ev)
 	_move_enemies(dt, ev)
 	_fire(dt, ev)
+	_kb_k = 0.0
 	_troops_step(dt, ev)
 	_reap(ev)
 	_check_queue(ev)
@@ -1553,7 +1562,7 @@ func _move_enemies(dt: float, ev: Array) -> void:
 	# The hot pass runs inside EnemyStore (own-member packed access is ~5x
 	# faster than en.x[s] from here). It returns an ordered action log; the
 	# Core / building effects replay in the same order.
-	var acts: PackedInt32Array = en.move(dt, frozen, CENTER, STOP_R, r_stop, r_fire, blk if any_b else PackedByteArray(), SIDE, CELL)
+	var acts: PackedInt32Array = en.move(dt, frozen, CENTER, STOP_R, r_stop, r_fire, blk if any_b else PackedByteArray(), SIDE, CELL, PackedFloat64Array([TuneRef.num("horde_accel", 6.0), TuneRef.num("horde_sep", 0.5), TuneRef.num("horde_sep_cap", 0.35), TuneRef.num("horde_friction", 6.0)]))
 	var k: int = 0
 	var escaped: Array = []
 	var lost: bool = false
@@ -1675,6 +1684,11 @@ func _hit(e: int, dmg_in: float, ev: Array, crit: bool = false) -> void:
 	if en.shred_n[e] > 0:
 		dmg *= 1.0 + float(stats.get("shred", 0.0)) * float(en.shred_n[e])
 	var real: float = minf(dmg, maxf(0.0, en.hp[e]))
+	if _kb_k > 0.0 and en.max_hp[e] > 0.0:
+		# Phase 4: hit impulse scaled by damage share and the weapon factor
+		var away: Vector2 = en.pos[e] - _kb_from
+		if away != Vector2.ZERO:
+			en.knock(e, away.normalized() * (_kb_k * TuneRef.num("horde_knock", 60.0) * (0.25 + minf(1.0, dmg / en.max_hp[e]))))
 	en.hp[e] = en.hp[e] - dmg
 	en.hit_t[e] = HIT_FLASH
 	var ls: float = float(stats.get("lifesteal", 0.0))
@@ -1745,7 +1759,10 @@ func _fire(dt: float, ev: Array) -> void:
 			if si == CORE_SLOT and String(wd.get("attack", "")) == "beam":
 				_beam_hold(wd, dt)
 			continue
+		_kb_k = 0.0
 		if si == CORE_SLOT:
+			_kb_k = float(KNOCK_W["core"])
+			_kb_from = CENTER
 			# Queen Engine: the Core holds fire while 3+ troops are alive.
 			if pf("queen_hold") > 0.0 and Troops.alive_count(troops) >= 3:
 				cooldowns[si] = 0.0
@@ -1760,6 +1777,8 @@ func _fire(dt: float, ev: Array) -> void:
 			continue
 		var kind: String = wd["kind"]
 		var from: Vector2 = slot_pos(si)
+		_kb_k = float(KNOCK_W.get(kind, 0.0))
+		_kb_from = from
 		if kind == "frost":
 			# Aura: every pulse slows and chills every enemy in range.
 			var any: bool = false
@@ -1816,6 +1835,7 @@ func _fire(dt: float, ev: Array) -> void:
 						continue
 					if en.pos[ed].distance_to(tpos) <= rad:
 						_hit(ed, dmg, ev, crit)
+				en.radial_knock(tpos, rad * 1.5, TuneRef.num("horde_knock", 60.0) * 1.5)
 				ev.append({"t": "shot", "kind": kind, "from": from, "to": tpos, "radius": rad})
 			"tesla":
 				var hit: Dictionary = {}
@@ -1945,10 +1965,11 @@ func _core_fire(wd: Dictionary, ev: Array) -> bool:
 			for xd in inside:
 				_hit(xd, d4, ev, crit4)
 				targets.append(en.eid[xd])
-				if en.kind[xd] != "boss" and en.kind[xd] != "courier":
-					var away: Vector2 = (en.pos[xd] - CENTER).normalized()
-					en.pos[xd] = en.pos[xd] + away * kb
-					en.dirty = true
+				# Phase 4: the old 12 px teleport is now an outward impulse
+				# (mass-scaled; bosses / couriers immune inside knock()).
+				var away: Vector2 = en.pos[xd] - CENTER
+				if away != Vector2.ZERO:
+					en.knock(xd, away.normalized() * kb * TuneRef.num("horde_pulse_knock", 6.0))
 			# Static: every 5th pulse chains 40% dmg to 3 targets beyond range.
 			if int(wd.get("chain_every", 0)) > 0 and pulse_n % int(wd["chain_every"]) == 0:
 				var outer: Array = []
