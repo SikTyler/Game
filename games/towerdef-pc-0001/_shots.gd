@@ -343,13 +343,11 @@ func _initialize() -> void:
 	var hp_keep: float = float(S.stats["max_hp"])
 	S.stats["max_hp"] = 1.0e9
 	S.hp = 1.0e9
-	var hev: Array = []
-	var mix: Array = ["mite", "mite", "mite", "mite", "drone", "drone", "skitter", "ranged", "shield", "sapper", "splitter", "hauler"]
-	for k in 3000:
-		var ang: float = TAU * float(k % 7) / 7.0 + float(k) * 0.0007
-		S._spawn(String(mix[k % mix.size()]), hev, TowerState.CENTER + Vector2.from_angle(ang) * (S.spawn_r() + float(k % 60) * 3.0), false, 1.0, S.wave, 1)
-	await _wait(150)
-	await _shot("%s/21_horde_gore.png" % outdir)
+	# MASS_HORDE §View: early (hundreds), mid (thousands), late (10k+) with
+	# orbital strikes landing in the thick of it (explosions part the sea).
+	await _horde_stage(S, 300, "%s/21a_horde_early.png" % outdir)
+	await _horde_stage(S, 2700, "%s/21b_horde_mid.png" % outdir)
+	await _horde_stage(S, 9500, "%s/21c_horde_late.png" % outdir)
 	S.stats["max_hp"] = hp_keep
 	S.hp = hp_keep
 	main.dbg_overlay = false
@@ -375,6 +373,27 @@ func _initialize() -> void:
 	await _shot("%s/19_menu_delete.png" % outdir)
 	MetaSave.clear()
 	quit(0)
+
+
+func _horde_stage(S, n: int, path: String) -> void:
+	var hev: Array = []
+	var mix: Array = ["mite", "mite", "mite", "mite", "drone", "drone", "skitter", "ranged", "shield", "sapper", "splitter", "hauler"]
+	for k in n:
+		var ang: float = TAU * float(k % 7) / 7.0 + float(k) * 0.0007
+		S._spawn(String(mix[k % mix.size()]), hev, TowerState.CENTER + Vector2.from_angle(ang) * (S.spawn_r() + float(k % 60) * 3.0), false, 1.0, S.wave, 1)
+	await _wait(130)
+	var core_w: Dictionary = (S.stats["weapons"] as Array).back()
+	for j in 3:
+		var pos: Vector2 = S._densest(90.0)
+		if pos == Vector2.INF:
+			break
+		pos += Vector2(float(j) * 70.0 - 70.0, float(j % 2) * 50.0)
+		S.orbitals.append({"pos": pos, "t": 0.05 + 0.1 * float(j), "dmg": float(core_w["dmg"]) * 40.0, "r": 110.0})
+		S.en.world.call("RadialImpulse", pos.x, pos.y, 160.0, 900.0)
+		main._ring(pos, 140.0, 0.6, Color("ffcf6b"))
+	await _wait(9)
+	print("stage bodies ", S.en.order.size())
+	await _shot(path, false)
 
 
 func _quiet() -> void:

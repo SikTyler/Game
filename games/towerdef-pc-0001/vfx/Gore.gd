@@ -167,11 +167,16 @@ func _paint() -> void:
 		var r: float = float(d["r"]) * k
 		var c: Color = (d["c"] as Color).lerp(Color(0.62, 0.03, 0.05), 0.65).darkened(0.15)   # FB2: blood red, brighter
 		var s: int = int(d["s"])
-		_painter.draw_circle(g, r, Color(c, 0.7))   # corpse / pool
+		# MASS_HORDE §View: swarm corpses soak in dark and translucent so ten
+		# thousand of them build a maroon floor, not a flat red sheet
+		var a0: float = 0.7 if float(d["r"]) >= 14.0 else 0.22
+		if a0 < 0.5:
+			c = c.darkened(0.55)
+		_painter.draw_circle(g, r, Color(c, a0))   # corpse / pool
 		for j in 4:   # splats, deterministic from the stamp seed
 			var a: float = float((s * (j + 3) * 2654435761) % 6283) / 1000.0
 			var dd: float = r * (1.2 + float((s >> j) & 7) * 0.25)
-			_painter.draw_circle(g + Vector2.from_angle(a) * dd, r * 0.42, Color(c, 0.62))
+			_painter.draw_circle(g + Vector2.from_angle(a) * dd, r * 0.42, Color(c, a0 * 0.85))
 	_batch.clear()
 
 

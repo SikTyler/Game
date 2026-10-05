@@ -1218,7 +1218,7 @@ public partial class HordeWorld : RefCounted
 			float[] buf = vbuf[k];
 			if ((n + 1) * 12 > buf.Length) { Array.Resize(ref buf, buf.Length * 2); vbuf[k] = buf; }
 			int o = n * 12;
-			float s2 = (float)(rad[s] * 4.0);
+			float s2 = (float)(rad[s] * (vspec[s] != 0 ? 4.0 : 3.2));   // swarm art at 1.6x its disc: legible, less mush
 			buf[o] = s2; buf[o + 1] = 0f; buf[o + 2] = 0f; buf[o + 3] = (float)x;
 			buf[o + 4] = 0f; buf[o + 5] = s2; buf[o + 6] = 0f; buf[o + 7] = (float)y;
 			buf[o + 8] = r; buf[o + 9] = g; buf[o + 10] = b; buf[o + 11] = 1f;

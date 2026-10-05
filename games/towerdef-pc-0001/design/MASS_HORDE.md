@@ -626,3 +626,80 @@ in the H2 probe); H12 is the existing `no_death_spiral`.
   first runs (`fresh_median_s`) instead of one seed's run: with hundreds of bodies a single run's
   wall moves +-5 waves with the draft (one seed died at wave 8, the median at 12-14). The single-seed
   value is still reported (`first_run_short_single`).
+
+---
+
+## §View — as built (render, 2026-10-05)
+
+Code: `HordeWorld.cs` (view section: `SetVis`, `RenderPrep`, `Upload`, `Specials`, corpse ring
+`DrainCorpses` / `PendingCorpses`), `EnemyStore.gd` (`commit` tags each body; `VIS` kind index),
+`ui/Battle.gd` (`_draw_enemies`), `vfx/Gore.gd` (`stamp_packed`), `Main.gd` (framing, overlay,
+kill feedback), `_shots.gd` (`_horde_stage`). The sim step is untouched (view arrays are never read
+by `Step`; checksum / determinism gates unchanged).
+
+### V1. MultiMesh fill (A9 as built)
+- `EnemyStore.commit` calls `SetVis(slot, visualKind, special, tint)` once per body: visual kind is a
+  process-stable index per kind string, `special` marks elite / boss / courier / marked / shielded
+  bodies, tint is gold for marked and a light violet lift for elites.
+- Per frame `Battle._draw_enemies` makes ONE `RenderPrep` call: C# walks the live slots once and
+  writes each body into a reused, grow-only `float[]` per visual kind (2D transform + colour = 12
+  floats), applying render interpolation (the unconsumed substep at the current seek speed toward
+  the Core / courier exit), hit flash, slow tint, density shading and surge flare. Then one
+  `Upload(rid, kind)` per kind = one `RenderingServer.MultimeshSetBuffer` + `SetVisibleInstances`.
+  GDScript no longer iterates bodies to draw; only `Specials()` (a handful) get HP bars / rings.
+- Swarm art is drawn at 1.6x the body disc (was 2x): at 10k the crowd reads as bodies, not mush.
+  Specials keep 2x. Kinds without art share one radial-gradient fallback texture (no per-body rects).
+
+### V2. Corpses / blood at scale
+- `MarkDead` pushes `(x, y, radius)` into an 8,192-entry C# ring (oldest dropped). Each frame Main
+  drains at most `Gore.stamps_per_frame()` (24 low / 96 full) into the never-cleared ground
+  SubViewport, so cost is per new stamp, bounded per frame, regardless of kill rate.
+  The per-body stamp loop in the `kills` handler (one GDScript call per dead body) is gone; the
+  `kill` event keeps its particle burst only. Every corpse now lands where the body died.
+- Swarm-sized stamps are dark and translucent (alpha 0.22, darkened) so thousands of them build a
+  maroon floor; boss-sized pools stay bright.
+
+### V3. Crowd readability / feedback / framing
+- Density shading: C# bins live bodies into a 24 px grid; non-special bodies in cells with more than
+  3 neighbours shade up to 38% darker, so a pile reads as a mass with a lit rim.
+- Surge / splash: bodies with knockback speed > 60 px/s flare hot (orange-white), so explosions and
+  surges read as a wave through the crowd.
+- Aggregated damage feedback: per-cell merged damage numbers (existing) plus one `xN` kill callout
+  per mass-kill aggregate (N >= 25), sized by N.
+- Camera: `Main.frame_k` eases from 0 to 1 as live bodies go 300 -> 4,300, blending the framed span
+  from the base view (`view_r`) to the horde spawn ring (`spawn_r`); it eases back slowly after a
+  wave. Wheel zoom still multiplies on top.
+
+### V4. F3 overlay
+Bodies, FPS, Sim ms (full TowerState tick), Render ms (C# fill + upload + draw submit of the horde),
+Frame ms, C# step ms (`Stats().step_us`), corpses pending, gore level / queue.
+
+### V5. Frame profile (xvfb + opengl3 on llvmpipe SOFTWARE rasterizer, 4-core Xeon 2.1 GHz, Debug mono)
+Real `Main` scene at 1920x1080, a fresh run, gore full, bodies spawned 0.6x spawn_r out and held at
+N, 60 frames after a 30-frame settle (scratch probe, deleted):
+
+| bodies | frame ms (fps) | sim ms / frame | render ms (C# fill+upload) |
+|---|---|---|---|
+| 1,000 | 67.6 (14.8) | 1.8 | 0.33 |
+| 10,000 | 137.0 (7.3) | 17.8 | 0.91 |
+| 20,000 | 177.2 (5.6) | 45.0 | 1.68 |
+
+Frame time is dominated by the software rasterizer (67 ms at 1k bodies, where sim + render are 2 ms),
+so the fps column is not representative of a GPU. The horde-specific CPU view cost (fill + upload) is
+under 1 ms at 10k and 1.7 ms at 20k, inside the A8 budget's order of magnitude (0.5 / 1 ms; this
+Debug build on a 2.1 GHz Xeon). Sim per frame here includes catch-up of multiple 0.05 s substeps per
+slow frame, so it overstates the 60 fps per-frame sim cost (see S6 for per-tick numbers).
+
+### V6. Shots
+`_shots.gd` `_horde_stage`: `21a_horde_early.png` (~470 bodies), `21b_horde_mid.png` (~2.5k),
+`21c_horde_late.png` (~12k), each with three orbital strikes + radial impulses landing on the densest
+knot just before capture, F3 overlay and gore full.
+
+### V7. Open items
+- Ground layer never fades: a long run saturates the inner field (now dark maroon, not red). A slow
+  periodic fade pass (draw a translucent ground-colour rect into the viewport every N s) would keep
+  fresh blood readable.
+- Hit-flash / tint read the C# timers, so a body flashed by GDScript between steps shows at once; slow
+  tint and density shading override each other (flash > slow > density/surge).
+- `Intel.roster` still scans bodies in GDScript (S7).
+- Real GPU numbers (owner's RTX 5080) still to be measured with F3.

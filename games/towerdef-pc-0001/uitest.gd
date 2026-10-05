@@ -899,7 +899,7 @@ func _settings_records() -> void:
 	_key(KEY_F3)
 	await _frames()
 	var ds: Dictionary = main.debug_stats()
-	_check("HORDE P6: F3 toggles the debug overlay", main.dbg_overlay != ov0 and ds.has("bodies") and ds.has("fps") and ds.has("sim_ms") and ds.has("hash_ms") and ds.has("hash_cells"))
+	_check("HORDE P6: F3 toggles the debug overlay", main.dbg_overlay != ov0 and ds.has("bodies") and ds.has("fps") and ds.has("sim_ms") and ds.has("hash_ms") and ds.has("hash_cells") and ds.has("render_ms"))
 	_key(KEY_F3)
 	await _frames()
 	_check("HORDE P6: F3 toggles the overlay back", main.dbg_overlay == ov0)
