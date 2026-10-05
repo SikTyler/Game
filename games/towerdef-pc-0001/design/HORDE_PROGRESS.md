@@ -192,3 +192,18 @@ The profile scatters bodies over the board, so they overlap heavily: the crowd i
 - **Gates:** import OK; `--quit-after 120` clean; SELFTEST OK (golden/hash unchanged — sim untouched); UITEST OK; PLAYTEST FAIL on the same 15 gates as after P3+P4 (view-only change, expected).
 - **Shot:** `_shots.gd` adds `21_horde_gore.png` (900 extra bodies at horde_mult 10, gore full, overlay on). Under xvfb software GL: ~420 live bodies, sim 3.8 ms, hash 0.26 ms, 101 cells; FPS figure under xvfb is not representative.
 - **Note:** the ground stamps are subtle at the default zoom; the field-wide red tint in the shot is the existing core-hit flash, not gore.
+
+## FB1 run-screen UI (PLAYTEST_FEEDBACK_1) — view only, sim unchanged
+- Range on click: selecting any building draws its reach (weapons: live range circle; non-weapons: aura square over the 8 neighbours). `Battle.range_of / preview_range / draw_reach`.
+- Projectiles: every shot tracer now carries a visible travelling projectile head (muzzle -> target over the tracer life).
+- Live currencies: top-left bar already adds this run's coins / scrap / keys live (confirmed, unchanged).
+- Placement preview: while placing (taken pick or dragged card) the cursor becomes the building icon on the hovered cell, with its range radius, tinted green (valid) / red (with the reason). World tooltips are suppressed while placing.
+- Left bar: Build/Info + hotkey legend removed; it is now the PERKS menu (gold perks, stat perks/packs, insights, mutations) whenever no draft is open. Weapon Target button floats under the selected weapon on the field.
+- Right Core panel gains "Enemies killed" (bodies). Track number badges removed.
+- Bottom bar removed: field and side panels run to the window bottom; specials are floating round icons over the bottom of the field (cooldown sweep + copy pips, no key labels, no FIELD / NEXT DRAFT text). The field prompt sits above them.
+- Draft cards: coloured type banner with icon — BUILDING (blue, "Place another <X>" for weapon duplicates), UPGRADE (green, "Drag onto your <Building>" for non-weapon duplicates), PERK (gold, "listed under Perks"), ABILITY (cyan). Hotkey badges and "[key]" text removed from cards, Reroll/Banish/Cancel, track tips, ability tips and the top bar.
+- Tooltips: structured RichTextLabel — bold gold header, then one stat line per row (" · " split) led by a related icon (dmg/HP/rate/range/cash/coins/level/cooldown...). `tip_label` keeps the canonical plain text.
+- uitest: +15 FB1 checks. One deliberate assertion change: PC-U1 "top bar, left, field, right, hotbar do not overlap" — the hotbar rect now lives inside the field by design, so it left the no-overlap set and a new check asserts the field encloses it and the panels reach the bottom.
+- Shots: 15_place now hovers a free cell (preview + range); 16 selects a weapon if one survives.
+- Gates: --import / --quit-after clean; SELFTEST OK; UITEST OK; playtest: see below.
+- Playtest: same 15 balance-gate FAILs as after P3-P6 (e.g. ac25_fresh_wall, ac29_wave_gap, rd_ac27_storage_fill) — expected, this change is view-only; no new failures.
