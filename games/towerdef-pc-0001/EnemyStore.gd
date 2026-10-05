@@ -35,6 +35,7 @@ var fire_cd: PackedFloat64Array = PackedFloat64Array()
 var shock_t: PackedFloat64Array = PackedFloat64Array()
 var hit_t: PackedFloat64Array = PackedFloat64Array()
 var taunt_t: PackedFloat64Array = PackedFloat64Array()
+var share: PackedFloat64Array = PackedFloat64Array()   # horde body share 1/m (1.0 = whole entry)
 var kind: PackedStringArray = PackedStringArray()
 var eid: PackedInt32Array = PackedInt32Array()
 var shield: PackedInt32Array = PackedInt32Array()
@@ -68,7 +69,7 @@ func clear() -> void:
 	pos.clear(); vel.clear(); exit.clear()
 	hp.clear(); max_hp.clear(); spd.clear(); dmg.clear(); cash.clear(); xp.clear(); coin.clear()
 	size.clear(); atk_cd.clear(); slow_t.clear(); slow_m.clear(); fire_cd.clear(); shock_t.clear()
-	hit_t.clear(); taunt_t.clear(); kind.clear()
+	hit_t.clear(); taunt_t.clear(); share.clear(); kind.clear()
 	eid.clear(); shield.clear(); max_shield.clear(); shock_src.clear(); quad.clear(); shred_n.clear()
 	flags.clear(); next_free.clear()
 	free_head = -1
@@ -84,7 +85,7 @@ func _grow() -> void:
 	pos.resize(c); vel.resize(c); exit.resize(c)
 	hp.resize(c); max_hp.resize(c); spd.resize(c); dmg.resize(c); cash.resize(c); xp.resize(c); coin.resize(c)
 	size.resize(c); atk_cd.resize(c); slow_t.resize(c); slow_m.resize(c); fire_cd.resize(c); shock_t.resize(c)
-	hit_t.resize(c); taunt_t.resize(c); kind.resize(c)
+	hit_t.resize(c); taunt_t.resize(c); share.resize(c); kind.resize(c)
 	eid.resize(c); shield.resize(c); max_shield.resize(c); shock_src.resize(c); quad.resize(c); shred_n.resize(c)
 	flags.resize(c); next_free.resize(c)
 	# chain the new slots onto the free list, lowest index first
@@ -103,7 +104,7 @@ func alloc(id: int, k: String, p: Vector2) -> int:
 	pos[s] = p; vel[s] = Vector2.ZERO; exit[s] = p
 	hp[s] = 0.0; max_hp[s] = 0.0; spd[s] = 0.0; dmg[s] = 0.0; cash[s] = 0.0; xp[s] = 0.0; coin[s] = 0.0
 	size[s] = 16.0; atk_cd[s] = 0.0; slow_t[s] = 0.0; slow_m[s] = 1.0; fire_cd[s] = 0.0; shock_t[s] = 0.0
-	hit_t[s] = 0.0; taunt_t[s] = 0.0; kind[s] = k
+	hit_t[s] = 0.0; taunt_t[s] = 0.0; share[s] = 1.0; kind[s] = k
 	eid[s] = id; shield[s] = 0; max_shield[s] = 0; shock_src[s] = -1; quad[s] = -1; shred_n[s] = 0
 	flags[s] = 0
 	eid_slot[id] = s
@@ -231,6 +232,7 @@ func fill(s: int, d: Dictionary) -> void:
 	coin[s] = float(d.get("coin", 0.0))
 	set_size(s, float(d.get("size", 16.0)))
 	atk_cd[s] = float(d.get("atk_cd", 0.0))
+	share[s] = float(d.get("share", 1.0))
 	slow_t[s] = float(d.get("slow_t", 0.0))
 	# the Dict move code read .get("slow_m", 0.55) while slowed, 1.0 elsewhere
 	slow_m[s] = float(d.get("slow_m", 0.55 if slow_t[s] > 0.0 else 1.0))
@@ -262,7 +264,7 @@ func get_dict(s: int) -> Dictionary:
 		"slow_t": slow_t[s], "slow_m": slow_m[s], "shield": shield[s], "max_shield": max_shield[s],
 		"fire_cd": fire_cd[s], "shock_t": shock_t[s], "shock_src": shock_src[s], "hit_t": hit_t[s],
 		"eid": eid[s], "taunt_t": taunt_t[s], "quad": quad[s], "shred_n": shred_n[s],
-		"marked": is_marked(s), "slot": s,
+		"marked": is_marked(s), "slot": s, "share": share[s],
 	}
 	if has_exit(s):
 		d["exit"] = exit[s]

@@ -30,3 +30,10 @@ static func int_of(key: String, default_value: int) -> int:
 static func seed_of(default_value: int) -> int:
 	var raw := OS.get_environment("GF_SEED")
 	return int(raw) if raw.is_valid_int() else default_value
+
+
+## HORDE Phase 2: bodies per plan entry (1 = classic). Each body carries 1/m of
+## the entry's HP / damage / rewards; kill counts are per body (owner C2), so
+## kill-count thresholds scale by this factor.
+static func horde_mult() -> int:
+	return clampi(int_of("horde_mult", 1), 1, 16)

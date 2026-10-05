@@ -781,7 +781,7 @@ const EVENT_CLIP: Dictionary = {
 	"perk_taken": "perk", "placed": "place", "upgraded": "upgrade", "track": "upgrade", "special_cast": "perk",
 	"core_hit": "core_hit", "interest": "coin", "revive": "levelup", "dead": "game_over",
 	"tier_unlocked": "levelup", "insight_found": "levelup", "draft_offer": "card_open", "ring_open": "levelup",
-	"core_attack": "shot_core",
+	"core_attack": "shot_core", "kills": "kill", "core_hits": "core_hit",
 }
 
 
@@ -838,6 +838,24 @@ func _handle(events: Array) -> void:
 			"core_hit":
 				juice.add_trauma(0.22)
 				flash = minf(0.45, flash + 0.18)
+			# HORDE aggregates (horde_mult > 1): one summary per substep.
+			"hits":
+				for h in ev["top"]:
+					var hd: Dictionary = h
+					var hp2: Vector2 = hd["pos"]
+					# merge popups by 64 px cell, not body: no stacked numbers
+					_dmg_num(-1 - (int(floor(hp2.x / 64.0)) * 4096 + int(floor(hp2.y / 64.0))), hp2, float(hd["amt"]))
+			"kills":
+				for kp in ev["pos_sample"]:
+					if bursts != null:
+						bursts.call("burst", kp, ENEMY, false)
+					_ring(kp, 14.0, 0.2, ENEMY)
+			"core_hits":
+				juice.add_trauma(minf(0.4, 0.22 + 0.02 * float(ev["n"])))
+				flash = minf(0.45, flash + 0.18)
+				if int(ev["shots"]) > 0:
+					var bo2: Dictionary = bolts.take(0.25)
+					bo2["a"] = (ev["pos_sample"] as Array)[0]
 			"enemy_shot":
 				var bo: Dictionary = bolts.take(0.25)
 				bo["a"] = ev["pos"]

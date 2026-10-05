@@ -147,6 +147,8 @@ var xp: float = 0.0
 var level: int = 1
 var coins_run: float = 0.0
 var kills: int = 0
+var horde_mult: int = TuneRef.horde_mult()   # HORDE Phase 2: bodies per plan entry
+var agg: bool = false   # aggregate per-hit/per-kill events (set from horde_mult in tick)
 var core_run_lvl: int = 0         # mirror of tracks["dmg"] (legacy name the view reads)
 var spawn_hold: bool = false      # test/tool hook: suppress wave spawns (bosses included)
 var build_cap: int = 48
@@ -882,8 +884,81 @@ func tick(delta: float) -> Array:
 	for k in n:
 		if over:
 			break
+		var at: int = ev.size()
 		_step(sub, ev)
+		if horde_mult > 1:
+			aggregate_events(ev, at)
 	return ev
+
+
+## HORDE Phase 2 event aggregation (horde_mult > 1 only; at 1 the per-event
+## stream is untouched). Collapses this substep's per-body "kill", per-hit
+## "dmg" and Core contact "core_hit"/"enemy_shot" events (from index `at`)
+## into one summary each, appended at the end, so view / sfx / Missions /
+## Stats cost no longer scales with bodies. Boss kills stay single events.
+##   {"t":"kills","n","cash","by_kind":{kind:n},"pos_sample":[<=16]}
+##   {"t":"hits","n","sum","crit_n","top":[{eid,pos,amt,crit}] (<=8 largest)}
+##   {"t":"core_hits","n","dmg","shots","pos_sample":[<=8]}
+const AGG_POS: int = 16
+const AGG_TOP: int = 8
+static func aggregate_events(ev: Array, at: int = 0) -> void:
+	var keep: Array = []
+	var kn: int = 0
+	var kcash: float = 0.0
+	var by_kind: Dictionary = {}
+	var kpos: Array = []
+	var hn: int = 0
+	var hsum: float = 0.0
+	var hcrit: int = 0
+	var top: Array = []
+	var cn: int = 0
+	var cshots: int = 0
+	var cdmg: float = 0.0
+	var cpos: Array = []
+	for i in range(at, ev.size()):
+		var e: Dictionary = ev[i]
+		var t: String = String(e.get("t", ""))
+		if t == "kill" and String(e.get("kind", "")) != "boss":
+			kn += 1
+			kcash += float(e.get("cash", 0.0))
+			var kk: String = String(e.get("kind", "drone"))
+			by_kind[kk] = int(by_kind.get(kk, 0)) + 1
+			if kpos.size() < AGG_POS:
+				kpos.append(e["pos"])
+		elif t == "dmg":
+			hn += 1
+			var a: float = float(e.get("amt", 0.0))
+			hsum += a
+			if bool(e.get("crit", false)):
+				hcrit += 1
+			if top.size() < AGG_TOP:
+				top.append(e)
+			else:
+				var lo: int = 0
+				for j in range(1, top.size()):
+					if float((top[j] as Dictionary)["amt"]) < float((top[lo] as Dictionary)["amt"]):
+						lo = j
+				if a > float((top[lo] as Dictionary)["amt"]):
+					top[lo] = e
+		elif t == "core_hit" or t == "enemy_shot":
+			cn += 1
+			if t == "enemy_shot":
+				cshots += 1
+			cdmg += float(e.get("dmg", 0.0))
+			if cpos.size() < AGG_TOP:
+				cpos.append(e["pos"])
+		else:
+			keep.append(e)
+	if kn == 0 and hn == 0 and cn == 0:
+		return
+	ev.resize(at)
+	ev.append_array(keep)
+	if hn > 0:
+		ev.append({"t": "hits", "n": hn, "sum": hsum, "crit_n": hcrit, "top": top})
+	if kn > 0:
+		ev.append({"t": "kills", "n": kn, "cash": kcash, "by_kind": by_kind, "pos_sample": kpos})
+	if cn > 0:
+		ev.append({"t": "core_hits", "n": cn, "dmg": cdmg, "shots": cshots, "pos_sample": cpos})
 
 
 func _step(sub: float, ev: Array) -> void:
@@ -1198,8 +1273,12 @@ func _spawn_due(ev: Array) -> void:
 		var pe: Dictionary = plan[plan_idx]
 		plan_idx += 1
 		var q: int = int(pe["quad"])
-		if _spawn(String(pe["kind"]), ev, Vector2.INF, q, bool(pe.get("marked", false))):
+		var pk: String = String(pe["kind"])
+		var pm: bool = bool(pe.get("marked", false))
+		var gm: int = 1 if (pm or pk == "boss" or pk == "elite" or pk == "courier") else horde_mult
+		if _spawn(pk, ev, Vector2.INF, q, pm, 1.0 / float(gm)):
 			wave_spawned[q] = int(wave_spawned.get(q, 0)) + 1
+			_spawn_clones(gm)
 
 
 ## Lane focus (Orbital auto-target prefers it): one of the 4 quadrants.
@@ -1240,8 +1319,31 @@ func _roll_kind(for_wave: int = -1) -> String:
 	return "drone"
 
 
-func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF, quad: int = -1, marked: bool = false) -> bool:
-	if en.count() >= MAX_ENEMIES:
+## Body budget: MAX_ENEMIES entries' worth of bodies (220 at horde_mult 1).
+func max_bodies() -> int:
+	return MAX_ENEMIES * horde_mult
+
+
+## Horde: copy the body just spawned (last in `order`) gm-1 times, fanned
+## +-2 deg around the Core by body index (no rng draws: the wave sequence and
+## every later roll stay identical to horde_mult 1).
+func _spawn_clones(gm: int) -> void:
+	if gm <= 1 or en.order.is_empty():
+		return
+	var src: int = en.order[en.order.size() - 1]
+	for k in range(1, gm):
+		if en.count() >= max_bodies():
+			return
+		var a: float = deg_to_rad(-2.0 + 4.0 * float(k) / float(gm - 1))
+		var d: Dictionary = en.get_dict(src)
+		d.erase("eid")
+		d["pos"] = CENTER + (en.pos[src] - CENTER).rotated(a)
+		var s2: int = add_enemy(d)
+		en.quad[s2] = quad_of(en.pos[s2])
+
+
+func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF, quad: int = -1, marked: bool = false, share: float = 1.0) -> bool:
+	if en.count() >= max_bodies():
 		return false
 	var d: Dictionary = EnemyDB.get_def(kind)
 	var sc: float = scale() * hp_mult * float(stats.get("perk_enemy_hp", 1.0)) * enemy_hp_mod * (1.0 + 0.15 * float(pack_n("pk_gambit")))
@@ -1284,6 +1386,15 @@ func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF, quad: int = -1, 
 		en.flags[e] = en.flags[e] | EnemyStore.F_MARKED
 		en.hp[e] = en.hp[e] * TuneRef.num("pc_mark_hp", 3.0)
 		en.max_hp[e] = en.max_hp[e] * TuneRef.num("pc_mark_hp", 3.0)
+	if share < 1.0:
+		# horde body: 1/m of the entry (shields stay whole; elites never split)
+		en.share[e] = share
+		en.hp[e] = en.hp[e] * share
+		en.max_hp[e] = en.max_hp[e] * share
+		en.dmg[e] = en.dmg[e] * share
+		en.cash[e] = en.cash[e] * share
+		en.xp[e] = en.xp[e] * share
+		en.coin[e] = en.coin[e] * share
 	en.quad[e] = quad_of(pos)
 	if kind == "boss":
 		ev.append({"t": "boss", "pos": en.pos[e], "quad": en.quad[e]})
@@ -1354,13 +1465,13 @@ func _spawn_courier(ev: Array) -> void:
 	ev.append({"t": "courier_spawn", "eid": en.eid[cd], "pos": from, "to": to})
 
 
-func _core_damage(amt: float, ev: Array, kind: String, from: Vector2, src: int = -1) -> void:
+func _core_damage(amt: float, ev: Array, kind: String, from: Vector2, src: int = -1, share: float = 1.0) -> void:
 	if immune_t > 0.0:
 		return
 	# Mirror Hull: contact hits reflect a share back to the attacker (slot src).
 	if kind == "core_hit" and src >= 0 and float(stats.get("reflect", 0.0)) > 0.0 and en.hp[src] > 0.0:
 		_hit(src, amt * float(stats["reflect"]), ev)
-	var real: float = maxf(amt * TuneRef.num("pc_armor_floor", 0.25), amt - float(stats.get("armor", 0.0)))
+	var real: float = maxf(amt * TuneRef.num("pc_armor_floor", 0.25), amt - float(stats.get("armor", 0.0)) * share)   # flat armor split per horde body (owner C4)
 	real *= 1.0 - float(stats.get("dr", 0.0))
 	shield_idle = 0.0
 	if shield > 0.0:
@@ -1398,9 +1509,9 @@ func _move_enemies(dt: float, ev: Array) -> void:
 			EnemyStore.ACT_WALL:
 				ev.append({"t": "wall_broken", "quad": e})
 			EnemyStore.ACT_SHOT:
-				_core_damage(en.dmg[e], ev, "enemy_shot", en.pos[e])
+				_core_damage(en.dmg[e], ev, "enemy_shot", en.pos[e], -1, en.share[e])
 			EnemyStore.ACT_HIT:
-				_core_damage(en.dmg[e], ev, "core_hit", en.pos[e], e)
+				_core_damage(en.dmg[e], ev, "core_hit", en.pos[e], e, en.share[e])
 			EnemyStore.ACT_ESCAPE:
 				escaped.append(e)
 	for x in escaped:
@@ -1878,7 +1989,7 @@ func _reap(ev: Array) -> void:
 		if kind == "boss":
 			_boss_bounty(pos, ev)
 		elif kind == "splitter":
-			splits.append(pos)
+			splits.append([pos, en.share[ed]])
 		_roll_drops(ed, ev)
 		dead.append(ed)
 	if dead.is_empty():
@@ -1888,9 +1999,10 @@ func _reap(ev: Array) -> void:
 		en.release(ds)
 	var nc: int = TuneRef.int_of("splitter_children", 2)
 	for p in splits:
-		var sp: Vector2 = p
+		var sp: Vector2 = (p as Array)[0]
+		var ssh: float = float((p as Array)[1])
 		for k in nc:
-			_spawn("mite", ev, sp + Vector2.from_angle(TAU * float(k) / float(maxi(1, nc))) * 10.0)
+			_spawn("mite", ev, sp + Vector2.from_angle(TAU * float(k) / float(maxi(1, nc))) * 10.0, -1, false, ssh)
 		ev.append({"t": "split", "pos": sp, "n": nc})
 
 
@@ -1905,7 +2017,7 @@ func _roll_drops(ed: int, ev: Array) -> void:
 		src = "courier"
 	elif kind == "elite" or en.is_marked(ed):
 		src = "elite"
-	var ctx: Dictionary = {"tier": tier, "drop_mult": 1.0 + float(ins.get("in_drop", 0.0)), "parts_so_far": Drops.capped_count(loot)}
+	var ctx: Dictionary = {"tier": tier, "drop_mult": 1.0 + float(ins.get("in_drop", 0.0)), "parts_so_far": Drops.capped_count(loot), "share": en.share[ed]}
 	var got: Array = Drops.add(loot, Drops.roll(drop_rng, src, ctx))
 	for x in got:
 		var d: Dictionary = (x as Dictionary).duplicate()

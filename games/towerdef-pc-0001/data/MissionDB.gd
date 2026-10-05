@@ -28,7 +28,7 @@ static func target(tpl: String, best_wave: int) -> int:
 	var b: int = maxi(0, best_wave)
 	match tpl:
 		"kill":
-			return 150 + 10 * b
+			return (150 + 10 * b) * preload("res://Tune.gd").horde_mult()   # kills are per body
 		"wave":
 			return maxi(10, int(floor(float(b) * 0.8)))
 		"boss":

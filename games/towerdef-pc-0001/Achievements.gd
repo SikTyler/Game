@@ -20,7 +20,7 @@ const Cards := preload("res://Cards.gd")
 
 
 ## Per-frame combat events that never change a save-based achievement.
-const HOT: Array = ["shot", "dmg", "kill", "core_hit", "enemy_shot", "shield_hit", "split", "refined", "interest"]
+const HOT: Array = ["shot", "dmg", "kill", "kills", "hits", "core_hits", "core_hit", "enemy_shot", "shield_hit", "split", "refined", "interest"]
 
 
 static func new_run() -> Dictionary:
@@ -112,7 +112,7 @@ static func on_events(save: Dictionary, run: Dictionary, events: Array, now: int
 				run["active"] = true
 				run["mode"] = String(ev.get("mode", "normal"))
 				run["modifiers"] = (ev.get("modifiers", []) as Array).duplicate()
-			"core_hit", "enemy_shot":
+			"core_hit", "enemy_shot", "core_hits":
 				if int(run.get("wave", 1)) <= 10 and float(ev.get("dmg", 1.0)) > 0.0:
 					run["damaged_early"] = true
 			"wave":
@@ -188,7 +188,7 @@ static func check_save(save: Dictionary, now: int = 0) -> Array:
 		out.append_array(unlock(save, "ACH_FIRST_BOSS", now))
 	if int(st.get("bosses", 0)) >= 50:
 		out.append_array(unlock(save, "ACH_BOSS_50", now))
-	if int(st.get("kills", 0)) >= 100000:
+	if int(st.get("kills", 0)) >= 100000 * preload("res://Tune.gd").horde_mult():   # per-body kills
 		out.append_array(unlock(save, "ACH_KILLS_100K", now))
 	if int(st.get("runs", 0)) >= 1:
 		out.append_array(unlock(save, "ACH_FIRST_RUN", now))

@@ -329,27 +329,97 @@ static func _draw_world(m) -> void:
 		if hf < 1.0:
 			m.draw_rect(Rect2(tp + Vector2(-9, 12), Vector2(18, 3)), Color(0, 0, 0, 0.6))
 			m.draw_rect(Rect2(tp + Vector2(-9, 12), Vector2(18 * hf, 3)), Kit.GREEN)
-	# enemies
-	var en = S.en
+	# enemies (HORDE Phase 2): one MultiMesh per kind from the SVG icon,
+	# per-instance colour = hit flash / slow tint; overlays + HP bars only on
+	# the few special bodies (elite / boss / marked / courier).
+	_draw_enemies(m, S.en)
+
+
+## kind -> MultiMesh (reused every frame; instance buffer refilled from SoA)
+static var _mm: Dictionary = {}
+static var _quad: ArrayMesh = null
+static var _buf: Dictionary = {}   # kind -> PackedFloat32Array
+static var _cnt: Dictionary = {}   # kind -> int
+
+
+static func _unit_quad() -> ArrayMesh:
+	if _quad == null:
+		var arr: Array = []
+		arr.resize(Mesh.ARRAY_MAX)
+		arr[Mesh.ARRAY_VERTEX] = PackedVector2Array([Vector2(-0.5, -0.5), Vector2(0.5, -0.5), Vector2(0.5, 0.5), Vector2(-0.5, 0.5)])
+		arr[Mesh.ARRAY_TEX_UV] = PackedVector2Array([Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)])
+		arr[Mesh.ARRAY_INDEX] = PackedInt32Array([0, 1, 2, 0, 2, 3])
+		_quad = ArrayMesh.new()
+		_quad.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	return _quad
+
+
+static func _draw_enemies(m, en) -> void:
+	for k in _cnt.keys():
+		_cnt[k] = 0
+	var special: PackedInt32Array = PackedInt32Array()
 	for es in en.order:
+		var kind: String = en.kind[es]
+		var p: Vector2 = en.pos[es]
+		var s2: float = en.size[es] * 2.0
+		var c: Color = Color(1, 1, 1, 1)
+		var ht: float = en.hit_t[es]
+		if ht > 0.0:
+			var f: float = 1.0 + 1.6 * ht / TowerState.HIT_FLASH
+			c = Color(f, f, f, 1.0)
+		elif en.slow_t[es] > 0.0:
+			c = Color(0.7, 0.92, 1.25, 1.0)
+		if not _buf.has(kind):
+			_buf[kind] = PackedFloat32Array()
+			_cnt[kind] = 0
+		var b: PackedFloat32Array = _buf[kind]
+		var n: int = int(_cnt[kind])
+		if b.size() < (n + 1) * 12:
+			b.resize(maxi(64 * 12, b.size() * 2))
+		var o: int = n * 12
+		b[o] = s2; b[o + 1] = 0.0; b[o + 2] = 0.0; b[o + 3] = p.x
+		b[o + 4] = 0.0; b[o + 5] = s2; b[o + 6] = 0.0; b[o + 7] = p.y
+		b[o + 8] = c.r; b[o + 9] = c.g; b[o + 10] = c.b; b[o + 11] = c.a
+		_buf[kind] = b
+		_cnt[kind] = n + 1
+		if kind == "boss" or kind == "elite" or kind == "courier" or en.is_marked(es) or en.shield[es] > 0:
+			special.append(es)
+	for kind in _cnt.keys():
+		var n2: int = int(_cnt[kind])
+		if n2 <= 0:
+			continue
+		var tx: Texture2D = Kit.Art.tex(String(kind))
+		if tx == null:
+			var col: Color = ENEMY2 if String(kind) in ["skitter", "boss", "mite", "splitter"] else Kit.ENEMY
+			var bb: PackedFloat32Array = _buf[kind]
+			for i in n2:
+				var hs: float = bb[i * 12] * 0.25
+				m.draw_rect(Rect2(Vector2(bb[i * 12 + 3], bb[i * 12 + 7]) - Vector2(hs, hs), Vector2(hs, hs) * 2.0), col)
+			continue
+		var mm: MultiMesh = _mm.get(kind, null)
+		if mm == null:
+			mm = MultiMesh.new()
+			mm.transform_format = MultiMesh.TRANSFORM_2D
+			mm.use_colors = true
+			mm.mesh = _unit_quad()
+			_mm[kind] = mm
+		var need: int = (_buf[kind] as PackedFloat32Array).size() / 12
+		if mm.instance_count != need:
+			mm.instance_count = need
+		mm.visible_instance_count = n2
+		mm.buffer = _buf[kind]
+		m.draw_multimesh(mm, tx)
+	for es in special:
 		var p: Vector2 = en.pos[es]
 		var s: float = en.size[es]
 		var kind: String = en.kind[es]
 		var col: Color = ENEMY2 if kind in ["skitter", "boss", "mite", "splitter"] else Kit.ENEMY
 		var hitr := Rect2(p - Vector2(s, s), Vector2(s, s) * 2.0)
-		if not Kit.icon(m, kind, hitr):
-			m.draw_rect(Rect2(p - Vector2(s, s) * 0.5, Vector2(s, s)), col)
 		if en.is_marked(es):
 			m.draw_arc(p, s * 1.3, 0, TAU, 24, Kit.GOLD, 2.0)
-		if en.slow_t[es] > 0.0:
-			m.draw_arc(p, s * 0.9, 0, TAU, 20, Color("8fe3ff"), 2.0)
-		var sh: int = en.shield[es]
-		if sh > 0:
+		if en.shield[es] > 0:
 			if not Kit.icon(m, "elite_shield", hitr.grow(s * 0.3)):
 				m.draw_arc(p, s * 1.2, 0, TAU, 24, SHIELD, 3.0)
-		var ht: float = en.hit_t[es]
-		if ht > 0.0:
-			m.draw_circle(p, s * 0.75, Color(1, 1, 1, 0.7 * ht / TowerState.HIT_FLASH))
 		var frac: float = en.hp[es] / en.max_hp[es]
 		if frac < 1.0:
 			m.draw_rect(Rect2(p + Vector2(-s * 0.6, s * 0.85), Vector2(s * 1.2, 4)), Color(0, 0, 0, 0.6))

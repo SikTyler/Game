@@ -62,6 +62,11 @@ static func on_event(s: Dictionary, e: Dictionary) -> void:
 		"kill":
 			st["kills"] = int(st["kills"]) + 1
 			_bump(st["kills_by_kind"], String(e.get("kind", "drone")))
+		"kills":   # horde aggregate (per body)
+			st["kills"] = int(st["kills"]) + int(e.get("n", 0))
+			var bk: Dictionary = e.get("by_kind", {})
+			for kk in bk:
+				_bump(st["kills_by_kind"], String(kk), int(bk[kk]))
 		"boss_bounty":
 			st["bosses"] = int(st["bosses"]) + 1
 		"wave":

@@ -81,6 +81,8 @@ static func on_run_events(s: Dictionary, events: Array) -> Array:
 		match String(e.get("t", "")):
 			"kill":
 				ev.append_array(progress(s, "kill", 1))
+			"kills":   # horde aggregate (per body)
+				ev.append_array(progress(s, "kill", int(e.get("n", 0))))
 			"wave":
 				ev.append_array(progress(s, "wave", int(e.get("wave", 0)), true))
 			"boss_bounty":

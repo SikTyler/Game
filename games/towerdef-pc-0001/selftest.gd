@@ -598,6 +598,42 @@ func _horde_stages() -> void:
 	S.eh.damage(TowerState.CENTER, 310.0, 1.0, func(sl: int, amt: float) -> void: hits.append(sl))
 	_check("HORDE hash damage(): every live body in radius, spawn order", hits == [0, 2, 1])
 	_check("HORDE density counts exact neighbours", S.eh.density(TowerState.CENTER + Vector2(0, -300), 1.0) == 1)
+	# ---- Phase 2: horde_mult conservation + event aggregation
+	var S1 = _fresh()
+	S1.spawn_hold = true
+	S1._spawn("hauler", [], TowerState.CENTER + Vector2(0, -400))
+	var S4 = _fresh()
+	S4.spawn_hold = true
+	S4.horde_mult = 4
+	S4._spawn("hauler", [], TowerState.CENTER + Vector2(0, -400), -1, false, 0.25)
+	S4._spawn_clones(4)
+	var sum_hp: float = 0.0
+	var sum_cash: float = 0.0
+	var sum_dmg: float = 0.0
+	for sl in S4.en.order:
+		sum_hp += S4.en.hp[sl]
+		sum_cash += S4.en.cash[sl]
+		sum_dmg += S4.en.dmg[sl]
+	_check("HORDE m=4: 4 bodies, HP / cash / contact dmg conserved", S4.en.count() == 4 and absf(sum_hp - S1.en.hp[0]) < 1e-6 and absf(sum_cash - S1.en.cash[0]) < 1e-9 and absf(sum_dmg - S1.en.dmg[0]) < 1e-9)
+	_check("HORDE m=4: body budget scales (MAX_ENEMIES x m)", S4.max_bodies() == TowerState.MAX_ENEMIES * 4 and S1.max_bodies() == TowerState.MAX_ENEMIES)
+	S4.stats["armor"] = 2.0
+	S4.stats["dr"] = 0.0
+	var hp0: float = S4.hp
+	S4._core_damage(4.0, [], "core_hit", TowerState.CENTER, -1, 0.25)
+	_check("HORDE flat armor split per body (4 - 2/4 = 3.5)", absf((hp0 - S4.hp) - 3.5) < 1e-9 or S4.shield > 0.0)
+	var agg: Array = [{"t": "wave", "wave": 2}]
+	for i in 5:
+		agg.append({"t": "kill", "pos": Vector2(i, 0), "cash": 1.5, "kind": "drone"})
+		agg.append({"t": "dmg", "eid": i, "pos": Vector2(i, 0), "amt": float(i + 1)})
+	agg.append({"t": "kill", "pos": Vector2.ZERO, "cash": 9.0, "kind": "boss"})
+	agg.append({"t": "core_hit", "dmg": 2.0, "pos": Vector2.ZERO})
+	TowerState.aggregate_events(agg, 1)
+	var ks: Array = _evts(agg, "kills")
+	var hs: Array = _evts(agg, "hits")
+	_check("HORDE aggregation: 1 kills (n 5, cash 7.5) + 1 hits (sum 15) + 1 core_hits; boss kill stays single", ks.size() == 1 and int(ks[0]["n"]) == 5 and absf(float(ks[0]["cash"]) - 7.5) < 1e-9 and hs.size() == 1 and absf(float(hs[0]["sum"]) - 15.0) < 1e-9 and _evts(agg, "core_hits").size() == 1 and _evts(agg, "kill").size() == 1 and _evts(agg, "dmg").is_empty() and String(agg[0]["t"]) == "wave")
+	var sv: Dictionary = BaseMeta.normalize({})
+	Missions.on_run_events(sv, [{"t": "kills", "n": 7, "by_kind": {"drone": 7}}])
+	_check("HORDE aggregated kills count per body in Stats", int((sv["stats"] as Dictionary)["kills"]) == 7)
 
 
 func _weapon(S, kind: String) -> Dictionary:

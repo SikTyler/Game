@@ -58,7 +58,7 @@ static func roll(rng: RandomNumberGenerator, source: String, ctx: Dictionary) ->
 			out.append({"kind": "core_core", "n": 1, "source": "boss"})
 	if source == "courier":
 		out.append({"kind": "key", "n": 1, "source": "courier"})
-	elif rng.randf() < TuneRef.num("pc_key_p", KEY_P):
+	elif rng.randf() < TuneRef.num("pc_key_p", KEY_P) * float(ctx.get("share", 1.0)):   # horde body: 1/m odds (per-wave keys conserved)
 		out.append({"kind": "key", "n": 1, "source": "kill"})
 	return out
 
