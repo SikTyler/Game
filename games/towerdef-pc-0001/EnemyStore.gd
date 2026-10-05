@@ -38,6 +38,7 @@ var hit_t: PackedFloat64Array = PackedFloat64Array()
 var taunt_t: PackedFloat64Array = PackedFloat64Array()
 var share: PackedFloat64Array = PackedFloat64Array()   # horde body share 1/m (1.0 = whole entry)
 var kind: PackedStringArray = PackedStringArray()
+var kc: PackedInt32Array = PackedInt32Array()          # kind code for the C# hot loop: 0 other, 1 courier, 2 ranged
 var eid: PackedInt32Array = PackedInt32Array()
 var shield: PackedInt32Array = PackedInt32Array()
 var max_shield: PackedInt32Array = PackedInt32Array()
@@ -60,6 +61,35 @@ var max_size: float = 0.0                          # largest body ever stored (q
 var dirty: bool = true                             # positions / order changed since the hash rebuild
 
 
+static func _kcode(k: String) -> int:
+	return 1 if k == "courier" else (2 if k == "ranged" else 0)
+
+
+## C# hot loop (HordeMove.cs). `cs_mode`: -1 = Tune "horde_cs" (default 1 = C#
+## when the mono build is present), 0 = force GDScript, 1 = force C#. The
+## GDScript move() body below is the reference/fallback; both paths are
+## bit-identical (selftest compares the 120 s fingerprint).
+const TuneR := preload("res://Tune.gd")
+static var cs_mode: int = -1
+static var _cs: Object = null
+static var _cs_tried: bool = false
+
+
+static func cs_available() -> bool:
+	if not _cs_tried:
+		_cs_tried = true
+		if ResourceLoader.exists("res://HordeMove.cs"):
+			var scr = load("res://HordeMove.cs")
+			if scr is Script and (scr as Script).can_instantiate():
+				_cs = scr.new()
+	return _cs != null
+
+
+static func use_cs() -> bool:
+	var m: int = cs_mode if cs_mode >= 0 else int(TuneR.int_of("horde_cs", 1))
+	return m == 1 and cs_available()
+
+
 func capacity() -> int:
 	return hp.size()
 
@@ -76,7 +106,7 @@ func clear() -> void:
 	pos.clear(); vel.clear(); exit.clear()
 	hp.clear(); max_hp.clear(); spd.clear(); dmg.clear(); cash.clear(); xp.clear(); coin.clear()
 	size.clear(); atk_cd.clear(); slow_t.clear(); slow_m.clear(); fire_cd.clear(); shock_t.clear()
-	hit_t.clear(); taunt_t.clear(); share.clear(); kind.clear()
+	hit_t.clear(); taunt_t.clear(); share.clear(); kind.clear(); kc.clear()
 	eid.clear(); shield.clear(); max_shield.clear(); shock_src.clear(); quad.clear(); shred_n.clear()
 	flags.clear(); next_free.clear(); cur_s.clear()
 	free_head = -1
@@ -92,7 +122,7 @@ func _grow() -> void:
 	pos.resize(c); vel.resize(c); exit.resize(c)
 	hp.resize(c); max_hp.resize(c); spd.resize(c); dmg.resize(c); cash.resize(c); xp.resize(c); coin.resize(c)
 	size.resize(c); atk_cd.resize(c); slow_t.resize(c); slow_m.resize(c); fire_cd.resize(c); shock_t.resize(c)
-	hit_t.resize(c); taunt_t.resize(c); share.resize(c); kind.resize(c)
+	hit_t.resize(c); taunt_t.resize(c); share.resize(c); kind.resize(c); kc.resize(c)
 	eid.resize(c); shield.resize(c); max_shield.resize(c); shock_src.resize(c); quad.resize(c); shred_n.resize(c)
 	flags.resize(c); next_free.resize(c); cur_s.resize(c)
 	# chain the new slots onto the free list, lowest index first
@@ -111,7 +141,7 @@ func alloc(id: int, k: String, p: Vector2) -> int:
 	pos[s] = p; vel[s] = Vector2.ZERO; exit[s] = p
 	hp[s] = 0.0; max_hp[s] = 0.0; spd[s] = 0.0; dmg[s] = 0.0; cash[s] = 0.0; xp[s] = 0.0; coin[s] = 0.0
 	size[s] = 16.0; atk_cd[s] = 0.0; slow_t[s] = 0.0; slow_m[s] = 1.0; fire_cd[s] = 0.0; shock_t[s] = 0.0
-	hit_t[s] = 0.0; taunt_t[s] = 0.0; share[s] = 1.0; kind[s] = k
+	hit_t[s] = 0.0; taunt_t[s] = 0.0; share[s] = 1.0; kind[s] = k; kc[s] = _kcode(k)
 	eid[s] = id; shield[s] = 0; max_shield[s] = 0; shock_src[s] = -1; quad[s] = -1; shred_n[s] = 0
 	flags[s] = 0; cur_s[s] = 0.0
 	eid_slot[id] = s
@@ -190,6 +220,8 @@ func radial_knock(c: Vector2, r: float, k: float) -> void:
 ## Core ring (|p-C| <= stop + size/2) attacks. Effects are an ordered action
 ## log replayed by TowerState. `prm` = [accel_k, sep_k, sep_cap, friction].
 func move(dt: float, frozen: bool, center: Vector2, stop_r: float, r_stop: float, r_fire: float, blk: PackedByteArray, side: int, cell: float, prm: PackedFloat64Array = PackedFloat64Array([6.0, 0.5, 0.35, 6.0])) -> PackedInt32Array:
+	if use_cs():
+		return _move_cs(dt, frozen, center, stop_r, r_stop, r_fire, blk, side, cell, prm)
 	var acts: PackedInt32Array = PackedInt32Array()
 	var has_b: bool = not blk.is_empty()
 	var half: int = side / 2
@@ -347,6 +379,16 @@ func move(dt: float, frozen: bool, center: Vector2, stop_r: float, r_stop: float
 	return acts
 
 
+func _move_cs(dt: float, frozen: bool, center: Vector2, stop_r: float, r_stop: float, r_fire: float, blk: PackedByteArray, side: int, cell: float, prm: PackedFloat64Array) -> PackedInt32Array:
+	var kmax: float = prm[4] if prm.size() > 4 else 12.0
+	var sc: PackedFloat64Array = PackedFloat64Array([dt, 1.0 if frozen else 0.0, center.x, center.y, stop_r, r_stop, r_fire, float(side), cell, prm[0], prm[1], prm[2], exp(-prm[3] * dt), kmax])
+	var r: Array = _cs.call("Move", order, pos, vel, exit, spd, size, kc, flags, slow_t, slow_m, shock_t, hit_t, taunt_t, cur_s, atk_cd, fire_cd, blk, sc)
+	pos = r[0]; vel = r[1]; slow_t = r[2]; slow_m = r[3]; shock_t = r[4]; hit_t = r[5]
+	taunt_t = r[6]; cur_s = r[7]; atk_cd = r[8]; fire_cd = r[9]
+	dirty = true
+	return r[10]
+
+
 ## Fill slot s from a legacy enemy Dictionary (selftest / tool injection).
 ## Missing keys take the defaults the Dict code's .get() fallbacks used.
 func fill(s: int, d: Dictionary) -> void:
@@ -369,6 +411,7 @@ func fill(s: int, d: Dictionary) -> void:
 	hit_t[s] = float(d.get("hit_t", 0.0))
 	taunt_t[s] = float(d.get("taunt_t", 0.0))
 	kind[s] = String(d.get("kind", "drone"))
+	kc[s] = _kcode(kind[s])
 	shield[s] = int(d.get("shield", 0))
 	max_shield[s] = int(d.get("max_shield", shield[s]))
 	shock_src[s] = int(d.get("shock_src", -1))

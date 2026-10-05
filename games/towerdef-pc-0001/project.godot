@@ -34,3 +34,7 @@ textures/canvas_textures/default_texture_filter=3
 [gui]
 
 timers/tooltip_delay_sec=3600.0
+
+[dotnet]
+
+project/assembly_name="Corehold"

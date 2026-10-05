@@ -241,3 +241,21 @@ The profile scatters bodies over the board, so they overlap heavily: the crowd i
 - (7) Enemy HP/damage growth retune and building HP vs targeting: NOT done this round. Still open.
 - (8) Cards.gd gem comment fixed. Outpost stays a nav button (Back to Outpost) for now; it is not a plaza building yet. The 1k/5k/10k GPU profile still needs real hardware: not possible in this container.
 - Gates: --import clean; --quit-after 120 clean; SELFTEST OK; UITEST OK; PLAYTEST FAIL 12 (was 14): t2_by_day5 (day 8), tier3_by_day30 (none), offline_below_active, no_plateau_after_t3, seeds_ok, pc_endless_runs, rd_frontier_band, rd_no_plateau, rd_archetypes_viable, rd_outpost_share, rd_ac27_storage_fill, ac29_wave_gap. Newly passing: first_run_short, ac25_fresh_wall, no_plateau_before_t3, ac38_eco_mix, early_3day_rise. Newly failing: tier3_by_day30, rd_frontier_band, rd_no_plateau (steeper Core track costs slow late progression).
+
+## C# hot loop (csharp-hotloop)
+- **Mono editor (ALL later agents/gates must use it):** `/tmp/claude-0/-home-user-Game/05c614f6-9287-5a9e-902d-6ecd88ec3dfe/scratchpad/godot_mono/Godot_v4.6.3-stable_mono_linux_x86_64/Godot_v4.6.3-stable_mono_linux.x86_64` (`--version` = 4.6.3.stable.mono.official.7d41c59c4). Source zip: github.com/godotengine/godot/releases/download/4.6.3-stable/Godot_v4.6.3-stable_mono_linux_x86_64.zip. .NET 8 SDK from the container.
+- Project is now mixed GDScript/C#: `Corehold.csproj` (Godot.NET.Sdk/4.6.3, net8.0), `Corehold.sln`, `project.godot [dotnet] project/assembly_name="Corehold"`. `--build-solutions` did not generate the csproj on its own, so it was written by hand; then `<mono> --headless --path games/towerdef-pc-0001 --build-solutions --quit` builds it (output in .godot/mono, not committed). On a fresh checkout, build once before the gates.
+- `HordeMove.cs`: pure static `HordeMove.Run(...)` over the packed arrays (order, pos, vel, exit, spd, size, kc, flags, slow/shock/hit/taunt timers, cur_s, atk_cd, fire_cd, blk, scalars). It ports EnemyStore.move() 1:1: move + separation + knockback + stop ring + contact action log. GDScript calls it through an instance method `Move` (GDScript cannot call C# statics); the arrays come back in an Array and are reassigned.
+- Determinism: vectors stay float32 with Godot C++ Vector2 semantics (double scalars are cast to float before vector mul/div; length = sqrtf(x*x+y*y)); scalars are double; the operation order is the same. The friction factor exp(-f*dt) is computed in GDScript and passed in, so there is no cross-libm exp risk. New `EnemyStore.kc` kind-code array (0/1 courier/2 ranged) is kept in sync in alloc/fill.
+- Switch: `EnemyStore.cs_mode` (-1 = GF_TUNE `horde_cs`, default 1 = C# when the build is present; 0 = force GDScript; 1 = force C#). The GDScript body of move() is kept as the reference and fallback. If the C# assembly is missing, it falls back to GDScript.
+- selftest: +2 checks. The C# path is available, and the 120 s fingerprint from the GDScript path == the C# path == HORDE_FP_GOLDEN (9376f262…, unchanged). No literals changed.
+- Profile (`res://horde_prof.gd`, EnemyStore.move() per 1/60 s step, ring of bodies with separation + knockback, this container's CPU):
+
+  | bodies | GDScript ms/move | C# ms/move | speedup | identical pos |
+  |---|---|---|---|---|
+  | 1000 | 4.09 | 0.80 | 5.1x | yes |
+  | 2000 | 8.34 | 1.47 | 5.7x | yes |
+  | 5000 | 23.81 | 2.90 | 8.2x | yes |
+
+  C# time includes the per-call marshalling of ~17 packed arrays, which is now the main C# cost. A next step could keep the arrays C#-side.
+- Gates (mono binary): --import clean; --quit-after 120 clean; SELFTEST OK; UITEST OK; PLAYTEST FAIL 12. The same 12 gates failed as before this change (t2_by_day5, tier3_by_day30, offline_below_active, no_plateau_after_t3, seeds_ok, pc_endless_runs, rd_frontier_band, rd_no_plateau, rd_archetypes_viable, rd_outpost_share, rd_ac27_storage_fill, ac29_wave_gap). These are balance gates; the sim output is bit-identical.

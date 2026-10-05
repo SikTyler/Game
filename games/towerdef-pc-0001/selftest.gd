@@ -670,6 +670,16 @@ func _horde_stages() -> void:
 	var got: String = FP.run_all()
 	_check("HORDE 120 s seeded fingerprint matches the recorded golden (%s)" % got.left(8), got == HORDE_FP_GOLDEN)
 	_check("HORDE fingerprint is deterministic (two runs)", FP.run_all() == got)
+	# C# hot loop (HordeMove.cs) vs the GDScript reference path: bit-identical.
+	var ES = load("res://EnemyStore.gd")
+	var prev_mode: int = ES.cs_mode
+	ES.cs_mode = 0
+	var got_gd: String = FP.run_all()
+	ES.cs_mode = 1
+	var got_cs: String = FP.run_all() if ES.cs_available() else got_gd
+	ES.cs_mode = prev_mode
+	_check("HORDE C# hot loop available (mono build)", ES.cs_available())
+	_check("HORDE C# and GDScript hot loops give the same 120 s fingerprint", got_gd == HORDE_FP_GOLDEN and got_cs == HORDE_FP_GOLDEN)
 	_horde_p34()
 	var S = _fresh()
 	S.spawn_hold = true
