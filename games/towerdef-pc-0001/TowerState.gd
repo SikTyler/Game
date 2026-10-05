@@ -146,6 +146,13 @@ var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var drop_rng: RandomNumberGenerator = RandomNumberGenerator.new()   # loot only: never perturbs waves
 var draft_rng: RandomNumberGenerator = RandomNumberGenerator.new()  # drafts / perks / mutations
 var combat_rng: RandomNumberGenerator = RandomNumberGenerator.new() # crits / wave skip
+var horde_rng: RandomNumberGenerator = RandomNumberGenerator.new()  # FB1 per-body horde loot (own stream)
+var horde_loot_wave: int = -1
+var horde_loot_wave_val: float = 0.0
+var horde_loot_total: float = 0.0
+const HORDE_LOOT_P := 0.08        # common: ~1 in 12 bodies
+const HORDE_LOOT_COIN := 0.25     # low value per drop
+const HORDE_LOOT_CAP_PER_WAVE := 3.0   # coins per wave cap = this x wave
 # Separate streams keep the wave sequence identical whatever the player picks
 # or shoots, so two policies on one seed face the same waves.
 var save: Dictionary = {}
@@ -201,7 +208,7 @@ var xp: float = 0.0
 var level: int = 1
 var coins_run: float = 0.0
 var kills: int = 0
-var horde_mult: int = TuneRef.horde_mult()   # HORDE Phase 2: bodies per plan entry
+var horde_mult: int = 1   # classic in tests; Main sets Tune.horde_mult() for real runs   # HORDE Phase 2: bodies per plan entry
 var agg: bool = false   # aggregate per-hit/per-kill events (set from horde_mult in tick)
 var core_run_lvl: int = 0         # mirror of tracks["dmg"] (legacy name the view reads)
 var spawn_hold: bool = false      # test/tool hook: suppress wave spawns (bosses included)
@@ -296,6 +303,7 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	drop_rng.seed = seed_value ^ 0x5EED_D20B
 	draft_rng.seed = seed_value ^ 0x0D2A_F7C3
 	combat_rng.seed = seed_value ^ 0x00C0_BA75
+	horde_rng.seed = seed_value ^ 0x40AD_1007
 	run_seed = seed_value
 	save = save_data
 	now_unix = now
@@ -2048,6 +2056,21 @@ func _troop_heal(tid: int, amt: float) -> void:
 			return
 
 
+## FB1: low-value, common per-body loot roll (horde only). Own RNG stream, so
+## waves / drops / drafts stay identical; per-wave value is capped.
+func _horde_loot() -> void:
+	if horde_loot_wave != wave:
+		horde_loot_wave = wave
+		horde_loot_wave_val = 0.0
+	var cap: float = HORDE_LOOT_CAP_PER_WAVE * float(maxi(1, wave))
+	if horde_loot_wave_val >= cap or horde_rng.randf() >= HORDE_LOOT_P:
+		return
+	var g: float = minf(HORDE_LOOT_COIN, cap - horde_loot_wave_val)
+	horde_loot_wave_val += g
+	horde_loot_total += g
+	coins_run += g
+
+
 func _reap(ev: Array) -> void:
 	var alive: PackedInt32Array = PackedInt32Array()
 	var dead: PackedInt32Array = PackedInt32Array()
@@ -2075,6 +2098,8 @@ func _reap(ev: Array) -> void:
 		kills += 1
 		var kind: String = en.kind[ed]
 		ev.append({"t": "kill", "pos": pos, "cash": gain, "kind": kind})
+		if horde_mult > 1:
+			_horde_loot()
 		if kind == "boss":
 			_boss_bounty(pos, ev)
 		elif kind == "splitter":

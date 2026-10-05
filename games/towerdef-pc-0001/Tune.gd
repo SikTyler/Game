@@ -36,4 +36,4 @@ static func seed_of(default_value: int) -> int:
 ## the entry's HP / damage / rewards; kill counts are per body (owner C2), so
 ## kill-count thresholds scale by this factor.
 static func horde_mult() -> int:
-	return clampi(int_of("horde_mult", 1), 1, 16)
+	return clampi(int_of("horde_mult", 4), 1, 16)

@@ -1,6 +1,6 @@
 extends RefCounted
 ## Cards (SPEC A7). save["cards"] = {owned:{id:{lvl,copies}}, equipped:[id], slots:int}.
-## Gems are earn-only; chests are the only way to get cards.
+## Cards come from chests only (no gems, no paid currency).
 
 const CardDB := preload("res://data/CardDB.gd")
 const TuneRef := preload("res://Tune.gd")

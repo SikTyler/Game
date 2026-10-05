@@ -31,7 +31,7 @@ const DEFAULTS: Dictionary = {
 		"ui_scale": 1.0, "shake": true, "dmg_numbers": "full", "reduce_motion": false, "gore": "low"},
 	"audio": {"Master": 0.8, "Music": 0.7, "SFX": 0.9, "UI": 0.8, "mute": false, "mute_unfocused": true},
 	"controls": {"deadzone": 0.5, "tooltip_delay": 0.4, "edge_pan": false, "invert_zoom": false, "glyphs": "auto"},
-	"gameplay": {"pause_on_draft": true, "pause_on_focus_loss": true, "confirm_sell": false, "default_speed": 1.0,
+	"gameplay": {"pause_on_draft": false, "pause_on_focus_loss": true, "confirm_sell": false, "default_speed": 1.0,
 		"colorblind": "off", "language": "en"},
 	"keybinds": {},   # {action: [event dicts]}; empty = defaults
 }
@@ -79,7 +79,7 @@ static func normalize(src: Dictionary) -> Dictionary:
 	c["glyphs"] = _pick(String(c_in.get("glyphs", "auto")), GLYPHS, "auto")
 	var g_in: Dictionary = src.get("gameplay", {}) if src.get("gameplay", {}) is Dictionary else {}
 	var g: Dictionary = d["gameplay"]
-	g["pause_on_draft"] = bool(g_in.get("pause_on_draft", true))
+	g["pause_on_draft"] = bool(g_in.get("pause_on_draft", false))
 	g["pause_on_focus_loss"] = bool(g_in.get("pause_on_focus_loss", true))
 	g["confirm_sell"] = bool(g_in.get("confirm_sell", false))
 	g["default_speed"] = clampf(float(g_in.get("default_speed", 1.0)), 0.5, 4.0)

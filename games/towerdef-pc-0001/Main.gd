@@ -354,6 +354,7 @@ func start_run(seed_override: int = 0) -> void:
 		return
 	BaseMeta.select_tier(save, view_tier)
 	S = TowerState.new()
+	S.horde_mult = TuneRef.horde_mult()   # FB1: horde on by default (per-body kills)
 	_clear_fx()
 	run_missions = 0
 	run_loot = []
@@ -1227,7 +1228,7 @@ func _process(delta: float) -> void:
 ## Settings > Gameplay "Pause on draft": an open offer freezes engine time
 ## (otherwise the engine's own 20% slow-mo applies).
 func _draft_hold() -> bool:
-	if S == null or not bool(((Settings.normalize(settings)["gameplay"]) as Dictionary).get("pause_on_draft", true)):
+	if S == null or not bool(((Settings.normalize(settings)["gameplay"]) as Dictionary).get("pause_on_draft", false)):
 		return false
 	return S.draft.size() > 0 or S.perk_offer.size() > 0 or S.mutation_offer.size() > 0
 

@@ -688,6 +688,14 @@ func _horde_stages() -> void:
 	S.eh.damage(TowerState.CENTER, 310.0, 1.0, func(sl: int, amt: float) -> void: hits.append(sl))
 	_check("HORDE hash damage(): every live body in radius, spawn order", hits == [0, 2, 1])
 	_check("HORDE density counts exact neighbours", S.eh.density(TowerState.CENTER + Vector2(0, -300), 1.0) == 1)
+	# ---- FB1: per-body horde loot is common, low value and capped per wave
+	var SL = _fresh()
+	SL.horde_mult = 4
+	SL.wave = 2
+	var c0: float = SL.coins_run
+	for _i in range(2000):
+		SL._horde_loot()
+	_check("FB1 horde loot: drops happen and cap at 3 x wave per wave", SL.horde_loot_total > 0.0 and is_equal_approx(SL.coins_run - c0, 6.0))
 	# ---- Phase 2: horde_mult conservation + event aggregation
 	var S1 = _fresh()
 	S1.spawn_hold = true
@@ -2047,7 +2055,7 @@ func _pc_shell_stages() -> void:
 		"ACH_TIER_8": [{"best_wave_by_tier": {"1": 9999, "2": 9999, "3": 9999, "4": 9999, "5": 9999, "6": 9999, "7": 9999}}, [{"t": "meta"}], -1.0],
 		"ACH_FIRST_BOSS": [{}, [{"t": "boss_bounty"}], -1.0],
 		"ACH_BOSS_50": [{"stats": {"bosses": 50}}, [{"t": "meta"}], -1.0],
-		"ACH_KILLS_100K": [{"stats": {"kills": 100000}}, [{"t": "meta"}], -1.0],
+		"ACH_KILLS_100K": [{"stats": {"kills": 100000 * preload("res://Tune.gd").horde_mult()}}, [{"t": "meta"}], -1.0],
 		"ACH_RING_3": [{"unlocked": [ring3]}, [{"t": "meta"}], -1.0],
 		"ACH_FULL_BASE": [{"unlocked": full}, [{"t": "meta"}], -1.0],
 		"ACH_ALL_SYNERGY": [{}, [{"t": "synergies", "n": AchievementDB.SYNERGY_TARGET}], -1.0],
