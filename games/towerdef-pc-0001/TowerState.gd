@@ -1484,7 +1484,7 @@ func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF, marked: bool = f
 		# horde body: 1/m of the entry (shields stay whole; elites never split)
 		en.share[e] = share
 		# FB2 retune: the x4 horde is harder (area/crowd tools hit many bodies)
-		var hh: float = TuneRef.num("pc_horde_hp", 1.4)
+		var hh: float = TuneRef.num("pc_horde_hp", 1.5)
 		en.hp[e] = en.hp[e] * share * hh
 		en.max_hp[e] = en.max_hp[e] * share * hh
 		en.dmg[e] = en.dmg[e] * share * TuneRef.num("pc_horde_dmg", 1.25)

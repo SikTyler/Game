@@ -752,7 +752,7 @@ func _horde_stages() -> void:
 		sum_hp += S4.en.hp[sl]
 		sum_cash += S4.en.cash[sl]
 		sum_dmg += S4.en.dmg[sl]
-	_check("HORDE m=4: 4 bodies, HP / cash / contact dmg conserved", S4.en.count() == 4 and absf(sum_hp - S1.en.hp[0] * 1.4) < 1e-6 and absf(sum_cash - S1.en.cash[0]) < 1e-9 and absf(sum_dmg - S1.en.dmg[0] * 1.25) < 1e-6)   # FB2 (deliberate): horde HP x1.4 / dmg x1.25 (pc_horde_hp/dmg); cash still conserved
+	_check("HORDE m=4: 4 bodies, HP / cash / contact dmg conserved", S4.en.count() == 4 and absf(sum_hp - S1.en.hp[0] * 1.5) < 1e-6 and absf(sum_cash - S1.en.cash[0]) < 1e-9 and absf(sum_dmg - S1.en.dmg[0] * 1.25) < 1e-6)   # FB2 (deliberate): horde HP x1.5 / dmg x1.25 (pc_horde_hp/dmg); cash still conserved
 	_check("HORDE m=4: body budget scales (MAX_ENEMIES x m)", S4.max_bodies() == TowerState.MAX_ENEMIES * 4 and S1.max_bodies() == TowerState.MAX_ENEMIES)
 	S4.stats["armor"] = 2.0
 	S4.stats["dr"] = 0.0

@@ -259,3 +259,38 @@ The profile scatters bodies over the board, so they overlap heavily: the crowd i
 
   C# time includes the per-call marshalling of ~17 packed arrays, which is now the main C# cost. A next step could keep the arrays C#-side.
 - Gates (mono binary): --import clean; --quit-after 120 clean; SELFTEST OK; UITEST OK; PLAYTEST FAIL 12. The same 12 gates failed as before this change (t2_by_day5, tier3_by_day30, offline_below_active, no_plateau_after_t3, seeds_ok, pc_endless_runs, rd_frontier_band, rd_no_plateau, rd_archetypes_viable, rd_outpost_share, rd_ac27_storage_fill, ac29_wave_gap). These are balance gates; the sim output is bit-identical.
+
+## FB2 x4 retune (horde-x4-retune)
+- Horde x4 is the shipped ruleset (`Tune.horde_mult()` = 4; Main + now the playtest bot set it). Every FB2 sim rule below is gated on `horde_mult > 1`. So the classic (m=1) sims, the HORDE_FP golden (9376f262…) and the C#/GDScript parity check do not change.
+- Bodies scale back: a horde body's size (art, hit box, separation radius, stop ring and knockback mass, since all of them read `en.size`) is x sqrt(share), with a floor of `pc_horde_size_floor` 0.45. At x4 that is half size, so a pack takes the same area. The view draws the art at `en.size`, so the SVGs scale with it.
+- Bigger map, same base scale: `spawn_r()` gap x `pc_horde_map` 1.8. New `view_r()` (the old ring) is what `Main.world_xform` frames, so the grid's on-screen scale does not change and packs walk in from beyond the view edge.
+- Loot: common, low-value drops are now pool-funded. 35% of each horde body's kill coins goes to `horde_loot_pool`. Drops (8%, <= 0.25 each) pay out from the pool, and whatever is left is swept to coins at wave end or on death. So a wave's loot value equals what its kills were worth. The old cap of 3 x wave is gone.
+- Crowd tools (identity kept):
+  - Gun: overkill carry gets +2 hops (`pc_horde_carry_hops`).
+  - Tesla: +2 chains (`pc_horde_chains`).
+  - Flak: the burst also hits flyers within 0.45 cells for 50%.
+  - Railgun already pierces. Mortar and Frost already hit an area.
+- Omnidirectional rewrites:
+  - Barricade: an aura slows every body within 1.5 cells on any side by 30% (`_wall_auras`).
+  - Rifle Barracks: riflemen seek and leash around the Core (grid half + 3 / + 4.5 cells), idling at their hut's post. This needed per-troop `seek`/`leash`/`post` in Troops.gd.
+  - Lane Beacon is now "Signal Beacon". Its sim was already a 2-cell radius; the text was updated in BuildingDB and PickDB.
+- Difficulty: horde HP x1.4 (`pc_horde_hp`) and contact dmg x1.25 (`pc_horde_dmg`). Cash per entry is still conserved.
+- Selftest:
+  - Deliberate literal changes:
+    - "FB1 horde loot" now seeds a 6.0 pool instead of relying on the 3 x wave cap. The same `== 6.0` assertion holds.
+    - The "HORDE m=4 conserved" check now expects HP x1.4 and dmg x1.25; cash is still exact.
+  - New checks: drops <= pool, wave-end sweep, half-size bodies, spawn ring > view ring with the view unchanged, Barricade aura.
+- Gate changes:
+  - `first_run_short` 200-300 s -> 300-480 s. Reason: owner FB2 asks for short first runs of ~5-8 min, and the bigger x4 map adds approach time.
+  - The playtest bot now plays horde x4. Reason: the gates must measure the shipped ruleset; before this they ran classic m=1.
+- Playtest iter 1 (crowd tools, no HP/dmg bump): 14 FAIL. Runs were far too easy: first run 498.7 s, t2 day 5, t3 day 13, fresh weapon waves ~21.
+- Playtest iter 2 (horde HP x1.4, dmg x1.25): 16 FAIL. First run 437.4 s and first_run_short PASS. Fresh median wave 16 (ac25 wants 8-15). t2 day 8.
+- Playtest iter 3 (SHIPPED; horde HP x1.5, dmg x1.25): **13 FAIL** (was 12 before FB2, but measured on classic m=1; this is the first horde-measured run).
+  - Metrics: first run 423.3 s (~7 min, PASS); fresh median wave 15.0; active 1470 coins/min vs offline 290.
+  - Failing: t2_by_day5, no_plateau_before_t3, mix_beats_weapon, ac38_eco_mix, no_plateau_after_t3, seeds_ok, pc_endless_runs, rd_frontier_band, rd_archetypes_viable, rd_outpost_share, rd_ac27_storage_fill, ac29_wave_gap, ac25_fresh_wall.
+  - Now passing vs pre-FB2: tier3_by_day30, offline_below_active, rd_no_plateau, first_run_short.
+  - Open:
+    - ac25 still fails on its other clauses; the median is in band.
+    - Outpost storage/share gates belong to the Outpost redesign task.
+    - t2_by_day5 needs a growth (research/parts) pass, not more run difficulty.
+- Gates (mono): --import clean; --quit-after 120 clean; SELFTEST OK; UITEST OK; PLAYTEST FAIL 13. Shots (fb2shots 16/21) confirm the grid keeps its on-screen size while bodies are half-size and packs enter from beyond the view.
