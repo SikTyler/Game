@@ -1,0 +1,168 @@
+Godot Engine v4.6.3.stable.official.7d41c59c4 - https://godotengine.org
+
+UITEST PASS: PC: boots to the main menu 
+UITEST PASS: PC: slot picker shows 3 slots 
+UITEST PASS: PC-U2 menu: buttons have tooltips, press mode, >= 40 px, inside the window []
+UITEST PASS: PC: slot 1 loads to the hub (Play tab) 
+UITEST PASS: PC-U1: no embedded mobile column (one unscaled Control layer) 
+UITEST PASS: PC-U1: overlays ignore the mouse 
+UITEST PASS: PC-U2 play: buttons have tooltips, press mode, >= 40 px, inside the window []
+UITEST PASS: away modal shown at boot (only Collect clickable) 
+UITEST PASS: Collect pays the Outpost's stored coins 1200
+UITEST PASS: missions rolled at boot 
+UITEST PASS: tier > selects tier 2 
+UITEST PASS: locked tier 3 shown, START disabled 
+UITEST PASS: tier < back to tier 1 
+UITEST PASS: BAY: K opens the Core Bay 
+UITEST PASS: PC-U2 bay: buttons have tooltips, press mode, >= 40 px, inside the window []
+UITEST PASS: BAY: clicking a locked Core shows it (cannot be activated) 
+UITEST PASS: BAY: Level up spends coins and raises the Core level 
+UITEST PASS: BAY: U levels the viewed Core 
+UITEST PASS: BAY: inventory shows owned parts 
+UITEST PASS: BAY: dragging a part onto its slot installs it ["1", "", "", "", "", "", ""]
+UITEST PASS: BAY: a Barrel dropped on a Frame slot is refused 
+UITEST PASS: BAY: Equip installs into the open Barrel slot 
+UITEST PASS: BAY: Unequip removes it 
+UITEST PASS: BAY: preset tab 2 switches loadouts (empty) 
+UITEST PASS: BAY: key 1 returns to loadout 1 
+UITEST PASS: BAY: slot filter shows only Barrels 2
+UITEST PASS: BAY: part Lv up spends Scrap 
+UITEST PASS: BAY: Lock protects a part (Salvage disabled) 
+UITEST PASS: BAY: Salvage turns a part into Scrap 
+UITEST PASS: BAY: Make active switches the run Core 
+UITEST PASS: BAY: back to Bastion 
+UITEST PASS: BAY: hovering a slot shows the part tooltip with + and - lines Plating  Lv2  (Common Frame)
++30% Core HP
+-4% Core attack rate
+Click to select · right-click / Unequip to remove
+UITEST PASS: CRATE: J opens Crates 
+UITEST PASS: PC-U2 crates: buttons have tooltips, press mode, >= 40 px, inside the window []
+UITEST PASS: CRATE: Field Crate costs its coin price and yields a part 
+UITEST PASS: CRATE: the reveal plays from the open events 
+UITEST PASS: CRATE: Skip reveals all (Close shown) 
+UITEST PASS: CRATE: Close clears the stage 
+UITEST PASS: CRATE: Supply Crate with a Key opens 2 parts 
+UITEST PASS: OP: O opens the Outpost 
+UITEST PASS: PC-U2 outpost: buttons have tooltips, press mode, >= 40 px, inside the window []
+UITEST PASS: OP: palette click arms the building 
+UITEST PASS: OP: hover preview validates the footprint and the Relay link { "err": "", "linked": true, "bonus": 0.1, "delta": 0.1 }
+UITEST PASS: OP: hover over the Research Hall shows the refusal { "err": "occupied", "linked": false, "bonus": 0.0, "delta": 0.0 }
+UITEST PASS: OP: click on the map places it (coins spent, builder busy) 
+UITEST PASS: OP: the new building is selected 
+UITEST PASS: OP: Skip finishes the build for gems 
+UITEST PASS: OP: dragging a Conduit from the palette places it 
+UITEST PASS: OP: Esc disarms 
+UITEST PASS: OP: clicking a building selects it 
+UITEST PASS: OP: U queues an upgrade 
+UITEST PASS: OP: the upgrade completes after Skip 
+UITEST PASS: OP: M picks the building up 
+UITEST PASS: OP: click drops it at the new spot 
+UITEST PASS: OP: R rotates the armed footprint 
+UITEST PASS: OP: Delete demolishes the selection 
+UITEST PASS: OP: clicking a stocked generator collects it 
+UITEST PASS: OP: Collect all is locked below Relay Lv3 
+UITEST PASS: OP: Collect all collects every building 
+UITEST PASS: OP: clicking locked land selects the plot 
+UITEST PASS: OP: buying a plot opens the land 
+UITEST PASS: OP: right-drag pans the map (120.0, 60.0)
+UITEST PASS: OP: wheel zooms the map 
+UITEST PASS: OP: blueprint Save stores the layout 
+UITEST PASS: OP: Export produces a layout code 
+UITEST PASS: OP: Load rebuilds the saved blueprint 
+UITEST PASS: RES: L opens Research 
+UITEST PASS: PC-U2 research: buttons have tooltips, press mode, >= 40 px, inside the window []
+UITEST PASS: RES: click a project starts it 
+UITEST PASS: RES: Rush finishes it for gems 
+UITEST PASS: CARDS: C opens Cards 
+UITEST PASS: PC-U2 cards: buttons have tooltips, press mode, >= 40 px, inside the window []
+UITEST PASS: CARDS: Open Chest (sfx card_open) 
+UITEST PASS: CARDS: click a card equips it 
+UITEST PASS: CARDS: click an equipped slot unequips 
+UITEST PASS: MIS: M opens Missions 
+UITEST PASS: PC-U2 missions: buttons have tooltips, press mode, >= 40 px, inside the window []
+UITEST PASS: MIS: streak claim 
+UITEST PASS: MIS: mission claims 
+UITEST PASS: MIS: all-clear bonus 
+UITEST PASS: RF: Y opens Reforge 
+UITEST PASS: PC-U2 reforge: buttons have tooltips, press mode, >= 40 px, inside the window []
+UITEST PASS: RF: Reforge is locked below the gate 
+UITEST PASS: RF: first click asks to confirm (nothing reset) 
+UITEST PASS: RF: Keep playing cancels 
+UITEST PASS: RF: confirmed Reforge banks shards and resets coins 13
+UITEST PASS: RF: Reforge keeps owned parts 
+UITEST PASS: RF: a branch node needs the root first 
+UITEST PASS: RF: tree nodes buy with shards 
+UITEST PASS: PC-S1: settings opens on 4 tabs 
+UITEST PASS: PC-U2 settings: buttons have tooltips, press mode, >= 40 px, inside the window []
+UITEST PASS: PC-S1: VSync cycles and persists to settings.cfg 
+UITEST PASS: PC-S2: remap button enters capture 
+UITEST PASS: PC-S2: captured key rebinds the action P
+UITEST PASS: PC-S2: conflicting key swaps bindings 
+UITEST PASS: PC-S2: reset all restores defaults 
+UITEST PASS: PC-U7: H opens stats 
+UITEST PASS: PC-U2 records: buttons have tooltips, press mode, >= 40 px, inside the window []
+UITEST PASS: PC-U7: achievements tab 
+UITEST PASS: PC-U3: Esc closes the overlay 
+UITEST PASS: PC: mode select lists modifiers 
+UITEST PASS: PC: toggling a modifier updates run options 
+UITEST PASS: RUN: START RUN starts a run on an empty grid 
+UITEST PASS: sfx: wave_start on run start 
+UITEST PASS: PC-U2 run: buttons have tooltips, press mode, >= 40 px, inside the window []
+UITEST PASS: PC-U1: top bar, left, field, right, hotbar do not overlap at 1920x1080 
+UITEST PASS: PC-U1: the whole 7x7 grid is inside the field 
+UITEST PASS: PC-G6: cash and Core HP are shown once (right panel only) 1/1
+UITEST PASS: PC-U2 run 1280x720: buttons have tooltips, press mode, >= 40 px, inside the window []
+UITEST PASS: PC-U2 run 1280x800: buttons have tooltips, press mode, >= 40 px, inside the window []
+UITEST PASS: RUN: speed button cycles game speed 
+UITEST PASS: RUN: F steps the speed down 
+UITEST PASS: RUN: clicking a Core track buys a level 
+UITEST PASS: RUN: Shift+2 buys the Rate track 
+UITEST PASS: RUN: hovering a track shows its tooltip Eco track: +0.4 cash/s and +5 interest cap per level
+Level 0 / 50  ·  next $25  [Shift+4]
+UITEST PASS: RUN: hovering the Core shows its attack + trait Bastion Core  Lv1
+Auto Cannon: Shell at the nearest enemy; 0.5-cell splash at 40%
+Trait Steadfast: +1% dmg and +1% cash/s per building on the grid (max 20)
+UITEST PASS: RUN: the draft panel shows the cards 
+UITEST PASS: PC-U2 draft: buttons have tooltips, press mode, >= 40 px, inside the window []
+UITEST PASS: RUN: free reroll re-rolls the hand 
+UITEST PASS: RUN: reroll now shows its cash cost 
+UITEST PASS: RUN: Banish arms banish mode 
+UITEST PASS: RUN: clicking a card in banish mode banishes it 
+UITEST PASS: RUN: Q takes draft card 1 (place mode) draft [] pending 'gun' perk 0 mut 0 over false
+UITEST PASS: RUN: click a glowing cell places it 
+UITEST PASS: sfx: place clip 
+UITEST PASS: RUN: dragging a draft card onto a cell places it 
+UITEST PASS: RUN: Target button cycles the weapon's mode 
+UITEST PASS: RUN: the hotbar shows the specials 
+UITEST PASS: RUN: key 1 casts special 1 (cooldown starts) 
+UITEST PASS: RUN: casting on cooldown is refused 
+UITEST PASS: RUN: a targeted special arms the aim cursor 
+UITEST PASS: RUN: right-click cancels the aim 
+UITEST PASS: RUN: clicking the field drops the Orbital Strike there 
+UITEST PASS: RUN: zoom clamps at 1.4 
+UITEST PASS: RUN: Space pauses (engine time frozen) 
+UITEST PASS: PC-U2 pause: buttons have tooltips, press mode, >= 40 px, inside the window []
+UITEST PASS: RUN: Space resumes 
+UITEST PASS: RUN: V moves the lane focus 
+UITEST PASS: RUN: Ctrl+R retries the same seed 
+UITEST PASS: RUN: Abandon ends the run -> results (banked) 
+UITEST PASS: RUN: results offer Back to base + Retry seed 
+UITEST PASS: PC-U2 results: buttons have tooltips, press mode, >= 40 px, inside the window []
+UITEST PASS: sfx: game_over clip 
+UITEST PASS: RUN: Back to base returns to the hub 
+UITEST PASS: PC-U5: pad input switches glyphs 
+UITEST PASS: PC-U5: play focus chain has no dead ends (pad) []
+UITEST PASS: PC-U5: bay focus chain has no dead ends (pad) []
+UITEST PASS: PC-U5: crates focus chain has no dead ends (pad) []
+UITEST PASS: PC-U5: outpost focus chain has no dead ends (pad) []
+UITEST PASS: PC-U5: research focus chain has no dead ends (pad) []
+UITEST PASS: PC-U5: reforge focus chain has no dead ends (pad) []
+UITEST PASS: PC-U5: stick moves the grid cursor once per push 25
+UITEST PASS: PC-U5: A places at the cursor 
+UITEST PASS: PC-U5: keyboard switches glyphs back; Esc leaves results 
+UITEST PASS: PC: Menu returns to the slot picker 
+UITEST PASS: PC-U6: delete asks for confirmation first 
+UITEST PASS: PC-U6: confirmed delete removes the slot 
+UITEST PASS: PC: new game in the emptied slot 
+UITEST OK
+EXIT 0
