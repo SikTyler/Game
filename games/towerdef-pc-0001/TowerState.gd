@@ -181,9 +181,6 @@ var wave_spawned: int = 0         # planned entries actually spawned this wave
 var last_wave_spawned: Dictionary = {}  # {wave, n} of the wave that just ended
 var wave_started: bool = false    # wave 1 starts after the opening telegraph lead
 var grid_n: int = 3               # run grid side (Research unlock)
-var bld_hp: Array = []            # N x float: current building HP (0 = none)
-var bld_lost: Array = []          # ids of buildings destroyed this run
-var stats_prev_max: Dictionary = {} # bld_max of the previous recompute
 var wave_cash0: float = 0.0       # cash_earned at wave start
 var ironclad: float = 0.0         # Ironclad modifier: non-crit hits deal this much less
 
@@ -229,7 +226,8 @@ var mass_wave_peak: int = 0       # peak alive bodies during the current wave
 var mass_spawned: int = 0         # bodies spawned this run (weights)
 var mass_leaked: int = 0          # bodies that reached the Core this run (weights)
 var mass_kills_wave: Dictionary = {}   # wave -> kills credited while it was the current wave
-var mass_wall_hits: Dictionary = {}    # building slot -> body hits this wave (Wall of Flesh)
+var mass_wall_slowed: Dictionary = {}  # Wall slot -> {body eid: true} slowed this wave (Wall of Flesh)
+const WALL_FLESH: int = 2000
 var burning: PackedInt32Array = PackedInt32Array()   # slots on fire (Flamer)
 var burn_acc: float = 0.0                             # Flamer burn tick accumulator
 var kills_by_weapon: Dictionary = {}                  # MASS_HORDE §D6: source -> kills this run
@@ -391,15 +389,11 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	grid_n = grid_for_level(glv)
 	if opts.has("grid"):
 		grid_n = clampi(int(opts["grid"]), 3, 10)
-	bld_hp.clear()
-	bld_lost = []
-	stats_prev_max = {}
 	for i in N:
 		slots.append({})
 		unlocked.append(i != CORE_SLOT and in_grid_n(i, grid_n))
 		cooldowns.append(0.0)
 		target_modes.append("nearest")
-		bld_hp.append(0.0)
 	en.clear()
 	next_eid = 1
 	draft.clear()
@@ -422,7 +416,7 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	mass_spawned = 0
 	mass_leaked = 0
 	mass_kills_wave = {}
-	mass_wall_hits = {}
+	mass_wall_slowed = {}
 	burning = PackedInt32Array()
 	plan_lod = {}
 	surge_acc = 0.0
@@ -706,7 +700,6 @@ func compute_stats() -> Dictionary:
 		"kill_cash": 1.0,
 		"weapons": [],
 		"links": [],
-		"bld_max": {},
 		"bounties": [],
 		"huts": [],
 		"interest_rate": float(cd["irate"]),
@@ -798,7 +791,7 @@ func compute_stats() -> Dictionary:
 				st["shield_max"] = float(st["shield_max"]) + 60.0 * m2
 				st["shield_regen"] = float(st["shield_regen"]) + 6.0 * m2
 			"barricade":
-				pass   # a high-HP blocker (see bld_max below)
+				pass   # the Wall: a cheap blocker with a slow aura (_wall_auras)
 			"mine":
 				cash_add += 0.8 * m2
 			"oilmill":
@@ -826,17 +819,6 @@ func compute_stats() -> Dictionary:
 					hut["seek"] = gh + TuneRef.num("pc_rifle_seek", 3.0)
 					hut["leash"] = gh + TuneRef.num("pc_rifle_leash", 4.5)
 				(st["huts"] as Array).append(hut)
-	# Building HP (owner feedback #1): enemies attack buildings in their way.
-	# L1 HP x1.35/level, x enemy dmg growth so a building holds the same number
-	# of hits at any wave; Barricade is the dedicated blocker.
-	var bmax: Dictionary = st["bld_max"]
-	var hp_w: float = pow(dmg_growth, float(wave - 1)) * hp_mult
-	for i in N:
-		var bid: String = id_at(i)
-		if bid == "":
-			continue
-		var base_hp: float = TuneRef.num("pc_wall_hp", 200.0) if bid == "barricade" else TuneRef.num("pc_bld_hp", 40.0)
-		bmax[i] = base_hp * pow(1.35, float(lvl_at(i) - 1)) * hp_w * maxf(0.1, 1.0 + pf("bld_hp"))
 	# Core sheet with tracks, packs, legacy core levels, Insight.
 	var arm_n: int = tracks["armor"]
 	st["max_hp"] = (float(st["max_hp"]) + hp_add) * (1.0 + TRACK_ARMOR_HP * float(arm_n)) * pow(TRACK_ECO_HP, float(tracks["eco"])) * (1.0 + 0.20 * float(pack_n("pk_fort"))) * maxf(0.5, 1.0 - 0.05 * float(pack_n("pk_overclock"))) * max_hp_mult * (1.0 + float(ins.get("in_hp", 0.0))) * maxf(0.1, 1.0 + pf("core_hp"))
@@ -899,7 +881,6 @@ func compute_stats() -> Dictionary:
 func recompute() -> void:
 	var old_max: float = float(stats.get("max_hp", 0.0))
 	stats = compute_stats()
-	_sync_bld_hp()
 	var new_max: float = float(stats["max_hp"])
 	if old_max > 0.0 and new_max > old_max:
 		hp += new_max - old_max   # HP gains heal by their bonus
@@ -921,59 +902,6 @@ func _troop_mods() -> Dictionary:
 		"extra": int(pf("troop_count")),
 		"cell_px": cpx(),
 	}
-
-
-## Building HP follows the board: a new building starts full, a level-up or
-## wave growth adds its HP gain, an empty cell holds 0.
-func _sync_bld_hp() -> void:
-	var bm: Dictionary = stats.get("bld_max", {})
-	for i in N:
-		if not bm.has(i):
-			bld_hp[i] = 0.0
-			continue
-		var mx: float = float(bm[i])
-		var old: float = float(stats_prev_max.get(i, 0.0))
-		if float(bld_hp[i]) <= 0.0:
-			bld_hp[i] = mx
-		elif mx > old:
-			bld_hp[i] = minf(mx, float(bld_hp[i]) + (mx - old))
-		else:
-			bld_hp[i] = minf(mx, float(bld_hp[i]))
-	stats_prev_max = bm.duplicate()
-
-
-## Wave start: every building repairs pc_bld_wave_heal of its max HP.
-func _repair_buildings(ev: Array) -> void:
-	var bm: Dictionary = stats.get("bld_max", {})
-	var f: float = TuneRef.num("pc_bld_wave_heal", 0.5)
-	var n: int = 0
-	for i in bm.keys():
-		var mx: float = float(bm[i])
-		if float(bld_hp[int(i)]) < mx:
-			bld_hp[int(i)] = minf(mx, float(bld_hp[int(i)]) + f * mx)
-			n += 1
-	if n > 0:
-		ev.append({"t": "bld_repair", "n": n, "frac": f})
-
-
-## Building max HP on cell i (0 when empty).
-func bld_max(i: int) -> float:
-	return float((stats.get("bld_max", {}) as Dictionary).get(i, 0.0))
-
-
-## A building at 0 HP is destroyed and lost for the rest of the run.
-func _destroy_building(i: int, ev: Array) -> void:
-	var id: String = id_at(i)
-	if id == "":
-		return
-	slots[i] = {}
-	bld_hp[i] = 0.0
-	cooldowns[i] = 0.0
-	target_modes[i] = "nearest"
-	bld_lost.append(id)
-	ev.append({"t": "building_destroyed", "slot": i, "id": id, "pos": slot_pos(i)})
-	if pending_upgrade != "" and upgrade_targets(pending_upgrade).is_empty():
-		ev.append_array(cancel_upgrade())
 
 
 # ------------------------------------------------------------------ curves
@@ -1074,7 +1002,6 @@ func tick(delta: float) -> Array:
 ##   {"t":"kills","n","cash","by_kind":{kind:n},"pos_sample":[<=16]}
 ##   {"t":"hits","n","sum","crit_n","top":[{eid,pos,amt,crit}] (<=8 largest)}
 ##   {"t":"core_hits","n","dmg","shots","pos_sample":[<=8]}
-##   {"t":"bld_hits","n","dmg"}   (per-body building hits; destroys stay single)
 const AGG_POS: int = 16
 const AGG_TOP: int = 8
 static func aggregate_events(ev: Array, at: int = 0) -> void:
@@ -1091,8 +1018,6 @@ static func aggregate_events(ev: Array, at: int = 0) -> void:
 	var cshots: int = 0
 	var cdmg: float = 0.0
 	var cpos: Array = []
-	var bn: int = 0
-	var bdmg: float = 0.0
 	for i in range(at, ev.size()):
 		var e: Dictionary = ev[i]
 		var t: String = String(e.get("t", ""))
@@ -1126,12 +1051,9 @@ static func aggregate_events(ev: Array, at: int = 0) -> void:
 			cdmg += float(e.get("dmg", 0.0))
 			if cpos.size() < AGG_TOP:
 				cpos.append(e["pos"])
-		elif t == "bld_hit":
-			bn += 1
-			bdmg += float(e.get("dmg", 0.0))
 		else:
 			keep.append(e)
-	if kn == 0 and hn == 0 and cn == 0 and bn == 0:
+	if kn == 0 and hn == 0 and cn == 0:
 		return
 	ev.resize(at)
 	ev.append_array(keep)
@@ -1141,8 +1063,6 @@ static func aggregate_events(ev: Array, at: int = 0) -> void:
 		ev.append({"t": "kills", "n": kn, "cash": kcash, "by_kind": by_kind, "pos_sample": kpos})
 	if cn > 0:
 		ev.append({"t": "core_hits", "n": cn, "dmg": cdmg, "shots": cshots, "pos_sample": cpos})
-	if bn > 0:
-		ev.append({"t": "bld_hits", "n": bn, "dmg": bdmg})
 
 
 ## Mass runs: one "hits" summary per substep straight from counters (the
@@ -1189,7 +1109,7 @@ func _step(sub: float, ev: Array) -> void:
 	_fire(dt, ev)
 	_src = ""
 	_blockable = false
-	_wall_auras()
+	_wall_auras(ev)
 	_kb_k = 0.0
 	if mass:
 		_burn_step(dt, ev)
@@ -1330,7 +1250,7 @@ func _advance_wave(ev: Array) -> void:
 		# §D3: +1 Courier per 2,000 bodies in the wave.
 		for _c in mini(6, mass_bodies(wave) / 2000):
 			_spawn_courier(ev)
-		mass_wall_hits = {}
+		mass_wall_slowed = {}
 
 
 func _drain_troop_events(ev: Array) -> void:
@@ -1611,7 +1531,6 @@ func _adopt_plan(p: Dictionary, ev: Array, opening: bool) -> void:
 	wave_spawned = 0
 	next_plan = {}
 	wave_cash0 = cash_earned
-	_repair_buildings(ev)
 	if opening:
 		ev.append(_telegraph_event(p))
 	else:
@@ -1981,100 +1900,58 @@ func _move_enemies(dt: float, ev: Array) -> void:
 	var r_stop: float = TuneRef.num("ranged_stop", 230.0)
 	var r_fire: float = TuneRef.num("ranged_fire", 2.0)
 	var frozen: bool = float(buffs.get("warp_t", 0.0)) > 0.0
-	# Occupancy of standing buildings (the Core cell is never a blocker).
+	# Occupancy of the board's buildings (the Core cell is never a blocker).
 	var blk: PackedByteArray = PackedByteArray()
 	blk.resize(N)
 	for i in N:
-		if i != CORE_SLOT and float(bld_hp[i]) > 0.0 and id_at(i) != "":
+		if i != CORE_SLOT and id_at(i) != "":
 			blk[i] = 1
 	# MASS_HORDE: the step runs in the C# HordeWorld (flow field, pressure,
-	# knockback, contact). It returns an ordered action log; the Core effects
-	# replay in slot order, then one aggregated row per hit building.
-	var acts: PackedInt32Array = en.move(dt, frozen, CENTER, STOP_R, r_stop, r_fire, blk, SIDE, CELL, PackedFloat64Array([TuneRef.num("horde_accel", 6.0), TuneRef.num("horde_sep", 0.5), TuneRef.num("horde_sep_cap", 0.35), TuneRef.num("horde_friction", 6.0), TuneRef.num("horde_kmax", 24.0), TuneRef.num("horde_front", 10.0), TuneRef.num("horde_bld_cost", 40.0), TuneRef.num("horde_knock_max", 600.0), TuneRef.num("mass_press", 48.0) if mass else 0.0]))
+	# knockback, contact). It returns an ordered action log of Core effects,
+	# replayed in slot order. V2 P3a: structures have no HP - bodies flow
+	# around them, or squeeze through (horde_squeeze speed) when they seal the
+	# route; every attack lands on the Core.
+	var acts: PackedInt32Array = en.move(dt, frozen, CENTER, STOP_R, r_stop, r_fire, blk, SIDE, CELL, PackedFloat64Array([TuneRef.num("horde_accel", 6.0), TuneRef.num("horde_sep", 0.5), TuneRef.num("horde_sep_cap", 0.35), TuneRef.num("horde_friction", 6.0), TuneRef.num("horde_kmax", 24.0), TuneRef.num("horde_front", 10.0), TuneRef.num("horde_bld_cost", 40.0), TuneRef.num("horde_knock_max", 600.0), TuneRef.num("mass_press", 48.0) if mass else 0.0, TuneRef.num("horde_squeeze", 0.35)]))
 	var k: int = 0
 	var escaped: Array = []
-	var lost: bool = false
 	while k < acts.size():
 		var op: int = acts[k]
 		var e: int = acts[k + 1]
 		k += 2
 		match op:
-			EnemyStore.ACT_BLD:
-				# MASS_HORDE §4: one row per building per step (hits summed in C#)
-				var c: int = e
-				var nh: int = acts[k]
-				k += 1
-				if float(bld_hp[c]) <= 0.0 or id_at(c) == "":
-					continue
-				var amt: float = en.bld_dmg[c]
-				bld_hp[c] = float(bld_hp[c]) - amt
-				ev.append({"t": "bld_hit", "slot": c, "dmg": amt, "n": nh, "pos": slot_pos(c)})
-				if mass:
-					var wh: int = int(mass_wall_hits.get(c, 0)) + nh
-					mass_wall_hits[c] = wh
-					if wh >= 2000 and wh - nh < 2000 and id_at(c) == "barricade":
-						ev.append({"t": "wall_of_flesh", "slot": c, "n": wh})
-				if float(bld_hp[c]) <= 0.0:
-					_destroy_building(c, ev)
-					lost = true
 			EnemyStore.ACT_BOOM:
-				# MASS_HORDE §D1 Sapper: one structure blast, then it is gone (no reward).
-				var bc: int = acts[k]
+				# MASS_HORDE §D1 / V2: a Sapper reaches the Core and detonates for
+				# horde_sapper_core x its hit; it is gone (no kill, no reward).
 				k += 1
 				en.hp[e] = 0.0
 				en.flags[e] = en.flags[e] | EnemyStore.F_BOOM
-				if float(bld_hp[bc]) <= 0.0 or id_at(bc) == "":
-					continue
-				var bamt: float = en.dmg[e] * float(EnemyDB.mass_def("sapper")["bld"]) / float(EnemyDB.mass_def("sapper")["dmg"])
-				bld_hp[bc] = float(bld_hp[bc]) - bamt
-				ev.append({"t": "sapper_blast", "slot": bc, "dmg": bamt, "pos": en.pos[e]})
-				if float(bld_hp[bc]) <= 0.0:
-					_destroy_building(bc, ev)
-					lost = true
+				_leak(e)
+				var bamt: float = en.dmg[e] * TuneRef.num("horde_sapper_core", 6.0)
+				ev.append({"t": "sapper_blast", "slot": CORE_SLOT, "dmg": bamt, "pos": en.pos[e]})
+				_core_damage(bamt, ev, "core_hit", en.pos[e], -1, _armor_share(e))
 			EnemyStore.ACT_SHOT:
-				# MASS_HORDE §D1 Spitter: lobs acid at the nearest building or wall
-				# in reach (a siege on the defence); the Core only when none is.
-				var tb: int = _spit_target(en.pos[e], r_stop + CELL) if mass else -1
-				if tb >= 0:
-					var sa: float = en.dmg[e] * float(EnemyDB.mass_def("ranged")["bld"]) / float(EnemyDB.mass_def("ranged")["dmg"])
-					bld_hp[tb] = float(bld_hp[tb]) - sa
-					ev.append({"t": "bld_hit", "slot": tb, "dmg": sa, "n": 1, "pos": slot_pos(tb), "spit": true})
-					if float(bld_hp[tb]) <= 0.0:
-						_destroy_building(tb, ev)
-						lost = true
-				else:
-					_core_damage(en.dmg[e], ev, "enemy_shot", en.pos[e], -1, _armor_share(e))
+				# MASS_HORDE §D1 Spitter: lobs acid at the Core from its stand-off ring.
+				_core_damage(en.dmg[e], ev, "enemy_shot", en.pos[e], -1, _armor_share(e))
 			EnemyStore.ACT_HIT:
-				if mass and (en.flags[e] & EnemyStore.F_LEAK) == 0:
-					en.flags[e] = en.flags[e] | EnemyStore.F_LEAK
-					mass_leaked += en.wt[e]
-					var la: Dictionary = wave_acct.get(en.wv[e], {})
-					if not la.is_empty():
-						la["leak"] = int(la["leak"]) + en.wt[e]
+				_leak(e)
 				_core_damage(en.dmg[e], ev, "core_hit", en.pos[e], e, _armor_share(e))
 			EnemyStore.ACT_ESCAPE:
 				escaped.append(e)
-	if lost:
-		recompute()
-		_drain_troop_events(ev)
 	for x in escaped:
 		var xs: int = x
 		ev.append({"t": "courier_escape", "eid": en.eid[xs], "pos": en.pos[xs]})
 		en.remove(xs)
 
 
-## Nearest standing building within `r` of p (ties: lower slot), or -1.
-func _spit_target(p: Vector2, r: float) -> int:
-	var best: int = -1
-	var bd: float = r * r
-	for i in N:
-		if i == CORE_SLOT or float(bld_hp[i]) <= 0.0 or id_at(i) == "":
-			continue
-		var d2: float = p.distance_squared_to(slot_pos(i))
-		if d2 < bd:
-			bd = d2
-			best = i
-	return best
+## MASS_HORDE §D5: a body reaching the Core forfeits its share of the wave's
+## cash pool (counted once).
+func _leak(e: int) -> void:
+	if mass and (en.flags[e] & EnemyStore.F_LEAK) == 0:
+		en.flags[e] = en.flags[e] | EnemyStore.F_LEAK
+		mass_leaked += en.wt[e]
+		var la: Dictionary = wave_acct.get(en.wv[e], {})
+		if not la.is_empty():
+			la["leak"] = int(la["leak"]) + en.wt[e]
 
 
 ## Flat Core armor per contact hit (owner C4): the classic split carried
@@ -2281,10 +2158,11 @@ func _roll_crit(wd: Dictionary) -> bool:
 	return c > 0.0 and combat_rng.randf() < c
 
 
-## FB2 Barricade (omnidirectional): with spawns from every side there is no
-## lane to wall off, so each Barricade drags every body within its radius
-## (-30% speed) on top of being the high-HP blocker. Horde ruleset only.
-func _wall_auras() -> void:
+## Wall (id "barricade"; omnidirectional): with spawns from every side there is
+## no lane to wall off, so each Wall drags every body within its radius (-30%
+## speed) on top of being a blocker the horde must flow around or squeeze
+## through. Wall of Flesh: one Wall slows 2,000 distinct bodies in a wave.
+func _wall_auras(ev: Array) -> void:
 	if not crowd():
 		return
 	var r: float = TuneRef.num("pc_wall_aura", 1.5) * cpx()
@@ -2293,9 +2171,17 @@ func _wall_auras() -> void:
 		if id_at(i) != "barricade":
 			continue
 		var c: Vector2 = slot_pos(i)
+		var seen: Dictionary = mass_wall_slowed.get(i, {})
+		var n0: int = seen.size()
 		for fe in eh.candidates(c, r):
 			if en.hp[fe] > 0.0 and c.distance_to(en.pos[fe]) <= r:
 				en.apply_slow(fe, 0.2, sm)
+				if n0 < WALL_FLESH:
+					seen[en.eid[fe]] = true
+		if n0 < WALL_FLESH:
+			mass_wall_slowed[i] = seen
+			if seen.size() >= WALL_FLESH:
+				ev.append({"t": "wall_of_flesh", "slot": i, "n": seen.size()})
 
 
 func _fire(dt: float, ev: Array) -> void:

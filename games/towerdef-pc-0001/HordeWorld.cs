@@ -19,7 +19,8 @@ using Godot;
 [GlobalClass]
 public partial class HordeWorld : RefCounted
 {
-	public const int ACT_BLD = 0, ACT_SHOT = 1, ACT_HIT = 2, ACT_ESCAPE = 3, ACT_BOOM = 4;
+	// V2 P3a: no building HP - opcode 0 (building hit) is retired.
+	public const int ACT_SHOT = 1, ACT_HIT = 2, ACT_ESCAPE = 3, ACT_BOOM = 4;
 	public const int KC_OTHER = 0, KC_COURIER = 1, KC_RANGED = 2, KC_BOSS = 3, KC_SAPPER = 4;
 	const int F_EXIT = 2;
 
@@ -32,6 +33,7 @@ public partial class HordeWorld : RefCounted
 	double[] exX = new double[0], exY = new double[0];
 	int[] kc = new int[0], flg = new int[0];
 	byte[] live = new byte[0];   // 1 = stored and alive (hp > 0), 0 = free or dead
+	byte[] sqz = new byte[0];    // V2 P3a: 1 = squeezing through a structure that seals its route
 	// step scratch
 	double[] ox = new double[0], oy = new double[0], pushX = new double[0], pushY = new double[0];
 	double[] front = new double[0], dirX = new double[0], dirY = new double[0], want = new double[0];
@@ -45,6 +47,10 @@ public partial class HordeWorld : RefCounted
 	double accelK = 6.0, sepK = 0.5, sepCap = 0.35, friction = 6.0;
 	int kmax = 24;
 	double frontK = 10.0, bldCost = 40.0, knockMax = 600.0, bldInset = 1.0, attackDot = 0.25;
+	// V2 P3a: bodies never attack structures. When the cheapest route runs
+	// through one (a sealed ring) they squeeze through it at this speed factor.
+	double squeezeK = 0.35;
+	public int SqueezeStarts = 0;   // bodies that began a squeeze (selftest / debug)
 	// MASS_HORDE §D2 pressure: melee bodies within this band beyond the Core's
 	// contact ring are part of the pile pushing on it and hit it too (0 = only
 	// the front rank, the classic rule).
@@ -75,7 +81,6 @@ public partial class HordeWorld : RefCounted
 	int[] qhead = new int[0], qlink = new int[0];
 
 	// ---------------------------------------------------------------- outputs
-	double[] bldHits = new double[0], bldDmg = new double[0];
 	long stepUs = 0;
 	long[] passUs = new long[4];
 	int lastAlive = 0, maxCell = 0;
@@ -98,7 +103,6 @@ public partial class HordeWorld : RefCounted
 		bldBlk = new byte[side * side];
 		bldList = new int[side * side];
 		bldCount = 0;
-		bldHits = new double[side * side]; bldDmg = new double[side * side];
 		hgw = (int)Math.Ceiling(2.0 * HHALF / HCELL);
 		hox = cx - HHALF; hoy = cy - HHALF;
 		qhead = new int[hgw * hgw];
@@ -106,7 +110,7 @@ public partial class HordeWorld : RefCounted
 		qdirty = true;
 	}
 
-	// prm = [accel_k, sep_k, sep_cap, friction, kmax, front_k, bld_cost, knock_max]
+	// prm = [accel_k, sep_k, sep_cap, friction, kmax, front_k, bld_cost, knock_max, press_band, squeeze_k]
 	public void SetParams(double[] prm)
 	{
 		if (prm.Length > 0) accelK = prm[0];
@@ -118,6 +122,7 @@ public partial class HordeWorld : RefCounted
 		if (prm.Length > 6 && prm[6] != bldCost) { bldCost = prm[6]; RebuildFlow(); }
 		if (prm.Length > 7) knockMax = prm[7];
 		if (prm.Length > 8) pressBand = Math.Max(0.0, prm[8]);
+		if (prm.Length > 9) squeezeK = Math.Clamp(prm[9], 0.01, 1.0);
 	}
 
 	// ================================================================ storage
@@ -131,7 +136,7 @@ public partial class HordeWorld : RefCounted
 		Array.Resize(ref slowT, c); Array.Resize(ref slowM, c); Array.Resize(ref shockT, c); Array.Resize(ref hitT, c);
 		Array.Resize(ref tauntT, c); Array.Resize(ref atkCd, c); Array.Resize(ref fireCd, c);
 		Array.Resize(ref exX, c); Array.Resize(ref exY, c); Array.Resize(ref lvx, c); Array.Resize(ref lvy, c);
-		Array.Resize(ref kc, c); Array.Resize(ref flg, c); Array.Resize(ref live, c);
+		Array.Resize(ref kc, c); Array.Resize(ref flg, c); Array.Resize(ref live, c); Array.Resize(ref sqz, c);
 		ox = new double[c]; oy = new double[c]; pushX = new double[c]; pushY = new double[c];
 		front = new double[c]; dirX = new double[c]; dirY = new double[c]; want = new double[c];
 		mode = new byte[c]; qlink = new int[c];
@@ -153,7 +158,7 @@ public partial class HordeWorld : RefCounted
 		px[s] = f[0]; py[s] = f[1]; rad[s] = f[2] * 0.5; spd[s] = f[3]; dmg[s] = f[4];
 		exX[s] = f[5]; exY[s] = f[6]; atkCd[s] = f[7]; fireCd[s] = f[8]; slowT[s] = f[9]; slowM[s] = f[10];
 		shockT[s] = f[11]; hitT[s] = f[12]; tauntT[s] = f[13]; curS[s] = f[14]; vx[s] = f[15]; vy[s] = f[16];
-		kc[s] = kcode; flg[s] = flags; lvx[s] = 0.0; lvy[s] = 0.0;
+		kc[s] = kcode; flg[s] = flags; lvx[s] = 0.0; lvy[s] = 0.0; sqz[s] = 0;
 		live[s] = (byte)(f[17] > 0.0 ? 1 : 0);
 		qdirty = true;
 	}
@@ -481,6 +486,40 @@ public partial class HordeWorld : RefCounted
 		x0 = bx - h; x1 = bx + h; y0 = by - h; y1 = by + h;
 	}
 
+	// Standing building whose square holds (x, y), or -1 (the Core cell never counts).
+	int BldAt(double x, double y)
+	{
+		if (bldCount == 0) return -1;
+		int half = side / 2;
+		int gx = (int)Math.Floor((x - cx) / bcell + half + 0.5), gy = (int)Math.Floor((y - cy) / bcell + half + 0.5);
+		if (gx < 0 || gy < 0 || gx >= side || gy >= side) return -1;
+		int bi = gy * side + gx;
+		return bldBlk[bi] != 0 && bi != half * side + half ? bi : -1;
+	}
+
+	// True when a body of radius r at (x, y) overlaps any standing building square.
+	bool TouchesBuilding(double x, double y, double r)
+	{
+		if (bldCount == 0) return false;
+		int half = side / 2;
+		int gx = (int)Math.Floor((x - cx) / bcell + half + 0.5), gy = (int)Math.Floor((y - cy) / bcell + half + 0.5);
+		for (int yy = gy - 1; yy <= gy + 1; yy++)
+		{
+			if (yy < 0 || yy >= side) continue;
+			for (int xx = gx - 1; xx <= gx + 1; xx++)
+			{
+				if (xx < 0 || xx >= side) continue;
+				int bi = yy * side + xx;
+				if (bldBlk[bi] == 0 || bi == half * side + half) continue;
+				BldRect(bi, out double x0, out double y0, out double x1, out double y1);
+				double qx = Math.Clamp(x, x0, x1), qy = Math.Clamp(y, y0, y1);
+				double dx = x - qx, dy = y - qy;
+				if (dx * dx + dy * dy < (r + 0.5) * (r + 0.5)) return true;
+			}
+		}
+		return false;
+	}
+
 	// Push body s out of every standing building square near it. Returns the
 	// building it is pressing into (flow toward it), or -1.
 	double pressNx, pressNy;   // outward face normal of the building ResolveBuildings returned
@@ -563,8 +602,9 @@ public partial class HordeWorld : RefCounted
 
 	// ================================================================ step
 	// One fixed sim step. Returns the action log: [ACT_SHOT|ACT_HIT|ACT_ESCAPE, slot]
-	// pairs in slot order, then [ACT_BLD, building_slot, hits] rows (building order)
-	// whose damage sums are in LastBuildingDamage().
+	// pairs and [ACT_BOOM, slot, -1] triples (a Sapper detonating on the Core), in
+	// slot order. Structures are never attacked (V2 P3a): they are flowed around,
+	// or squeezed through at squeezeK when they seal the route.
 	[MethodImpl(MethodImplOptions.AggressiveOptimization)]
 	public int[] Step(double dt, bool frozen, double rStop, double rFire, byte[] blk)
 	{
@@ -572,8 +612,6 @@ public partial class HordeWorld : RefCounted
 		stepDt = dt > 0.0 ? dt : 0.05;
 		SetBuildings(blk);
 		var acts = new System.Collections.Generic.List<int>(64);
-		Array.Clear(bldHits, 0, bldHits.Length);
-		Array.Clear(bldDmg, 0, bldDmg.Length);
 		double fr = Math.Exp(-friction * dt);
 		int alive = 0;
 		// ---- pass 1: timers + desired motion
@@ -734,7 +772,11 @@ public partial class HordeWorld : RefCounted
 			byte md = mode[s];
 			if (md == 0) continue;
 			double block = Math.Clamp(1.0 - frontK * front[s], 0.0, 1.0);
-			double mx = dirX[s] * want[s] * block, my = dirY[s] * want[s] * block;
+			// Squeezing through a structure: own motion slows to squeezeK while
+			// the body overlaps it (crowd pushes and knockback are not scaled).
+			bool sq = sqz[s] != 0;
+			double sk = sq && TouchesBuilding(ox[s], oy[s], rad[s]) ? squeezeK : 1.0;
+			double mx = dirX[s] * want[s] * block * sk, my = dirY[s] * want[s] * block * sk;
 			if (block < 1.0) curS[s] *= block;
 			double ppx = pushX[s] * sepK, ppy = pushY[s] * sepK;
 			double cap2 = 2.0 * rad[s] * sepCap;
@@ -758,52 +800,54 @@ public partial class HordeWorld : RefCounted
 				double vn = (vx[s] * rx + vy[s] * ry) / Math.Max(1e-9, Math.Sqrt(rx * rx + ry * ry));
 				if (vn < 0) { vx[s] -= vn * rx / Math.Sqrt(rx * rx + ry * ry); vy[s] -= vn * ry / Math.Sqrt(rx * rx + ry * ry); }
 			}
-			int bi = ResolveBuildings(s, dirX[s], dirY[s]);
-			if (bi >= 0 && md != 4 && kc[s] == KC_SAPPER)
+			if (sq)
 			{
-				// MASS_HORDE §D1 Sapper: detonates on the first structure it presses
-				// (sealed or not); the rules apply the blast and reap the body.
-				live[s] = 0; qdirty = true;
-				acts.Add(ACT_BOOM); acts.Add(s); acts.Add(bi);
-				continue;
+				// No push-out while squeezing; the squeeze ends once the body is
+				// out of every structure and its route no longer runs through one.
+				if (BldAt(px[s], py[s]) < 0 && !RouteThroughBuilding(px[s], py[s])) sqz[s] = 0;
 			}
-			if (bi >= 0 && md != 4)
+			else
 			{
-				// Pressing a face. Sealed path (the cheapest route from here runs
-				// THROUGH a building: the best next cell is a building cell) ->
-				// attack it. Otherwise the way round is cheaper: slide along the
-				// face toward the cheaper side (a jet hitting a wall splits; exact
-				// ties split by slot parity), so open-ground buildings are flowed around.
-				double nxv = pressNx, nyv = pressNy;
-				if (!RouteThroughBuilding(px[s] + nxv * fc * 0.25, py[s] + nyv * fc * 0.25))
+				int bi = ResolveBuildings(s, dirX[s], dirY[s]);
+				if (bi >= 0 && md != 4)
 				{
-					double tx = -nyv, ty = nxv;
-					double a = CostAt(px[s] + tx * fc * 2.0, py[s] + ty * fc * 2.0);
-					double b2 = CostAt(px[s] - tx * fc * 2.0, py[s] - ty * fc * 2.0);
-					double sg = a < b2 ? 1.0 : (b2 < a ? -1.0 : ((s & 1) == 0 ? 1.0 : -1.0));
-					double slide = Math.Max(want[s], spd[s] * 0.5 * dt);
-					px[s] += tx * sg * slide; py[s] += ty * sg * slide;
-					ResolveBuildings(s, dirX[s], dirY[s]);
-					bi = -1;
+					// Pressing a face. Sealed path (the cheapest route from here runs
+					// THROUGH a building: the best next cell is a building cell) ->
+					// squeeze through it from the next step on. Otherwise the way
+					// round is cheaper: slide along the face toward the cheaper side
+					// (a jet hitting a wall splits; exact ties split by slot parity),
+					// so open-ground buildings are flowed around.
+					double nxv = pressNx, nyv = pressNy;
+					if (RouteThroughBuilding(px[s] + nxv * fc * 0.25, py[s] + nyv * fc * 0.25))
+					{
+						sqz[s] = 1;
+						SqueezeStarts++;
+					}
+					else
+					{
+						double tx = -nyv, ty = nxv;
+						double a = CostAt(px[s] + tx * fc * 2.0, py[s] + ty * fc * 2.0);
+						double b2 = CostAt(px[s] - tx * fc * 2.0, py[s] - ty * fc * 2.0);
+						double sg = a < b2 ? 1.0 : (b2 < a ? -1.0 : ((s & 1) == 0 ? 1.0 : -1.0));
+						double slide = Math.Max(want[s], spd[s] * 0.5 * dt);
+						px[s] += tx * sg * slide; py[s] += ty * sg * slide;
+						ResolveBuildings(s, dirX[s], dirY[s]);
+					}
 				}
 			}
 			lvx[s] = (px[s] - ox[s]) / stepDt; lvy[s] = (py[s] - oy[s]) / stepDt;
 			rx = px[s] - cx; ry = py[s] - cy;
 			nd = Math.Sqrt(rx * rx + ry * ry);
 			if (md == 4) continue;   // pinned by a troop: it fights the troop, not the base
-			if (bi >= 0 && !(md == 3 && nd <= stop + rad[s] + 0.5))
+			if (nd > stop + rad[s] + 0.5 + (ranged ? 0.0 : pressBand)) continue;
+			if (kc[s] == KC_SAPPER)
 			{
-				curS[s] = 0.0;
-				atkCd[s] -= dt;
-				if (atkCd[s] <= 0.0)
-				{
-					atkCd[s] = ranged ? rFire : 1.0;
-					bldHits[bi] += 1.0;
-					bldDmg[bi] += dmg[s];
-				}
+				// MASS_HORDE §D1 / V2: a Sapper ignores structures and detonates on
+				// the Core; the rules apply the blast and reap the body.
+				live[s] = 0; qdirty = true;
+				acts.Add(ACT_BOOM); acts.Add(s); acts.Add(-1);
 				continue;
 			}
-			if (nd > stop + rad[s] + 0.5 + (ranged ? 0.0 : pressBand)) continue;
 			if (ranged)
 			{
 				fireCd[s] -= dt;
@@ -815,8 +859,6 @@ public partial class HordeWorld : RefCounted
 				if (atkCd[s] <= 0.0) { atkCd[s] = 1.0; acts.Add(ACT_HIT); acts.Add(s); }
 			}
 		}
-		for (int i = 0; i < bldHits.Length; i++)
-			if (bldHits[i] > 0.0) { acts.Add(ACT_BLD); acts.Add(i); acts.Add((int)bldHits[i]); }
 		qdirty = true;
 		sw.Stop();
 		stepUs = sw.Elapsed.Ticks / 10;
@@ -864,7 +906,15 @@ public partial class HordeWorld : RefCounted
 		return true;
 	}
 
-	public double[] LastBuildingDamage() { return (double[])bldDmg.Clone(); }
+	public int SqueezeStartCount() { return SqueezeStarts; }
+
+	// Bodies currently squeezing through a structure (selftest / debug view).
+	public int Squeezing()
+	{
+		int n = 0;
+		for (int s = 0; s < cap; s++) if (live[s] != 0 && sqz[s] != 0) n++;
+		return n;
+	}
 
 	// ================================================================ impulses
 	// Knockback (GDScript knock() rule): v / max(0.25, (size/16)^2); bosses and

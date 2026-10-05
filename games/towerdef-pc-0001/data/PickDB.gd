@@ -27,7 +27,7 @@ const DEFS: Dictionary = {
 	"beacon":    {"fam": "building", "name": "Beacon", "rarity": "rare", "tags": ["dps"], "max": 5, "desc": "Radius 2: +10% rate, +0.3 range"},
 	"bulwark":   {"fam": "building", "name": "Bulwark", "rarity": "common", "tags": ["sustain"], "max": 5, "desc": "Core +40 HP"},
 	"aegis":     {"fam": "building", "name": "Aegis", "rarity": "epic", "tags": ["sustain"], "max": 5, "desc": "60-pt Core shield; regen 6/s after 4 s without damage"},
-	"barricade": {"fam": "building", "name": "Barricade", "rarity": "common", "tags": ["control"], "max": 5, "desc": "High-HP wall; every enemy within 1.5 cells (any side) is slowed 30%"},
+	"barricade": {"fam": "building", "name": "Wall", "rarity": "common", "tags": ["control"], "max": 5, "desc": "Blocker: the horde flows around it or squeezes through at a crawl; every enemy within 1.5 cells is slowed 30%"},
 	"mine":      {"fam": "building", "name": "Gold Mine", "rarity": "common", "tags": ["eco"], "max": 5, "desc": "+0.8 cash/s"},
 	"oilmill":   {"fam": "building", "name": "Oil Mill", "rarity": "rare", "tags": ["eco"], "max": 5, "desc": "+2.0 cash/s; adjacent buildings -10% rate"},
 	"bounty":    {"fam": "building", "name": "Bounty Post", "rarity": "rare", "tags": ["eco"], "max": 5, "desc": "+20% kill cash within 3 cells"},

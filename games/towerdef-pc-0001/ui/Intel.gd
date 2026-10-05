@@ -19,9 +19,9 @@ const NAMES: Dictionary = {
 const TRAITS: Dictionary = {
 	"drone": "Packs behind the swarm: the wall of bodies", "skitter": "Fast flanker, slips through gaps",
 	"hauler": "Heavy: shoves the tide forward, shrugs off knockback",
-	"ranged": "Stops at range and spits", "elite": "Shielded, drops loot", "splitter": "Bursts into 6 swarmlings",
-	"mite": "The water: tiny, fast, one hit", "courier": "Runs for the edge, carries a key", "boss": "Huge HP, carries a crowd in its wake",
-	"sapper": "Blows up the first wall or building it reaches", "shield": "Front shield stops shots; flank it or use AoE / chain",
+	"ranged": "Stops at range and spits at the Core", "elite": "Shielded, drops loot", "splitter": "Bursts into 6 swarmlings",
+	"mite": "The water: tiny, fast, one hit", "courier": "Runs for the edge, carries Scrap", "boss": "Huge HP, carries a crowd in its wake",
+	"sapper": "Ignores walls; detonates on the Core for 6x damage", "shield": "Front shield stops shots; flank it or use AoE / chain",
 }
 const ORDER: Array = ["boss", "elite", "courier", "hauler", "shield", "sapper", "splitter", "ranged", "drone", "skitter", "mite"]
 

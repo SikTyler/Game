@@ -179,12 +179,9 @@ func _initialize() -> void:
 	S.perks_taken.append("p_dmg")
 	var pl: Array = S.perk_list()
 	_check("FB1 perk picks apply instantly and list under Perks (packs + gold perks)", int(S.packs.get("pk_arsenal", 0)) == 1 and String(_evts(ev, "pick_applied")[0]["reward"]) == "perk" and pl.any(func(p: Variant) -> bool: return String((p as Dictionary)["id"]) == "pk_arsenal" and String((p as Dictionary)["kind"]) == "pack") and pl.any(func(p: Variant) -> bool: return String((p as Dictionary)["kind"]) == "gold"))
-	# A pending upgrade whose only target is destroyed is cancelled.
-	S.draft = [Draft.card_for("mine", S._draft_ctx(""))]
-	S.choose_card(0)
-	var dev2: Array = []
-	S._destroy_building(_r(8), dev2)
-	_check("FB1 destroying the upgrade's last target cancels it", S.pending_upgrade == "" and _evts(dev2, "upgrade_cancelled").size() == 1 and _evts(dev2, "building_destroyed").size() == 1)
+	# V2 P3a (deliberate): structures have no HP, so nothing destroys an
+	# upgrade's target mid-run (the FB1 cancel-on-destroy check is retired).
+	_check("V2 P3a: structures have no HP and no destroy path", not ("bld_hp" in S) and not S.has_method("_destroy_building") and not S.has_method("_repair_buildings"))
 	var r1 := RandomNumberGenerator.new()
 	r1.seed = 99
 	var r2 := RandomNumberGenerator.new()
@@ -733,48 +730,37 @@ func _mass_horde_world() -> void:
 	var dead_s: int = P.en.order[0]
 	P._hit(dead_s, 1e9, [])
 	_check("MASS_HORDE a killed body drops out of queries before the reap", not P.eh.in_radius(P.en.pos[dead_s], 0.5).has(dead_s))
-	# ---- sealed Core: contact attacks aggregate per building; the wall falls -> surge
-	var G = _fresh()
-	G.spawn_hold = true
-	G.stats["weapons"] = []
-	var rn: int = _rc(2, 3)
-	for dr in [-1, 0, 1]:
-		for dc in [-1, 0, 1]:
-			if dr != 0 or dc != 0:
-				G.slots[_rc(3 + dr, 3 + dc)] = {"id": "barricade", "perm": 0, "run": 3}
-	G.recompute()
-	G.stats["weapons"] = []
-	for k2 in G.bld_hp.size():
-		if float(G.bld_hp[k2]) > 0.0:
-			G.bld_hp[k2] = 1e9
-	_mh_field(G, "mite", 600, TowerState.slot_pos(rn) + Vector2(0, -150), 0.0, 120.0)
-	var agg_ok: bool = true
-	var hits_n: int = 0
-	for k in 160:
-		var gev: Array = []
-		G._move_enemies(0.05, gev)
-		var seen_b: Dictionary = {}
-		for e in _evts(gev, "bld_hit"):
-			var bs: int = int((e as Dictionary)["slot"])
-			if seen_b.has(bs):
-				agg_ok = false
-			seen_b[bs] = true
-			hits_n += int((e as Dictionary)["n"])
-	var at_core: int = 0
-	for es in G.en.order:
-		if G.en.pos[es].distance_to(C) <= TowerState.STOP_R + 10.0:
-			at_core += 1
-	_check("MASS_HORDE sealed Core: the crowd presses the wall (%d hits), one aggregated bld_hit row per building per step, none reach the Core" % hits_n, agg_ok and hits_n >= 50 and at_core == 0)
-	G.bld_hp[rn] = 1.0
-	G._destroy_building(rn, [])
-	G.recompute()
-	for k in 60:
-		G._move_enemies(0.05, [])
-	at_core = 0
-	for es in G.en.order:
-		if G.en.pos[es].distance_to(C) <= TowerState.STOP_R + 10.0:
-			at_core += 1
-	_check("MASS_HORDE the wall falls -> the dammed crowd surges through to the Core (%d)" % at_core, at_core >= 5)
+	# ---- V2 P3a sealed Core: no structure is ever attacked; the crowd squeezes
+	# through the Wall ring (slower than open ground) and every hit lands on the Core.
+	var at_core_n: Array = []
+	var bld_ev: int = 0
+	var sq_n: int = 0
+	for sealed in [true, false]:
+		var G = _fresh()
+		G.spawn_hold = true
+		G.stats["weapons"] = []
+		if sealed:
+			for dr in [-1, 0, 1]:
+				for dc in [-1, 0, 1]:
+					if dr != 0 or dc != 0:
+						G.slots[_rc(3 + dr, 3 + dc)] = {"id": "barricade", "perm": 0, "run": 3}
+		G.recompute()
+		G.stats["weapons"] = []
+		_mh_field(G, "mite", 600, TowerState.slot_pos(_rc(2, 3)) + Vector2(0, -150), 0.0, 120.0)
+		for k in 160:
+			var gev: Array = []
+			G._move_enemies(0.05, gev)
+			for e in gev:
+				if String((e as Dictionary)["t"]) in ["bld_hit", "building_destroyed", "bld_repair"]:
+					bld_ev += 1
+		var at_core: int = 0
+		for es in G.en.order:
+			if G.en.pos[es].distance_to(C) <= TowerState.STOP_R + 10.0:
+				at_core += 1
+		at_core_n.append(at_core)
+		if sealed:
+			sq_n = int(G.en.world.call("SqueezeStartCount"))
+	_check("V2 P3a sealed Core: the crowd squeezes through the Wall ring (%d at the Core vs %d on open ground, %d squeezes), no structure is ever hit" % [at_core_n[0], at_core_n[1], sq_n], int(at_core_n[0]) > 0 and int(at_core_n[0]) < int(at_core_n[1]) and sq_n > 0 and bld_ev == 0)
 
 
 ## HORDE Phase 1 gates: the 120 s seeded golden (recorded from the Dict
@@ -871,7 +857,7 @@ func _mass_content_stages() -> void:
 		SH.stats["weapons"] = []
 	var a1: Dictionary = SH.wave_acct.get(1, {})
 	_check("MASS alive cap: queue holds at the cap, then every planned body spawns", held and (a1.is_empty() or int(a1["spawned"]) == SH.mass_bodies(1)), "held %s peak %d" % [str(held), peak])
-	# ---- §D1 Sapper: detonates on the first structure it presses, no kill credit
+	# ---- §D1 / V2 Sapper: ignores structures, detonates on the Core (x6 its hit), no kill credit
 	var SS = _mfresh()
 	for i in TowerState.N:
 		SS.unlocked[i] = i != TowerState.CORE_SLOT
@@ -879,12 +865,22 @@ func _mass_content_stages() -> void:
 	var bi: int = _rc(1, 3)
 	SS.slots[bi] = {"id": "barricade", "perm": 0, "run": 1}
 	SS.recompute()
-	var bhp0: float = float(SS.bld_hp[bi])
+	SS.stats["weapons"] = []
+	SS.stats["armor"] = 0.0
+	SS.stats["dr"] = 0.0
+	SS.shield = 0.0
+	var shp0: float = SS.hp
 	SS._spawn("sapper", [], TowerState.slot_pos(bi) + Vector2(0, -34))
+	var sdmg: float = SS.en.dmg[SS.en.order[0]]
+	SS.en.hp[SS.en.order[0]] = 1e9   # the Core's own gun must not kill it on the way
 	var boom: Array = []
-	for i in 80:
+	for i in 240:
 		boom.append_array(_evts(SS.tick(0.05), "sapper_blast"))
-	_check("MASS Sapper: one blast on the wall (x12.5 its Core hit), gone, not a kill", boom.size() == 1 and float(SS.bld_hp[bi]) < bhp0 and SS.en.count() == 0 and SS.kills == 0, "%d blasts hp %.1f->%.1f n %d kills %d" % [boom.size(), bhp0, float(SS.bld_hp[bi]), SS.en.count(), SS.kills])
+		SS.stats["weapons"] = []
+		if not boom.is_empty():
+			break
+	var blast_ok: bool = boom.size() == 1 and int((boom[0] as Dictionary)["slot"]) == TowerState.CORE_SLOT and is_equal_approx(float((boom[0] as Dictionary)["dmg"]), 6.0 * sdmg)
+	_check("MASS Sapper (V2): passes the Wall, detonates on the Core for x6 its hit, gone, not a kill", blast_ok and SS.hp < shp0 and SS.en.count() == 0 and SS.kills == 0, "%d blasts hp %.1f->%.1f n %d kills %d" % [boom.size(), shp0, SS.hp, SS.en.count(), SS.kills])
 	# ---- §D1 Shieldbearer: the frontal shield soaks projectiles from the front only
 	var SB = _mfresh()
 	SB.spawn_hold = true
@@ -1026,8 +1022,8 @@ func _horde_stages() -> void:
 	SW._spawn("drone", [], SW.slot_pos(wi) + Vector2(0, -20), false, 0.25)
 	SW._spawn("drone", [], SW.slot_pos(wi) + Vector2(0, -900), false, 0.25)
 	SW.eh.rebuild()
-	SW._wall_auras()
-	_check("FB2 Barricade aura slows bodies on any side, not far ones", SW.en.slow_t[SW.en.order[0]] > 0.0 and SW.en.slow_t[SW.en.order[1]] == 0.0)
+	SW._wall_auras([])
+	_check("FB2 Wall aura slows bodies on any side, not far ones", SW.en.slow_t[SW.en.order[0]] > 0.0 and SW.en.slow_t[SW.en.order[1]] == 0.0)
 	var SC = _fresh()
 	_check("FB2 map: horde spawn ring larger, view ring unchanged", SZ.spawn_r() > SC.spawn_r() and is_equal_approx(SZ.view_r(), SC.spawn_r()))
 	# ---- Phase 2: horde_mult conservation + event aggregation
@@ -1835,62 +1831,64 @@ func _pc_building_stages() -> void:
 	_check("PC-E3 Precision packs: +8% crit each (global)", is_equal_approx(float(S.stats["crit"]), 0.16))
 	# FEEDBACK-1 (deliberate): lane walls are gone. Every building has HP and
 	# enemies attack buildings standing in their way before the Core; the
-	# Barricade is the dedicated high-HP blocker (200 HP x1.35^(L-1) x enemy
-	# dmg growth; others 40 HP). Destroyed = lost for the run.
-	# MASS_HORDE (deliberate, FEEDBACK_3 + MASS_HORDE D4/H9): the crowd is a
-	# fluid on a flow field. A building with open ground around it is flowed
-	# AROUND (not chewed through); a building that seals the path is pressed
-	# against and attacked. The FB1 "stops at the building in its way" gate is
-	# re-aimed at a sealed path (the Core's 8 neighbours all walled).
+	# V2 P3a (deliberate, owner brief: "remove individual building health,
+	# enemies always attack the Core"): structures have no HP. The crowd is a
+	# fluid on a flow field: a building with open ground around it is flowed
+	# AROUND; a ring that seals the path is SQUEEZED THROUGH at horde_squeeze
+	# (0.35x) - never attacked. The FB1 HP / attack / destroy / repair gates are
+	# retired (test ledger, P3a).
 	S = _open_run()
 	S.slots[r2] = {"id": "barricade", "perm": 0, "run": 2}
 	S.slots[_rc(3, 1)] = {"id": "mine", "perm": 0, "run": 1}
 	S.recompute()
 	S.stats["weapons"] = []
-	var whp: float = 200.0 * 1.35
-	_check("FB1 barricade HP 200 x1.35/lv, other buildings 40", is_equal_approx(S.bld_max(r2), whp) and is_equal_approx(float(S.bld_hp[r2]), whp) and is_equal_approx(S.bld_max(_rc(3, 1)), 40.0) and S.bld_max(_rc(3, 3)) == 0.0)
 	var wa: Dictionary = _enemy("drone", TowerState.slot_pos(r2) + Vector2(0, -60))
 	S.set_enemies([wa])
 	var aev: Array = []
 	for k in 40:
 		S._move_enemies(0.1, aev)
 	_sync(S, [wa])
-	_check("MASS_HORDE an open-ground building is flowed around: the body reaches the Core, the building is untouched", (wa["pos"] as Vector2).distance_to(TowerState.CENTER) <= TowerState.STOP_R + 8.5 and _evts(aev, "bld_hit").is_empty() and is_equal_approx(float(S.bld_hp[r2]), whp))
+	_check("MASS_HORDE an open-ground building is flowed around: the body reaches the Core, nothing squeezes", (wa["pos"] as Vector2).distance_to(TowerState.CENTER) <= TowerState.STOP_R + 8.5 and int(S.en.world.call("Squeezing")) == 0 and S.id_at(r2) == "barricade")
 	S = _open_run()
 	var rn: int = _rc(2, 3)   # the Core's north neighbour
 	for dr in [-1, 0, 1]:
 		for dc in [-1, 0, 1]:
 			if dr != 0 or dc != 0:
 				S.slots[_rc(3 + dr, 3 + dc)] = {"id": "barricade", "perm": 0, "run": 2}
-	S.slots[_rc(3, 1)] = {"id": "mine", "perm": 0, "run": 1}
 	S.recompute()
 	S.stats["weapons"] = []
 	var wn: Dictionary = _enemy("drone", TowerState.slot_pos(rn) + Vector2(0, -60))
-	wn["dmg"] = 10.0
 	S.set_enemies([wn])
 	var bev: Array = []
-	for k in 40:
-		S._move_enemies(0.1, bev)
-	_sync(S, [wn])
-	_check("FB1 enemy stops at a building sealing its path and attacks it", (wn["pos"] as Vector2).distance_to(TowerState.slot_pos(rn)) > TowerState.CELL * 0.5 and _evts(bev, "bld_hit").size() >= 3 and float(S.bld_hp[rn]) < whp and float(S.bld_hp[rn]) > 0.0)
-	wn["dmg"] = 5000.0
-	_push(S, wn)
-	bev = []
-	for k in 12:
-		S._move_enemies(0.1, bev)
-	_check("FB1 a building at 0 HP is destroyed and lost for the run", _evts(bev, "building_destroyed").size() == 1 and S.id_at(rn) == "" and S.bld_lost == ["barricade"] and float(S.bld_hp[rn]) == 0.0)
-	_sync(S, [wn])
-	var p0: Vector2 = wn["pos"]
-	S._move_enemies(0.5, [])
-	_sync(S, [wn])
-	_check("FB1 the attacker moves on after the building falls", (wn["pos"] as Vector2).distance_to(TowerState.CENTER) < p0.distance_to(TowerState.CENTER))
-	# Wave start repairs pc_bld_wave_heal (50%) of max HP; HP grows with the wave.
-	S.set_enemies([])
-	var mi: int = _rc(3, 1)
-	S.bld_hp[mi] = 1.0
-	S.wave_t = S.wave_time - 0.001
-	bev = S.tick(0.05)
-	_check("FB1 wave start repairs 50% of building HP (x1.06 growth)", _evts(bev, "bld_repair").size() == 1 and is_equal_approx(S.bld_max(mi), 40.0 * 1.06) and absf(float(S.bld_hp[mi]) - (1.0 + (40.0 * 1.06 - 40.0) + 0.5 * 40.0 * 1.06)) < 0.01)
+	var wr := Rect2(TowerState.slot_pos(rn) - Vector2(TowerState.CELL, TowerState.CELL) * 0.5, Vector2(TowerState.CELL, TowerState.CELL)).grow(-4.0)
+	var prev: Vector2 = wn["pos"]
+	var in_d: float = 0.0
+	var in_t: float = 0.0
+	var free_d: float = 0.0
+	var reached: bool = false
+	for k in 200:
+		S._move_enemies(0.05, bev)
+		_sync(S, [wn])
+		var p: Vector2 = wn["pos"]
+		if wr.has_point(p) and wr.has_point(prev):
+			in_d += p.distance_to(prev)
+			in_t += 0.05
+		elif k >= 4 and k < 8:
+			free_d += p.distance_to(prev)
+		prev = p
+		if p.distance_to(TowerState.CENTER) <= TowerState.STOP_R + 8.5:
+			reached = true
+			break
+	var spd0: float = float(wn["spd"])
+	var bad_ev: int = 0
+	for e in bev:
+		if String((e as Dictionary)["t"]) in ["bld_hit", "building_destroyed", "bld_repair"]:
+			bad_ev += 1
+	_check("V2 P3a sealed ring: the body squeezes through the Wall at <= 0.4x speed (%.1f vs %.1f px/s free) and reaches the Core; no structure event" % [in_d / maxf(0.01, in_t), free_d / 0.2], reached and in_t > 0.5 and in_d / in_t <= 0.4 * spd0 and free_d / 0.2 > 0.8 * spd0 and bad_ev == 0 and S.id_at(rn) == "barricade")
+	var hit_ev: Array = []
+	for k in 30:
+		S._move_enemies(0.05, hit_ev)
+	_check("V2 P3a: once through, its attacks land on the Core", _evts(hit_ev, "core_hit").size() >= 1)
 	# Outer rings reach further (+8% per ring past 1).
 	S = _open_run()
 	S.slots[r1] = {"id": "gun", "perm": 0, "run": 1}

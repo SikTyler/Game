@@ -7,7 +7,7 @@ extends SceneTree
 ## the count holds. Not a CI gate (MASS_HORDE H11): prints numbers.
 ## Usage: godot --headless --path games/towerdef-pc-0001 --script res://horde_prof.gd [-- 1000 10000 20000]
 
-const BOARD: Dictionary = {16: "gun", 17: "mortar", 18: "tesla", 23: "frost", 25: "flak", 30: "hut_infantry", 31: "hut_sapper", 32: "hut_drone", 10: "railgun", 38: "barricade"}
+const BOARD: Dictionary = {16: "gun", 17: "mortar", 18: "tesla", 23: "frost", 25: "flak", 30: "hut_infantry", 31: "hut_sapper", 10: "railgun", 38: "barricade"}
 const WARM: int = 120    # 6 s of sim: the crowd reaches the board and piles up
 const STEPS: int = 60
 

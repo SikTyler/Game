@@ -17,7 +17,7 @@ const LIST: Array = [
 	{"id": "ACH_KILLS_1M",      "name": "Exterminator II", "desc": "1,000,000 lifetime kills"},
 	{"id": "ACH_KILLS_10M",     "name": "Exterminator III", "desc": "10,000,000 lifetime kills"},
 	{"id": "ACH_TIDE",          "name": "The Tide",        "desc": "Survive a wave with 10,000 enemies alive at once"},
-	{"id": "ACH_WALL_FLESH",    "name": "Wall of Flesh",   "desc": "A single Barricade slows 2,000 enemies in one wave"},
+	{"id": "ACH_WALL_FLESH",    "name": "Wall of Flesh",   "desc": "A single Wall slows 2,000 enemies in one wave"},
 	{"id": "ACH_PART_SEA",      "name": "Parting the Sea", "desc": "Knock back 500 enemies with a single blast"},
 	{"id": "ACH_ALL_SYNERGY",   "name": "Networked",       "desc": "Have 6 synergies active at once in a run"},
 	{"id": "ACH_ECO_ONLY",      "name": "Merchant Prince", "desc": "Reach wave 30 with no weapon buildings"},

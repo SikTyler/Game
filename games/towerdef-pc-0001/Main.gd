@@ -938,10 +938,9 @@ func _handle(events: Array) -> void:
 					_ring(ev["pos"], float(ev["aoe"]), 0.35, Kit.RUST)
 			"troop_die":
 				_ring(ev["pos"], 14.0, 0.3, Kit.DIM)
-			"building_destroyed":
-				_ring(ev["pos"], 40.0, 0.5, ENEMY)
-				_pop(ev["pos"], "DESTROYED", 1.0, ENEMY, 18)
-				rebuild = true
+			"sapper_blast":
+				_ring(ev["pos"], 56.0, 0.45, ENEMY)
+				juice.shake(1.0)
 			"upgrade_mode":
 				rebuild = true
 			"perk_taken":

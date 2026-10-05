@@ -184,7 +184,7 @@ static func cell_text(m, i: int) -> String:
 		return "Empty cell (ring %d)\nDraft a building and drop it here" % ring
 	var d: Dictionary = PickDB.get_def(id)
 	var up: String = "\nClick to apply the %s upgrade here" % pick_name(S.pending_upgrade) if S.pending_upgrade == id and S.upgrade_targets(id).has(i) else ""
-	return "%s  Lv%d / %d  (%s)\nHP %d / %d\n%s%s" % [String(d["name"]), S.lvl_at(i), PickDB.max_of(id), String(d["rarity"]).capitalize(), int(S.bld_hp[i]), int(S.bld_max(i)), String(d["desc"]), up]
+	return "%s  Lv%d / %d  (%s)\n%s%s" % [String(d["name"]), S.lvl_at(i), PickDB.max_of(id), String(d["rarity"]).capitalize(), String(d["desc"]), up]
 
 
 # ================================================================== ranges
@@ -329,12 +329,6 @@ static func _draw_grid(m) -> void:
 			var lv: int = S.lvl_at(i)
 			for k in lv:
 				m.draw_rect(Rect2(r.position + Vector2(4 + k * 7, r.size.y - 7), Vector2(5, 4)), Kit.GOLD)
-			# building HP (enemies attack buildings in their way)
-			var bmx: float = float(S.bld_max(i))
-			if bmx > 0.0 and float(S.bld_hp[i]) < bmx:
-				var f: float = clampf(float(S.bld_hp[i]) / bmx, 0.0, 1.0)
-				m.draw_rect(Rect2(r.position + Vector2(2, 2), Vector2(r.size.x - 4, 4)), Color(0, 0, 0, 0.6))
-				m.draw_rect(Rect2(r.position + Vector2(2, 2), Vector2((r.size.x - 4) * f, 4)), Kit.GREEN.lerp(Kit.ENEMY, 1.0 - f))
 			# pending upgrade: glow the buildings it can be applied to
 			if S.pending_upgrade == id and S.upgrade_targets(id).has(i):
 				m.draw_rect(r.grow(3), Color(Kit.GOLD, 0.6 + 0.35 * sin(m.t_anim * 8.0)), false, 3.0)

@@ -20,13 +20,12 @@ extends RefCounted
 
 const F_MARKED: int = 1
 const F_EXIT: int = 2
-## move() action log opcodes: [op, arg] pairs (ACT_BLD: [op, slot, cell]),
+## move() action log opcodes: [op, arg] pairs (ACT_BOOM: [op, slot, -1]),
 ## replayed in order by TowerState.
-const ACT_BLD: int = 0       # arg = slot of a body hitting the building on `cell`
 const ACT_SHOT: int = 1      # arg = slot of a ranged body firing at the Core
 const ACT_HIT: int = 2       # arg = slot of a melee body hitting the Core
 const ACT_ESCAPE: int = 3    # arg = slot of a courier that reached its exit
-const ACT_BOOM: int = 4      # [op, slot, cell]: a Sapper detonated on the building on `cell`
+const ACT_BOOM: int = 4      # [op, slot, -1]: a Sapper detonated on the Core
 const F_LEAK: int = 4        # MASS_HORDE §D5: reached the Core (forfeits its pool share)
 const F_FROST: int = 8       # chilled by a Cryo Spire (freeze-shatter / Brittle)
 const F_BOOM: int = 16       # Sapper that detonated (reaped without a kill / reward)
@@ -89,7 +88,6 @@ static func _kcode(k: String) -> int:
 ## C# HordeWorld (mono build required: the mass horde is C#-only).
 var world: Object = null
 ## Last step's building contact damage (per building slot), from HordeWorld.
-var bld_dmg: PackedFloat64Array = PackedFloat64Array()
 
 
 func _init() -> void:
@@ -302,16 +300,15 @@ func radial_knock(c: Vector2, r: float, k: float) -> int:
 
 
 ## One fixed sim step in C# (MASS_HORDE §3/§4): flow-field seek, pressure,
-## knockback, Core ring + building projection, contact attacks. `blk` is the
-## per-building-slot occupancy (the flow field rebuilds only when it changes).
-## Returns the action log ([op, slot] pairs; then [ACT_BLD, building, hits]
-## rows whose damage sums are in `bld_dmg`). `prm` = [accel_k, sep_k,
-## sep_cap, friction, kmax, front_k, bld_cost].
+## knockback, Core ring + building projection / squeeze, contact attacks.
+## `blk` is the per-building-slot occupancy (the flow field rebuilds only when
+## it changes). Returns the action log ([op, slot] pairs; [ACT_BOOM, slot, -1]
+## triples). `prm` = [accel_k, sep_k, sep_cap, friction, kmax, front_k,
+## bld_cost, knock_max, press_band, squeeze_k].
 func move(dt: float, frozen: bool, center: Vector2, stop_r: float, r_stop: float, r_fire: float, blk: PackedByteArray, side: int, cell: float, prm: PackedFloat64Array = PackedFloat64Array([6.0, 0.5, 0.35, 6.0])) -> PackedInt32Array:
 	_configure(center, stop_r, side, cell)
 	world.call("SetParams", prm)
 	var acts: PackedInt32Array = world.call("Step", dt, frozen, r_stop, r_fire, blk)
-	bld_dmg = world.call("LastBuildingDamage")
 	pull()
 	return acts
 

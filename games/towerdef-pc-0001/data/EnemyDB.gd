@@ -31,22 +31,23 @@ static func get_def(kind: String) -> Dictionary:
 ## MASS_HORDE §D1/§D2: the designed mass roster (shipping waves). Every body is
 ## a designed unit at mass scale (no share of a bigger enemy). hp / dmg are
 ## Tier-1 wave-1 values; dmg is one contact hit on the Core (C# contact cadence
-## 1 s; Spitters fire at range); `bld` = damage per contact hit on a structure
-## (Sapper: its one detonation). cash / xp / coin are WEIGHTS that split each
+## 1 s; Spitters fire at range; a Sapper detonates on the Core for
+## horde_sapper_core x its hit; V2 P3a: structures are never attacked).
+## cash / xp / coin are WEIGHTS that split each
 ## wave's designed pool (§D5), not payouts. `size` = 2 x the §D1 radius.
 ## `grow` picks the per-body HP growth class ("f" fodder/line, "h" heavy).
 const MASS: Dictionary = {
-	"mite":     {"hp": 2.0,   "spd": 90.0,  "dmg": 0.25, "bld": 0.25, "cash": 1.0,  "xp": 1.0,  "coin": 0.0,  "size": 10.0, "grow": "f"},
-	"drone":    {"hp": 5.0,   "spd": 50.0,  "dmg": 0.5,  "bld": 0.5,  "cash": 2.0,  "xp": 2.0,  "coin": 0.0,  "size": 14.0, "grow": "f"},
-	"skitter":  {"hp": 3.0,   "spd": 120.0, "dmg": 0.4,  "bld": 0.4,  "cash": 2.0,  "xp": 2.0,  "coin": 0.0,  "size": 12.0, "grow": "f"},
-	"hauler":   {"hp": 60.0,  "spd": 30.0,  "dmg": 3.0,  "bld": 3.0,  "cash": 20.0, "xp": 20.0, "coin": 1.0,  "size": 26.0, "grow": "h"},
-	"ranged":   {"hp": 8.0,   "spd": 42.0,  "dmg": 1.0,  "bld": 1.5,  "cash": 6.0,  "xp": 6.0,  "coin": 0.0,  "size": 14.0, "grow": "f"},
-	"sapper":   {"hp": 12.0,  "spd": 55.0,  "dmg": 2.0,  "bld": 25.0, "cash": 8.0,  "xp": 8.0,  "coin": 0.0,  "size": 16.0, "grow": "f"},
-	"shield":   {"hp": 40.0,  "spd": 38.0,  "dmg": 1.0,  "bld": 1.0,  "cash": 15.0, "xp": 15.0, "coin": 1.0,  "size": 20.0, "grow": "h", "guard": 30.0},
-	"splitter": {"hp": 25.0,  "spd": 40.0,  "dmg": 1.0,  "bld": 1.0,  "cash": 10.0, "xp": 10.0, "coin": 0.0,  "size": 22.0, "grow": "h"},
-	"courier":  {"hp": 30.0,  "spd": 140.0, "dmg": 0.0,  "bld": 0.0,  "cash": 0.0,  "xp": 0.0,  "coin": 0.0,  "size": 18.0, "grow": "h"},
-	"elite":    {"hp": 300.0, "spd": 34.0,  "dmg": 8.0,  "bld": 8.0,  "cash": 150.0, "xp": 150.0, "coin": 10.0, "size": 24.0, "grow": "e"},
-	"boss":     {"hp": 3000.0, "spd": 22.0, "dmg": 40.0, "bld": 40.0, "cash": 1500.0, "xp": 1500.0, "coin": 100.0, "size": 52.0, "grow": "e"},
+	"mite":     {"hp": 2.0,   "spd": 90.0,  "dmg": 0.25, "cash": 1.0,  "xp": 1.0,  "coin": 0.0,  "size": 10.0, "grow": "f"},
+	"drone":    {"hp": 5.0,   "spd": 50.0,  "dmg": 0.5,  "cash": 2.0,  "xp": 2.0,  "coin": 0.0,  "size": 14.0, "grow": "f"},
+	"skitter":  {"hp": 3.0,   "spd": 120.0, "dmg": 0.4,  "cash": 2.0,  "xp": 2.0,  "coin": 0.0,  "size": 12.0, "grow": "f"},
+	"hauler":   {"hp": 60.0,  "spd": 30.0,  "dmg": 3.0,  "cash": 20.0, "xp": 20.0, "coin": 1.0,  "size": 26.0, "grow": "h"},
+	"ranged":   {"hp": 8.0,   "spd": 42.0,  "dmg": 1.0,  "cash": 6.0,  "xp": 6.0,  "coin": 0.0,  "size": 14.0, "grow": "f"},
+	"sapper":   {"hp": 12.0,  "spd": 55.0,  "dmg": 2.0,  "cash": 8.0,  "xp": 8.0,  "coin": 0.0,  "size": 16.0, "grow": "f"},
+	"shield":   {"hp": 40.0,  "spd": 38.0,  "dmg": 1.0,  "cash": 15.0, "xp": 15.0, "coin": 1.0,  "size": 20.0, "grow": "h", "guard": 30.0},
+	"splitter": {"hp": 25.0,  "spd": 40.0,  "dmg": 1.0,  "cash": 10.0, "xp": 10.0, "coin": 0.0,  "size": 22.0, "grow": "h"},
+	"courier":  {"hp": 30.0,  "spd": 140.0, "dmg": 0.0,  "cash": 0.0,  "xp": 0.0,  "coin": 0.0,  "size": 18.0, "grow": "h"},
+	"elite":    {"hp": 300.0, "spd": 34.0,  "dmg": 8.0,  "cash": 150.0, "xp": 150.0, "coin": 10.0, "size": 24.0, "grow": "e"},
+	"boss":     {"hp": 3000.0, "spd": 22.0, "dmg": 40.0, "cash": 1500.0, "xp": 1500.0, "coin": 100.0, "size": 52.0, "grow": "e"},
 }
 
 ## §D3 mix by wave band (share of the body count; elites / bosses / couriers

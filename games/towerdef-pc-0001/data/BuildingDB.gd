@@ -21,7 +21,7 @@ const DEFS: Dictionary = {
 	"flak":      {"name": "Flamer",  "cat": "weapon",  "coin": 22, "desc": "40 deg cone of fire; burn spreads through the pile"},
 	"beacon":    {"name": "Signal Beacon", "cat": "support", "coin": 20, "desc": "+10%/lv rate & +0.3/lv range to buildings within 2 cells, every direction"},
 	"refinery":  {"name": "Refinery",      "cat": "eco",     "coin": 24, "desc": "Wave end: 10% of the wave's cash income -> coins (cap 2.5/lv). Adj Mine: +20% output"},
-	"barricade": {"name": "Barricade",     "cat": "support", "coin": 16, "desc": "High-HP wall; enemies within 1.5 cells on any side -30% speed"},
+	"barricade": {"name": "Wall",          "cat": "support", "coin": 16, "desc": "Blocker: flowed around or squeezed through at a crawl; enemies within 1.5 cells on any side -30% speed"},
 	# Redesign run-only picks (PickDB holds draft text; these give the view a name + colour).
 	"frost":        {"name": "Cryo Spire",     "cat": "weapon",  "coin": 0, "desc": "Slows 30% within 2.5 cells, 3 dmg/s"},
 	"obelisk":      {"name": "Siphon Obelisk", "cat": "support", "coin": 0, "desc": "1% of all damage dealt heals the Core"},

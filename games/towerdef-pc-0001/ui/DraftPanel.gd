@@ -153,7 +153,7 @@ static func draw(m) -> void:
 		Kit.icon(m, S.pending_place, Rect2(x + 14, lr.position.y + 70, 80, 80))
 		Kit.t(m, String(d2["name"]), Vector2(x + 108, lr.position.y + 100), 22, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w - 120)
 		Kit.wrap(m, String(d2["desc"]), Vector2(x + 14, lr.position.y + 176), 15, Kit.DIM, w - 28, 3)
-		Kit.wrap(m, "Click a glowing cell on the grid. Enemies attack buildings in their way — a destroyed building is lost for the run.", Vector2(x, lr.position.y + 330), 15, Kit.DIM, w, 4)
+		Kit.wrap(m, "Click a glowing cell on the grid. Enemies never attack buildings: they flow around them, or squeeze slowly through a sealed wall.", Vector2(x, lr.position.y + 330), 15, Kit.DIM, w, 4)
 		return
 	if S.pending_upgrade != "":
 		var d3: Dictionary = PickDB.get_def(S.pending_upgrade)
