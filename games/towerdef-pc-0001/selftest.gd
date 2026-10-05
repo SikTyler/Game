@@ -1013,6 +1013,18 @@ func _mass_content_stages() -> void:
 	SF.eh.rebuild()
 	SF._burn_step(0.25, [])
 	_check("MASS Flamer: cone licks bodies ahead (not behind), burn spreads to a touching body", cone_ok and SF.en.burn_t[SF.en.order[3]] > 0.0)
+	# ---- §D1 Warlord surge: fodder near a Warlord runs +20%; a slow still wins
+	var SW2 = _mfresh()
+	SW2.spawn_hold = true
+	SW2._spawn("elite", [], TowerState.CENTER + Vector2(0, -400))
+	SW2.add_enemy({"kind": "mite", "pos": TowerState.CENTER + Vector2(30, -400), "hp": 999.0, "max_hp": 999.0, "size": 10.0, "spd": 0.0})
+	SW2.add_enemy({"kind": "mite", "pos": TowerState.CENTER + Vector2(-30, -400), "hp": 999.0, "max_hp": 999.0, "size": 10.0, "spd": 0.0})
+	SW2.add_enemy({"kind": "mite", "pos": TowerState.CENTER + Vector2(0, 400), "hp": 999.0, "max_hp": 999.0, "size": 10.0, "spd": 0.0})
+	var slowed: int = SW2.en.order[2]
+	SW2.en.apply_slow(slowed, 5.0, 0.5)
+	SW2.eh.rebuild()
+	SW2._warlord_surge(0.3)
+	_check("MASS Warlord surge: near fodder x1.2, far fodder untouched, a slowed body stays slowed", SW2.en.slow_m[SW2.en.order[1]] == 1.2 and SW2.en.slow_m[SW2.en.order[3]] == 1.0 and SW2.en.slow_m[slowed] == 0.5)
 	# ---- §D6 rescaled kill missions
 	_check("MASS §D6 missions: kill 5k / 15k / 40k; kill-in-one-wave 1k / 5k", MissionDB.target("kill", 0) == 5000 and MissionDB.target("kill", 25) == 15000 and MissionDB.target("kill", 40) == 40000 and MissionDB.target("wave_kills", 0) == 1000 and MissionDB.target("wave_kills", 40) == 5000)
 	# ---- H10: same seed, same mass run (kills / cash / bodies / C# checksum)

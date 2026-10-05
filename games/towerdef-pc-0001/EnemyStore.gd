@@ -231,6 +231,16 @@ func apply_slow(s: int, t: float, m: float) -> void:
 	world.call("SetSlow", s, slow_t[s], slow_m[s])
 
 
+## Warlord surge (MASS_HORDE §D1): a speed-up that never overrides a slow
+## (a slowed body stays slowed; an unslowed one runs at x m for t seconds).
+func haste(s: int, t: float, m: float) -> void:
+	if slow_t[s] > 0.0 and slow_m[s] < 1.0:
+		return
+	slow_t[s] = maxf(slow_t[s], t)
+	slow_m[s] = m
+	world.call("SetSlow", s, slow_t[s], slow_m[s])
+
+
 func flash(s: int, t: float) -> void:
 	hit_t[s] = t
 	world.call("SetHit", s, t)

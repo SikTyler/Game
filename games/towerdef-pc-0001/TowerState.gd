@@ -430,6 +430,7 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	mass_wall_hits = {}
 	burning = PackedInt32Array()
 	plan_lod = {}
+	surge_acc = 0.0
 	burn_acc = 0.0
 	kills_by_weapon = {}
 	_hn = 0
@@ -1217,6 +1218,7 @@ func _step(sub: float, ev: Array) -> void:
 	_kb_k = 0.0
 	if mass:
 		_burn_step(dt, ev)
+		_warlord_surge(dt)
 	_src = "troop"
 	_troops_step(dt, ev)
 	_src = "frost"
@@ -1583,7 +1585,7 @@ func _mass_open(p: Dictionary) -> void:
 	var w: int = int(p["wave"])
 	var a: Dictionary = _mass_acct(w)
 	plan_lod[w] = int(p.get("lod", 1))
-	a["n"] = int(a["n"]) + (p["entries"] as Array).size() + int(p.get("nboss", 0))
+	a["n"] = int(a["n"]) + (p["entries"] as Array).size() * int(p.get("lod", 1)) + int(p.get("nboss", 0))   # in body weights
 	a["pool"] = mass_cash_pool(w)
 	a["W"] = float(p["cash_w"])
 	a["xpool"] = mass_cash_pool(w) * TuneRef.num("mass_xp_unit", 1.25) / maxf(0.01, TuneRef.num("mass_cash_unit", 1.0))
@@ -1679,11 +1681,13 @@ func _spawn_mass_due(ev: Array) -> void:
 		var at: Vector2 = CENTER + Vector2.from_angle(float(pe.get("a", 0.0))) * (spawn_r() + float(pe.get("j", 0.0)))
 		if _spawn(String(pe["kind"]), ev, at, bool(pe.get("marked", false)), 1.0, pw, lod):
 			wave_spawned += 1
-	if plan_idx >= plan.size() and wave_acct.has(plan_wave):
-		var a: Dictionary = wave_acct[plan_wave]
-		if not bool(a["planned_done"]):
-			a["planned_done"] = true
-			_mass_try_clear(plan_wave, ev)
+	if plan_idx >= plan.size():
+		# every wave up to this plan (incl. a held remainder carried into it) is fully spawned
+		for aw in wave_acct.keys():
+			var a: Dictionary = wave_acct[aw]
+			if int(aw) <= plan_wave and not bool(a["planned_done"]):
+				a["planned_done"] = true
+				_mass_try_clear(int(aw), ev)
 
 
 ## Weighted roll in SPEC order: hauler, splitter, elite, ranged, skitter, drone.
@@ -2604,6 +2608,26 @@ func _gun_round(from: Vector2, tpos: Vector2, te: int, pn: int, reach3: float, d
 	if hitn == 0 and en.hp[te] > 0.0:
 		_hit(te, dmg, ev, crit)
 	ev.append({"t": "shot", "kind": "gun", "from": from, "to": last})
+
+
+## Warlord aura (§D1): every 0.25 s each living Warlord hastes the fodder
+## within 120 px by +20% (a surge); killing it breaks the surge.
+var surge_acc: float = 0.0
+const FODDER: Array = ["mite", "drone", "skitter"]
+func _warlord_surge(dt: float) -> void:
+	surge_acc += dt
+	if surge_acc < 0.25 - 0.000001:
+		return
+	surge_acc = 0.0
+	var r: float = TuneRef.num("mass_surge_r", 120.0)
+	var m: float = TuneRef.num("mass_surge", 1.2)
+	for e in en.order:
+		if en.kind[e] != "elite" or en.hp[e] <= 0.0:
+			continue
+		var c: Vector2 = en.pos[e]
+		for f in eh.in_radius(c, r):
+			if FODDER.has(en.kind[f]):
+				en.haste(f, 0.35, m)
 
 
 ## Flamer burn (§D4): `t` seconds at `dps`, refreshed to the longer burn.
