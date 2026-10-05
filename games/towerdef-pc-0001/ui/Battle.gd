@@ -153,12 +153,12 @@ static func world_tip(m, p: Vector2) -> String:
 	var wp: Vector2 = m.s2w(p)
 	var best: float = 22.0
 	var found: Dictionary = {}
-	for e in S.enemies:
-		var ed: Dictionary = e
-		var dd: float = (ed["pos"] as Vector2).distance_to(wp)
-		if dd < maxf(best, float(ed["size"])):
+	var en = S.en
+	for s in S.eh.candidates(wp, maxf(best, en.max_size)):
+		var dd: float = en.pos[s].distance_to(wp)
+		if dd < maxf(best, en.size[s]):
 			best = dd
-			found = ed
+			found = en.get_dict(s)
 	if not found.is_empty():
 		return "%s\nHP %d / %d" % [String(found["kind"]).capitalize(), int(ceil(float(found["hp"]))), int(float(found["max_hp"]))]
 	for t in S.troops:
@@ -330,27 +330,27 @@ static func _draw_world(m) -> void:
 			m.draw_rect(Rect2(tp + Vector2(-9, 12), Vector2(18, 3)), Color(0, 0, 0, 0.6))
 			m.draw_rect(Rect2(tp + Vector2(-9, 12), Vector2(18 * hf, 3)), Kit.GREEN)
 	# enemies
-	for e in S.enemies:
-		var ed: Dictionary = e
-		var p: Vector2 = ed["pos"]
-		var s: float = float(ed["size"])
-		var kind: String = ed["kind"]
+	var en = S.en
+	for es in en.order:
+		var p: Vector2 = en.pos[es]
+		var s: float = en.size[es]
+		var kind: String = en.kind[es]
 		var col: Color = ENEMY2 if kind in ["skitter", "boss", "mite", "splitter"] else Kit.ENEMY
 		var hitr := Rect2(p - Vector2(s, s), Vector2(s, s) * 2.0)
 		if not Kit.icon(m, kind, hitr):
 			m.draw_rect(Rect2(p - Vector2(s, s) * 0.5, Vector2(s, s)), col)
-		if bool(ed.get("marked", false)):
+		if en.is_marked(es):
 			m.draw_arc(p, s * 1.3, 0, TAU, 24, Kit.GOLD, 2.0)
-		if float(ed["slow_t"]) > 0.0:
+		if en.slow_t[es] > 0.0:
 			m.draw_arc(p, s * 0.9, 0, TAU, 20, Color("8fe3ff"), 2.0)
-		var sh: int = int(ed.get("shield", 0))
+		var sh: int = en.shield[es]
 		if sh > 0:
 			if not Kit.icon(m, "elite_shield", hitr.grow(s * 0.3)):
 				m.draw_arc(p, s * 1.2, 0, TAU, 24, SHIELD, 3.0)
-		var ht: float = float(ed.get("hit_t", 0.0))
+		var ht: float = en.hit_t[es]
 		if ht > 0.0:
 			m.draw_circle(p, s * 0.75, Color(1, 1, 1, 0.7 * ht / TowerState.HIT_FLASH))
-		var frac: float = float(ed["hp"]) / float(ed["max_hp"])
+		var frac: float = en.hp[es] / en.max_hp[es]
 		if frac < 1.0:
 			m.draw_rect(Rect2(p + Vector2(-s * 0.6, s * 0.85), Vector2(s * 1.2, 4)), Color(0, 0, 0, 0.6))
 			m.draw_rect(Rect2(p + Vector2(-s * 0.6, s * 0.85), Vector2(s * 1.2 * frac, 4)), col.lightened(0.3))

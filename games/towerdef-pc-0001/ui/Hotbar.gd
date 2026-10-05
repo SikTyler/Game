@@ -72,7 +72,7 @@ static func draw(m) -> void:
 	var lw: float = slot_rect(m, 0).position.x - lx - 30.0
 	Kit.t(m, "LANE FOCUS", Vector2(lx, hr.position.y + 30), 14, Kit.RUST, HORIZONTAL_ALIGNMENT_LEFT, lw)
 	Kit.t(m, "%s   [%s / %s]" % [String(QUAD_NAMES[int(S.focus_quad)]), Kit.hint(m, "lane_prev"), Kit.hint(m, "lane_next")], Vector2(lx, hr.position.y + 54), 17, Kit.GEM, HORIZONTAL_ALIGNMENT_LEFT, lw)
-	Kit.t(m, "%d enemies on the field  ·  %d kills" % [S.enemies.size(), int(S.kills)], Vector2(lx, hr.position.y + 78), 15, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, lw)
+	Kit.t(m, "%d enemies on the field  ·  %d kills" % [S.enemy_count(), int(S.kills)], Vector2(lx, hr.position.y + 78), 15, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, lw)
 	m.stat_tips.append([Rect2(lx, hr.position.y + 10, lw, 76), "Lane focus steers auto-targeted specials (Orbital) and lane buffs."])
 	# right: draft cadence
 	var rx: float = slot_rect(m, 3).end.x + 30.0

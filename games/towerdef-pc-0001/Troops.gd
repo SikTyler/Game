@@ -111,39 +111,39 @@ static func alive_count(troops: Array) -> int:
 	return n
 
 
-static func _eid_index(enemies: Array, eid: int) -> int:
+## Living slot of `eid` in the EnemyStore, or -1.
+static func _eid_index(en, eid: int) -> int:
 	if eid < 0:
 		return -1
-	for k in enemies.size():
-		var e: Dictionary = enemies[k]
-		if int(e.get("eid", -2)) == eid and float(e["hp"]) > 0.0:
-			return k
+	var k: int = en.slot_of(eid)
+	if k >= 0 and en.hp[k] > 0.0:
+		return k
 	return -1
 
 
 ## Best target for troop td: priority kinds first for its role, then nearest
-## to the troop; candidates must be within SEEK cells of the anchor.
-static func _seek(td: Dictionary, enemies: Array, px: float) -> int:
+## to the troop; candidates must be within SEEK cells of the anchor. Hash
+## candidates arrive in spawn order, so the strict `<` keeps the old winner.
+static func _seek(td: Dictionary, en, eh, px: float) -> int:
 	var anchor: Vector2 = td["anchor"]
 	var pos: Vector2 = td["pos"]
 	var lim: float = SEEK * px
 	var best: int = -1
 	var best_key: float = INF
-	for k in enemies.size():
-		var e: Dictionary = enemies[k]
-		if float(e["hp"]) <= 0.0 or String(e["kind"]) == "courier":
+	for k in eh.candidates(anchor, lim):
+		var kind: String = en.kind[k]
+		if en.hp[k] <= 0.0 or kind == "courier":
 			continue
-		var ep: Vector2 = e["pos"]
+		var ep: Vector2 = en.pos[k]
 		if anchor.distance_to(ep) > lim:
 			continue
 		var key: float = pos.distance_squared_to(ep)
-		var kind: String = String(e["kind"])
 		var pri: bool = false
 		match String(td["kind"]):
 			"drone":
 				pri = FLYERS.has(kind)
 			"sapper":
-				pri = PRIORITY.has(kind) or bool(e.get("marked", false))
+				pri = PRIORITY.has(kind) or en.is_marked(k)
 		if pri:
 			key -= 1.0e9
 		if key < best_key:
@@ -161,7 +161,8 @@ static func _move(td: Dictionary, to: Vector2, dt: float) -> void:
 
 ## Advance every troop by dt. Returns {ev: [...], hits: [{eid, dmg, tid}]}.
 ## ctx: cell_px, heal_frac (retreat heal per s, default 0.2).
-static func step(troops: Array, enemies: Array, dt: float, ctx: Dictionary) -> Dictionary:
+## en / eh: the TowerState EnemyStore + EnemyHash (query object).
+static func step(troops: Array, en, eh, dt: float, ctx: Dictionary) -> Dictionary:
 	var ev: Array = []
 	var hits: Array = []
 	var px: float = float(ctx.get("cell_px", 78.0))
@@ -182,14 +183,13 @@ static func step(troops: Array, enemies: Array, dt: float, ctx: Dictionary) -> D
 		td["cd"] = maxf(0.0, float(td["cd"]) - dt)
 		# Enemies in contact hit the troop (50% of contact dmg); Riflemen taunt.
 		var pos: Vector2 = td["pos"]
-		for e in enemies:
-			var ed: Dictionary = e
-			if float(ed["hp"]) <= 0.0 or String(ed["kind"]) == "courier":
+		for ed in eh.candidates(pos, contact + en.max_size * 0.5):
+			if en.hp[ed] <= 0.0 or en.kind[ed] == "courier":
 				continue
-			if pos.distance_to(ed["pos"]) <= contact + float(ed.get("size", 16.0)) * 0.5:
-				td["hp"] = float(td["hp"]) - 0.5 * float(ed["dmg"]) * dt
+			if pos.distance_to(en.pos[ed]) <= contact + en.size[ed] * 0.5:
+				td["hp"] = float(td["hp"]) - 0.5 * en.dmg[ed] * dt
 				if bool(td.get("taunt", false)):
-					ed["taunt_t"] = 0.15
+					en.taunt_t[ed] = 0.15
 		if float(td["hp"]) <= 0.0:
 			td["state"] = "dead"
 			td["hp"] = 0.0
@@ -209,24 +209,24 @@ static func step(troops: Array, enemies: Array, dt: float, ctx: Dictionary) -> D
 				if float(td["hp"]) >= float(td["max_hp"]):
 					td["state"] = "seek"
 			continue
-		var k: int = _eid_index(enemies, int(td["tgt"]))
+		var k: int = _eid_index(en, int(td["tgt"]))
 		var anchor: Vector2 = td["anchor"]
-		if k >= 0 and anchor.distance_to((enemies[k] as Dictionary)["pos"]) > LEASH * px:
+		if k >= 0 and anchor.distance_to(en.pos[k]) > LEASH * px:
 			k = -1
 		if k < 0:
-			k = _seek(td, enemies, px)
-			var new_tgt: int = int((enemies[k] as Dictionary).get("eid", -1)) if k >= 0 else -1
+			k = _seek(td, en, eh, px)
+			var new_tgt: int = en.eid[k] if k >= 0 else -1
 			if new_tgt != int(td["tgt"]):
 				td["tgt"] = new_tgt
-				ev.append({"t": "troop_move", "tid": int(td["tid"]), "to": (enemies[k] as Dictionary)["pos"] if k >= 0 else anchor, "state": "engage" if k >= 0 else "seek"})
+				ev.append({"t": "troop_move", "tid": int(td["tid"]), "to": en.pos[k] if k >= 0 else anchor, "state": "engage" if k >= 0 else "seek"})
 		if k < 0:
 			td["state"] = "seek"
 			_move(td, anchor, dt)
 			continue
 		td["state"] = "engage"
-		var e2: Dictionary = enemies[k]
-		var ep: Vector2 = e2["pos"]
-		var reach: float = float(td["range"]) if float(td["range"]) > 0.0 else MELEE * px + float(e2.get("size", 16.0)) * 0.5
+		var e2: int = k
+		var ep: Vector2 = en.pos[e2]
+		var reach: float = float(td["range"]) if float(td["range"]) > 0.0 else MELEE * px + en.size[e2] * 0.5
 		var dist: float = (td["pos"] as Vector2).distance_to(ep)
 		if dist > reach:
 			# chase, but never past the leash
@@ -238,14 +238,13 @@ static func step(troops: Array, enemies: Array, dt: float, ctx: Dictionary) -> D
 		if String(td["kind"]) == "sapper":
 			# suicide charge: aoe blast, x2 vs armored, then respawn
 			var rad: float = float(td["aoe"])
-			for x in enemies:
-				var xd: Dictionary = x
-				if float(xd["hp"]) <= 0.0 or String(xd["kind"]) == "courier":
+			for xd in eh.candidates(ep, rad):
+				if en.hp[xd] <= 0.0 or en.kind[xd] == "courier":
 					continue
-				if (xd["pos"] as Vector2).distance_to(ep) <= rad:
-					var m: float = 2.0 if ARMORED.has(String(xd["kind"])) else 1.0
-					hits.append({"eid": int(xd.get("eid", -1)), "dmg": float(td["dmg"]) * m, "tid": int(td["tid"])})
-			ev.append({"t": "troop_hit", "tid": int(td["tid"]), "eid": int(e2.get("eid", -1)), "pos": ep, "aoe": rad, "kind": "sapper"})
+				if en.pos[xd].distance_to(ep) <= rad:
+					var m: float = 2.0 if ARMORED.has(en.kind[xd]) else 1.0
+					hits.append({"eid": en.eid[xd], "dmg": float(td["dmg"]) * m, "tid": int(td["tid"])})
+			ev.append({"t": "troop_hit", "tid": int(td["tid"]), "eid": en.eid[e2], "pos": ep, "aoe": rad, "kind": "sapper"})
 			td["state"] = "dead"
 			td["hp"] = 0.0
 			td["respawn_t"] = float(td["respawn"])
@@ -254,8 +253,8 @@ static func step(troops: Array, enemies: Array, dt: float, ctx: Dictionary) -> D
 			continue
 		if float(td["cd"]) <= 0.0 and float(td["rate"]) > 0.0:
 			td["cd"] = 1.0 / float(td["rate"])
-			hits.append({"eid": int(e2.get("eid", -1)), "dmg": float(td["dmg"]), "tid": int(td["tid"])})
-			ev.append({"t": "troop_hit", "tid": int(td["tid"]), "eid": int(e2.get("eid", -1)), "pos": ep, "kind": String(td["kind"])})
+			hits.append({"eid": en.eid[e2], "dmg": float(td["dmg"]), "tid": int(td["tid"])})
+			ev.append({"t": "troop_hit", "tid": int(td["tid"]), "eid": en.eid[e2], "pos": ep, "kind": String(td["kind"])})
 	return {"ev": ev, "hits": hits}
 
 

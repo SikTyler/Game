@@ -215,7 +215,7 @@ func _initialize() -> void:
 		S.hp = float(S.stats["max_hp"])
 		if k % 5 == 0:
 			Bot.bot_step(S, "balanced")
-		if S.wave >= 4 and S.enemies.size() > 6 and S.draft.is_empty() and S.pending_place == "":
+		if S.wave >= 4 and S.enemy_count() > 6 and S.draft.is_empty() and S.pending_place == "":
 			break
 	main.sel = -1
 	_quiet()
@@ -251,7 +251,7 @@ func _initialize() -> void:
 		S.hp = float(S.stats["max_hp"])
 		if k % 4 == 0:
 			Bot.bot_step(S, "balanced")
-		if S.wave >= 22 and S.enemies.size() > 16 and S.draft.is_empty() and S.pending_place == "" and S.perk_offer.is_empty():
+		if S.wave >= 22 and S.enemy_count() > 16 and S.draft.is_empty() and S.pending_place == "" and S.perk_offer.is_empty():
 			break
 	main.sel = TowerState.CORE_SLOT
 	_quiet()

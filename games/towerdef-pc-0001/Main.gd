@@ -644,10 +644,8 @@ func _clear_fx() -> void:
 func enemy_pos(eid: int) -> Variant:
 	if S == null:
 		return null
-	for e in S.enemies:
-		if int((e as Dictionary).get("eid", -1)) == eid:
-			return (e as Dictionary)["pos"]
-	return null
+	var s: int = S.en.slot_of(eid)
+	return S.en.pos[s] if s >= 0 else null
 
 
 # ---------------------------------------------------------------- events

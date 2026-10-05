@@ -31,6 +31,8 @@ const Troops := preload("res://Troops.gd")
 const Drops := preload("res://Drops.gd")
 const PowerModel := preload("res://PowerModel.gd")
 const Parts := preload("res://Parts.gd")
+const EnemyStore := preload("res://EnemyStore.gd")
+const EnemyHash := preload("res://EnemyHash.gd")
 
 const CENTER: Vector2 = Vector2(360, 470)
 const CELL: float = 52.0
@@ -97,7 +99,11 @@ var unlocked: Array = []     # N × bool (rings open this run)
 var cooldowns: Array = []    # N × float (core uses CORE_SLOT)
 var target_modes: Array = []  # N × String (TARGET_MODES)
 var next_eid: int = 1
-var enemies: Array = []      # {pos, hp, max_hp, spd, dmg, kind, atk_cd, slow_t, slow_m, cash, xp, coin, size, eid}
+## HORDE Phase 1: enemies live in a struct-of-arrays store (EnemyStore: slots,
+## free list, eid -> slot map, `order` = spawn order) queried through a
+## uniform spatial hash (EnemyHash). Rules iterate `en.order`.
+var en: EnemyStore = EnemyStore.new()
+var eh: EnemyHash = EnemyHash.new(en, CENTER)
 var stats: Dictionary = {}
 
 var wave: int = 1
@@ -294,7 +300,7 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 		cooldowns.append(0.0)
 		target_modes.append("nearest")
 	rings_open = 1
-	enemies.clear()
+	en.clear()
 	next_eid = 1
 	draft.clear()
 	pending_place = ""
@@ -948,10 +954,9 @@ func _tick_buffs(dt: float, ev: Array) -> void:
 			continue
 		var c: Vector2 = od["pos"]
 		var n: int = 0
-		for e in enemies:
-			var ed: Dictionary = e
-			if float(ed["hp"]) > 0.0 and (ed["pos"] as Vector2).distance_to(c) <= float(od["r"]) + float(ed["size"]) * 0.5:
-				_hit(ed, float(od["dmg"]), ev)
+		for s in eh.candidates(c, float(od["r"]) + en.max_size * 0.5):
+			if en.hp[s] > 0.0 and en.pos[s].distance_to(c) <= float(od["r"]) + en.size[s] * 0.5:
+				_hit(s, float(od["dmg"]), ev)
 				n += 1
 		ev.append({"t": "orbital_hit", "pos": c, "r": float(od["r"]), "hits": n})
 	orbitals = keep
@@ -1236,7 +1241,7 @@ func _roll_kind(for_wave: int = -1) -> String:
 
 
 func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF, quad: int = -1, marked: bool = false) -> bool:
-	if enemies.size() >= MAX_ENEMIES:
+	if en.count() >= MAX_ENEMIES:
 		return false
 	var d: Dictionary = EnemyDB.get_def(kind)
 	var sc: float = scale() * hp_mult * float(stats.get("perk_enemy_hp", 1.0)) * enemy_hp_mod * (1.0 + 0.15 * float(pack_n("pk_gambit")))
@@ -1248,16 +1253,15 @@ func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF, quad: int = -1, 
 		var pt: int = 2 * q + rng.randi_range(0, 1)
 		var a: float = deg_to_rad(-90.0 + 45.0 * float(pt)) + rng.randf_range(-0.2, 0.2)
 		pos = CENTER + Vector2.from_angle(a) * SPAWN_R
-	var e: Dictionary = {
-		"kind": kind, "pos": pos,
-		"hp": float(d["hp"]) * sc, "max_hp": float(d["hp"]) * sc,
-		"spd": float(d["spd"]) * float(stats.get("perk_enemy_spd", 1.0)) * enemy_spd_mod,
-		"dmg": float(d["dmg"]) * pow(dmg_growth, float(wave - 1)) * hp_mult * enemy_dmg_mod,
-		"cash": float(d["cash"]), "xp": float(d["xp"]), "coin": float(d["coin"]),
-		"size": float(d["size"]), "atk_cd": 0.0, "slow_t": 0.0, "slow_m": 1.0,
-		"shield": 0, "fire_cd": 0.0, "shock_t": 0.0, "shock_src": -1,
-		"hit_t": 0.0, "eid": next_eid, "taunt_t": 0.0,
-	}
+	var e: int = en.alloc(next_eid, kind, pos)
+	en.hp[e] = float(d["hp"]) * sc
+	en.max_hp[e] = float(d["hp"]) * sc
+	en.spd[e] = float(d["spd"]) * float(stats.get("perk_enemy_spd", 1.0)) * enemy_spd_mod
+	en.dmg[e] = float(d["dmg"]) * pow(dmg_growth, float(wave - 1)) * hp_mult * enemy_dmg_mod
+	en.cash[e] = float(d["cash"])
+	en.xp[e] = float(d["xp"])
+	en.coin[e] = float(d["coin"])
+	en.set_size(e, float(d["size"]))
 	next_eid += 1
 	match kind:
 		"boss":
@@ -1268,25 +1272,70 @@ func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF, quad: int = -1, 
 			var bm: float = TuneRef.num("boss_hp_hi", 0.5) if tier >= 2 else 1.0 + (TuneRef.num("boss_hp_t1", 3.0) - 1.0) * ramp
 			if tier == 1 and wave <= 10:
 				bm *= TuneRef.num("pc_first_boss", 0.6)   # the very first boss teaches, it does not wall
-			e["hp"] = float(e["hp"]) * bm
-			e["max_hp"] = float(e["max_hp"]) * bm
-			e["dmg"] = float(e["dmg"]) * TuneRef.num("pc_boss_dmg", 1.0)
+			en.hp[e] = en.hp[e] * bm
+			en.max_hp[e] = en.max_hp[e] * bm
+			en.dmg[e] = en.dmg[e] * TuneRef.num("pc_boss_dmg", 1.0)
 		"elite":
-			e["shield"] = TuneRef.int_of("elite_shield_base", 3) + wave / 10 + elite_shield_add
-			e["max_shield"] = int(e["shield"])
+			en.shield[e] = TuneRef.int_of("elite_shield_base", 3) + wave / 10 + elite_shield_add
+			en.max_shield[e] = en.shield[e]
 		"ranged":
-			e["fire_cd"] = TuneRef.num("ranged_fire", 2.0)
+			en.fire_cd[e] = TuneRef.num("ranged_fire", 2.0)
 	if marked:
-		e["marked"] = true
-		e["hp"] = float(e["hp"]) * TuneRef.num("pc_mark_hp", 3.0)
-		e["max_hp"] = float(e["max_hp"]) * TuneRef.num("pc_mark_hp", 3.0)
-	e["quad"] = quad_of(pos)
-	enemies.append(e)
+		en.flags[e] = en.flags[e] | EnemyStore.F_MARKED
+		en.hp[e] = en.hp[e] * TuneRef.num("pc_mark_hp", 3.0)
+		en.max_hp[e] = en.max_hp[e] * TuneRef.num("pc_mark_hp", 3.0)
+	en.quad[e] = quad_of(pos)
 	if kind == "boss":
-		ev.append({"t": "boss", "pos": e["pos"], "quad": int(e["quad"])})
+		ev.append({"t": "boss", "pos": en.pos[e], "quad": en.quad[e]})
 	if marked:
-		ev.append({"t": "elite_marked", "eid": int(e["eid"]), "pos": e["pos"]})
+		ev.append({"t": "elite_marked", "eid": en.eid[e], "pos": en.pos[e]})
 	return true
+
+
+## ---- EnemyStore accessors for views / tools / tests (rules use en.* directly)
+## Inject a body from a legacy Dict (missing keys -> Dict-code defaults); a
+## missing eid gets the next one, written back into `d`. Returns its slot.
+func add_enemy(d: Dictionary) -> int:
+	if not d.has("eid"):
+		d["eid"] = next_eid
+		next_eid += 1
+	var s: int = en.alloc(int(d["eid"]), String(d.get("kind", "drone")), d.get("pos", CENTER))
+	en.fill(s, d)
+	d["slot"] = s
+	return s
+
+
+## Replace the whole field (tests): clears the store, injects in order, so
+## slots are 0..n-1 in list order.
+func set_enemies(list: Array) -> void:
+	en.clear()
+	for d in list:
+		add_enemy(d)
+
+
+## Fresh Dict copy of a stored body by eid ({} when it is gone).
+func enemy_dict(id: int) -> Dictionary:
+	var s: int = en.slot_of(id)
+	return en.get_dict(s) if s >= 0 else {}
+
+
+## Dict copies of every stored body, spawn order (debug / tests / tools).
+func enemy_list() -> Array:
+	return en.to_dicts()
+
+
+func enemy_count() -> int:
+	return en.count()
+
+
+## Write fields of a stored body (tests / tools). Keys as in get_dict.
+func set_enemy(id: int, fields: Dictionary) -> void:
+	var s: int = en.slot_of(id)
+	if s < 0:
+		return
+	var d: Dictionary = en.get_dict(s)
+	d.merge(fields, true)
+	en.fill(s, d)
 
 
 ## Courier (REDESIGN §2.6): a rare loot runner that crosses the field on a
@@ -1298,17 +1347,18 @@ func _spawn_courier(ev: Array) -> void:
 	var to: Vector2 = CENTER + Vector2.from_angle(a + deg_to_rad(110.0)) * SPAWN_R
 	if not _spawn("courier", ev, from, q):
 		return
-	var cd: Dictionary = enemies.back()
-	cd["exit"] = to
+	var cd: int = en.order[en.order.size() - 1]
+	en.exit[cd] = to
+	en.flags[cd] = en.flags[cd] | EnemyStore.F_EXIT
 	couriers += 1
-	ev.append({"t": "courier_spawn", "eid": int(cd["eid"]), "pos": from, "to": to})
+	ev.append({"t": "courier_spawn", "eid": en.eid[cd], "pos": from, "to": to})
 
 
-func _core_damage(amt: float, ev: Array, kind: String, from: Vector2, src: Dictionary = {}) -> void:
+func _core_damage(amt: float, ev: Array, kind: String, from: Vector2, src: int = -1) -> void:
 	if immune_t > 0.0:
 		return
-	# Mirror Hull: contact hits reflect a share back to the attacker.
-	if kind == "core_hit" and not src.is_empty() and float(stats.get("reflect", 0.0)) > 0.0 and float(src["hp"]) > 0.0:
+	# Mirror Hull: contact hits reflect a share back to the attacker (slot src).
+	if kind == "core_hit" and src >= 0 and float(stats.get("reflect", 0.0)) > 0.0 and en.hp[src] > 0.0:
 		_hit(src, amt * float(stats["reflect"]), ev)
 	var real: float = maxf(amt * TuneRef.num("pc_armor_floor", 0.25), amt - float(stats.get("armor", 0.0)))
 	real *= 1.0 - float(stats.get("dr", 0.0))
@@ -1333,67 +1383,70 @@ func _move_enemies(dt: float, ev: Array) -> void:
 	var wall_slow: float = 1.0 - TuneRef.num("pc_wall_slow", 0.30)
 	var frozen: bool = float(buffs.get("warp_t", 0.0)) > 0.0
 	var escaped: Array = []
-	for e in enemies:
-		var ed: Dictionary = e
-		var pos: Vector2 = ed["pos"]
-		var slow_t: float = float(ed["slow_t"])
-		var mult: float = float(ed.get("slow_m", 0.55)) if slow_t > 0.0 else 1.0
-		ed["slow_t"] = maxf(0.0, slow_t - dt)
-		if float(ed["slow_t"]) <= 0.0:
-			ed["slow_m"] = 1.0
-		ed["shock_t"] = maxf(0.0, float(ed.get("shock_t", 0.0)) - dt)
-		ed["hit_t"] = maxf(0.0, float(ed.get("hit_t", 0.0)) - dt)
+	for e in en.order:
+		var pos: Vector2 = en.pos[e]
+		var slow_t: float = en.slow_t[e]
+		var mult: float = en.slow_m[e] if slow_t > 0.0 else 1.0
+		en.slow_t[e] = maxf(0.0, slow_t - dt)
+		if en.slow_t[e] <= 0.0:
+			en.slow_m[e] = 1.0
+		en.shock_t[e] = maxf(0.0, en.shock_t[e] - dt)
+		en.hit_t[e] = maxf(0.0, en.hit_t[e] - dt)
 		if frozen:
 			continue
-		if String(ed["kind"]) == "courier":
-			var to2: Vector2 = ed.get("exit", pos)
+		var kind: String = en.kind[e]
+		if kind == "courier":
+			var to2: Vector2 = en.exit[e] if en.has_exit(e) else pos
 			var dd: Vector2 = to2 - pos
-			var stp: float = float(ed["spd"]) * mult * dt
+			var stp: float = en.spd[e] * mult * dt
 			if dd.length() <= stp:
-				escaped.append(ed)
+				escaped.append(e)
 			else:
-				ed["pos"] = pos + dd.normalized() * stp
+				en.pos[e] = pos + dd.normalized() * stp
 			continue
-		var taunt: float = float(ed.get("taunt_t", 0.0))
+		var taunt: float = en.taunt_t[e]
 		if taunt > 0.0:
-			ed["taunt_t"] = maxf(0.0, taunt - dt)
+			en.taunt_t[e] = maxf(0.0, taunt - dt)
 			continue   # pinned by a Rifleman (it is hitting the troop instead)
-		var ranged: bool = String(ed["kind"]) == "ranged"
+		var ranged: bool = kind == "ranged"
 		var stop: float = r_stop if ranged else STOP_R
 		var to_c: Vector2 = CENTER - pos
 		var dist: float = to_c.length()
 		if dist > stop + 0.001:
 			# Barricade: a standing wall on this lane slows enemies pressing on
 			# it, and they wear it down with their contact damage.
-			var wq: int = int(ed.get("quad", -1))
+			var wq: int = en.quad[e]
 			if not walls.is_empty() and dist <= wall_r + 15.0 and walls.has(wq):
 				var wd: Dictionary = walls[wq]
 				if float(wd["hp"]) > 0.0:
 					mult *= wall_slow
-					wd["hp"] = float(wd["hp"]) - float(ed["dmg"]) * dt
+					wd["hp"] = float(wd["hp"]) - en.dmg[e] * dt
 					if float(wd["hp"]) <= 0.0:
 						wd["hp"] = 0.0
 						ev.append({"t": "wall_broken", "quad": wq})
-			var step: float = minf(dist - stop, float(ed["spd"]) * mult * dt)
-			ed["pos"] = pos + to_c.normalized() * step
+			var step: float = minf(dist - stop, en.spd[e] * mult * dt)
+			en.pos[e] = pos + to_c.normalized() * step
 		elif ranged:
-			ed["fire_cd"] = float(ed["fire_cd"]) - dt
-			if float(ed["fire_cd"]) <= 0.0:
-				ed["fire_cd"] = float(ed["fire_cd"]) + r_fire
-				_core_damage(float(ed["dmg"]), ev, "enemy_shot", pos)
+			en.fire_cd[e] = en.fire_cd[e] - dt
+			if en.fire_cd[e] <= 0.0:
+				en.fire_cd[e] = en.fire_cd[e] + r_fire
+				_core_damage(en.dmg[e], ev, "enemy_shot", pos)
 		else:
-			ed["atk_cd"] = float(ed["atk_cd"]) - dt
-			if float(ed["atk_cd"]) <= 0.0:
-				ed["atk_cd"] = 1.0
-				_core_damage(float(ed["dmg"]), ev, "core_hit", pos, ed)
+			en.atk_cd[e] = en.atk_cd[e] - dt
+			if en.atk_cd[e] <= 0.0:
+				en.atk_cd[e] = 1.0
+				_core_damage(en.dmg[e], ev, "core_hit", pos, e)
+	en.dirty = true
 	for x in escaped:
-		enemies.erase(x)
-		ev.append({"t": "courier_escape", "eid": int((x as Dictionary).get("eid", -1)), "pos": (x as Dictionary)["pos"]})
+		var xs: int = x
+		ev.append({"t": "courier_escape", "eid": en.eid[xs], "pos": en.pos[xs]})
+		en.remove(xs)
 
 
 ## Targeting (pattern adapted from ape1121/Godot-4-Tower-Defense-Template, MIT:
 ## try_get_closest_target; first/strongest/weakest are in-house). Pure: picks
-## an index into `enemies` within `rng_lim` of `from`, or -1.
+## a slot of `en` within `rng_lim` of `from`, or -1. Hash candidates come in
+## spawn order, so the `<` + d^2 tie-break picks what the linear scan did.
 func pick_target(from: Vector2, rng_lim: float, mode_s: String, flyers_only: bool = false) -> int:
 	if mode_s == "nearest" and not flyers_only:
 		return _nearest(from, rng_lim, {})
@@ -1401,14 +1454,13 @@ func pick_target(from: Vector2, rng_lim: float, mode_s: String, flyers_only: boo
 	var best_key: float = INF
 	var best_d: float = INF
 	var lim2: float = rng_lim * rng_lim
-	for k in enemies.size():
-		var ed: Dictionary = enemies[k]
-		var hpv: float = float(ed["hp"])
+	for k in eh.candidates(from, rng_lim):
+		var hpv: float = en.hp[k]
 		if hpv <= 0.0:
 			continue
-		if flyers_only and not FLYERS.has(String(ed["kind"])):
+		if flyers_only and not FLYERS.has(en.kind[k]):
 			continue
-		var p: Vector2 = ed["pos"]
+		var p: Vector2 = en.pos[k]
 		var d2: float = from.distance_squared_to(p)
 		if d2 > lim2:
 			continue
@@ -1452,88 +1504,80 @@ func cycle_target_mode(i: int) -> Array:
 
 
 func _nearest(from: Vector2, rng_lim: float, exclude: Dictionary) -> int:
-	var best: int = -1
-	var best_d: float = rng_lim * rng_lim
-	for k in enemies.size():
-		if exclude.has(k):
-			continue
-		var ed: Dictionary = enemies[k]
-		if float(ed["hp"]) <= 0.0:
-			continue
-		var p: Vector2 = ed["pos"]
-		var d2: float = from.distance_squared_to(p)
-		if d2 <= best_d:
-			best_d = d2
-			best = k
-	return best
+	return eh.nearest(from, rng_lim, exclude)
 
 
 ## Every hit goes through here: Ironclad, an elite's shield absorbs whole
 ## hits, Obelisk lifesteal heals the Core.
-func _hit(ed: Dictionary, dmg_in: float, ev: Array, crit: bool = false) -> void:
+func _hit(e: int, dmg_in: float, ev: Array, crit: bool = false) -> void:
 	var dmg: float = dmg_in
 	if not crit and ironclad > 0.0:
 		dmg *= 1.0 - ironclad
-	var sh: int = int(ed.get("shield", 0))
+	var sh: int = en.shield[e]
 	if sh > 0:
 		sh -= 1
-		ed["shield"] = sh
-		ev.append({"t": "shield_hit", "pos": ed["pos"], "left": sh})
+		en.shield[e] = sh
+		ev.append({"t": "shield_hit", "pos": en.pos[e], "left": sh})
 		if sh == 0:
-			ev.append({"t": "shield_break", "pos": ed["pos"]})
+			ev.append({"t": "shield_break", "pos": en.pos[e]})
 		return
 	# Parts: Hunter Scope (vs bosses/elites/marked, else the normal-enemy tax)
 	# and Singularity Lens shred stacks (+shred per stack, x5).
-	if BOSSY.has(String(ed.get("kind", ""))) or bool(ed.get("marked", false)):
+	if BOSSY.has(en.kind[e]) or en.is_marked(e):
 		dmg *= float(stats.get("boss_mult", 1.0))
 	else:
 		dmg *= float(stats.get("normal_mult", 1.0))
-	if int(ed.get("shred_n", 0)) > 0:
-		dmg *= 1.0 + float(stats.get("shred", 0.0)) * float(int(ed["shred_n"]))
-	var real: float = minf(dmg, maxf(0.0, float(ed["hp"])))
-	ed["hp"] = float(ed["hp"]) - dmg
-	ed["hit_t"] = HIT_FLASH
+	if en.shred_n[e] > 0:
+		dmg *= 1.0 + float(stats.get("shred", 0.0)) * float(en.shred_n[e])
+	var real: float = minf(dmg, maxf(0.0, en.hp[e]))
+	en.hp[e] = en.hp[e] - dmg
+	en.hit_t[e] = HIT_FLASH
 	var ls: float = float(stats.get("lifesteal", 0.0))
 	if ls > 0.0 and real > 0.0:
 		hp = minf(float(stats["max_hp"]), hp + real * ls)
 	if crit:
-		ev.append({"t": "dmg", "eid": int(ed.get("eid", 0)), "pos": ed["pos"], "amt": dmg, "crit": true})
+		ev.append({"t": "dmg", "eid": en.eid[e], "pos": en.pos[e], "amt": dmg, "crit": true})
 	else:
-		ev.append({"t": "dmg", "eid": int(ed.get("eid", 0)), "pos": ed["pos"], "amt": dmg})
+		ev.append({"t": "dmg", "eid": en.eid[e], "pos": en.pos[e], "amt": dmg})
 
 
 ## Overkill carry (single-target shots): damage left over after a kill rolls
 ## to the nearest living enemy within range of the shooter (up to
 ## pc_carry_hops times), so surplus DPS becomes kill throughput when the
-## field floods. Shields still eat whole hits.
-func _hit_carry(ed: Dictionary, dmg: float, ev: Array, crit: bool, from: Vector2, rng_lim: float) -> void:
-	var cur: Dictionary = ed
+## field floods. Shields still eat whole hits. Candidates: hash cells around
+## the shooter's range (spawn order, `<=` tie as the linear scan).
+func _hit_carry(e0: int, dmg: float, ev: Array, crit: bool, from: Vector2, rng_lim: float) -> void:
+	var cur: int = e0
 	var left: float = dmg
 	var done: Dictionary = {}
+	var cands: PackedInt32Array = PackedInt32Array()
+	var have_cands: bool = false
 	for hop in TuneRef.int_of("pc_carry_hops", 2) + 1:
-		var before: float = float(cur["hp"])
-		var sh: int = int(cur.get("shield", 0))
+		var before: float = en.hp[cur]
+		var sh: int = en.shield[cur]
 		_hit(cur, left, ev, crit)
-		if sh > 0 or float(cur["hp"]) > 0.0:
+		if sh > 0 or en.hp[cur] > 0.0:
 			return
 		left = (left * (1.0 - ironclad if not crit and ironclad > 0.0 else 1.0) - maxf(0.0, before)) * TuneRef.num("pc_carry_frac", 0.6)
 		if left <= 0.0:
 			return
 		done[cur] = true
-		var best: Dictionary = {}
+		if not have_cands:
+			cands = eh.candidates(from, rng_lim)
+			have_cands = true
+		var best: int = -1
 		var bd: float = INF
-		var cpos: Vector2 = cur["pos"]
-		for e in enemies:
-			var x: Dictionary = e
-			if done.has(x) or float(x["hp"]) <= 0.0:
+		var cpos: Vector2 = en.pos[cur]
+		for x in cands:
+			if done.has(x) or en.hp[x] <= 0.0:
 				continue
-			if from.distance_squared_to(x["pos"]) > rng_lim * rng_lim:
+			if from.distance_squared_to(en.pos[x]) > rng_lim * rng_lim:
 				continue
-			var d2: float = cpos.distance_squared_to(x["pos"])
+			var d2: float = cpos.distance_squared_to(en.pos[x])
 			if d2 <= bd:
 				bd = d2
 				best = x
-		if best.is_empty():
+		if best < 0:
 			return
 		cur = best
 
@@ -1574,12 +1618,12 @@ func _fire(dt: float, ev: Array) -> void:
 		if kind == "frost":
 			# Aura: every pulse slows and chills every enemy in range.
 			var any: bool = false
-			for e in enemies:
-				var fe: Dictionary = e
-				if float(fe["hp"]) > 0.0 and from.distance_to(fe["pos"]) <= float(wd["range"]):
+			var frange: float = float(wd["range"])
+			for fe in eh.candidates(from, frange):
+				if en.hp[fe] > 0.0 and from.distance_to(en.pos[fe]) <= frange:
 					any = true
-					fe["slow_t"] = maxf(float(fe["slow_t"]), float(wd["slow_t"]))
-					fe["slow_m"] = minf(float(fe.get("slow_m", 1.0)) if float(fe["slow_t"]) > 0.0 else 1.0, 1.0 - float(wd["slow"]))
+					en.slow_t[fe] = maxf(en.slow_t[fe], float(wd["slow_t"]))
+					en.slow_m[fe] = minf(en.slow_m[fe] if en.slow_t[fe] > 0.0 else 1.0, 1.0 - float(wd["slow"]))
 					_hit(fe, float(wd["dmg"]), ev)
 			if any:
 				ev.append({"t": "shot", "kind": "frost", "from": from, "to": from, "radius": float(wd["range"])})
@@ -1588,15 +1632,15 @@ func _fire(dt: float, ev: Array) -> void:
 				cooldowns[si] = 0.0
 			continue
 		var tgt: int = pick_target(from, float(wd["range"]), String(target_modes[si]) if si < target_modes.size() else "nearest", kind == "flak")
-		if kind == "mortar" and tgt >= 0 and from.distance_to((enemies[tgt] as Dictionary)["pos"]) < float(wd.get("min_range", 0.0)):
+		if kind == "mortar" and tgt >= 0 and from.distance_to(en.pos[tgt]) < float(wd.get("min_range", 0.0)):
 			tgt = -1
 		if tgt < 0:
 			cooldowns[si] = 0.0
 			continue
 		cooldowns[si] = cd + 1.0 / rate
 		var dmg: float = float(wd["dmg"])
-		var te: Dictionary = enemies[tgt]
-		var tpos: Vector2 = te["pos"]
+		var te: int = tgt
+		var tpos: Vector2 = en.pos[te]
 		var crit: bool = _roll_crit(wd)
 		if crit:
 			dmg *= TuneRef.num("pc_crit_mult", 2.0)
@@ -1605,15 +1649,16 @@ func _fire(dt: float, ev: Array) -> void:
 				# Pierces every enemy on the line from the gun through the target.
 				var dir: Vector2 = (tpos - from).normalized()
 				var reach: float = float(wd["range"])
-				for e in enemies:
-					var ed: Dictionary = e
-					if float(ed["hp"]) <= 0.0:
+				var pad: float = float(wd["pierce"]) + en.max_size * 0.5 + 1.0
+				var tip: Vector2 = from + dir * reach
+				for ed in eh.rect(Vector2(minf(from.x, tip.x) - pad, minf(from.y, tip.y) - pad), Vector2(maxf(from.x, tip.x) + pad, maxf(from.y, tip.y) + pad)):
+					if en.hp[ed] <= 0.0:
 						continue
-					var rel: Vector2 = (ed["pos"] as Vector2) - from
+					var rel: Vector2 = en.pos[ed] - from
 					var along: float = rel.dot(dir)
 					if along < 0.0 or along > reach:
 						continue
-					if absf(rel.cross(dir)) <= float(wd["pierce"]) + float(ed["size"]) * 0.5:
+					if absf(rel.cross(dir)) <= float(wd["pierce"]) + en.size[ed] * 0.5:
 						_hit(ed, dmg, ev, crit)
 				ev.append({"t": "shot", "kind": kind, "from": from, "to": from + dir * reach})
 			"flak":
@@ -1621,11 +1666,10 @@ func _fire(dt: float, ev: Array) -> void:
 				ev.append({"t": "shot", "kind": kind, "from": from, "to": tpos, "radius": 20.0})
 			"mortar":
 				var rad: float = float(wd["splash"])
-				for e in enemies:
-					var ed: Dictionary = e
-					if float(ed["hp"]) <= 0.0:
+				for ed in eh.candidates(tpos, rad):
+					if en.hp[ed] <= 0.0:
 						continue
-					if (ed["pos"] as Vector2).distance_to(tpos) <= rad:
+					if en.pos[ed].distance_to(tpos) <= rad:
 						_hit(ed, dmg, ev, crit)
 				ev.append({"t": "shot", "kind": kind, "from": from, "to": tpos, "radius": rad})
 			"tesla":
@@ -1636,12 +1680,12 @@ func _fire(dt: float, ev: Array) -> void:
 				var d2: float = dmg
 				while cur >= 0 and hit.size() < n:
 					hit[cur] = true
-					var ce: Dictionary = enemies[cur]
+					var ce: int = cur
 					_hit(ce, d2, ev, crit)
-					ce["slow_t"] = maxf(float(ce["slow_t"]), 0.6)
-					ce["shock_t"] = 1.5
-					ce["shock_src"] = si
-					var cpos: Vector2 = ce["pos"]
+					en.slow_t[ce] = maxf(en.slow_t[ce], 0.6)
+					en.shock_t[ce] = 1.5
+					en.shock_src[ce] = si
+					var cpos: Vector2 = en.pos[ce]
 					ev.append({"t": "shot", "kind": kind, "from": prev, "to": cpos})
 					prev = cpos
 					d2 *= float(wd.get("chain_frac", 0.7))
@@ -1655,11 +1699,10 @@ func _fire(dt: float, ev: Array) -> void:
 func _beam_hold(wd: Dictionary, dt: float) -> void:
 	if beam_eid < 0:
 		return
-	for e in enemies:
-		var ed: Dictionary = e
-		if int(ed.get("eid", -1)) == beam_eid and float(ed["hp"]) > 0.0 and CENTER.distance_to(ed["pos"]) <= float(wd["range"]):
-			beam_t += dt
-			return
+	var b: int = en.slot_of(beam_eid)
+	if b >= 0 and en.hp[b] > 0.0 and CENTER.distance_to(en.pos[b]) <= float(wd["range"]):
+		beam_t += dt
+		return
 	beam_eid = -1
 	beam_t = 0.0
 
@@ -1686,20 +1729,19 @@ func _core_fire(wd: Dictionary, ev: Array) -> bool:
 					break
 				skip[tgt] = true
 				hit_any = true
-				var te: Dictionary = enemies[tgt]
-				var tpos: Vector2 = te["pos"]
+				var te: int = tgt
+				var tpos: Vector2 = en.pos[te]
 				var crit: bool = _roll_crit(wd)
 				var d: float = dmg * (TuneRef.num("pc_crit_mult", 2.0) if crit else 1.0)
 				_hit_carry(te, d * float(wd.get("single_mult", 1.0)), ev, crit, CENTER, rng_lim)
 				_shred(te, wd)
-				targets.append(int(te.get("eid", -1)))
+				targets.append(en.eid[te])
 				_pierce(te, d, wd, ev, targets)
 				var rad: float = float(wd.get("splash", 0.0))
-				for e in enemies:
-					var ed: Dictionary = e
-					if ed != te and float(ed["hp"]) > 0.0 and (ed["pos"] as Vector2).distance_to(tpos) <= rad:
+				for ed in eh.candidates(tpos, rad):
+					if ed != te and en.hp[ed] > 0.0 and en.pos[ed].distance_to(tpos) <= rad:
 						_hit(ed, d * float(wd.get("splash_frac", 0.4)), ev)
-						targets.append(int(ed.get("eid", -1)))
+						targets.append(en.eid[ed])
 				ev.append({"t": "shot", "kind": "core", "from": CENTER, "to": tpos, "radius": rad})
 			if not hit_any:
 				return false
@@ -1707,17 +1749,16 @@ func _core_fire(wd: Dictionary, ev: Array) -> bool:
 			var tgt2: int = pick_target(CENTER, rng_lim, String(target_modes[CORE_SLOT]))
 			if tgt2 < 0:
 				return false
-			var tpos2: Vector2 = (enemies[tgt2] as Dictionary)["pos"]
+			var tpos2: Vector2 = en.pos[tgt2]
 			var crit2: bool = _roll_crit(wd)
 			var d2: float = dmg * (TuneRef.num("pc_crit_mult", 2.0) if crit2 else 1.0)
 			var rad2: float = float(wd["splash"])
-			for e in enemies:
-				var ed: Dictionary = e
-				if float(ed["hp"]) > 0.0 and (ed["pos"] as Vector2).distance_to(tpos2) <= rad2:
+			for ed in eh.candidates(tpos2, rad2):
+				if en.hp[ed] > 0.0 and en.pos[ed].distance_to(tpos2) <= rad2:
 					_hit(ed, d2, ev, crit2)
-					ed["slow_t"] = maxf(float(ed["slow_t"]), float(wd["slow_t"]))
-					ed["slow_m"] = minf(float(ed.get("slow_m", 1.0)) if float(ed["slow_t"]) > 0.0 else 1.0, 1.0 - float(wd["slow"]))
-					targets.append(int(ed.get("eid", -1)))
+					en.slow_t[ed] = maxf(en.slow_t[ed], float(wd["slow_t"]))
+					en.slow_m[ed] = minf(en.slow_m[ed] if en.slow_t[ed] > 0.0 else 1.0, 1.0 - float(wd["slow"]))
+					targets.append(en.eid[ed])
 			ev.append({"t": "shot", "kind": "core", "from": CENTER, "to": tpos2, "radius": rad2})
 		"beam":
 			# Lock the highest-HP enemy in range; the ramp resets on a switch.
@@ -1726,92 +1767,90 @@ func _core_fire(wd: Dictionary, ev: Array) -> bool:
 				beam_eid = -1
 				beam_t = 0.0
 				return false
-			var te3: Dictionary = enemies[tgt3]
-			if int(te3.get("eid", -1)) != beam_eid:
-				beam_eid = int(te3.get("eid", -1))
+			var te3: int = tgt3
+			if en.eid[te3] != beam_eid:
+				beam_eid = en.eid[te3]
 				beam_t = -float(wd.get("retarget", 0.0))   # Focus Lens retarget delay
 			var ramp: float = clampf(float(wd["ramp"]) * beam_t, 0.0, float(wd["ramp_max"]))
 			var d3: float = dmg * (1.0 + ramp) * float(wd.get("single_mult", 1.0))
-			if BOSSY.has(String(te3["kind"])) or bool(te3.get("marked", false)):
+			if BOSSY.has(en.kind[te3]) or en.is_marked(te3):
 				d3 *= float(wd.get("boss_mult", 1.0))
 			var crit3: bool = _roll_crit(wd)
 			if crit3:
 				d3 *= TuneRef.num("pc_crit_mult", 2.0)
 			_hit_carry(te3, d3, ev, crit3, CENTER, rng_lim)
 			_shred(te3, wd)
-			targets.append(int(te3.get("eid", -1)))
+			targets.append(en.eid[te3])
 			_pierce(te3, d3, wd, ev, targets)
-			ev.append({"t": "shot", "kind": "core", "from": CENTER, "to": te3["pos"], "beam": true, "ramp": ramp})
+			ev.append({"t": "shot", "kind": "core", "from": CENTER, "to": en.pos[te3], "beam": true, "ramp": ramp})
 		"pulse":
 			var rings: int = int(wd.get("rings", 1))
-			var inside: Array = []
-			for e in enemies:
-				var ed: Dictionary = e
-				if float(ed["hp"]) > 0.0 and CENTER.distance_to(ed["pos"]) <= rng_lim + float(ed["size"]) * 0.5:
+			var inside: PackedInt32Array = PackedInt32Array()
+			var in_set: Dictionary = {}
+			for ed in eh.candidates(CENTER, rng_lim + en.max_size * 0.5):
+				if en.hp[ed] > 0.0 and CENTER.distance_to(en.pos[ed]) <= rng_lim + en.size[ed] * 0.5:
 					inside.append(ed)
+					in_set[ed] = true
 			if inside.is_empty():
 				return false
 			pulse_n += 1
 			var crit4: bool = _roll_crit(wd)
 			var d4: float = dmg * float(rings) * float(wd.get("pulse_mult", 1.0)) * (TuneRef.num("pc_crit_mult", 2.0) if crit4 else 1.0)
 			var kb: float = float(wd.get("knock", 0.3)) * 40.0
-			for x in inside:
-				var xd: Dictionary = x
+			for xd in inside:
 				_hit(xd, d4, ev, crit4)
-				targets.append(int(xd.get("eid", -1)))
-				if String(xd["kind"]) != "boss" and String(xd["kind"]) != "courier":
-					var away: Vector2 = ((xd["pos"] as Vector2) - CENTER).normalized()
-					xd["pos"] = (xd["pos"] as Vector2) + away * kb
+				targets.append(en.eid[xd])
+				if en.kind[xd] != "boss" and en.kind[xd] != "courier":
+					var away: Vector2 = (en.pos[xd] - CENTER).normalized()
+					en.pos[xd] = en.pos[xd] + away * kb
+					en.dirty = true
 			# Static: every 5th pulse chains 40% dmg to 3 targets beyond range.
 			if int(wd.get("chain_every", 0)) > 0 and pulse_n % int(wd["chain_every"]) == 0:
 				var outer: Array = []
-				for e in enemies:
-					var od: Dictionary = e
-					if float(od["hp"]) > 0.0 and not inside.has(od):
+				for od in en.order:
+					if en.hp[od] > 0.0 and not in_set.has(od):
 						outer.append(od)
-				outer.sort_custom(func(a: Variant, b: Variant) -> bool: return CENTER.distance_squared_to((a as Dictionary)["pos"]) < CENTER.distance_squared_to((b as Dictionary)["pos"]))
+				var P: PackedVector2Array = en.pos
+				outer.sort_custom(func(a: Variant, b: Variant) -> bool: return CENTER.distance_squared_to(P[int(a)]) < CENTER.distance_squared_to(P[int(b)]))
 				for k in mini(int(wd["chain_n"]), outer.size()):
-					var cd2: Dictionary = outer[k]
+					var cd2: int = outer[k]
 					_hit(cd2, dmg * float(wd["chain_frac"]), ev)
-					targets.append(int(cd2.get("eid", -1)))
-					ev.append({"t": "shot", "kind": "tesla", "from": CENTER, "to": cd2["pos"]})
+					targets.append(en.eid[cd2])
+					ev.append({"t": "shot", "kind": "tesla", "from": CENTER, "to": en.pos[cd2]})
 			ev.append({"t": "shot", "kind": "core", "from": CENTER, "to": CENTER, "radius": rng_lim, "pulse": true})
 	ev.append({"t": "core_attack", "kind": atk, "core": core_id, "targets": targets})
 	return true
 
 
 ## Lancer 4-piece: the Core shot also hits the nearest other enemy to its target.
-func _pierce(te: Dictionary, d: float, wd: Dictionary, ev: Array, targets: Array) -> void:
+func _pierce(te: int, d: float, wd: Dictionary, ev: Array, targets: Array) -> void:
 	if int(wd.get("pierce", 0)) <= 0:
 		return
-	var skip: Dictionary = {}
-	for k in enemies.size():
-		if enemies[k] == te:
-			skip[k] = true
+	var skip: Dictionary = {te: true}
 	for n in int(wd["pierce"]):
-		var j: int = _nearest(te["pos"], cpx() * 1.5, skip)
+		var j: int = _nearest(en.pos[te], cpx() * 1.5, skip)
 		if j < 0:
 			return
 		skip[j] = true
-		_hit(enemies[j], d, ev)
-		targets.append(int((enemies[j] as Dictionary).get("eid", -1)))
+		_hit(j, d, ev)
+		targets.append(en.eid[j])
 
 
 ## Singularity Lens: Core hits stack armor shred on the target (max 5).
-func _shred(te: Dictionary, _wd: Dictionary) -> void:
+func _shred(te: int, _wd: Dictionary) -> void:
 	if float(stats.get("shred", 0.0)) > 0.0:
-		te["shred_n"] = mini(5, int(te.get("shred_n", 0)) + 1)
+		en.shred_n[te] = mini(5, en.shred_n[te] + 1)
 
 
 ## Storm 4-piece: a free Pulse Ring (Core dmg, Core range, x pulse_mult).
 func _free_pulse(wd: Dictionary, ev: Array) -> void:
 	var targets: Array = []
 	var d: float = float(wd["dmg"]) * float(wd.get("pulse_mult", 1.0))
-	for e in enemies:
-		var ed: Dictionary = e
-		if float(ed["hp"]) > 0.0 and CENTER.distance_to(ed["pos"]) <= float(wd["range"]) + float(ed["size"]) * 0.5:
+	var r: float = float(wd["range"])
+	for ed in eh.candidates(CENTER, r + en.max_size * 0.5):
+		if en.hp[ed] > 0.0 and CENTER.distance_to(en.pos[ed]) <= r + en.size[ed] * 0.5:
 			_hit(ed, d, ev)
-			targets.append(int(ed.get("eid", -1)))
+			targets.append(en.eid[ed])
 	ev.append({"t": "shot", "kind": "core", "from": CENTER, "to": CENTER, "radius": float(wd["range"]), "pulse": true})
 	ev.append({"t": "core_attack", "kind": "pulse", "core": core_id, "targets": targets, "free": true})
 
@@ -1821,21 +1860,18 @@ func _troops_step(dt: float, ev: Array) -> void:
 	_drain_troop_events(ev)
 	if troops.is_empty():
 		return
-	var res: Dictionary = Troops.step(troops, enemies, dt, {"cell_px": cpx()})
+	var res: Dictionary = Troops.step(troops, en, eh, dt, {"cell_px": cpx()})
 	ev.append_array(res["ev"])
 	for h in res["hits"]:
 		var hd: Dictionary = h
-		var eid: int = int(hd["eid"])
-		for e in enemies:
-			var ed: Dictionary = e
-			if int(ed.get("eid", -2)) == eid and float(ed["hp"]) > 0.0:
-				_hit(ed, float(hd["dmg"]), ev)
-				# Swarm 4-piece: troops lifesteal 1%; a troop kill heals the Core.
-				if pf("troop_ls") > 0.0:
-					_troop_heal(int(hd.get("tid", -1)), 0.01 * float(hd["dmg"]))
-					if float(ed["hp"]) <= 0.0:
-						hp = minf(float(stats["max_hp"]), hp + 0.5)
-				break
+		var ed: int = en.slot_of(int(hd["eid"]))
+		if ed >= 0 and en.hp[ed] > 0.0:
+			_hit(ed, float(hd["dmg"]), ev)
+			# Swarm 4-piece: troops lifesteal 1%; a troop kill heals the Core.
+			if pf("troop_ls") > 0.0:
+				_troop_heal(int(hd.get("tid", -1)), 0.01 * float(hd["dmg"]))
+				if en.hp[ed] <= 0.0:
+					hp = minf(float(stats["max_hp"]), hp + 0.5)
 
 
 func _troop_heal(tid: int, amt: float) -> void:
@@ -1847,38 +1883,43 @@ func _troop_heal(tid: int, amt: float) -> void:
 
 
 func _reap(ev: Array) -> void:
-	var alive: Array = []
+	var alive: PackedInt32Array = PackedInt32Array()
+	var dead: PackedInt32Array = PackedInt32Array()
 	var splits: Array = []
 	var cm: float = run_coin_mult()
 	var ci: float = cash_index()
 	var magnet: float = 2.0 if float(buffs.get("magnet_t", 0.0)) > 0.0 else 1.0
-	for e in enemies:
-		var ed: Dictionary = e
-		if float(ed["hp"]) > 0.0:
+	for ed in en.order:
+		if en.hp[ed] > 0.0:
 			alive.append(ed)
 			continue
-		var pos: Vector2 = ed["pos"]
+		var pos: Vector2 = en.pos[ed]
 		var bm: float = 1.0
 		for b in stats.get("bounties", []):
 			var bd: Dictionary = b
 			if (bd["pos"] as Vector2).distance_to(pos) <= float(bd["r"]):
 				bm += float(bd["mult"])
-		var gain: float = float(ed["cash"]) * ci * bm * float(stats.get("kill_cash", 1.0)) * run_cash_mult() * kill_cash_mod * magnet
+		var gain: float = en.cash[ed] * ci * bm * float(stats.get("kill_cash", 1.0)) * run_cash_mult() * kill_cash_mod * magnet
 		cash += gain
 		cash_earned += gain
-		xp += float(ed["xp"]) * float(stats["xp_mult"])
-		var cg: float = float(ed["coin"]) * cm
+		xp += en.xp[ed] * float(stats["xp_mult"])
+		var cg: float = en.coin[ed] * cm
 		coins_run += cg
 		coins_kill += cg
 		kills += 1
-		var kind: String = ed["kind"]
+		var kind: String = en.kind[ed]
 		ev.append({"t": "kill", "pos": pos, "cash": gain, "kind": kind})
 		if kind == "boss":
 			_boss_bounty(pos, ev)
 		elif kind == "splitter":
 			splits.append(pos)
 		_roll_drops(ed, ev)
-	enemies = alive
+		dead.append(ed)
+	if dead.is_empty():
+		return
+	en.order = alive
+	for ds in dead:
+		en.release(ds)
 	var nc: int = TuneRef.int_of("splitter_children", 2)
 	for p in splits:
 		var sp: Vector2 = p
@@ -1889,21 +1930,21 @@ func _reap(ev: Array) -> void:
 
 ## Loot (REDESIGN §2.6) on the separate drop RNG: boss / elite / marked /
 ## Courier parts, boss Scrap, rare Keys.
-func _roll_drops(ed: Dictionary, ev: Array) -> void:
-	var kind: String = String(ed["kind"])
+func _roll_drops(ed: int, ev: Array) -> void:
+	var kind: String = en.kind[ed]
 	var src: String = "kill"
 	if kind == "boss":
 		src = "boss"
 	elif kind == "courier":
 		src = "courier"
-	elif kind == "elite" or bool(ed.get("marked", false)):
+	elif kind == "elite" or en.is_marked(ed):
 		src = "elite"
 	var ctx: Dictionary = {"tier": tier, "drop_mult": 1.0 + float(ins.get("in_drop", 0.0)), "parts_so_far": Drops.capped_count(loot)}
 	var got: Array = Drops.add(loot, Drops.roll(drop_rng, src, ctx))
 	for x in got:
 		var d: Dictionary = (x as Dictionary).duplicate()
 		d["t"] = "drop"
-		d["pos"] = ed["pos"]
+		d["pos"] = en.pos[ed]
 		ev.append(d)
 
 
@@ -2275,8 +2316,8 @@ func cast_special(k: int, cell: Variant = -1) -> Dictionary:
 	var fx: Dictionary = Specials.FX.get(id, {})
 	var ev: Array = []
 	var live: int = 0
-	for e in enemies:
-		if float((e as Dictionary)["hp"]) > 0.0:
+	for e in en.order:
+		if en.hp[e] > 0.0:
 			live += 1
 	var spec_mult: float = float(mods.get("special_dmg", 1.0))
 	var cast: Dictionary = {"t": "special_cast", "slot": k, "id": id}
@@ -2298,11 +2339,10 @@ func cast_special(k: int, cell: Variant = -1) -> Dictionary:
 		"sp_emp":
 			if live == 0:
 				return {"result": "no_target", "ev": []}
-			for e in enemies:
-				var ed: Dictionary = e
-				ed["slow_t"] = maxf(float(ed["slow_t"]), float(fx["dur"]))
-				ed["slow_m"] = minf(float(ed.get("slow_m", 1.0)), 1.0 - float(fx["slow"]))
-				ed["shield"] = 0
+			for ed in en.order:
+				en.slow_t[ed] = maxf(en.slow_t[ed], float(fx["dur"]))
+				en.slow_m[ed] = minf(en.slow_m[ed], 1.0 - float(fx["slow"]))
+				en.shield[ed] = 0
 		"sp_timewarp":
 			if live == 0:
 				return {"result": "no_target", "ev": []}
@@ -2334,16 +2374,12 @@ func _densest(r: float) -> Vector2:
 	var best: Vector2 = Vector2.INF
 	var best_n: int = -1
 	var best_d: float = INF
-	for e in enemies:
-		var ed: Dictionary = e
-		if float(ed["hp"]) <= 0.0:
+	for ed in en.order:
+		if en.hp[ed] <= 0.0:
 			continue
-		var p: Vector2 = ed["pos"]
-		var n: int = 0
-		for x in enemies:
-			if float((x as Dictionary)["hp"]) > 0.0 and p.distance_to((x as Dictionary)["pos"]) <= r:
-				n += 1
-		if int(ed.get("quad", -1)) == focus_quad:
+		var p: Vector2 = en.pos[ed]
+		var n: int = eh.density(p, r)   # exact neighbour count via the hash
+		if en.quad[ed] == focus_quad:
 			n += 1
 		var d: float = CENTER.distance_squared_to(p)
 		if n > best_n or (n == best_n and d < best_d):
@@ -2431,7 +2467,7 @@ func building_value(i: int) -> int:
 ## field is clear between waves; during an active wave it costs
 ## pc_move_cost_frac of the moved building(s) value in cash.
 func move_cost(a: int, b: int, paused: bool = false) -> int:
-	if paused or enemies.is_empty():
+	if paused or en.is_empty():
 		return 0
 	var f: float = TuneRef.num("pc_move_cost_frac", 0.1)
 	return int(ceil(f * float(building_value(a) + building_value(b))))

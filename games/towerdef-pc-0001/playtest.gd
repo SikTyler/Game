@@ -463,14 +463,14 @@ static func _use_specials(S) -> Array:
 	var near: int = 0
 	var boss: bool = false
 	var core_r: float = float((S.stats["weapons"] as Array).back()["range"])
-	for e in S.enemies:
-		var ed: Dictionary = e
-		if float(ed["hp"]) <= 0.0:
+	var en = S.en
+	for es in en.order:
+		if en.hp[es] <= 0.0:
 			continue
 		live += 1
-		if TowerState.CENTER.distance_to(ed["pos"]) <= core_r:
+		if TowerState.CENTER.distance_to(en.pos[es]) <= core_r:
 			near += 1
-		if String(ed["kind"]) == "boss":
+		if en.kind[es] == "boss":
 			boss = true
 	var hp_frac: float = S.hp / maxf(1.0, float(S.stats["max_hp"]))
 	for k in S.specials.size():
@@ -541,9 +541,9 @@ static func bot_step(S, policy: String, perk_pref: String = "") -> Array:
 	# A competent player focuses fire on a boss once it is inside Core range.
 	var core_r: float = float((S.stats["weapons"] as Array).back()["range"])
 	var boss_in: bool = false
-	for e in S.enemies:
-		var ed: Dictionary = e
-		if String(ed["kind"]) == "boss" and TowerState.CENTER.distance_to(ed["pos"]) <= core_r:
+	var en = S.en
+	for es in en.order:
+		if en.kind[es] == "boss" and TowerState.CENTER.distance_to(en.pos[es]) <= core_r:
 			boss_in = true
 			break
 	var want: String = "strongest" if boss_in else "nearest"
@@ -856,17 +856,18 @@ static func camp_run(save: Dictionary, policy: String, seed_value: int, now: int
 			lw = S.wave
 			rw[lw] = PowerModel.effective_dps(S.power_snapshot())
 		wt[S.wave] = float(wt.get(S.wave, 0.0)) + DT * S.speed
-		var ne: int = S.enemies.size()
+		var eo: PackedInt32Array = S.en.order
+		var ne: int = eo.size()
 		var k: int = ne - 1
-		while k >= 0 and int((S.enemies[k] as Dictionary)["eid"]) > last_eid:
-			var ed: Dictionary = S.enemies[k]
-			if String(ed["kind"]) != "courier":
-				whp[S.wave] = float(whp.get(S.wave, 0.0)) + float(ed["max_hp"])
-				if String(ed["kind"]) == "boss":
-					wboss[S.wave] = float(wboss.get(S.wave, 0.0)) + float(ed["max_hp"])
+		while k >= 0 and int(S.en.eid[eo[k]]) > last_eid:
+			var es: int = eo[k]
+			if String(S.en.kind[es]) != "courier":
+				whp[S.wave] = float(whp.get(S.wave, 0.0)) + float(S.en.max_hp[es])
+				if String(S.en.kind[es]) == "boss":
+					wboss[S.wave] = float(wboss.get(S.wave, 0.0)) + float(S.en.max_hp[es])
 			k -= 1
 		if ne > 0:
-			last_eid = maxi(last_eid, int((S.enemies[ne - 1] as Dictionary)["eid"]))
+			last_eid = maxi(last_eid, int(S.en.eid[eo[ne - 1]]))
 		if acc >= 0.5:
 			acc = 0.0
 			ev.append_array(bot_step(S, policy, perk_pref))
