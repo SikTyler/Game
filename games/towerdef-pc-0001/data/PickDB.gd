@@ -46,7 +46,7 @@ const DEFS: Dictionary = {
 	"pk_ledger":    {"fam": "pack", "name": "Ledger Pack", "rarity": "common", "tags": ["eco"], "max": 5, "desc": "+0.6 cash/s, +5% kill cash"},
 	"pk_optics":    {"fam": "pack", "name": "Optics Pack", "rarity": "rare", "tags": ["dps"], "max": 2, "desc": "+0.5 range (all)"},
 	"pk_crit":      {"fam": "pack", "name": "Precision Pack", "rarity": "rare", "tags": ["dps"], "max": 3, "desc": "+8% crit chance (crit x2)"},
-	"pk_logistics": {"fam": "pack", "name": "Logistics Pack", "rarity": "rare", "tags": ["eco"], "max": 3, "desc": "Core cash tracks -12% cost"},
+	"pk_logistics": {"fam": "pack", "name": "Logistics Pack", "rarity": "rare", "tags": ["eco"], "max": 3, "desc": "Core Enhancements -12% cost"},
 	"pk_core":      {"fam": "pack", "name": "Core Surge", "rarity": "epic", "tags": ["dps"], "max": 2, "desc": "Core attack +15% dmg, +5% rate"},
 	"pk_barracks":  {"fam": "pack", "name": "Drill Sergeant", "rarity": "rare", "tags": ["troop"], "max": 3, "desc": "Troops +25% HP and dmg, -2 s respawn"},
 	"pk_gambit":    {"fam": "pack", "name": "Gambit", "rarity": "legendary", "tags": ["dps"], "max": 1, "desc": "+40% dmg (all), enemies +15% HP"},

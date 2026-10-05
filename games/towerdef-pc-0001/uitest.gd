@@ -16,6 +16,8 @@ extends SceneTree
 ## info popover and mobile column are gone (Outpost / Core Bay replace them).
 ## Run: godot --headless --path games/towerdef-pc-0001/ --script res://uitest.gd
 
+const Hub := preload("res://ui/Hub.gd")
+const Intel := preload("res://ui/Intel.gd")
 const TowerState := preload("res://TowerState.gd")
 const BaseMeta := preload("res://BaseMeta.gd")
 const MetaSave := preload("res://MetaSave.gd")
@@ -454,7 +456,17 @@ func _fb1_home() -> void:
 	await _frames()
 	# WP3 (deliberate): the home is the Factory: FCAT / FBUILD palette keys,
 	# a 96x64 chunked map, Crate Depot naming, facility levels at the Relay.
-	_check("FB1: home is the Factory (build palette + Play/Missions/Reforge buttons, no Core Bay tab)", _find("FCAT logistics") != null and _find("DSTART") != null and _find("DTAB Missions") != null and _find("DTAB Reforge") != null and _find("DTAB Core Bay") == null and _find("DTAB Crates") == null)
+	# FB2 (deliberate): Core Bay / Crates / Research / Cards are back in the top
+	# menu (they are ALSO buildings on the Outpost), so the "no Core Bay tab" literal flipped.
+	_check("FB1/FB2: home is the Factory (build palette + top menu Core Bay/Crates/Research/Cards/Missions/Reforge)", _find("FCAT logistics") != null and _find("DSTART") != null and _find("DTAB Missions") != null and _find("DTAB Reforge") != null and _find("DTAB Core Bay") != null and _find("DTAB Crates") != null and _find("DTAB Research") != null and _find("DTAB Cards") != null)
+	for nv in [["DTAB Core Bay", "bay"], ["DTAB Crates", "crates"], ["DTAB Research", "research"], ["DTAB Cards", "cards"]]:
+		_press(String(nv[0]))
+		await _frames()
+		_check("FB2: top menu %s opens its screen" % String(nv[0]), main.tab == String(nv[1]) and _find(String(nv[0])) != null, main.tab)
+	var r6: Rect2 = Hub.nav_rect(main, 6)
+	_check("FB2: top menu clears the deploy cluster", r6.end.x <= Hub.start_rect(main).position.x - 330.0, str(r6))
+	main.set_tab("play")
+	await _frames()
 	_audit("home")
 	_check("FB1/WP3: the factory map is large (>= 96x64 in 24 land chunks)", FactoryDB.W >= 96 and FactoryDB.H >= 64 and FactoryDB.CW * FactoryDB.CH == 24)
 	var cat: Button = _find("FCAT logistics")
@@ -971,14 +983,33 @@ func _run_screen() -> void:
 	var cost: int = S.track_cost("dmg")
 	_press("TRACK Damage")
 	await _frames()
-	_check("RUN: clicking a Core track buys a level", int(S.tracks["dmg"]) == 1 and S.cash < 400.0 - float(cost) + 5.0)
+	_check("RUN: clicking a Core Enhancement buys a level", int(S.tracks["dmg"]) == 1 and S.cash < 400.0 - float(cost) + 5.0)
 	_key(KEY_2, false, true)
 	await _frames()
 	_check("RUN: Shift+2 buys the Rate track", int(S.tracks["rate"]) == 1)
 	_motion(_find("TRACK Eco").get_global_rect().get_center())
 	await _frames(3)
-	_check("RUN: hovering a track shows its tooltip", main.tipbox.visible and main.tip_label.text.begins_with("Eco track"), main.tip_label.text)
+	# FB2 (deliberate): "Core tracks" renamed "Core Enhancements" everywhere.
+	_check("RUN: hovering a track shows its tooltip", main.tipbox.visible and main.tip_label.text.begins_with("Eco enhancement"), main.tip_label.text)
 	_check("FB1: tooltips render a bold header + icon stat lines, no hotkey callouts", main.tip_rich.text.begins_with("[b]") and main.tip_rich.text.contains("[img") and not main.tip_label.text.contains("Shift"), main.tip_rich.text)
+	# FB2 right panel: Loot Drops feed aggregates kill loot; Core-hit flash is capped
+	main._handle([{"t": "drop", "kind": "scrap", "n": 3, "source": "kill", "pos": Vector2.ZERO}, {"t": "drop", "kind": "scrap", "n": 2, "source": "kill", "pos": Vector2.ZERO}, {"t": "drop", "kind": "key", "n": 1, "source": "kill", "pos": Vector2.ZERO}])
+	var lf0: Dictionary = main.loot_feed[0] if not main.loot_feed.is_empty() else {}
+	var scrap_n: float = 0.0
+	for f in main.loot_feed:
+		if String((f as Dictionary)["k"]) == "scrap":
+			scrap_n = float((f as Dictionary)["n"])
+	_check("FB2: Loot Drops feed aggregates drops (scrap 3+2 = 5, newest first)", is_equal_approx(scrap_n, 5.0) and String(lf0.get("k", "")) == "key", str(main.loot_feed))
+	var hz: Array = []
+	for q in 60:
+		hz.append({"t": "core_hits", "n": 40, "dmg": 1.0, "shots": 0, "pos_sample": [Vector2.ZERO]})
+	main.flash = 0.0
+	main.flash_cd = 0.0
+	main._handle(hz)
+	_check("FB2: horde Core hits pulse the flash once, capped", main.flash > 0.0 and main.flash <= main.FLASH_CAP + 0.001, str(main.flash))
+	await _frames(4)
+	var ro: Dictionary = Intel.roster(S)
+	_check("FB2: Enemy intel lists this round's types (alive or queued) with 1-5 stars", not ro.is_empty() and Intel.stars(S, String(ro.keys()[0])) >= 1 and Intel.stars(S, "boss") <= 5 and main.intel_seen.size() >= ro.size(), str(ro.keys()))
 	_motion(_cell_scr(TowerState.CORE_SLOT))
 	await _frames(3)
 	_check("RUN: hovering the Core shows its attack + trait", main.tipbox.visible and main.tip_label.text.contains("Core") and main.tip_label.text.contains("Trait"), main.tip_label.text)

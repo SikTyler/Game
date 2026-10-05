@@ -102,7 +102,7 @@ func kill(pos: Vector2, col: Color, big: bool = false) -> void:
 		p.restart()
 		p.emitting = true
 		bursts_fired += 1
-	stamp(pos, (14.0 if big else 6.0) * (1.3 if level == "full" else 1.0), col)
+	stamp(pos, (22.0 if big else 9.0) * (1.3 if level == "full" else 1.0), col)   # FB2: larger, readable pools
 
 
 func stamp(pos: Vector2, r: float, col: Color) -> void:
@@ -153,13 +153,13 @@ func _paint() -> void:
 	for d in _batch:
 		var g: Vector2 = w2g(d["p"])
 		var r: float = float(d["r"]) * k
-		var c: Color = (d["c"] as Color).darkened(0.45)
+		var c: Color = (d["c"] as Color).lerp(Color(0.62, 0.03, 0.05), 0.65).darkened(0.15)   # FB2: blood red, brighter
 		var s: int = int(d["s"])
-		_painter.draw_circle(g, r, Color(c, 0.55))   # corpse / pool
+		_painter.draw_circle(g, r, Color(c, 0.7))   # corpse / pool
 		for j in 4:   # splats, deterministic from the stamp seed
 			var a: float = float((s * (j + 3) * 2654435761) % 6283) / 1000.0
 			var dd: float = r * (1.2 + float((s >> j) & 7) * 0.25)
-			_painter.draw_circle(g + Vector2.from_angle(a) * dd, r * 0.35, Color(c, 0.4))
+			_painter.draw_circle(g + Vector2.from_angle(a) * dd, r * 0.42, Color(c, 0.62))
 	_batch.clear()
 
 

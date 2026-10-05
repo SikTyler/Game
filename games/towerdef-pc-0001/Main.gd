@@ -41,6 +41,7 @@ const Stats := preload("res://Stats.gd")
 const Kit := preload("res://ui/Kit.gd")
 const Desktop := preload("res://ui/Desktop.gd")
 const Battle := preload("res://ui/Battle.gd")
+const Intel := preload("res://ui/Intel.gd")
 const Hub := preload("res://ui/Hub.gd")
 const FactoryView := preload("res://ui/FactoryView.gd")
 const Factory := preload("res://Factory.gd")
@@ -85,6 +86,9 @@ var toast_t: float = 0.0
 var toast_queue: Array = []
 var view_tier: int = 1
 var run_missions: int = 0
+var intel_seen: Dictionary = {}       # FB2 right panel: enemy kind -> first wave seen
+var loot_feed: Array = []             # FB2 right panel: aggregated loot-drop feed
+var loot_coin_seen: float = 0.0
 var run_loot: Array = []             # meta events banked at run end (parts, insight)
 var meta_rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var sfx: Node = null                 # Sfx.gd (owned child, not an autoload)
@@ -105,6 +109,7 @@ var dbg_fps: float = 0.0
 var fclip: Control                   # clips kill particles to the battlefield
 var slot_pop: Dictionary = {}
 var flash: float = 0.0
+var flash_cd: float = 0.0              # FB2: Core-hit flash rate limit (hordes hit every substep)
 var heal_flash: float = 0.0
 var level_burst: float = 0.0
 var insight_t: float = 0.0           # Insight fanfare timer
@@ -370,6 +375,7 @@ func start_run(seed_override: int = 0) -> void:
 	_clear_fx()
 	run_missions = 0
 	run_loot = []
+	Intel.reset(self)
 	last_breakdown = {}
 	var sd: int = seed_override if seed_override != 0 else TuneRef.seed_of(int(Time.get_ticks_usec() % 1000000))
 	last_seed = sd
@@ -690,6 +696,7 @@ func _clear_fx() -> void:
 	slot_pop.clear()
 	juice.reset()
 	flash = 0.0
+	flash_cd = 0.0
 	heal_flash = 0.0
 	level_burst = 0.0
 	insight_t = 0.0
@@ -873,6 +880,8 @@ func _handle(events: Array) -> void:
 			clip = "shot_" + String(ev["kind"])
 		if clip != "":
 			sfx_play(clip)
+		if et == "drop":
+			Intel.on_event(self, ev)   # FB2 Loot Drops feed
 		match et:
 			"shot":
 				var kind: String = ev["kind"]
@@ -908,7 +917,7 @@ func _handle(events: Array) -> void:
 				_ring(ev["pos"], 18.0, 0.2, ENEMY)
 			"core_hit":
 				juice.add_trauma(0.22)
-				flash = minf(0.45, flash + 0.18)
+				core_flash()
 			# HORDE aggregates (horde_mult > 1): one summary per substep.
 			"hits":
 				for h in ev["top"]:
@@ -935,14 +944,15 @@ func _handle(events: Array) -> void:
 					juice.hit_pause(0.03)   # mass-kill hit-stop (Juice caps + cools it down)
 			"core_hits":
 				juice.add_trauma(minf(0.4, 0.22 + 0.02 * float(ev["n"])))
-				flash = minf(0.45, flash + 0.18)
+				core_flash()
 				if int(ev["shots"]) > 0:
 					var bo2: Dictionary = bolts.take(0.25)
 					bo2["a"] = (ev["pos_sample"] as Array)[0]
 			"enemy_shot":
 				var bo: Dictionary = bolts.take(0.25)
 				bo["a"] = ev["pos"]
-				flash = minf(0.3, flash + 0.06)
+				if flash_cd <= 0.0:
+					flash = minf(0.2, flash + 0.06)
 			"shield_hit":
 				_ring(ev["pos"], 26.0, 0.2, SHIELD)
 			"shield_break":
@@ -953,6 +963,7 @@ func _handle(events: Array) -> void:
 			"interest":
 				_pop(TowerState.CENTER + Vector2(0, -44), "+$%d interest" % int(round(float(ev["amt"]))), 1.0, GOLD, 18)
 			"boss_bounty":
+				Intel.on_event(self, ev)
 				_ring(ev["pos"], 120.0, 0.6, GOLD)
 				var bt: String = "BOUNTY +%d coins" % int(ev["coins"])
 				# Banner sits below the grid (never over cells).
@@ -1204,6 +1215,19 @@ func _end_drag(pos: Vector2) -> void:
 
 
 # ---------------------------------------------------------------- update
+## FB2: Core-hit screen flash, capped and rate-limited so a horde gnawing the
+## Core every substep pulses gently instead of holding the screen red.
+const FLASH_CAP: float = 0.3
+const FLASH_CD: float = 0.6
+
+
+func core_flash() -> void:
+	if flash_cd > 0.0:
+		return
+	flash = minf(FLASH_CAP, flash + 0.18)
+	flash_cd = FLASH_CD
+
+
 func _process(delta: float) -> void:
 	t_anim += delta
 	SteamService.tick()
@@ -1219,6 +1243,7 @@ func _process(delta: float) -> void:
 		var tev: Array = S.tick(juice.engine_delta(delta))
 		dbg_sim_ms = lerpf(dbg_sim_ms, float(Time.get_ticks_usec() - t0) / 1000.0, 0.2)
 		_handle(tev)
+		Intel.poll(self, delta)
 		ui_t += delta
 		if ui_t >= 0.25 and screen == "run":
 			ui_t = 0.0
@@ -1265,6 +1290,7 @@ func _process(delta: float) -> void:
 		gore.call("flush")
 	dbg_fps = Engine.get_frames_per_second()
 	flash = maxf(0.0, flash - 1.5 * delta)
+	flash_cd = maxf(0.0, flash_cd - delta)
 	heal_flash = maxf(0.0, heal_flash - delta)
 	level_burst = maxf(0.0, level_burst - delta)
 	insight_t = maxf(0.0, insight_t - delta)

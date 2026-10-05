@@ -16,7 +16,7 @@ const DEFS: Dictionary = {
 	"foundry": {"name": "Foundry", "arch": "eco", "dmg": 5.0, "rate": 1.0, "range": 3.5, "hp": 100.0, "regen": 0.8, "armor": 1.0, "cash": 4.0, "irate": 0.05, "icap": 150.0,
 		"attack": "slag", "splash": 1.0, "slow": 0.2, "slow_t": 2.0,
 		"attack_name": "Slag Spitter", "attack_desc": "Lobbed blob; 1-cell splash, 2 s slow (-20%)",
-		"trait": "compound", "trait_name": "Compound", "trait_desc": "Interest cap +10 per Eco track level; eco picks 1.5x as likely",
+		"trait": "compound", "trait_name": "Compound", "trait_desc": "Interest cap +10 per Eco enhancement level; eco picks 1.5x as likely",
 		"l20": "Splash x1.5"},
 	"lance": {"name": "Lance", "arch": "single", "dmg": 28.0, "rate": 0.5, "range": 5.5, "hp": 90.0, "regen": 0.6, "armor": 1.0, "cash": 1.5, "irate": 0.01, "icap": 30.0,
 		"attack": "beam", "ramp": 0.15, "ramp_max": 1.5,

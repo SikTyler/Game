@@ -14,7 +14,7 @@ const NODES: Dictionary = {
 	"root_forge": {"name": "Forge Root", "branch": "root", "base": 1, "step": 0, "max": 1, "desc": "Unlocks the tree and the Lance Core"},
 	"might": {"name": "Might", "branch": "power", "base": 2, "step": 1, "max": 20, "amt": 0.6, "stack": "mul", "desc": "x1.6 all damage per level (multiplies)"},
 	"bulwark_p": {"name": "Bulwark", "branch": "power", "base": 2, "step": 1, "max": 20, "amt": 0.35, "stack": "mul", "desc": "x1.35 Core HP per level (multiplies)"},
-	"head_start": {"name": "Head Start", "branch": "power", "base": 4, "step": 2, "max": 5, "desc": "+1 starting level on every cash track"},
+	"head_start": {"name": "Head Start", "branch": "power", "base": 4, "step": 2, "max": 5, "desc": "+1 starting level on every Core Enhancement"},
 	"core_ceiling": {"name": "Core Ceiling", "branch": "power", "base": 15, "step": 0, "max": 1, "desc": "Core max level 75"},
 	"wide_draft": {"name": "Wide Draft", "branch": "power", "base": 25, "step": 0, "max": 1, "desc": "4 draft choices"},
 	"banish_plus": {"name": "Banish+", "branch": "power", "base": 6, "step": 0, "max": 2, "desc": "+1 banish per run"},

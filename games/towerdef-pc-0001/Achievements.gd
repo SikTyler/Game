@@ -8,6 +8,7 @@ extends RefCounted
 ## Run-scoped facts (core damage before wave 11, time at wave 40, active
 ## synergies) live in a caller-owned `run` Dictionary from new_run().
 
+const FactoryDB := preload("res://data/FactoryDB.gd")
 const AchievementDB := preload("res://data/AchievementDB.gd")
 const SteamService := preload("res://SteamService.gd")
 const BuildingDB := preload("res://data/BuildingDB.gd")
@@ -262,7 +263,9 @@ static func _redesign_checks(save: Dictionary, st: Dictionary, now: int) -> Arra
 		if String(b.get("id", "")) == "gemmine" and bool(b.get("built", false)):
 			out.append_array(unlock(save, "ACH_GEM_MINE", now))
 			break
-	if op.get("plots", []) is Array and (op.get("plots", []) as Array).size() >= 8:
+	# FB2: "fully settled" = every land chunk of the factory map (was 8 plots).
+	var fc: Dictionary = save.get("factory", {}) if save.get("factory", {}) is Dictionary else {}
+	if fc.get("chunks", []) is Array and (fc.get("chunks", []) as Array).size() >= FactoryDB.CW * FactoryDB.CH:
 		out.append_array(unlock(save, "ACH_OUTPOST_FULL", now))
 	if int(st.get("couriers", 0)) >= 1:
 		out.append_array(unlock(save, "ACH_COURIER", now))

@@ -1274,7 +1274,8 @@ static func set_recipe(s: Dictionary, uid: String, rec: String) -> Array:
 # ---------------------------------------------------------------- land
 static func chunk_cost(s: Dictionary) -> int:
 	var bought: int = (_f(s)["chunks"] as Array).size() - DB.START_CHUNKS.size()
-	return int(round(float(DB.CHUNK_BASE) * pow(DB.CHUNK_GROWTH, float(bought))))
+	var n: float = float(maxi(0, bought))
+	return int(round(float(DB.CHUNK_BASE) * (1.0 + DB.CHUNK_LIN * n + DB.CHUNK_QUAD * n * n)))
 
 
 static func chunk_adjacent(s: Dictionary, k: int) -> bool:

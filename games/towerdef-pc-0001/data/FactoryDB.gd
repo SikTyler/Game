@@ -13,9 +13,12 @@ const CW: int = W / CHUNK   # 6
 const CH: int = H / CHUNK   # 4
 ## Chunk index = cy * CW + cx. Open from the start: the two centre chunks.
 const START_CHUNKS: Array = [8, 9]
-## Coins for the n-th bought chunk (n = chunks bought so far).
+## Coins for the n-th bought chunk (n = chunks bought so far):
+## CHUNK_BASE * (1 + CHUNK_LIN*n + CHUNK_QUAD*n^2). FB2: the old x1.55 geometric
+## curve priced the 22nd chunk at ~25M coins; this one tops out near 80k.
 const CHUNK_BASE: int = 2500
-const CHUNK_GROWTH: float = 1.55
+const CHUNK_LIN: float = 0.6
+const CHUNK_QUAD: float = 0.04
 
 ## Fixed simulation step (seconds). The tick is deterministic: entities are
 ## processed in ascending uid order.

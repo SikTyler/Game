@@ -2112,7 +2112,8 @@ func _pc_shell_stages() -> void:
 		"ACH_GEM_MINE": [{"outpost": {"buildings": {"1": {"id": "gemmine", "built": true}}, "plots": []}}, [{"t": "meta"}], -1.0],
 		"ACH_COURIER": [{"stats": {"couriers": 1}}, [{"t": "meta"}], -1.0],
 		"ACH_CORES_4": [{"cores": {"active": "bastion", "owned": ["bastion", "foundry", "lance", "tempest"], "levels": {}}}, [{"t": "meta"}], -1.0],
-		"ACH_OUTPOST_FULL": [{"outpost": {"buildings": {}, "plots": [0, 1, 2, 3, 4, 5, 6, 7]}}, [{"t": "meta"}], -1.0],
+		# FB2 (deliberate): Frontier Settled now needs all 24 factory land chunks (was 8 legacy plots).
+		"ACH_OUTPOST_FULL": [{"factory": {"chunks": range(24)}}, [{"t": "meta"}], -1.0],
 		"ACH_INSIGHT_10": [{"insight": {"in_dmg": 6, "in_hp": 4}}, [{"t": "meta"}], -1.0],
 		"ACH_SPECIAL_100": [{"stats": {"specials_cast": 100}}, [{"t": "meta"}], -1.0],
 		"ACH_CARD_MAX": [{"cards": {"owned": {"c_test": {"lvl": CardDB.MAX_LVL, "copies": 0}}}}, [{"t": "meta"}], -1.0],
@@ -3829,6 +3830,19 @@ func _factory_stages() -> void:
 	var cost0: int = Factory.chunk_cost(sv)
 	var uev: Array = Factory.unlock_chunk(sv, k_new)
 	_check("FACTORY locked chunk hides its deposits; unlocking reveals them and costs coins", not deps.is_empty() and hid and uev.size() == 1 and Factory.deposit_visible(sv, dep_cell) and int(sv["coins"]) == c0 - cost0 and Factory.chunk_cost(sv) > cost0)
+	# FB2: land price curve is sane (monotonic, last chunk under 100k coins)
+	var lp: Dictionary = {"coins": 0, "factory": {"chunks": []}}
+	var prev_c: int = 0
+	var mono: bool = true
+	for nb in range(FactoryDB.CW * FactoryDB.CH - FactoryDB.START_CHUNKS.size()):
+		var arr: Array = FactoryDB.START_CHUNKS.duplicate()
+		for q in nb:
+			arr.append(100 + q)
+		lp["factory"]["chunks"] = arr
+		var cc: int = Factory.chunk_cost(lp)
+		mono = mono and cc > prev_c
+		prev_c = cc
+	_check("FB2: land chunk price rises every purchase and the last chunk costs < 100k", mono and prev_c < 100000 and prev_c > 20000, str(prev_c))
 	_check("FACTORY a non-adjacent chunk cannot be bought", Factory.unlock_chunk(sv, 0).is_empty())
 	_check("FACTORY placement rules: locked land / occupied hub / miner off-deposit / missing tech refused", Factory.place_error(sv, "belt", 2, 2, 0) == "locked" and Factory.place_error(sv, "belt", 47, 23, 0) == "occupied" and Factory.place_error(sv, "miner", 50, 20, 0) == "no_deposit" and Factory.place_error(_fsave(false), "belt2", 50, 20, 0) == "tech")
 	# belts move items

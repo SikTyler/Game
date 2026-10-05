@@ -14,16 +14,17 @@ const Tiers := preload("res://Tiers.gd")
 const Kit := preload("res://ui/Kit.gd")
 const DraftPanel := preload("res://ui/DraftPanel.gd")
 const Hotbar := preload("res://ui/Hotbar.gd")
+const Intel := preload("res://ui/Intel.gd")
 
 const ENEMY2: Color = Color("e04bc0")
 const SHIELD: Color = Color("7fd8ff")
 const TRACK_ICON: Dictionary = {"dmg": "pk_arsenal", "rate": "pk_overclock", "range": "pk_optics", "eco": "pk_ledger", "armor": "pk_fort"}
 const TRACK_TIP: Dictionary = {
-	"dmg": "Damage track: x1.08 Core and building damage per level",
-	"rate": "Rate track: +3% Core attack rate per level",
-	"range": "Range track: +0.1 cell Core range per level",
-	"eco": "Eco track: +0.4 cash/s and +5 interest cap per level",
-	"armor": "Armor track: +5% Core HP, +0.2 regen and +0.5 armor per level",
+	"dmg": "Damage enhancement: x1.08 Core and building damage per level",
+	"rate": "Rate enhancement: +3% Core attack rate per level",
+	"range": "Range enhancement: +0.1 cell Core range per level",
+	"eco": "Eco enhancement: +0.4 cash/s and +5 interest cap per level",
+	"armor": "Armor enhancement: +5% Core HP, +0.2 regen and +0.5 armor per level",
 }
 
 
@@ -94,7 +95,7 @@ static func place_reason(m, i: int, id: String) -> String:
 	if i == TowerState.CORE_SLOT:
 		return "The Core"
 	if not bool(S.unlocked[i]):
-		return "Ring %d is closed (buy Core tracks)" % TowerState.ring_of(i)
+		return "Ring %d is closed (buy Core Enhancements)" % TowerState.ring_of(i)
 	if S.id_at(i) != "":
 		return "Occupied"
 	if not S.can_place(i, id):
@@ -408,13 +409,34 @@ static func _unit_quad() -> ArrayMesh:
 	return _quad
 
 
+## FB2 render interpolation: the sim moves bodies in fixed 0.05 s substeps, so
+## between steps the view advances each walker by its current seek speed times
+## the unconsumed step time (S.step_acc / speed-scaled), toward its goal and never
+## past it. View-only: the sim state is never touched.
+static func rpos(m, en, es: int) -> Vector2:
+	var p: Vector2 = en.pos[es]
+	var S = m.S
+	if S == null:
+		return p
+	var cs: float = en.cur_s[es]
+	if cs <= 0.0:
+		return p
+	var lead: float = clampf(float(S.step_acc), 0.0, TowerState.SUBSTEP)
+	var goal: Vector2 = en.exit[es] if en.kind[es] == "courier" else TowerState.CENTER
+	var d: Vector2 = goal - p
+	var dist: float = d.length()
+	if dist < 1.0:
+		return p
+	return p + d / dist * minf(dist * 0.5, cs * lead)
+
+
 static func _draw_enemies(m, en) -> void:
 	for k in _cnt.keys():
 		_cnt[k] = 0
 	var special: PackedInt32Array = PackedInt32Array()
 	for es in en.order:
 		var kind: String = en.kind[es]
-		var p: Vector2 = en.pos[es]
+		var p: Vector2 = rpos(m, en, es)
 		var s2: float = en.size[es] * 2.0
 		var c: Color = Color(1, 1, 1, 1)
 		var ht: float = en.hit_t[es]
@@ -464,7 +486,7 @@ static func _draw_enemies(m, en) -> void:
 		mm.buffer = _buf[kind]
 		m.draw_multimesh(mm, tx)
 	for es in special:
-		var p: Vector2 = en.pos[es]
+		var p: Vector2 = rpos(m, en, es)
 		var s: float = en.size[es]
 		var kind: String = en.kind[es]
 		var col: Color = ENEMY2 if kind in ["skitter", "boss", "mite", "splitter"] else Kit.ENEMY
@@ -661,14 +683,14 @@ static func _draw_right(m) -> void:
 	var st: Dictionary = S.stats
 	Kit.t(m, "+%.1f/s" % float(st.get("cash_ps", 0.0)), Vector2(x + w, y - 12), 15, Kit.GREEN, HORIZONTAL_ALIGNMENT_RIGHT, w * 0.4)
 	Kit.t(m, "interest %d%% (cap %d)" % [int(round(float(st.get("interest_rate", 0.0)) * 100.0)), int(float(st.get("interest_cap", 0.0)))], Vector2(x + w, y + 6), 13, Kit.DIM, HORIZONTAL_ALIGNMENT_RIGHT, w * 0.5)
-	m.stat_tips.append([Rect2(x, y - 34, w, 44), "Run cash: buys Core tracks and rerolls. Earned per second, per kill (x1.10 per wave) and as interest each wave on banked cash up to the cap."])
+	m.stat_tips.append([Rect2(x, y - 34, w, 44), "Run cash: buys Core Enhancements and rerolls. Earned per second, per kill (x1.10 per wave) and as interest each wave on banked cash up to the cap."])
 	y += 30.0
 	# Owner feedback #1: enemies killed lives in the Core panel (bodies counted)
 	Kit.icon(m, "mis_kill", Rect2(x, y - 4, 30, 30))
 	Kit.t(m, "Enemies killed", Vector2(x + 38, y + 18), 17, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w * 0.5)
 	Kit.t(m, Kit.fmt(float(S.kills)), Vector2(x + w, y + 20), 24, Kit.ENEMY, HORIZONTAL_ALIGNMENT_RIGHT, w * 0.5)
 	m.stat_tips.append([Rect2(x, y - 4, w, 30), "Enemies killed this run\nEvery body in a horde counts  ·  %d enemies on the field now" % S.enemy_count()])
-	y += 56.0
+	y += 40.0
 	# stats
 	var cw: Dictionary = (st["weapons"] as Array).back()
 	var rows: Array = [
@@ -682,14 +704,18 @@ static func _draw_right(m) -> void:
 		["Crit chance", "%d%%" % int(round(minf(1.0, float(st.get("crit", 0.0)) + float(cw.get("crit", 0.0))) * 100.0)), "Chance a Core hit deals critical damage"],
 		["Best wave", "%d" % int(m.save.get("best_wave", 0)), "Your best wave on any tier — beat it to push the frontier"],
 	]
-	var sh: float = clampf((track_y(m) - 74.0 - y) / float(rows.size()), 20.0, 30.0)
+	# FB2: stats in two compact columns, freeing room for Enemies + Loot Drops
+	var sh: float = 22.0
+	var cw2: float = (w - 12.0) * 0.5
 	for k in rows.size():
 		var rw: Array = rows[k]
-		Kit.row(m, String(rw[0]), String(rw[1]), Vector2(x, y + sh * float(k)), w, Kit.TEXT, String(rw[2]), 16)
+		Kit.row(m, String(rw[0]), String(rw[1]), Vector2(x + float(k % 2) * (cw2 + 12.0), y + sh * float(k / 2)), cw2, Kit.TEXT, String(rw[2]), 14)
+	y += sh * float((rows.size() + 1) / 2) + 6.0
+	Intel.draw(m, x, w, y, track_y(m) - 58.0)
 	# tracks
 	var ty: float = track_y(m)
 	var th: float = track_h(m)
-	Kit.head(m, "CORE TRACKS  (cash, this run)", Vector2(x, ty - 30), w)
+	Kit.head(m, "CORE ENHANCEMENTS  (cash, this run)", Vector2(x, ty - 30), w)
 	for k in TowerState.TRACK_IDS.size():
 		var tid: String = TowerState.TRACK_IDS[k]
 		var td: Dictionary = TowerState.TRACKS[tid]

@@ -78,10 +78,27 @@ const SCREENS: Dictionary = {
 }
 
 
-## Small nav buttons (left): home, Missions, Reforge.
+## FB2 top menu (left): home, then Core Bay, Crates, Research, Cards (also
+## buildings on the Outpost), Missions, Reforge. Widths shrink to stay clear of
+## the deploy cluster on narrow windows.
+const NAV: Array = [
+	["bay", "Core Bay", "core_open", "Core Bay: equip Cores, parts and Core Enhancements"],
+	["crates", "Crates", "crate_field", "Open crates for parts, keys and Cores"],
+	["research", "Research", "icon_lab", "Research Lab: timed upgrades and factory tech"],
+	["cards", "Cards", "tab_cards", "Card Hall: card collection and loadout"],
+	["missions", "Missions", "tab_missions", "Daily missions and the login streak"],
+	["reforge", "Reforge", "rf_root", "Core Reforge: reset for Shards and permanent nodes"],
+]
+
+
+static func nav_w(m) -> float:
+	var avail: float = start_rect(m).position.x - 340.0 - 206.0
+	return clampf(avail / float(NAV.size()) - 8.0, 96.0, 160.0)
+
+
 static func nav_rect(m, k: int) -> Rect2:
-	var w: float = 190.0 if k == 0 else 160.0
-	var x: float = 8.0 + (0.0 if k == 0 else 198.0 + float(k - 1) * 168.0)
+	var w: float = 190.0 if k == 0 else nav_w(m)
+	var x: float = 8.0 + (0.0 if k == 0 else 198.0 + float(k - 1) * (nav_w(m) + 8.0))
 	return Rect2(x, m.TOP_H + 8.0, w, m.NAV_H - 14.0)
 
 
@@ -92,8 +109,10 @@ static func start_rect(m) -> Rect2:
 static func build(m) -> void:
 	var home: bool = is_home(String(m.tab))
 	Kit.btn(m, "Outpost" if home else "Back to Outpost", nav_rect(m, 0), func() -> void: m.set_tab("play"), "Your Outpost: build, collect, and click the Core Bay, Crates, Research and Card Hall buildings", true, Kit.RUST if home else Kit.NEUTRAL, "DTAB Outpost", "op_relay_1", 16)
-	Kit.btn(m, "Missions", nav_rect(m, 1), func() -> void: m.set_tab("missions"), "Daily missions and the login streak", true, Kit.RUST if m.tab == "missions" else Kit.NEUTRAL, "DTAB Missions", "tab_missions", 15)
-	Kit.btn(m, "Reforge", nav_rect(m, 2), func() -> void: m.set_tab("reforge"), "Core Reforge: reset for Shards and permanent nodes", true, Kit.RUST if m.tab == "reforge" else Kit.NEUTRAL, "DTAB Reforge", "rf_root", 15)
+	for k in NAV.size():
+		var nv: Array = NAV[k]
+		var tid: String = String(nv[0])
+		Kit.btn(m, String(nv[1]), nav_rect(m, k + 1), func() -> void: m.set_tab(tid), String(nv[3]), true, Kit.RUST if m.tab == tid else Kit.NEUTRAL, "DTAB " + String(nv[1]), String(nv[2]), 15 if nav_w(m) >= 140.0 else 13)
 	# deploy cluster (right): tier < T > · Modes · START RUN
 	var sr: Rect2 = start_rect(m)
 	var ny: float = m.TOP_H + 8.0
@@ -135,11 +154,6 @@ static func draw(m) -> void:
 	Kit.t(m, "TIER %d" % vt, Vector2(tx, m.TOP_H + 30), 20, Kit.TEXT if Tiers.is_unlocked(m.save, vt) else Color("ff8a8a"), HORIZONTAL_ALIGNMENT_CENTER, 90.0)
 	Kit.t(m, ("x%.1f coins" % Tiers.coin_mult(vt)) if Tiers.is_unlocked(m.save, vt) else "locked", Vector2(tx, m.TOP_H + 49), 13, Kit.GOLD if Tiers.is_unlocked(m.save, vt) else Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, 90.0)
 	m.stat_tips.append([Rect2(tx - 45, m.TOP_H + 8, 90, m.NAV_H - 14), ("Tier %d: coins x%.1f, enemy HP x%.1f" % [vt, Tiers.coin_mult(vt), Tiers.hp_mult(vt)]) if Tiers.is_unlocked(m.save, vt) else Tiers.requirement(vt)])
-	if not home and SCREENS.has(String(m.tab)):
-		var sc: Array = SCREENS[String(m.tab)]
-		var cx: float = (nav_rect(m, 2).end.x + sr.position.x - 330.0) * 0.5
-		Kit.icon(m, String(sc[1]), Rect2(cx - 120, m.TOP_H + 12, 34, 34))
-		Kit.t(m, String(sc[0]).to_upper(), Vector2(cx - 78, m.TOP_H + 38), 22, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, 300.0)
 	if home:
 		for id in ["bay", "crates", "research", "cards"]:
 			var lr: Rect2 = FactoryView.landmark_rect(m, String(id))
@@ -159,7 +173,9 @@ static func draw(m) -> void:
 				_draw_missions(m, cr)
 			"reforge":
 				ReforgeView.draw(m, cr)
-	var nb: Array = [["outpost", 0], ["missions", 1], ["reforge", 2]]
+	var nb: Array = [["outpost", 0]]
+	for k in NAV.size():
+		nb.append([String((NAV[k] as Array)[0]), k + 1])
 	for e in nb:
 		if m.overlay == "" and m.offline_offer.is_empty() and badge(m, String((e as Array)[0])):
 			var r: Rect2 = nav_rect(m, int((e as Array)[1]))

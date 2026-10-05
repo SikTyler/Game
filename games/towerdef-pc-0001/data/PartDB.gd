@@ -97,7 +97,7 @@ const FX_TEXT: Dictionary = {
 	"luck": "{v} draft Luck", "perk_choices": "{v} perk choice", "dmg_per_bld": "{v} damage per building (max 12)",
 	"ring_delay": "grid rings open one step later", "reflect": "reflects {v} of contact damage", "special_tax": "specials cost {v} of banked cash",
 	"shred": "Core hits shred {v} armor (stacks x5)", "pulse_dmg": "{v} pulse ring damage",
-	"last_stand": "Core immune 2 s after dropping below 30% HP (once per wave)", "interest_fast": "interest is paid every 15 s", "dividend": "{v} all damage at Eco track 50 (scales with Eco level)",
+	"last_stand": "Core immune 2 s after dropping below 30% HP (once per wave)", "interest_fast": "interest is paid every 15 s", "dividend": "{v} all damage at Eco enhancement 50 (scales with Eco level)",
 	"pierce": "Core attack pierces 1 extra enemy", "storm_pulse": "every 10th Core attack fires a free Pulse Ring",
 	"troop_ls": "troops lifesteal 1% and heal the Core 0.5 HP per kill",
 }
