@@ -611,7 +611,7 @@ func _last(S) -> Dictionary:
 ## FEEDBACK-1 (deliberate): no lanes, building blocking, live drafts, new
 ## tracks and difficulty change the sim, so the golden was re-recorded from
 ## this build (bit-identity to the Dict impl only held while rules matched).
-const HORDE_FP_GOLDEN: String = "57f8f0e5eb23bee8fa8c81265d8e9c5f03529fab0a2b34fb3151c5c2ad3f4e9e"
+const HORDE_FP_GOLDEN: String = "782857cc84a30b94b4c5540fb64ff08a998c6228768f6e611d92500c01f666af"
 func _horde_stages() -> void:
 	var FP = load("res://horde_fp.gd")
 	var got: String = FP.run_all()

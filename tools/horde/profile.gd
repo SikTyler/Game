@@ -1,7 +1,7 @@
 extends SceneTree
 ## HORDE Phase-0/1 (Phase 1: SoA EnemyStore + EnemyHash): TowerState.tick() cost per substep at N live enemies.
 ## Instrumented runtime copy of TowerState with MAX_ENEMIES lifted (hlib.gd);
-## enemies are injected through the engine's own _spawn(kind, ev, at, quad)
+## enemies are injected through the engine's own _spawn(kind, ev, at, marked)
 ## (spawn_hold stops the wave plan). Enemy HP is pinned huge so the body count
 ## stays constant while every weapon fires; Core HP is refilled each substep.
 ## Usage: godot --headless --path games/towerdef-pc-0001 --script ../../tools/horde/profile.gd -- counts=220,1000,5000 steps=40 board=full|core
@@ -57,7 +57,7 @@ func _profile(g: GDScript, n: int, steps: int, board: String, do_densest: bool) 
 	for k in n:
 		var a: float = r.randf() * TAU
 		var d: float = r.randf_range(S.STOP_R, S.SPAWN_R)
-		S._spawn(String(KINDS[k % KINDS.size()]), ev0, S.CENTER + Vector2.from_angle(a) * d, -1)
+		S._spawn(String(KINDS[k % KINDS.size()]), ev0, S.CENTER + Vector2.from_angle(a) * d, false)
 	var spawn_us: float = float(Time.get_ticks_usec() - t_sp) / float(maxi(1, n))
 	for e in S.en.order:
 		S.en.hp[e] = 1e15

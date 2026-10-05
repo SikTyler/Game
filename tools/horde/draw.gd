@@ -58,7 +58,7 @@ func _next() -> void:
 	var ev: Array = []
 	for k in int(counts[ci]):
 		var a: float = r.randf() * TAU
-		S._spawn(String(KINDS[k % KINDS.size()]), ev, S.CENTER + Vector2.from_angle(a) * r.randf_range(S.STOP_R, S.SPAWN_R), -1)
+		S._spawn(String(KINDS[k % KINDS.size()]), ev, S.CENTER + Vector2.from_angle(a) * r.randf_range(S.STOP_R, S.SPAWN_R), false)
 	# realistic mix of decorations: ~half damaged (HP bar), some slowed / flashing
 	var en = S.en
 	for k in en.order.size():

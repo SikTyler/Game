@@ -37,7 +37,6 @@ func _initialize() -> void:
 	# ---- a mid-game save: Outpost started, a Mill ran 3 h while away
 	var save: Dictionary = BaseMeta.default_save()
 	save["coins"] = 60000
-	save["gems"] = 180
 	save["scrap"] = 900
 	save["keys"] = 3
 	save["core_cores"] = 6
@@ -97,8 +96,8 @@ func _initialize() -> void:
 	main.set_tab("crates")
 	await _shot("%s/04_crates.png" % outdir)
 	main.meta_rng.seed = 77
-	s["gems"] = 400
-	load("res://ui/CrateView.gd").open(main, "vault", "gems")
+	s["keys"] = 8
+	load("res://ui/CrateView.gd").open(main, "vault", "keys")
 	main.crate_anim["t"] = 1.55
 	_quiet()
 	await _shot("%s/04b_crate_open.png" % outdir, false)
@@ -114,7 +113,6 @@ func _initialize() -> void:
 	await _shot("%s/05c_outpost_hover.png" % outdir)
 	main.op_arm = ""
 	s["coins"] = 400000
-	s["gems"] = 600
 	for k in 3:
 		Outpost.unlock_plot(s, k, "coins")
 	var t: int = T0
@@ -136,7 +134,7 @@ func _initialize() -> void:
 	main._rebuild_ui()
 	await _shot("%s/05b_outpost_dev.png" % outdir)
 	# corner toast (achievement / missions banner) over the Outpost map
-	main.toast_text = "Achievement: Outpost Builder  (+10 gems)"
+	main.toast_text = "Achievement: Outpost Builder  (+500 coins)"
 	main.toast_t = 30.0
 	main.queue_redraw()
 	await _shot("%s/05f_outpost_toast.png" % outdir, false)
@@ -155,7 +153,7 @@ func _initialize() -> void:
 	_quiet()
 	main.set_tab("research")
 	await _shot("%s/06_research.png" % outdir)
-	s["gems"] = 300
+	s["coins"] = int(s["coins"]) + 4000
 	for k in 9:
 		Cards.open_chest(s, rng)
 	for id in Cards.owned(s).keys().slice(0, 2):

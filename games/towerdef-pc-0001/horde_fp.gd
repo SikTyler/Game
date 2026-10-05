@@ -64,7 +64,7 @@ static func run_one(core: String) -> String:
 			S.hp_mult = 0.08   # fragile flood: kills, overkill carry, splits
 			for j in 150:
 				var a: float = TAU * float(j) / 150.0
-				S._spawn(String(KS[j % KS.size()]), [], S.CENTER + Vector2.from_angle(a) * (230.0 + float(j % 7) * 30.0), -1)
+				S._spawn(String(KS[j % KS.size()]), [], S.CENTER + Vector2.from_angle(a) * (230.0 + float(j % 7) * 30.0), false)
 			S.hp_mult = hm
 		S.tick(0.05)
 		if k % 20 == 19:
