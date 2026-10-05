@@ -613,6 +613,7 @@ static func _place_cell(S, id: String) -> int:
 
 static func run_once(save: Dictionary, policy: String, seed_value: int) -> Dictionary:
 	var S = TowerState.new()
+	S.horde_mult = preload("res://Tune.gd").horde_mult()   # FB2: bot plays the shipped x4 horde (Main does the same)
 	S.setup(seed_value, save)
 	var t: float = 0.0
 	var acc: float = 0.0
@@ -846,6 +847,7 @@ const CARD_PRIO: Array = ["c_dmg", "c_hp", "c_wind", "c_coin", "c_cash", "c_xp",
 ## One run on `save` (mutated: banks, missions). Returns run facts.
 static func camp_run(save: Dictionary, policy: String, seed_value: int, now: int, perk_pref: String = "", feed_missions: bool = true, opts: Dictionary = {}) -> Dictionary:
 	var S = TowerState.new()
+	S.horde_mult = preload("res://Tune.gd").horde_mult()   # FB2: bot plays the shipped x4 horde (Main does the same)
 	S.setup(seed_value, save, now, opts)
 	var t: float = 0.0
 	var acc: float = 0.0
