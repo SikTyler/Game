@@ -12,6 +12,10 @@ extends Node2D
 const GROUND_PX: int = 2048          # texture size (square)
 const GROUND_WORLD: float = 2600.0   # world units covered, centred on CENTER
 const RING_CAP: int = 512            # pending stamp commands (oldest dropped)
+## Slow periodic fade so a long run's floor never goes solid: every
+## FADE_PERIOD s the whole layer is multiplied by FADE_MULT (half-life ~70 s).
+const FADE_PERIOD: float = 3.0
+const FADE_MULT: float = 0.97
 
 var level: String = "low"
 var center: Vector2 = Vector2.ZERO
@@ -25,6 +29,10 @@ var _painter: Node2D = null
 var _ring: Array[Dictionary] = []     # pending stamps {p: Vector2 world, r: float, c: Color, s: int seed}
 var _batch: Array[Dictionary] = []    # stamps drawn this frame
 var _wipe: bool = false
+var _fader: Node2D = null
+var _fade_due: bool = false
+var _fade_ms: int = 0
+var fades: int = 0
 
 
 func setup(world_center: Vector2, lvl: String) -> void:
@@ -39,6 +47,14 @@ func setup(world_center: Vector2, lvl: String) -> void:
 	_painter = Node2D.new()
 	_painter.draw.connect(_paint)
 	_vp.add_child(_painter)
+	_fader = Node2D.new()
+	var fm: CanvasItemMaterial = CanvasItemMaterial.new()
+	fm.blend_mode = CanvasItemMaterial.BLEND_MODE_MUL   # dst *= src (rgb and alpha)
+	_fader.material = fm
+	_fader.visible = false
+	_fader.draw.connect(func() -> void: _fader.draw_rect(Rect2(0, 0, GROUND_PX, GROUND_PX), Color(FADE_MULT, FADE_MULT, FADE_MULT, FADE_MULT)))
+	_vp.add_child(_fader)
+	_fade_ms = Time.get_ticks_msec()
 	set_level(lvl)
 
 
@@ -134,7 +150,13 @@ func flush() -> void:
 	if _vp == null:
 		return
 	var n: int = mini(stamps_per_frame(), _ring.size())
-	if n <= 0 and not _wipe:
+	var now: int = Time.get_ticks_msec()
+	_fade_due = level != "off" and now - _fade_ms >= int(FADE_PERIOD * 1000.0)
+	if _fade_due:
+		_fade_ms = now
+		fades += 1
+	_fader.visible = _fade_due
+	if n <= 0 and not _wipe and not _fade_due:
 		return
 	_batch = _ring.slice(0, n)
 	_ring = _ring.slice(n)

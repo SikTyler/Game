@@ -1,12 +1,14 @@
 extends RefCounted
 ## Troops (REDESIGN_SPEC §2.5, SYSTEMS §2.6): units spawned by troop huts that
-## walk out of the base along their lane and fight the shapes. Pure, static,
+## walk out to a post just outside the wall (radially past their hut) and
+## fight the horde coming from every side. Pure, static,
 ## deterministic (no RNG; fixed iteration order), stepped by TowerState's tick.
 ##   huts   = [{slot, id, lvl, home: Vector2, anchor: Vector2}]
 ##   troops = [{tid, hut, kind, pos, hp, max_hp, dmg, rate, range, spd, aoe,
 ##              cd, state, respawn_t, tgt, anchor, home}]
 ##   state: seek | engage | retreat | dead
-## AI: seek the nearest enemy within SEEK cells of the hut's lane anchor
+## AI: seek the nearest enemy within SEEK cells of the hut's anchor
+## (Rifle Barracks in the horde ruleset: anchor = Core, seek/leash cover the whole perimeter)
 ## (drones prefer flyers, sappers elites/bosses/marked), never straying more
 ## than LEASH cells from the anchor; engage in range; sappers and drones
 ## retreat home below 25% HP (infantry never retreats); the dead respawn at

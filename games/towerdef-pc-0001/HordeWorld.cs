@@ -135,7 +135,7 @@ public partial class HordeWorld : RefCounted
 		ox = new double[c]; oy = new double[c]; pushX = new double[c]; pushY = new double[c];
 		front = new double[c]; dirX = new double[c]; dirY = new double[c]; want = new double[c];
 		mode = new byte[c]; qlink = new int[c];
-		Array.Resize(ref vk, c); Array.Resize(ref vspec, c); Array.Resize(ref vr, c); Array.Resize(ref vg, c); Array.Resize(ref vb, c);
+		Array.Resize(ref vk, c); Array.Resize(ref vspec, c); Array.Resize(ref vr, c); Array.Resize(ref vg, c); Array.Resize(ref vb, c); Array.Resize(ref vmhp, c);
 		cap = c;
 	}
 
@@ -1139,6 +1139,7 @@ public partial class HordeWorld : RefCounted
 	int[] vk = new int[0];
 	byte[] vspec = new byte[0];
 	float[] vr = new float[0], vg = new float[0], vb = new float[0];
+	double[] vmhp = new double[0];        // max hp per slot (Intel roster summary)
 	float[][] vbuf = new float[0][];
 	int[] vcnt = new int[0];
 	const int DGRID = 24;                 // density shading cell (px)
@@ -1150,10 +1151,26 @@ public partial class HordeWorld : RefCounted
 	readonly float[] corp = new float[CORPSE_CAP * 3];
 	int corpHead = 0, corpTail = 0;
 
-	public void SetVis(int s, int kind, int special, float r, float g, float b)
+	public void SetVis(int s, int kind, int special, float r, float g, float b, double maxHp)
 	{
 		if (s >= cap) return;
-		vk[s] = kind; vspec[s] = (byte)special; vr[s] = r; vg[s] = g; vb[s] = b;
+		vk[s] = kind; vspec[s] = (byte)special; vr[s] = r; vg[s] = g; vb[s] = b; vmhp[s] = maxHp;
+	}
+
+	// Intel roster summary in one pass: [alive, maxHp] per visual kind index
+	// (replaces the per-frame GDScript scan over every body).
+	public double[] KindSummary(int nvk)
+	{
+		var o = new double[nvk * 2];
+		for (int s = 0; s < cap; s++)
+		{
+			if (live[s] == 0) continue;
+			int k = vk[s];
+			if (k < 0 || k >= nvk) continue;
+			o[k * 2] += 1.0;
+			if (vmhp[s] > o[k * 2 + 1]) o[k * 2 + 1] = vmhp[s];
+		}
+		return o;
 	}
 
 	// Fills the per-kind buffers. lead = unconsumed sim time (render
@@ -1187,32 +1204,35 @@ public partial class HordeWorld : RefCounted
 				double dx = gx0 - x, dy = gy0 - y, dist = Math.Sqrt(dx * dx + dy * dy);
 				if (dist >= 1.0) { double m = Math.Min(dist * 0.5, cs * lead) / dist; x += dx * m; y += dy * m; }
 			}
+			// colour effects stack (blended, not exclusive): density shading ->
+			// slow tint -> surge flare -> hit flash on top
 			float r = vr[s], g = vg[s], b = vb[s];
+			int dgx = (int)((px[s] - dX0) / DGRID), dgy = (int)((py[s] - dY0) / DGRID);
+			if (dgx >= 0 && dgy >= 0 && dgx < dW && dgy < dH && vspec[s] == 0)
+			{
+				// crowd readability: the interior of a dense pile shades darker so
+				// the mass reads as a body with a bright, legible rim
+				int d = dens[dgy * dW + dgx];
+				if (d > dmax) dmax = d;
+				float sh = 1.0f - 0.38f * (float)Math.Clamp((d - 3) / 9.0, 0.0, 1.0);
+				r *= sh; g *= sh; b *= sh;
+			}
+			if (slowT[s] > 0.0)
+			{
+				float st = (float)Math.Clamp(slowT[s] / 0.3, 0.0, 1.0);   // fades out over the last 0.3 s
+				r *= 1.0f - 0.3f * st; g *= 1.0f - 0.08f * st; b *= 1.0f + 0.25f * st;
+			}
+			// surge / splash: bodies thrown by knockback flare hot
+			double kv = vx[s] * vx[s] + vy[s] * vy[s];
+			if (kv > 3600.0)
+			{
+				float h = (float)Math.Clamp((Math.Sqrt(kv) - 60.0) / 140.0, 0.0, 1.0);
+				r += (1.45f - r) * h; g += (1.05f - g) * h * 0.8f; b += (0.7f - b) * h * 0.5f;
+			}
 			if (hitT[s] > 0.0)
 			{
 				float f = (float)(1.0 + 1.6 * hitT[s] / flashT);
 				r *= f; g *= f; b *= f;
-			}
-			else if (slowT[s] > 0.0) { r *= 0.7f; g *= 0.92f; b *= 1.25f; }
-			else
-			{
-				// crowd readability: the interior of a dense pile shades darker so
-				// the mass reads as a body with a bright, legible rim
-				int gx = (int)((px[s] - dX0) / DGRID), gy = (int)((py[s] - dY0) / DGRID);
-				if (gx >= 0 && gy >= 0 && gx < dW && gy < dH && vspec[s] == 0)
-				{
-					int d = dens[gy * dW + gx];
-					if (d > dmax) dmax = d;
-					float sh = 1.0f - 0.38f * (float)Math.Clamp((d - 3) / 9.0, 0.0, 1.0);
-					r *= sh; g *= sh; b *= sh;
-				}
-				// surge / splash: bodies thrown by knockback flare hot
-				double kv = vx[s] * vx[s] + vy[s] * vy[s];
-				if (kv > 3600.0)
-				{
-					float h = (float)Math.Clamp((Math.Sqrt(kv) - 60.0) / 140.0, 0.0, 1.0);
-					r += (1.45f - r) * h; g += (1.05f - g) * h * 0.8f; b += (0.7f - b) * h * 0.5f;
-				}
 			}
 			int n = vcnt[k];
 			float[] buf = vbuf[k];

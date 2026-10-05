@@ -452,7 +452,7 @@ static func rpos(m, en, es: int) -> Vector2:
 
 static func _draw_enemies(m, en) -> void:
 	# MASS_HORDE §View: C# writes every live body into one buffer per visual
-	# kind (transform + colour: hit flash, slow, elite / marked tint, density
+	# kind (transform + colour, stacked: density shading, slow tint, elite / marked tint
 	# shading, surge flare) and uploads each with one MultimeshSetBuffer call.
 	# GDScript never iterates bodies here.
 	var t0: int = Time.get_ticks_usec()

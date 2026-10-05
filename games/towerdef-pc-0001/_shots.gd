@@ -345,6 +345,13 @@ func _initialize() -> void:
 	S.hp = 1.0e9
 	# MASS_HORDE §View: early (hundreds), mid (thousands), late (10k+) with
 	# orbital strikes landing in the thick of it (explosions part the sea).
+	# The early shot starts on a clean field: no bodies, no queued corpses, no
+	# ground layer from the earlier battle shots.
+	S.set_enemies([])
+	S.orbitals.clear()
+	S.en.world.call("DrainCorpses", 1 << 20)
+	main.gore.call("clear")
+	await _wait(4)
 	await _horde_stage(S, 300, "%s/21a_horde_early.png" % outdir)
 	await _horde_stage(S, 2700, "%s/21b_horde_mid.png" % outdir)
 	await _horde_stage(S, 9500, "%s/21c_horde_late.png" % outdir)

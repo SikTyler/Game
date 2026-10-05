@@ -3145,7 +3145,7 @@ func _special_stages() -> void:
 	_check("SPEC Time Warp freezes enemies 3 s", (fz["pos"] as Vector2) == p0 and is_equal_approx(float(S.buffs["warp_t"]), 3.0))
 
 
-## §2.5 Troops: spawn per hut level, roam out along the lane, fight, die,
+## §2.5 Troops: spawn per hut level, roam out to their post, fight, die,
 ## respawn, retreat, taunt; deterministic.
 func _troop_stages() -> void:
 	_check("TROOP count +1 at L3 and L5", Troops.count_for("hut_infantry", 1) == 3 and Troops.count_for("hut_infantry", 3) == 4 and Troops.count_for("hut_infantry", 5) == 5 and Troops.count_for("hut_sapper", 1) == 2 and Troops.count_for("hut_drone", 1) == 4)
@@ -3158,7 +3158,7 @@ func _troop_stages() -> void:
 	S._drain_troop_events(sev)
 	_check("TROOP 3 Riflemen spawn at the hut", S.troops.size() == 3 and _evts(sev, "troop_spawn").size() == 3 and (S.troops[0]["pos"] as Vector2) == TowerState.slot_pos(_rc(2, 3)))
 	var anchor: Vector2 = S.troops[0]["anchor"]
-	_check("TROOP lane anchor sits outside the wall on the hut's side", anchor.distance_to(TowerState.CENTER) > TowerState.STOP_R and anchor.y < TowerState.CENTER.y)
+	_check("TROOP anchor (post) sits outside the wall on the hut's side", anchor.distance_to(TowerState.CENTER) > TowerState.STOP_R and anchor.y < TowerState.CENTER.y)
 	S.stats["weapons"] = [S.stats["weapons"].back()]
 	S.stats["weapons"].back()["range"] = 1.0   # silence the Core
 	for k in 60:

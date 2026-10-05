@@ -220,7 +220,7 @@ func commit(s: int) -> void:
 	var mk: bool = (flags[s] & F_MARKED) != 0
 	var sp: int = 1 if (mk or k == "boss" or k == "elite" or k == "courier" or shield[s] > 0) else 0
 	var tn: Color = Color(1.25, 1.08, 0.62) if mk else (Color(1.15, 1.0, 1.15) if k == "elite" else Color(1, 1, 1))
-	world.call("SetVis", s, vis_id(k), sp, tn.r, tn.g, tn.b)
+	world.call("SetVis", s, vis_id(k), sp, tn.r, tn.g, tn.b, max_hp[s])
 	dirty = true
 
 

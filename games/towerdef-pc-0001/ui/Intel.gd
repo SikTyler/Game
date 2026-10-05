@@ -7,6 +7,7 @@ extends RefCounted
 
 const TowerState := preload("res://TowerState.gd")
 const EnemyDB := preload("res://data/EnemyDB.gd")
+const EnemyStore := preload("res://EnemyStore.gd")
 const Kit := preload("res://ui/Kit.gd")
 
 ## MASS_HORDE §D1 roster names (ids kept so art / Codex carry over).
@@ -68,13 +69,13 @@ static func roster(S) -> Dictionary:
 
 static func _roster_scan(S) -> Dictionary:
 	var out: Dictionary = {}
-	var en = S.en
-	for es in en.order:
-		var k: String = en.kind[es]
-		var r: Dictionary = out.get(k, {"n": 0, "q": 0, "hp": 0.0})
-		r["n"] = int(r["n"]) + 1
-		r["hp"] = maxf(float(r["hp"]), float(en.max_hp[es]))
-		out[k] = r
+	# one C# pass over the live bodies ([alive, max hp] per visual kind)
+	var ks: PackedStringArray = EnemyStore.VIS_KINDS
+	var sm: PackedFloat64Array = S.en.world.call("KindSummary", ks.size())
+	for vi in ks.size():
+		if sm[vi * 2] <= 0.0:
+			continue
+		out[ks[vi]] = {"n": int(sm[vi * 2]), "q": 0, "hp": sm[vi * 2 + 1]}
 	for pi in range(int(S.plan_idx), S.plan.size()):
 		var k2: String = String((S.plan[pi] as Dictionary).get("kind", ""))
 		if k2 == "":
