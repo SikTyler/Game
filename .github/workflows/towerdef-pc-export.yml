@@ -6,11 +6,11 @@
 # 4.6.3 is not published yet, build the image from that repo's Dockerfile with
 # --build-arg GODOT_VERSION=4.6.3.
 name: "towerdef-pc export"
+# Manual only: auto-running on every push spammed failure emails (the stock
+# godot-ci image is not the .NET/mono build this project now needs, and the
+# runner ran out of memory, exit 137). Run it by hand from the Actions tab.
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - "games/towerdef-pc-0001/**"
 
 env:
   GODOT_VERSION: 4.6.3
