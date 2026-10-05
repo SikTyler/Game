@@ -862,6 +862,12 @@ func _run_screen() -> void:
 	_audit("pause")
 	_key(KEY_SPACE)
 	await _frames(4)
+	# HORDE P3 (deliberate): fixed 0.05 s substeps accumulate across frames,
+	# so a few short frames may not reach one step yet; wait (bounded) for it.
+	for _w in 120:
+		if S.time_alive > ta:
+			break
+		await _frames(1)
 	_check("RUN: Space resumes", main.overlay == "" and S.time_alive > ta)
 	# FEEDBACK-1 (deliberate): no lanes, no seed replay.
 	_key(KEY_V)

@@ -49,7 +49,7 @@ var next_free: PackedInt32Array = PackedInt32Array()
 var cur_s: PackedFloat64Array = PackedFloat64Array()   # Phase 3: current seek speed (accelerates to spd)
 # Phase 3 separation grid (rebuilt inside move(), old positions = Jacobi read)
 const SEP_CS: float = 32.0
-const SEP_GW: int = 48
+const SEP_GW: int = 96   # 3072 px: covers the max spawn radius (bodies outside skip separation)
 var _head: PackedInt32Array = PackedInt32Array()
 var _link: PackedInt32Array = PackedInt32Array()
 
@@ -203,7 +203,8 @@ func move(dt: float, frozen: bool, center: Vector2, stop_r: float, r_stop: float
 	var ox: float = center.x - SEP_CS * gw * 0.5
 	var oy: float = center.y - SEP_CS * gw * 0.5
 	var do_sep: bool = sep_k > 0.0 and order.size() > 1 and not frozen
-	var reach: int = int(ceil(max_size / SEP_CS))
+	var reach: int = 1   # 3x3 cells; bigger bodies under-push slightly (they are heavy anyway)
+	var kmax: int = int(prm[4]) if prm.size() > 4 else 12   # candidates scanned per body (cap) (spawn-order deterministic)
 	if do_sep:
 		if _head.size() != gw * gw:
 			_head.resize(gw * gw)
@@ -213,7 +214,11 @@ func move(dt: float, frozen: bool, center: Vector2, stop_r: float, r_stop: float
 		for ri in range(order.size() - 1, -1, -1):
 			var q: int = order[ri]
 			var qp: Vector2 = old[q]
-			var ci: int = clampi(int((qp.y - oy) / SEP_CS), 0, gw - 1) * gw + clampi(int((qp.x - ox) / SEP_CS), 0, gw - 1)
+			var gx: int = int(floor((qp.x - ox) / SEP_CS))
+			var gy: int = int(floor((qp.y - oy) / SEP_CS))
+			if gx < 0 or gy < 0 or gx >= gw or gy >= gw:
+				continue   # off-grid bodies (far out) neither push nor get pushed
+			var ci: int = gy * gw + gx
 			_link[q] = _head[ci]
 			_head[ci] = q
 	for e in order:
@@ -275,15 +280,17 @@ func move(dt: float, frozen: bool, center: Vector2, stop_r: float, r_stop: float
 		# soft separation (mass-weighted, capped per substep)
 		if do_sep:
 			var push: Vector2 = Vector2.ZERO
+			var seen: int = 0
 			var si: float = size[e]
 			var mi: float = si * si
-			var cx: int = clampi(int((p.x - ox) / SEP_CS), 0, gw - 1)
-			var cy: int = clampi(int((p.y - oy) / SEP_CS), 0, gw - 1)
+			var cx: int = int(floor((p.x - ox) / SEP_CS))
+			var cy: int = int(floor((p.y - oy) / SEP_CS))
 			for yy in range(maxi(0, cy - reach), mini(gw - 1, cy + reach) + 1):
 				for xx in range(maxi(0, cx - reach), mini(gw - 1, cx + reach) + 1):
 					var j: int = _head[yy * gw + xx]
-					while j >= 0:
-						if j != e and kind[j] != "courier":
+					while j >= 0 and seen < kmax:
+						seen += 1
+						if j != e:
 							var dv: Vector2 = p - old[j]
 							var sj: float = size[j]
 							var rr: float = (si + sj) * 0.5
