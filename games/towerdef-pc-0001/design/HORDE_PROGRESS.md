@@ -112,3 +112,35 @@ Draw, `tools/horde/draw.gd` (xvfb llvmpipe), `_draw_world` CPU per frame (baseli
 | 10,000 | — → **19.4 ms** | — → 91 ms |
 
 The remaining ~2 µs/body is the GDScript buffer fill. It still needs a real-GPU re-check on the owner's RTX 5080 (R9). Moving the fill into EnemyStore as a packed write is the Phase 7 lever.
+
+## Owner feedback #1: run rules (commits 5de3ed1, e5bd5a0, + tools fix)
+Implemented in the engine (TowerState / EnemyStore / Draft / Labs / Outpost / BaseMeta), tested in selftest:
+1. **Lanes removed.** Spawns are uniform around the Core on `spawn_r()`. The quadrant plan, lane focus (API, Z/V hotkeys, hotbar/Battle UI) and lane walls are gone. The telegraph is now `{total, elites, boss}`. The Encircled modifier is repurposed to +25% enemies.
+2. **Buildings block.** Every building has HP: 40, or 200 for the Barricade, ×1.35 per level, × enemy damage growth. Buildings repair 50% at each wave start. An enemy whose leading edge touches a building cell stops and attacks it (`ACT_BLD`, `bld_hit` events; `bld_hits` at horde>1). At 0 HP the building is destroyed and lost for the run (`building_destroyed`, `bld_lost`). Melee contact with the Core is now at STOP_R 34 px.
+3. **Live drafts:** `time_scale()` is always 1.0.
+4. **Grid research:** "grid" lab (cost 150×3^L) sets the grid to 3/5/7/8/10. The board is 11×11 with the Core at (5,5). Rings no longer open from track totals. The view zooms to `spawn_r()`. Bastion Heart is now one grid step smaller.
+5. **Core tracks:** at most 8 levels (Range: 6), costs 60–90 × 2.0–2.3^L, and each level has a drawback (see `TRACKS.minus`).
+6. **Difficulty:** enemy HP ×2.5 and damage ×1.5 (`pc_enemy_hp` / `pc_enemy_dmg`). The first fresh run dies at wave ~16–21.
+7. **Typed rewards:** every card carries `reward` (building/upgrade/perk/ability). A duplicate weapon is a new building (`dup`). A non-weapon duplicate sets `pending_upgrade`, which the player applies with `apply_upgrade(cell)` (click or drag), or drops with `cancel_upgrade`. `perk_list()` returns packs, gold perks and Insight.
+8. **No seed retry:** results show "Play again" with a new random run; history Retry and Ctrl+R replay are removed.
+9. **Gems removed:** legacy gems convert to coins at 25 each on load. Missions, streak and tier rewards pay coins. Chests and card slots cost coins. Crates open with keys or coins. Rush/skip are removed. The Gem Mine is now the Deep Mine (coins).
+10. **Instant builds and research:** queued jobs in old saves complete on the next tick or claim. Lab Speed is removed.
+Also: the top bar shows run coins, scrap and keys live.
+
+Test changes are deliberate and tagged `FEEDBACK-1`/`FB1` in selftest/uitest. Lane, ring, gem, timer and seed-retry assertions were replaced by assertions of the new rules. HP literals are × `difficulty_hp()`. The HORDE golden was re-recorded (82857cc8…) with an added two-run determinism check.
+Playtest gate changes: the gem gates now assert zero gems. New gate `first_run_short` (first run 300–480 s). The bot applies upgrades, buys grid research first, and spends ≤15% of the bank on cards.
+
+### Gates
+import, --quit-after 120: clean · SELFTEST OK · UITEST OK · shots rendered (fb1shots).
+**PLAYTEST FAIL, 19 gates:** progressable, no_death_spiral, t2_by_day5, tier3_by_day30, offline_below_active, ac38_eco_mix, first_run_short (245 s; band 300–480), no_plateau_after_t3, seeds_ok, pc_endless_runs, rd_frontier_band, rd_no_plateau, rd_loops_faster, rd_archetypes_viable, rd_outpost_share, rd_ac27_storage_fill, ac29_wave_gap, ac25_fresh_wall, set4_no_trap.
+Key metrics: the main campaign never reaches T2 (t2_day -1; best wave at day 30 is 49), with boss walls at w20/w30. Day-1 best wave is 21. Active coin rate is 975/min against 285/min offline.
+Cause: ×2.5 HP is too steep for the meta curve once building loss and the big-step tracks are combined. The early harness (fresh.gd, 24 runs) put T2 near day 6, but the full campaign stalls below w40.
+Next pass (blocked by the effort cap, not attempted): taper `pc_enemy_hp` by tier/wave (e.g. 2.5 early → 1.6 by w20), soften the T1 w20/w30 boss ramp, then rerun the playtest.
+
+### Profile (tools/horde/profile.gd, full board, 20 substeps)
+| bodies | step ms (before → after) | move ms (before → after) |
+|---|---|---|
+| 1,000 | 0.91 → 0.76 | 0.41 → 0.59 |
+| 5,000 | 5.0 → 4.24 | 2.5 → 3.07 |
+
+The building block check adds about 25% to move. Total step time is lower because fewer events are emitted.
