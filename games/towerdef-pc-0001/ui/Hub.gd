@@ -66,28 +66,50 @@ static func badge(m, id: String) -> bool:
 	return false
 
 
+## FB1: the home screen IS the Outpost ("play" and "outpost" both show it).
+static func is_home(tab: String) -> bool:
+	return tab == "play" or tab == "outpost"
+
+
+## Screens reached from the Outpost's buildings: [tab, title, icon].
+const SCREENS: Dictionary = {
+	"bay": ["Core Bay", "core_open"], "crates": ["Crates", "crate_field"], "research": ["Research Lab", "icon_lab"],
+	"cards": ["Card Hall", "tab_cards"], "missions": ["Missions", "tab_missions"], "reforge": ["Reforge", "rf_root"],
+}
+
+
+## Small nav buttons (left): home, Missions, Reforge.
 static func nav_rect(m, k: int) -> Rect2:
-	var w: float = (m.vw - START_W - 24.0) / float(TABS.size())
-	return Rect2(8.0 + float(k) * w, m.TOP_H + 8.0, w - 6.0, m.NAV_H - 14.0)
+	var w: float = 190.0 if k == 0 else 160.0
+	var x: float = 8.0 + (0.0 if k == 0 else 198.0 + float(k - 1) * 168.0)
+	return Rect2(x, m.TOP_H + 8.0, w, m.NAV_H - 14.0)
+
+
+static func start_rect(m) -> Rect2:
+	return Rect2(m.vw - START_W - 8.0, m.TOP_H + 6.0, START_W, m.NAV_H - 10.0)
 
 
 static func build(m) -> void:
-	for k in TABS.size():
-		var tb: Array = TABS[k]
-		var id: String = tb[0]
-		var on: bool = m.tab == id
-		Kit.btn(m, "%s  [%s]" % [String(tb[1]), Kit.hint(m, String(tb[2]))], nav_rect(m, k), func() -> void: m.set_tab(id), "Open %s" % String(tb[1]), true, Kit.RUST if on else Kit.NEUTRAL, "DTAB " + String(tb[1]), String(tb[3]), 16)
-	var sr := Rect2(m.vw - START_W - 8.0, m.TOP_H + 6.0, START_W, m.NAV_H - 10.0)
-	Kit.btn(m, "START RUN  T%d [%s]" % [m.view_tier, Kit.hint(m, "confirm")], sr, func() -> void: m.start_run(), "Start a run on Tier %d with the %s Core" % [m.view_tier, String(CoreDB.get_def(Cores.active(m.save))["name"])], Tiers.is_unlocked(m.save, m.view_tier), Kit.RUST, "DSTART", "", 20)
+	var home: bool = is_home(String(m.tab))
+	Kit.btn(m, "Outpost" if home else "Back to Outpost", nav_rect(m, 0), func() -> void: m.set_tab("play"), "Your Outpost: build, collect, and click the Core Bay, Crates, Research and Card Hall buildings", true, Kit.RUST if home else Kit.NEUTRAL, "DTAB Outpost", "op_relay_1", 16)
+	Kit.btn(m, "Missions", nav_rect(m, 1), func() -> void: m.set_tab("missions"), "Daily missions and the login streak", true, Kit.RUST if m.tab == "missions" else Kit.NEUTRAL, "DTAB Missions", "tab_missions", 15)
+	Kit.btn(m, "Reforge", nav_rect(m, 2), func() -> void: m.set_tab("reforge"), "Core Reforge: reset for Shards and permanent nodes", true, Kit.RUST if m.tab == "reforge" else Kit.NEUTRAL, "DTAB Reforge", "rf_root", 15)
+	# deploy cluster (right): tier < T > · Modes · START RUN
+	var sr: Rect2 = start_rect(m)
+	var ny: float = m.TOP_H + 8.0
+	var nh: float = m.NAV_H - 14.0
+	Kit.btn(m, "<", Rect2(sr.position.x - 330, ny, 46, nh), func() -> void: m.shift_tier(-1), "Previous tier", m.view_tier > 1, Kit.NEUTRAL, "<", "", 22)
+	Kit.btn(m, ">", Rect2(sr.position.x - 194, ny, 46, nh), func() -> void: m.shift_tier(1), "Next tier (tougher enemies, more coins)", m.view_tier < mini(Tiers.tier_max(), Tiers.highest(m.save) + 1), Kit.NEUTRAL, ">", "", 22)
+	Kit.btn(m, "Modes", Rect2(sr.position.x - 140, ny, 130, nh), func() -> void: m.set_overlay("modes"), "Pick Normal or Endless and stack challenge modifiers for bonus coins", true, Kit.MAG, "MODES", "icon_mod", 15)
+	Kit.btn(m, "PLAY  T%d" % m.view_tier, sr, func() -> void: m.start_run(), "Start a run on Tier %d with the %s Core" % [m.view_tier, String(CoreDB.get_def(Cores.active(m.save))["name"])], Tiers.is_unlocked(m.save, m.view_tier), Kit.RUST, "DSTART", "", 20)
+	if home:
+		OutpostView.build(m)
+		return
 	match String(m.tab):
-		"play":
-			_build_play(m)
 		"bay":
 			CoreBay.build(m)
 		"crates":
 			CrateView.build(m)
-		"outpost":
-			OutpostView.build(m)
 		"research":
 			_build_research(m)
 		"cards":
@@ -102,166 +124,44 @@ static func draw(m) -> void:
 	var cr: Rect2 = m.content_rect()
 	m.draw_rect(Rect2(0, m.TOP_H, m.vw, m.NAV_H), Color("1a1f26"))
 	m.draw_line(Vector2(0, m.TOP_H + m.NAV_H), Vector2(m.vw, m.TOP_H + m.NAV_H), Kit.EDGE, 2.0)
-	match String(m.tab):
-		"play":
-			_draw_play(m, cr)
-		"bay":
-			CoreBay.draw(m, cr)
-		"crates":
-			CrateView.draw(m, cr)
-		"outpost":
-			OutpostView.draw(m, cr)
-		"research":
-			_draw_research(m, cr)
-		"cards":
-			_draw_cards(m, cr)
-		"missions":
-			_draw_missions(m, cr)
-		"reforge":
-			ReforgeView.draw(m, cr)
-	for k in TABS.size():
-		if m.overlay == "" and m.offline_offer.is_empty() and badge(m, String((TABS[k] as Array)[0])):
-			var r: Rect2 = nav_rect(m, k)
-			m.draw_circle(Vector2(r.end.x - 10, r.position.y + 10), 6.0, Kit.ENEMY)
-
-
-# ===================================================================== PLAY
-static func _cols(m) -> Array:
-	var cr: Rect2 = m.content_rect()
-	var pad: float = 20.0
-	var w: float = (cr.size.x - pad * 4.0) / 3.0
-	var out: Array = []
-	for k in 3:
-		out.append(Rect2(cr.position.x + pad + float(k) * (w + pad), cr.position.y + pad, w, cr.size.y - pad * 2.0))
-	return out
-
-
-static func _build_play(m) -> void:
-	var c: Array = _cols(m)
-	var lc: Rect2 = c[0]
-	var mc: Rect2 = c[1]
-	var rc: Rect2 = c[2]
-	Kit.btn(m, "Open Core Bay [%s]" % Kit.hint(m, "tab_bay"), Rect2(lc.position.x + 20, lc.end.y - 70, lc.size.x - 40, 50), func() -> void: m.set_tab("bay"), "Choose a Core, install parts, compare and level them", true, Kit.RUST, "PLAY BAY", "core_open")
-	var cx: float = mc.get_center().x
-	Kit.btn(m, "<", Rect2(mc.position.x + 20, mc.position.y + 70, 70, 70), func() -> void: m.shift_tier(-1), "Previous tier", m.view_tier > 1, Kit.NEUTRAL, "<", "", 30)
-	Kit.btn(m, ">", Rect2(mc.end.x - 90, mc.position.y + 70, 70, 70), func() -> void: m.shift_tier(1), "Next tier (tougher enemies, more coins)", m.view_tier < mini(Tiers.tier_max(), Tiers.highest(m.save) + 1), Kit.NEUTRAL, ">", "", 30)
-	Kit.btn(m, "START RUN", Rect2(cx - 180, mc.position.y + 270, 360, 74), func() -> void: m.start_run(), "Start a run with the current Core, tier, mode and modifiers", Tiers.is_unlocked(m.save, m.view_tier), Kit.RUST, "START RUN", "", 32)
-	Kit.btn(m, "Mode & challenges", Rect2(cx - 180, mc.position.y + 360, 360, 50), func() -> void: m.set_overlay("modes"), "Pick Normal or Endless and stack challenge modifiers for bonus coins", true, Kit.MAG, "MODES", "icon_mod")
-	var y: float = rc.position.y + 60.0
-	Kit.btn(m, "Outpost [%s]" % Kit.hint(m, "tab_outpost"), Rect2(rc.end.x - 200, y - 46, 180, 42), func() -> void: m.set_tab("outpost"), "Open the Outpost builder", true, Kit.NEUTRAL, "PLAY OUTPOST", "op_relay_1", 16)
-	Kit.btn(m, "Research [%s]" % Kit.hint(m, "tab_labs"), Rect2(rc.end.x - 200, y + 214, 180, 42), func() -> void: m.set_tab("research"), "Open the Research Hall", true, Kit.NEUTRAL, "PLAY RESEARCH", "icon_lab", 16)
-
-
-static func _draw_play(m, _cr: Rect2) -> void:
-	var s: Dictionary = m.save
-	var c: Array = _cols(m)
-	var lc: Rect2 = c[0]
-	var mc: Rect2 = c[1]
-	var rc: Rect2 = c[2]
-	for col in c:
-		Kit.panel(m, col as Rect2, Kit.EDGE, Kit.PANEL)
-	# --- left: the active Core
-	var cid: String = Cores.active(s)
-	var cd: Dictionary = CoreDB.get_def(cid)
-	var lv: int = Cores.level(s, cid)
-	var x: float = lc.position.x + 24.0
-	var w: float = lc.size.x - 48.0
-	Kit.head(m, "ACTIVE CORE", Vector2(x, lc.position.y + 34), w)
-	var g: float = 0.5 + 0.5 * sin(m.t_anim * 2.0)
-	m.draw_circle(Vector2(lc.get_center().x, lc.position.y + 160), 96.0 + 6.0 * g, Color(Kit.RUST, 0.08))
-	Kit.icon(m, "core_" + cid, Rect2(lc.get_center().x - 84, lc.position.y + 76, 168, 168))
-	Kit.t(m, "%s Core" % String(cd["name"]), Vector2(lc.get_center().x, lc.position.y + 278), 30, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, w)
-	Kit.t(m, "Level %d / %d  ·  %s" % [lv, Cores.max_level(s), String(cd["arch"]).capitalize()], Vector2(lc.get_center().x, lc.position.y + 306), 17, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, w)
-	var y: float = lc.position.y + 344.0
-	Kit.t(m, String(cd["attack_name"]), Vector2(x, y), 19, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, w)
-	y += Kit.wrap(m, String(cd["attack_desc"]), Vector2(x, y + 8), 15, Kit.DIM, w, 2) + 18.0
-	Kit.t(m, "Trait: " + String(cd["trait_name"]), Vector2(x, y + 8), 17, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w)
-	y += Kit.wrap(m, String(cd["trait_desc"]), Vector2(x, y + 16), 15, Kit.DIM, w, 2) + 50.0
-	var stats: Array = [
-		["Damage", "%.1f" % (float(cd["dmg"]) * CoreDB.lvl_mult("dmg", lv))], ["Attack rate", "%.2f/s" % float(cd["rate"])],
-		["Range", "%.1f cells" % float(cd["range"])], ["Core HP", "%d" % int(float(cd["hp"]) * CoreDB.lvl_mult("hp", lv))],
-		["Regen", "%.1f/s" % (float(cd["regen"]) * CoreDB.lvl_mult("regen", lv))], ["Cash / s", "%.1f" % (float(cd["cash"]) * CoreDB.lvl_mult("cash", lv))],
-	]
-	for k in stats.size():
-		var rw: Array = stats[k]
-		Kit.row(m, String(rw[0]), String(rw[1]), Vector2(x + float(k % 2) * (w * 0.5 + 10.0), y + float(k / 2) * 26.0), w * 0.5 - 10.0, Kit.TEXT, "", 15)
-	y += 3.0 * 26.0 + 14.0
-	Kit.t(m, "Installed parts", Vector2(x, y), 15, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w)
-	var eq: Array = Parts.equipped(s, cid)
-	var px: float = x
-	for e in eq:
-		var ed: Dictionary = e
-		var pr := Rect2(px, y + 10, 44, 44)
-		Kit.panel(m, pr, Kit.rarity_col(PartDB.rarity_of(String(ed["id"]))), Color("101418"), 2)
-		Kit.icon(m, String(ed["id"]), pr.grow(-3))
-		m.stat_tips.append([pr, "%s  Lv%d" % [String(PartDB.get_def(String(ed["id"])).get("name", "")), int(ed["lvl"])]])
-		px += 50.0
-	if eq.is_empty():
-		Kit.t(m, "none — open crates and install parts in the Core Bay", Vector2(x, y + 36), 14, Color(Kit.DIM, 0.7), HORIZONTAL_ALIGNMENT_LEFT, w)
-	# --- middle: tier + start
-	var cx: float = mc.get_center().x
-	Kit.head(m, "DEPLOY", Vector2(mc.position.x + 24, mc.position.y + 34), mc.size.x - 48)
+	var home: bool = is_home(String(m.tab))
+	# tier readout between < and >
+	var sr: Rect2 = start_rect(m)
+	var tx: float = sr.position.x - 239.0
 	var vt: int = m.view_tier
-	if Tiers.is_unlocked(s, vt):
-		Kit.t(m, "TIER %d" % vt, Vector2(cx, mc.position.y + 118), 44, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, 300.0)
-		Kit.t(m, "coins x%.1f  ·  enemy HP x%.1f" % [Tiers.coin_mult(vt), Tiers.hp_mult(vt)], Vector2(cx, mc.position.y + 158), 17, Kit.GOLD, HORIZONTAL_ALIGNMENT_CENTER, mc.size.x - 180)
-		var bwt: Dictionary = s.get("best_wave_by_tier", {})
-		Kit.t(m, "Best wave on this tier: %d" % int(bwt.get(str(vt), 0)), Vector2(cx, mc.position.y + 186), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, mc.size.x - 40)
+	Kit.t(m, "TIER %d" % vt, Vector2(tx, m.TOP_H + 30), 20, Kit.TEXT if Tiers.is_unlocked(m.save, vt) else Color("ff8a8a"), HORIZONTAL_ALIGNMENT_CENTER, 90.0)
+	Kit.t(m, ("x%.1f coins" % Tiers.coin_mult(vt)) if Tiers.is_unlocked(m.save, vt) else "locked", Vector2(tx, m.TOP_H + 49), 13, Kit.GOLD if Tiers.is_unlocked(m.save, vt) else Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, 90.0)
+	m.stat_tips.append([Rect2(tx - 45, m.TOP_H + 8, 90, m.NAV_H - 14), ("Tier %d: coins x%.1f, enemy HP x%.1f" % [vt, Tiers.coin_mult(vt), Tiers.hp_mult(vt)]) if Tiers.is_unlocked(m.save, vt) else Tiers.requirement(vt)])
+	if not home and SCREENS.has(String(m.tab)):
+		var sc: Array = SCREENS[String(m.tab)]
+		var cx: float = (nav_rect(m, 2).end.x + sr.position.x - 330.0) * 0.5
+		Kit.icon(m, String(sc[1]), Rect2(cx - 120, m.TOP_H + 12, 34, 34))
+		Kit.t(m, String(sc[0]).to_upper(), Vector2(cx - 78, m.TOP_H + 38), 22, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, 300.0)
+	if home:
+		OutpostView.draw(m, cr)
+		for id in ["bay", "crates", "research", "cards"]:
+			var lr: Rect2 = OutpostView.landmark_rect(m, String(id))
+			if m.overlay == "" and m.offline_offer.is_empty() and badge(m, String(id)) and OutpostView.map_rect(m).has_point(lr.position + Vector2(lr.size.x - 12, 12)):
+				m.draw_circle(lr.position + Vector2(lr.size.x - 12, 12), 8.0, Kit.ENEMY)
 	else:
-		Kit.icon(m, "icon_lock", Rect2(cx - 20, mc.position.y + 84, 40, 40), Color(1, 1, 1, 0.7))
-		Kit.t(m, Tiers.requirement(vt), Vector2(cx, mc.position.y + 160), 19, Color("ff8a8a"), HORIZONTAL_ALIGNMENT_CENTER, mc.size.x - 180)
-	var mode: String = String(m.run_opts.get("mode", "normal"))
-	var mods: Array = m.run_opts.get("modifiers", [])
-	var names: Array = []
-	for id in mods:
-		names.append(String(ModifierDB.get_def(String(id))["name"]))
-	Kit.t(m, "%s run%s" % [mode.capitalize(), ("  ·  " + ", ".join(names)) if not names.is_empty() else ""], Vector2(cx, mc.position.y + 236), 16, Kit.MAG if mode == "endless" else Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, mc.size.x - 40)
-	var ty: float = mc.position.y + 450.0
-	Kit.head(m, "HOW A RUN WORKS", Vector2(mc.position.x + 24, ty), mc.size.x - 48)
-	var how: String = "Your Core fights and earns cash. Spend cash on the 5 Core tracks (right panel). The grid starts empty: every draft offers buildings, troop huts, upgrade packs, special attacks — and, rarely, an Insight that improves you permanently. Bosses, marked elites and Couriers drop parts for the Core Bay."
-	Kit.wrap(m, how, Vector2(mc.position.x + 24, ty + 26), 16, Kit.DIM, mc.size.x - 48, 9)
-	var lr2: Array = s.get("history", [])
-	if not lr2.is_empty():
-		var e: Dictionary = lr2[lr2.size() - 1]
-		Kit.t(m, "Last run: Tier %d, wave %d, +%s coins" % [int(e["tier"]), int(e["wave"]), Kit.fmt(float(e["coins"]))], Vector2(cx, mc.end.y - 24), 16, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, mc.size.x - 40)
-	# --- right: Outpost / research / missions / reforge
-	x = rc.position.x + 24.0
-	w = rc.size.x - 48.0
-	y = rc.position.y + 34.0
-	Kit.head(m, "OUTPOST", Vector2(x, y), w - 200.0)
-	var prod: Dictionary = Outpost.production(s)
-	var pend: Dictionary = Outpost.pending(s, m.now())
-	var res: Array = [["cur_coin", "coins", Kit.GOLD], ["cur_scrap", "scrap", Kit.SCRAP], ["cur_key", "keys", Kit.KEYC]]
-	for k in res.size():
-		var a: Array = res[k]
-		var ry: float = y + 40.0 + float(k) * 42.0
-		Kit.icon(m, String(a[0]), Rect2(x, ry - 4, 30, 30))
-		var r: float = float(prod[String(a[1])])
-		Kit.t(m, ("%s/h" % Kit.fmt(r)) if r >= 10.0 else ("%.2f/h" % r), Vector2(x + 40, ry + 20), 18, a[2], HORIZONTAL_ALIGNMENT_LEFT, 140.0)
-		Kit.t(m, "stored %s" % Kit.fmt(floorf(float(pend[String(a[1])]))), Vector2(x + w, ry + 20), 15, Kit.DIM, HORIZONTAL_ALIGNMENT_RIGHT, 200.0)
-	y += 220.0
-	Kit.head(m, "RESEARCH HALL", Vector2(x, y + 6), w - 200.0)
-	var run: Array = Labs.running(s)
-	if run.is_empty():
-		Kit.t(m, "%d queue%s idle — start a project" % [Labs.slots(s), "" if Labs.slots(s) == 1 else "s"], Vector2(x, y + 44), 16, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, w)
-	for k in run.size():
-		var e2: Dictionary = run[k]
-		var ry2: float = y + 30.0 + float(k) * 34.0
-		Kit.t(m, "%s -> Lv%d" % [String((LabDB.DEFS[String(e2["track"])] as Dictionary)["name"]), int(e2["to_lvl"])], Vector2(x, ry2 + 16), 16, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w * 0.55)
-		Kit.bar(m, Rect2(x + w * 0.58, ry2 + 4, w * 0.42, 14), Labs.progress(s, k, m.now()), Kit.LAB)
-	y += 150.0
-	Kit.head(m, "MISSIONS", Vector2(x, y), w)
-	var ml: Array = Missions.list(s)
-	for k in ml.size():
-		var me: Dictionary = ml[k]
-		var ry3: float = y + 30.0 + float(k) * 30.0
-		Kit.t(m, MissionDB.text(String(me["tpl"]), int(me["target"])), Vector2(x, ry3), 15, Kit.TEXT if not Missions.is_done(me) else Kit.GREEN, HORIZONTAL_ALIGNMENT_LEFT, w - 70)
-		Kit.t(m, "%d/%d" % [int(me["prog"]), int(me["target"])], Vector2(x + w, ry3), 15, Kit.DIM, HORIZONTAL_ALIGNMENT_RIGHT, 70.0)
-	y += 30.0 + float(ml.size()) * 30.0 + 16.0
-	Kit.head(m, "CORE REFORGE", Vector2(x, y), w)
-	var pv: Dictionary = Reforge.preview(s)
-	var rtxt: String = "Ready: +%d shards  [%s]" % [int(pv["shards"]), Kit.hint(m, "tab_reforge")] if bool(pv["ok"]) else "Unlocks at best wave %d (or 1M coins since the last Reforge)" % int(pv["gate_wave"])
-	Kit.wrap(m, rtxt, Vector2(x, y + 22), 15, Kit.SHARD if bool(pv["ok"]) else Kit.DIM, w, 2)
+		match String(m.tab):
+			"bay":
+				CoreBay.draw(m, cr)
+			"crates":
+				CrateView.draw(m, cr)
+			"research":
+				_draw_research(m, cr)
+			"cards":
+				_draw_cards(m, cr)
+			"missions":
+				_draw_missions(m, cr)
+			"reforge":
+				ReforgeView.draw(m, cr)
+	var nb: Array = [["outpost", 0], ["missions", 1], ["reforge", 2]]
+	for e in nb:
+		if m.overlay == "" and m.offline_offer.is_empty() and badge(m, String((e as Array)[0])):
+			var r: Rect2 = nav_rect(m, int((e as Array)[1]))
+			m.draw_circle(Vector2(r.end.x - 10, r.position.y + 10), 6.0, Kit.ENEMY)
 
 
 # ================================================================= RESEARCH

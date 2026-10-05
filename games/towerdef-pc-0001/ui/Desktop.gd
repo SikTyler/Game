@@ -474,7 +474,10 @@ static func _offer_pick(m, k: int) -> void:
 
 
 static func _hub_action(m, event: InputEvent) -> bool:
-	if m.tab == "outpost" and OutpostView.action(m, event):
+	if _pressed(m, event, "confirm") and m.tab == "play" and m.op_arm == "" and m.op_sel == "" and String(m.last_device) != "pad":
+		m.start_run()
+		return true
+	if Hub.is_home(m.tab) and OutpostView.action(m, event):
 		return true
 	if m.tab == "bay" and CoreBay.action(m, event):
 		return true
@@ -482,9 +485,6 @@ static func _hub_action(m, event: InputEvent) -> bool:
 		if _pressed(m, event, String(t[0])):
 			m.set_tab(String(t[1]))
 			return true
-	if _pressed(m, event, "confirm") and m.tab == "play":
-		m.start_run()
-		return true
 	return false
 
 
@@ -512,12 +512,12 @@ static func _cancel(m) -> void:
 		else:
 			m.set_overlay("pause")
 	elif m.screen == "base":
-		if m.tab == "outpost" and (m.op_arm != "" or m.op_moving or m.op_sel != ""):
+		if Hub.is_home(m.tab) and (m.op_arm != "" or m.op_moving or m.op_sel != ""):
 			OutpostView.cancel(m)
 		elif m.tab == "bay" and m.bay_part != "":
 			m.bay_part = ""
 			m._rebuild_ui()
-		elif m.tab != "play":
+		elif not Hub.is_home(m.tab):
 			m.set_tab("play")
 		else:
 			m.go_menu()
@@ -579,7 +579,7 @@ static func tip_at(m, p: Vector2) -> String:
 		var w: String = Battle.world_tip(m, p)
 		if w != "":
 			return w
-	if m.screen == "base" and m.tab == "outpost" and OutpostView.map_rect(m).has_point(p):
+	if m.screen == "base" and Hub.is_home(m.tab) and OutpostView.map_rect(m).has_point(p):
 		var o: String = OutpostView.map_tip(m, p)
 		if o != "":
 			return o

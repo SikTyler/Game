@@ -273,6 +273,7 @@ func _run() -> void:
 	await _crates()
 	await _outpost()
 	await _research_cards_missions()
+	await _fb1_home()
 	await _reforge()
 	await _settings_records()
 	await _run_screen()
@@ -429,6 +430,105 @@ func _crates() -> void:
 	await _frames()
 	_check("CRATE: Supply Crate with a Key opens 2 parts", int(main.save["keys"]) == k0 - 1 and (main.crate_anim["items"] as Array).size() == 2)
 	main.crate_anim = {}
+
+
+# ============================================================ FB1 HOME
+## PLAYTEST_FEEDBACK_1 home: the Outpost IS the hub; plaza buildings open the
+## meta screens; Play / Missions / Reforge are small buttons; land chunks hide
+## their resources; upgrades show before -> after; crate items open the bay;
+## double-click equips / unequips / replaces; SVGs rasterise crisp.
+func _fb1_home() -> void:
+	var s: Dictionary = main.save
+	main.set_tab("play")
+	await _frames()
+	_check("FB1: home is the Outpost (build palette + Play/Missions/Reforge buttons, no Core Bay tab)", _find("OPCAT prod") != null and _find("DSTART") != null and _find("DTAB Missions") != null and _find("DTAB Reforge") != null and _find("DTAB Core Bay") == null and _find("DTAB Crates") == null)
+	_audit("home")
+	_check("FB1: Outpost map is much larger (24x16, 17 land chunks)", OutpostDB.W == 24 and OutpostDB.H == 16 and OutpostDB.PLOTS.size() == 17)
+	var cat: Button = _find("OPCAT prod")
+	_check("FB1: build categories carry icons", cat != null and cat.icon != null and _find("OPCAT decor") != null and _find("OPCAT decor").icon != null)
+	for lm in [["bay", "Core Bay"], ["crates", "Crates"], ["research", "Research"], ["cards", "Card"]]:
+		main.set_tab("play")
+		await _frames()
+		var lr: Rect2 = OutpostView.landmark_rect(main, String(lm[0]))
+		_motion(lr.get_center())
+		await _frames(3)
+		var tip: String = main.tip_label.text
+		_click(lr.get_center())
+		await _frames()
+		_check("FB1: clicking the %s building opens it" % String(lm[1]), main.tab == String(lm[0]) and tip.contains(String(lm[1])), "%s / %s" % [main.tab, tip])
+	_press("DTAB Outpost")
+	await _frames()
+	_check("FB1: Back to Outpost returns home", main.tab == "play")
+	# hidden resources in locked land
+	var vein := Vector2i(21, 2)
+	var pl: int = Outpost.plot_of(vein)
+	_check("FB1: a Crystal Vein inside locked land is hidden", OutpostDB.VEINS.has(vein) and pl >= 0 and not (s["outpost"]["plots"] as Array).has(pl) and not OutpostView.map_tip(main, OutpostView.cell_rect(main, vein.x, vein.y).get_center()).contains("Vein"))
+	# upgrade shows what it does
+	var mu: String = ""
+	for k in (s["outpost"]["buildings"] as Dictionary).keys():
+		if String((s["outpost"]["buildings"][k] as Dictionary)["id"]) == "mill":
+			mu = String(k)
+	var rows: Array = OutpostView.upgrade_delta(s, mu)
+	var rate_ok: bool = false
+	for r in rows:
+		if String((r as Array)[0]).begins_with("Coins / hour") and String((r as Array)[2]).to_float() > String((r as Array)[1]).to_float():
+			rate_ok = true
+	main.op_sel = mu
+	main._rebuild_ui()
+	await _frames()
+	var ub: Button = _find("OP UPGRADE")
+	_check("FB1: Outpost upgrade shows before -> after (Mill coins/hour rises)", mu != "" and rate_ok and ub != null and ub.tooltip_text.contains("->"), str(rows))
+	var rr: Array = OutpostView.upgrade_delta(s, "relay")
+	_check("FB1: Relay upgrade lists power before -> after", not rr.is_empty() and String((rr[0] as Array)[0]) == "Power" and int(String((rr[0] as Array)[2])) > int(String((rr[0] as Array)[1])))
+	main.op_sel = ""
+	# crate item -> Core Bay focused on it
+	s["coins"] = maxi(int(s["coins"]), 100000)
+	main.set_tab("crates")
+	await _frames()
+	main.meta_rng.seed = 11
+	_press("CRATE FIELD COINS")
+	await _frames()
+	_press("CRATE SKIP")
+	await _frames()
+	var it0: Dictionary = (main.crate_anim.get("items", []) as Array)[0] if not (main.crate_anim.get("items", []) as Array).is_empty() else {}
+	var cuid: String = String(it0.get("uid", ""))
+	_press("CRATE ITEM 0")
+	await _frames()
+	_check("FB1: clicking a revealed crate part opens the Core Bay on it", cuid != "" and main.tab == "bay" and main.bay_part == cuid, "%s %s" % [cuid, main.bay_part])
+	# double-click equip / unequip / replace
+	var core: String = Cores.active(s)
+	main.bay_core = core
+	for row_k in Parts.N_SLOTS:
+		Parts.unequip(s, core, row_k)
+	Parts.grant(s, "b_longbore", "test")
+	Parts.grant(s, "b_shortbore", "test")
+	var u1: String = Parts.uid_of(s, "b_longbore")
+	var u2: String = Parts.uid_of(s, "b_shortbore")
+	main.bay_filter = {"slot": "B", "rarity": "", "set": ""}
+	main.bay_page = 0
+	main._rebuild_ui()
+	await _frames()
+	var dbl: Callable = func(uid: String) -> void:
+		for n in 2:
+			for c in _all_buttons():
+				if (c as Button).has_meta("uid") and String((c as Button).get_meta("uid")) == uid:
+					_click((c as Button).get_global_rect().get_center())
+					break
+			await _frames()
+	await dbl.call(u1)
+	var at1: int = Parts.preset(s, core).find(u1)
+	_check("FB1: double-click equips a part", at1 >= 0, str(Parts.preset(s, core)))
+	await dbl.call(u2)
+	var row2: Array = Parts.preset(s, core)
+	_check("FB1: double-click replaces the equipped part in that slot", at1 >= 0 and String(row2[at1]) == u2 and not row2.has(u1), str(row2))
+	await dbl.call(u2)
+	_check("FB1: double-click an equipped part unequips it", not Parts.preset(s, core).has(u2), str(Parts.preset(s, core)))
+	main.bay_filter = {"slot": "", "rarity": "", "set": ""}
+	# crisp SVG raster
+	var tx: Texture2D = load("res://art/aegis.svg") as Texture2D
+	_check("FB1: SVG art rasterises at >= 256 px (not upscaled blur)", tx != null and tx.get_width() >= 256, str(tx.get_width() if tx != null else 0))
+	main.set_tab("play")
+	await _frames()
 
 
 # ================================================================= OUTPOST
@@ -713,7 +813,7 @@ func _settings_records() -> void:
 	_key(KEY_ESCAPE)
 	await _frames()
 	_check("PC-U3: Esc closes the overlay", main.overlay == "")
-	_press("DTAB Play")
+	_press("DTAB Outpost")   # FB1 (deliberate): the Play tab became the Outpost home button
 	await _frames()
 	_press("MODES")
 	await _frames()

@@ -81,9 +81,27 @@ static func build(m) -> void:
 	if m.crate_anim.has("crate"):
 		var st: Rect2 = stage_rect(m)
 		if _done(m):
+			# FB1: click a revealed part to open the Core Bay focused on it
+			var its: Array = m.crate_anim.get("items", [])
+			for k in its.size():
+				var e: Dictionary = its[k]
+				var uid: String = String(e.get("uid", ""))
+				if uid == "" or Parts.item(s, uid).is_empty():
+					continue
+				Kit.hit(m, item_rect(m, k, 1.0), func() -> void: m.open_part_in_bay(uid), String(PartDB.get_def(String(e["id"])).get("name", "")) + "\nClick to open it in the Core Bay", "CRATE ITEM %d" % k, true, Kit.rarity_col(PartDB.rarity_of(String(e["id"]))))
 			Kit.btn(m, "Close", Rect2(st.end.x - 180, st.end.y - 56, 160, 44), func() -> void: m.crate_anim = {}; m._rebuild_ui(), "Close the reveal", true, Kit.NEUTRAL, "CRATE CLOSE")
 		else:
 			Kit.btn(m, "Skip", Rect2(st.end.x - 180, st.end.y - 56, 160, 44), func() -> void: m.crate_anim["t"] = 99.0; m._rebuild_ui(), "Reveal everything now", true, Kit.NEUTRAL, "CRATE SKIP")
+
+
+## Screen rect of revealed card k (sx = flip progress 0..1).
+static func item_rect(m, k: int, sx: float) -> Rect2:
+	var st: Rect2 = stage_rect(m)
+	var n: int = maxi(1, (m.crate_anim.get("items", []) as Array).size())
+	var cs: float = minf(st.size.y - 60.0, 180.0)
+	var x0: float = st.position.x + 60.0 + cs * 0.7 + cs * 0.7 + 40.0
+	var cw: float = minf(220.0, (st.end.x - 200.0 - x0) / float(n) - 16.0)
+	return Rect2(x0 + float(k) * (cw + 16.0) + cw * 0.5 * (1.0 - sx), st.position.y + 20, cw * sx, st.size.y - 40)
 
 
 static func _done(m) -> bool:
@@ -159,7 +177,7 @@ static func _draw_reveal(m, st: Rect2) -> void:
 		var rar: String = PartDB.rarity_of(id)
 		var col: Color = Kit.rarity_col(rar)
 		var sx: float = clampf(ft, 0.0, 1.0)
-		var r := Rect2(x0 + float(k) * (cw + 16.0) + cw * 0.5 * (1.0 - sx), st.position.y + 20, cw * sx, st.size.y - 40)
+		var r: Rect2 = item_rect(m, k, sx)
 		if rar in ["epic", "legendary", "special"]:
 			m.draw_rect(r.grow(6.0), Color(col, 0.18 + 0.1 * sin(m.t_anim * 6.0)))
 		Kit.panel(m, r, col, Color(col.darkened(0.82), 1.0), 3)
@@ -177,4 +195,6 @@ static func _draw_reveal(m, st: Rect2) -> void:
 			"part_dup_salvaged":
 				sub = "+%d Scrap" % int(e["scrap"])
 		Kit.t(m, sub, Vector2(r.get_center().x, r.position.y + isz + 62), 15, col, HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 8)
+		if _done(m) and String(e.get("uid", "")) != "":
+			Kit.t(m, "Open in Core Bay", Vector2(r.get_center().x, r.end.y - 14), 14, Kit.GOLD, HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 8)
 		m.stat_tips.append([r, String(PartDB.get_def(id).get("name", id)) + "\n" + "\n".join(PackedStringArray((PartDB.lines(id, 1)["plus"] as Array) + (PartDB.lines(id, 1)["minus"] as Array)))])

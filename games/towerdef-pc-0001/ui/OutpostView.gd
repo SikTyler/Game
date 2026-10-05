@@ -15,10 +15,22 @@ const OutpostDB := preload("res://data/OutpostDB.gd")
 const Settings := preload("res://Settings.gd")
 const Art := preload("res://ArtDB.gd")
 const Kit := preload("res://ui/Kit.gd")
+const Cores := preload("res://Cores.gd")
 
 const PAL_W: float = 400.0
-const QUEUE_H: float = 96.0
-const CATS: Array = [["prod", "Production"], ["support", "Support"], ["infra", "Links"], ["decor", "Decor"]]
+const HEAD_H: float = 48.0
+## [id, label, icon] — FB1: obvious build categories with icons.
+const CATS: Array = [["prod", "Produce", "op_mill_1"], ["support", "Support", "op_research_1"], ["infra", "Links", "op_conduit"], ["decor", "Decor", "dc_tree"]]
+## FB1 home: the Command Plaza west of the grid (negative cell x) holds the
+## buildings that open the meta screens. [tab, name, art, top-left cell, blurb]
+const PLAZA_W: int = 4
+const LANDMARKS: Array = [
+	["bay", "Core Bay", "core_open", Vector2i(-4, 0), "Choose your Core, install and compare parts"],
+	["crates", "Crates", "crate_field", Vector2i(-4, 4), "Open crates for Core parts"],
+	["research", "Research Lab", "op_research_3", Vector2i(-4, 8), "Permanent upgrades for every run (instant)"],
+	["cards", "Card Hall", "tab_cards", Vector2i(-4, 12), "Equip cards and open card chests"],
+]
+const LM_SIZE: int = 3
 const CAT_IDS: Dictionary = {
 	"prod": ["mill", "refinery", "gemmine", "keyforge"],
 	"support": ["research", "barracks", "archive", "warehouse", "scrapyard", "beaconpost"],
@@ -44,7 +56,12 @@ const ERR: Dictionary = {"outside": "Outside the map", "locked": "Locked land �
 
 static func map_rect(m) -> Rect2:
 	var cr: Rect2 = m.content_rect()
-	return Rect2(cr.position.x + 12, cr.position.y + 12, cr.size.x - PAL_W - 36, cr.size.y - QUEUE_H - 30)
+	return Rect2(cr.position.x + 12, cr.position.y + HEAD_H + 16, cr.size.x - PAL_W - 36, cr.size.y - HEAD_H - 28)
+
+
+static func head_rect(m) -> Rect2:
+	var cr: Rect2 = m.content_rect()
+	return Rect2(cr.position.x + 12, cr.position.y + 10, cr.size.x - PAL_W - 36, HEAD_H)
 
 
 static func pal_rect(m) -> Rect2:
@@ -52,20 +69,40 @@ static func pal_rect(m) -> Rect2:
 	return Rect2(cr.end.x - PAL_W - 12, cr.position.y + 12, PAL_W, cr.size.y - 24)
 
 
-static func queue_rect(m) -> Rect2:
-	var mr: Rect2 = map_rect(m)
-	return Rect2(mr.position.x, mr.end.y + 8, mr.size.x, QUEUE_H)
-
-
 static func cell_px(m) -> float:
 	var mr: Rect2 = map_rect(m)
-	return minf(mr.size.x / float(OutpostDB.W), mr.size.y / float(OutpostDB.H)) * 0.96 * m.op_zoom
+	return minf(mr.size.x / float(OutpostDB.W + PLAZA_W), mr.size.y / float(OutpostDB.H)) * 0.97 * m.op_zoom
 
 
+## Cell (0, 0) on screen; the plaza (PLAZA_W columns) sits to its left.
 static func origin(m) -> Vector2:
 	var mr: Rect2 = map_rect(m)
 	var c: float = cell_px(m)
-	return mr.get_center() - Vector2(float(OutpostDB.W), float(OutpostDB.H)) * c * 0.5 + m.op_cam
+	return mr.get_center() - Vector2(float(OutpostDB.W + PLAZA_W), float(OutpostDB.H)) * c * 0.5 + Vector2(float(PLAZA_W) * c, 0.0) + m.op_cam
+
+
+static func landmark_rect(m, tab: String) -> Rect2:
+	for lm in LANDMARKS:
+		if String((lm as Array)[0]) == tab:
+			var c: Vector2i = (lm as Array)[3]
+			return cell_rect(m, c.x, c.y, LM_SIZE, LM_SIZE)
+	return Rect2()
+
+
+## Landmark under a cell ("" = none).
+static func landmark_at(c: Vector2i) -> String:
+	for lm in LANDMARKS:
+		var p: Vector2i = (lm as Array)[3]
+		if Rect2i(p, Vector2i(LM_SIZE, LM_SIZE)).has_point(c):
+			return String((lm as Array)[0])
+	return ""
+
+
+static func _landmark(tab: String) -> Array:
+	for lm in LANDMARKS:
+		if String((lm as Array)[0]) == tab:
+			return lm
+	return []
 
 
 static func cell_at(m, p: Vector2) -> Vector2i:
@@ -183,6 +220,10 @@ static func _press_palette(m, id: String) -> void:
 
 static func click(m, c: Vector2i) -> void:
 	m.op_focus = c
+	var lm: String = landmark_at(c)
+	if lm != "" and m.op_arm == "" and not m.op_moving:
+		m.set_tab(lm)
+		return
 	if m.op_arm != "":
 		place_at(m, c)
 		return
@@ -324,7 +365,7 @@ static func action(m, event: InputEvent) -> bool:
 			return true
 	for d in [["cursor_up", Vector2i(0, -1)], ["cursor_down", Vector2i(0, 1)], ["cursor_left", Vector2i(-1, 0)], ["cursor_right", Vector2i(1, 0)]]:
 		if pr.call(String(d[0])):
-			m.op_focus = Vector2i(clampi(m.op_focus.x + (d[1] as Vector2i).x, 0, OutpostDB.W - 1), clampi(m.op_focus.y + (d[1] as Vector2i).y, 0, OutpostDB.H - 1))
+			m.op_focus = Vector2i(clampi(m.op_focus.x + (d[1] as Vector2i).x, -PLAZA_W, OutpostDB.W - 1), clampi(m.op_focus.y + (d[1] as Vector2i).y, 0, OutpostDB.H - 1))
 			m._rebuild_ui()
 			return true
 	if pr.call("confirm"):
@@ -344,7 +385,7 @@ static func build(m) -> void:
 	var cw: float = (w - 18.0) / 4.0
 	for k in CATS.size():
 		var cat: String = String((CATS[k] as Array)[0])
-		Kit.btn(m, String((CATS[k] as Array)[1]), Rect2(x + k * (cw + 6.0), pr.position.y + 112, cw, 40), func() -> void: m.op_cat = cat; m._rebuild_ui(), "Show %s buildings" % String((CATS[k] as Array)[1]), true, Kit.RUST if m.op_cat == cat else Kit.NEUTRAL, "OPCAT " + cat, "", 14)
+		Kit.btn(m, String((CATS[k] as Array)[1]), Rect2(x + k * (cw + 6.0), pr.position.y + 100, cw, 52), func() -> void: m.op_cat = cat; m._rebuild_ui(), "Build category: %s" % String((CATS[k] as Array)[1]), true, Kit.RUST if m.op_cat == cat else Kit.NEUTRAL, "OPCAT " + cat, String((CATS[k] as Array)[2]), 14)
 	# palette entries
 	var ids: Array = CAT_IDS[m.op_cat]
 	for k in ids.size():
@@ -353,7 +394,7 @@ static func build(m) -> void:
 		var cc: Dictionary = cost_of(id)
 		var lim_ok: bool = is_decor(id) or Outpost.count_of(o, id) < OutpostDB.limit(id, int(o["relay_lvl"]))
 		var ok: bool = Outpost.can_afford(s, int(cc["coins"])) and lim_ok
-		var tip: String = "%s\n%s\n%s coins%s%s  [%s]" % [name_of(id), String(DESC.get(id, "Decor: +1% Charm per 10 pieces; tags buff neighbours")), Kit.fmt(float(cc["coins"])), "", ("" if is_decor(id) else "  ·  power %d  ·  instant" % int(OutpostDB.get_def(id).get("power", 0))), Kit.hint(m, "hotbar_%d" % (k + 1)) if k < 9 else "-"]
+		var tip: String = "%s\n%s\n%s coins%s  ·  click, then click the map (or drag it there)" % [name_of(id), String(DESC.get(id, "Decor: +1% Charm per 10 pieces; tags buff neighbours")), Kit.fmt(float(cc["coins"])), ("" if is_decor(id) else "  ·  power %d" % int(OutpostDB.get_def(id).get("power", 0)))]
 		Kit.hit(m, r, func() -> void: _press_palette(m, id), tip, "OPBUILD " + id, ok, Kit.GREEN)
 	# selected panel buttons
 	var sr: Rect2 = sel_rect(m)
@@ -361,7 +402,7 @@ static func build(m) -> void:
 	var bw: float = (sr.size.x - 30.0) / 3.0
 	var by: float = sr.end.y - 52.0
 	if who == "relay":
-		Kit.btn(m, "Upgrade %s" % Kit.fmt(float(Outpost.relay_cost(int(o["relay_lvl"])))), Rect2(sr.position.x + 10, by, bw * 1.5, 44), func() -> void: upgrade(m), "Relay Lv%d -> %d: more power, higher limits and max levels" % [int(o["relay_lvl"]), int(o["relay_lvl"]) + 1], Outpost.can_upgrade(s, "relay"), Kit.GREEN, "OP UPGRADE", "", 15)
+		Kit.btn(m, "Upgrade  %s" % Kit.fmt(float(Outpost.relay_cost(int(o["relay_lvl"])))), Rect2(sr.position.x + 10, by, sr.size.x - 20, 44), func() -> void: upgrade(m), "Relay Lv%d -> %d\n%s" % [int(o["relay_lvl"]), int(o["relay_lvl"]) + 1, _delta_text(upgrade_delta(s, "relay"))], Outpost.can_upgrade(s, "relay"), Kit.GREEN, "OP UPGRADE", "cur_coin", 15)
 	elif who.begins_with("plot:"):
 		var k2: int = int(who.substr(5))
 		var pc: Dictionary = Outpost.plot_cost(s)
@@ -375,10 +416,12 @@ static func build(m) -> void:
 			if OutpostDB.GENERATORS.has(bid):
 				Kit.btn(m, "Collect", Rect2(sr.position.x + 10, by - 50, bw, 44), func() -> void: m.meta_act(Outpost.collect(m.save, who, m.now())), "Collect what this building stored", float(b["stored"]) >= 1.0, Kit.GOLD, "OP COLLECT", "ui_collect", 15)
 			var uc: int = Outpost.cost(bid, int(b["lvl"]))
-			Kit.btn(m, "Upgrade %s [%s]" % [Kit.fmt(float(uc)), Kit.hint(m, "upgrade")], Rect2(sr.position.x + 20 + bw, by - 50, bw * 2.0, 44), func() -> void: upgrade(m), "Lv%d -> %d: %s coins, instant (max Lv%d at this Relay level)" % [int(b["lvl"]), int(b["lvl"]) + 1, Kit.fmt(float(uc)), Outpost.max_lvl(s, bid)], Outpost.can_upgrade(s, who), Kit.GREEN, "OP UPGRADE", "", 15)
-		Kit.btn(m, "Move [%s]" % Kit.hint(m, "tab_missions"), Rect2(sr.position.x + 10, by, bw, 44), func() -> void: begin_move(m), "Pick it up and click a new spot (R rotates)", true, Kit.GEM if m.op_moving else Kit.NEUTRAL, "OP MOVE", "ui_move", 15)
-		Kit.btn(m, "Rotate [%s]" % Kit.hint(m, "ability_4"), Rect2(sr.position.x + 15 + bw, by, bw, 44), func() -> void: _rotate_selected(m), "Rotate in place (where it fits)", true, Kit.NEUTRAL, "OP ROTATE", "ui_rotate", 15)
-		Kit.btn(m, "Demolish [%s]" % Kit.hint(m, "sell"), Rect2(sr.position.x + 20 + bw * 2.0, by, bw, 44), func() -> void: demolish(m), "Remove it: refunds half (all if still queued)", true, Kit.ENEMY, "OP DEMOLISH", "ui_demolish", 15)
+			Kit.btn(m, "Upgrade  %s" % Kit.fmt(float(uc)), Rect2(sr.position.x + 20 + bw, by - 50, bw * 2.0, 44), func() -> void: upgrade(m), "Lv%d -> %d: %s coins (max Lv%d at this Relay level)\n%s" % [int(b["lvl"]), int(b["lvl"]) + 1, Kit.fmt(float(uc)), Outpost.max_lvl(s, bid), _delta_text(upgrade_delta(s, who))], Outpost.can_upgrade(s, who), Kit.GREEN, "OP UPGRADE", "cur_coin", 15)
+			if bid == "research":
+				Kit.btn(m, "Open", Rect2(sr.position.x + 10, by - 50, bw, 44), func() -> void: m.set_tab("research"), "Open the Research Lab", true, Kit.LAB, "OP OPEN RESEARCH", "icon_lab", 15)
+		Kit.btn(m, "Move", Rect2(sr.position.x + 10, by, bw, 44), func() -> void: begin_move(m), "Pick it up and click a new spot (R rotates)", true, Kit.GEM if m.op_moving else Kit.NEUTRAL, "OP MOVE", "ui_move", 15)
+		Kit.btn(m, "Rotate", Rect2(sr.position.x + 15 + bw, by, bw, 44), func() -> void: _rotate_selected(m), "Rotate in place (where it fits)", true, Kit.NEUTRAL, "OP ROTATE", "ui_rotate", 15)
+		Kit.btn(m, "Demolish", Rect2(sr.position.x + 20 + bw * 2.0, by, bw, 44), func() -> void: demolish(m), "Remove it: refunds half (all if still queued)", true, Kit.ENEMY, "OP DEMOLISH", "ui_demolish", 15)
 	# blueprints
 	var bp: Rect2 = bp_rect(m)
 	var b4: float = (bp.size.x - 18.0) / 4.0
@@ -389,11 +432,9 @@ static func build(m) -> void:
 	for k in mini(bps.size(), 5):
 		var lay: Array = (bps[k] as Dictionary)["layout"]
 		Kit.btn(m, "%d" % (k + 1), Rect2(bp.position.x + 3.0 * (b4 + 6) + float(k) * (b4 / 5.0 + 0.5), bp.position.y + 30, b4 / 5.0 - 2.0, 40), func() -> void: m.meta_act(Outpost.load_blueprint(m.save, lay, m.now())["ev"]), "Load blueprint '%s' (moves buildings you own into it)" % String((bps[k] as Dictionary)["name"]), true, Kit.EDGE, "BP LOAD %d" % k, "", 13)
-	# queue + collect all
-	var qr: Rect2 = queue_rect(m)
-	var q: Array = o["queue"]
-	var _nq: int = q.size()   # builds are instant: the queue is always empty
-	Kit.btn(m, "Collect all", Rect2(qr.end.x - 200, qr.position.y + 26, 190, 50), func() -> void: m.meta_act(Outpost.collect_all(m.save, m.now())), "Collect every building at once (Relay Lv3)" if Outpost.collect_all_unlocked(s) else "Collect all unlocks at Relay Lv3 — click buildings to collect them one by one", Outpost.collect_all_unlocked(s), Kit.GOLD, "OP COLLECT ALL", "ui_collect", 16)
+	# collect all (header strip; builds are instant, so no builder queue)
+	var hr: Rect2 = head_rect(m)
+	Kit.btn(m, "Collect all", Rect2(hr.end.x - 190, hr.position.y + 2, 190, hr.size.y - 4), func() -> void: m.meta_act(Outpost.collect_all(m.save, m.now())), "Collect every building at once (Relay Lv3)" if Outpost.collect_all_unlocked(s) else "Collect all unlocks at Relay Lv3 — click buildings to collect them one by one", Outpost.collect_all_unlocked(s), Kit.GOLD, "OP COLLECT ALL", "ui_collect", 16)
 
 
 static func _rotate_selected(m) -> void:
@@ -436,9 +477,9 @@ static func _import(m) -> void:
 static func pal_entry(m, k: int) -> Rect2:
 	var pr: Rect2 = pal_rect(m)
 	var ids: Array = CAT_IDS[m.op_cat]
-	var top: float = pr.position.y + 160.0
+	var top: float = pr.position.y + 162.0
 	var avail: float = sel_rect(m).position.y - top - 10.0
-	var cols: int = 2 if ids.size() > 6 else 1
+	var cols: int = 3 if ids.size() > 9 else (2 if ids.size() > 4 else 1)
 	var rows: int = int(ceil(float(ids.size()) / float(cols)))
 	var h: float = minf(64.0, avail / float(maxi(1, rows)) - 4.0)
 	var w: float = (pr.size.x - 24.0 - 6.0 * float(cols - 1)) / float(cols)
@@ -447,7 +488,7 @@ static func pal_entry(m, k: int) -> Rect2:
 
 static func sel_rect(m) -> Rect2:
 	var pr: Rect2 = pal_rect(m)
-	return Rect2(pr.position.x + 12, pr.end.y - 400, pr.size.x - 24, 290)
+	return Rect2(pr.position.x + 12, pr.end.y - 520, pr.size.x - 24, 410)
 
 
 static func bp_rect(m) -> Rect2:
@@ -455,22 +496,21 @@ static func bp_rect(m) -> Rect2:
 	return Rect2(pr.position.x + 12, pr.end.y - 98, pr.size.x - 24, 86)
 
 
-static func queue_job(m, k: int) -> Rect2:
-	var qr: Rect2 = queue_rect(m)
-	return Rect2(qr.position.x + 240.0 + float(k) * 330.0, qr.position.y + 8, 320, qr.size.y - 16)
-
-
 # ===================================================================== tips
 static func map_tip(m, p: Vector2) -> String:
 	var s: Dictionary = m.save
 	var o: Dictionary = _o(m)
 	var c: Vector2i = cell_at(m, p)
+	var lm: String = landmark_at(c)
+	if lm != "":
+		var la: Array = _landmark(lm)
+		return "%s\n%s\nClick to open" % [String(la[1]), String(la[4])]
 	if not Outpost.in_map(c):
 		return ""
 	var pl: int = Outpost.plot_of(c)
 	if pl >= 0 and not (o["plots"] as Array).has(pl):
 		var pc: Dictionary = Outpost.plot_cost(s)
-		return "Locked land (plot %d)\n%s coins%s\n%s" % [pl + 1, Kit.fmt(float(pc["coins_alt"])), "", "Click to buy" if Outpost.plot_adjacent(o, pl) else "Must touch open land"]
+		return "Locked land (plot %d)\nCost: %s coins\nWhat lies inside is unknown until you buy it\n%s" % [pl + 1, Kit.fmt(float(pc["coins_alt"])), "Click to select, then Buy" if Outpost.plot_adjacent(o, pl) else "Must touch open land"]
 	var who: String = String(Outpost.occupancy(o).get(c, ""))
 	if who == "relay":
 		return "Core Relay  Lv%d\n%s\nPower %d / %d" % [int(o["relay_lvl"]), String(DESC["relay"]), int(Outpost.demand(o)), int(Outpost.supply(o))]
@@ -524,7 +564,6 @@ static func draw(m, _cr: Rect2) -> void:
 	m.draw_rect(mr.grow(4), Kit.EDGE, false, 2.0)
 	_draw_map_header(m, s, o, mr)
 	_draw_palette(m, s, o)
-	_draw_queue(m, s, o)
 
 
 static func _draw_map(m, s: Dictionary, o: Dictionary, mr: Rect2) -> void:
@@ -540,16 +579,14 @@ static func _draw_map(m, s: Dictionary, o: Dictionary, mr: Rect2) -> void:
 			if not mr.intersects(r):
 				continue
 			var open: bool = Outpost.is_open(o, cv)
-			if OutpostDB.BLOCKED.has(cv):
+			if OutpostDB.BLOCKED.has(cv) and open:
 				Kit.icon(m, "tile_rock", r)
 			elif open:
 				Kit.icon(m, "tile_ash", r)
 				if OutpostDB.VEINS.has(cv):
 					Kit.icon(m, "op_vein", r)
 			else:
-				Kit.icon(m, "tile_ash", r, Color(0.35, 0.35, 0.38))
-				if OutpostDB.VEINS.has(cv):
-					Kit.icon(m, "op_vein", r, Color(1, 1, 1, 0.35))
+				Kit.icon(m, "tile_ash", r, Color(0.28, 0.29, 0.32))   # FB1: resources hidden until bought
 			m.draw_rect(r, Color(1, 1, 1, 0.05), false, 1.0)
 	# locked plots
 	for k in OutpostDB.PLOTS.size():
@@ -562,6 +599,7 @@ static func _draw_map(m, s: Dictionary, o: Dictionary, mr: Rect2) -> void:
 		m.draw_rect(rr.grow(-2), Kit.GOLD if sel else Color(1, 1, 1, 0.15), false, 3.0 if sel else 1.0)
 		var isz: float = minf(c * 1.2, minf(rr.size.x, rr.size.y) - 8.0)
 		Kit.icon(m, "op_plot_locked", Rect2(rr.get_center() - Vector2(isz, isz) * 0.5, Vector2(isz, isz)), Color(1, 1, 1, 0.75 if Outpost.plot_adjacent(o, k) else 0.3))
+	_draw_plaza(m, c)
 	# Relay
 	var rl: int = int(o["relay_lvl"])
 	var rrr: Rect2 = cell_rect(m, OutpostDB.RELAY.x, OutpostDB.RELAY.y, 2, 2)
@@ -622,15 +660,62 @@ static func _draw_map(m, s: Dictionary, o: Dictionary, mr: Rect2) -> void:
 	# pad / keyboard cursor
 	if String(m.last_device) == "pad":
 		Kit.outline(m, cell_rect(m, m.op_focus.x, m.op_focus.y), Kit.GEM, 2.0)
+## FB1 Command Plaza: the buildings that open the Core Bay, Crates,
+## Research and Cards screens (click one to enter).
+static func _draw_plaza(m, c: float) -> void:
+	var pz: Rect2 = cell_rect(m, -PLAZA_W, 0, PLAZA_W, OutpostDB.H)
+	m.draw_rect(pz, Color("15191f"))
+	for y in OutpostDB.H:
+		for x in range(-PLAZA_W, 0):
+			Kit.icon(m, "tile_ash", cell_rect(m, x, y), Color(0.55, 0.5, 0.45))
+	# road from the plaza to the Relay
+	var road_y: float = cell_rect(m, 0, OutpostDB.RELAY.y, 1, 2).get_center().y
+	m.draw_line(Vector2(pz.end.x - c * 0.9, road_y), Vector2(cell_rect(m, OutpostDB.RELAY.x, 0).position.x, road_y), Color(Kit.RUST, 0.35), c * 0.22)
+	m.draw_line(Vector2(pz.end.x - c * 0.9, pz.position.y + c * 1.5), Vector2(pz.end.x - c * 0.9, pz.end.y - c * 1.5), Color(Kit.RUST, 0.35), c * 0.22)
+	var hov: String = landmark_at(cell_at(m, m.mouse_pos)) if map_rect(m).has_point(m.mouse_pos) else ""
+	for lm in LANDMARKS:
+		var la: Array = lm
+		var id: String = String(la[0])
+		var r: Rect2 = landmark_rect(m, id)
+		var on: bool = hov == id or (String(m.last_device) == "pad" and landmark_at(m.op_focus) == id)
+		var g: float = 0.5 + 0.5 * sin(m.t_anim * 2.0 + r.position.y * 0.01)
+		m.draw_rect(Rect2(r.position + Vector2(6, 10), r.size - Vector2(8, 8)), Color(0, 0, 0, 0.35))
+		Kit.panel(m, r.grow(-4), Kit.GOLD if on else Kit.RUST, Color("232a33") if on else Color("1c2229"), 3 if on else 2)
+		m.draw_circle(r.get_center() - Vector2(0, r.size.y * 0.08), r.size.x * 0.3, Color(Kit.RUST, 0.10 + 0.06 * g))
+		var art: String = ("core_" + Cores.active(m.save)) if id == "bay" else String(la[2])
+		var isz: float = r.size.x * 0.62
+		_art(m, art, Rect2(r.get_center() - Vector2(isz * 0.5, isz * 0.5 + r.size.y * 0.1), Vector2(isz, isz)))
+		var nb := Rect2(r.position.x + 8, r.end.y - 4 - maxf(26.0, c * 0.55), r.size.x - 16, maxf(26.0, c * 0.55))
+		Kit.panel(m, nb, Kit.GOLD if on else Kit.EDGE, Color(0.05, 0.06, 0.08, 0.92), 1)
+		Kit.t(m, String(la[1]), Vector2(nb.get_center().x, nb.get_center().y + 6), 16, Kit.GOLD if on else Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, nb.size.x - 6)
+
+
 static func _draw_map_header(m, s: Dictionary, o: Dictionary, mr: Rect2) -> void:
 	var con: Dictionary = Outpost.connected(o)
 	var rl: int = int(o["relay_lvl"])
 	var eff: float = Outpost.efficiency(o, con)
-	var hdr: String = "Relay Lv%d   ·   Power %d / %d%s   ·   Builders %d / %d   ·   Charm +%d%%" % [rl, int(Outpost.demand(o, con)), int(Outpost.supply(o)), ("  (output x%.2f)" % eff) if eff < 0.999 else "", Outpost.busy(s), Outpost.builders(s), int(round(Outpost.charm(o) * 100.0))]
-	Kit.panel(m, Rect2(mr.position.x + 8, mr.position.y + 8, 760, 36), Kit.EDGE, Color(0.05, 0.06, 0.08, 0.85), 1)
-	Kit.t(m, hdr, Vector2(mr.position.x + 20, mr.position.y + 32), 16, Kit.TEXT if eff >= 0.999 else Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, 740.0)
-	m.stat_tips.append([Rect2(mr.position.x + 8, mr.position.y + 8, 760, 36), "Power: linked buildings draw power from the Relay; over budget, every generator slows down. Charm: +1% production per 10 decor pieces (max +10%)."])
-	Kit.t(m, "Right-drag pans  ·  wheel zooms  ·  click a full building to collect", Vector2(mr.end.x - 14, mr.end.y - 12), 14, Color(Kit.DIM, 0.8), HORIZONTAL_ALIGNMENT_RIGHT, 600.0)
+	var hr: Rect2 = head_rect(m)
+	Kit.panel(m, Rect2(hr.position.x, hr.position.y, hr.size.x - 200, hr.size.y), Kit.EDGE, Kit.PANEL, 1)
+	var x: float = hr.position.x + 14.0
+	var cy: float = hr.get_center().y
+	var prod: Dictionary = Outpost.production(s)
+	var items: Array = [
+		["op_relay_1", "Relay Lv%d" % rl, Kit.TEXT, "Core Relay level: sets power, building limits and max levels"],
+		["bolt", "Power %d / %d" % [int(Outpost.demand(o, con)), int(Outpost.supply(o))], Kit.TEXT if eff >= 0.999 else Kit.GOLD, "Linked buildings draw power from the Relay; over budget, every generator slows down%s" % ((" (output x%.2f)" % eff) if eff < 0.999 else "")],
+		["cur_coin", "%s/h" % _rate_txt(float(prod["coins"])), Kit.GOLD, "Coins per hour from linked Mills and Deep Mines"],
+		["cur_scrap", "%s/h" % _rate_txt(float(prod["scrap"])), Kit.SCRAP, "Scrap per hour from Refineries"],
+		["cur_key", "%s/h" % _rate_txt(float(prod["keys"])), Kit.KEYC, "Keys per hour from Key Forges"],
+		["dc_lamp", "Charm +%d%%" % int(round(Outpost.charm(o) * 100.0)), Kit.TEXT, "+1% production per 10 decor pieces (max +10%)"],
+	]
+	for it in items:
+		var a: Array = it
+		var lw: float = 34.0 + m.font.get_string_size(String(a[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
+		Kit.icon(m, String(a[0]), Rect2(x, cy - 13, 26, 26))
+		Kit.t(m, String(a[1]), Vector2(x + 32, cy + 6), 16, a[2], HORIZONTAL_ALIGNMENT_LEFT, lw)
+		m.stat_tips.append([Rect2(x - 4, hr.position.y, lw + 8, hr.size.y), String(a[3])])
+		x += lw + 22.0
+	Kit.panel(m, Rect2(mr.end.x - 560, mr.end.y - 32, 552, 26), Color(0, 0, 0, 0), Color(0.05, 0.06, 0.08, 0.7), 0)
+	Kit.t(m, "Click a plaza building to open it  ·  right-drag pans  ·  wheel zooms", Vector2(mr.end.x - 14, mr.end.y - 13), 14, Color(Kit.DIM, 0.9), HORIZONTAL_ALIGNMENT_RIGHT, 560.0)
 	if m.op_msg != "":
 		Kit.panel(m, Rect2(mr.get_center().x - 260, mr.end.y - 60, 520, 36), Kit.GOLD, Color(0.14, 0.12, 0.06, 0.92))
 		Kit.t(m, m.op_msg, Vector2(mr.get_center().x, mr.end.y - 36), 16, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, 500.0)
@@ -768,12 +853,11 @@ static func _draw_palette(m, s: Dictionary, o: Dictionary) -> void:
 	Kit.panel(m, pr, Kit.EDGE, Kit.PANEL)
 	var x: float = pr.position.x + 16.0
 	var w: float = pr.size.x - 32.0
-	Kit.t(m, "OUTPOST", Vector2(x, pr.position.y + 34), 22, Kit.RUST, HORIZONTAL_ALIGNMENT_LEFT, w)
-	var prod: Dictionary = Outpost.production(s)
+	Kit.icon(m, "op_builder", Rect2(x - 2, pr.position.y + 10, 40, 40))
+	Kit.t(m, "BUILD", Vector2(x + 46, pr.position.y + 40), 26, Kit.RUST, HORIZONTAL_ALIGNMENT_LEFT, w)
 	var cred: int = int(o.get("credit", 0))
-	Kit.t(m, "%s coins/h  ·  %s Scrap/h" % [Kit.fmt(float(prod["coins"])), _rate_txt(float(prod["scrap"]))], Vector2(x, pr.position.y + 62), 15, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, w)
-	m.stat_tips.append([Rect2(x, pr.position.y + 44, w, 24), "Total Outpost production per hour (linked, built buildings; layout and power included)"])
-	Kit.t(m, ("Build credit %s coins" % Kit.fmt(float(cred))) if cred > 0 else "Build with coins earned in runs", Vector2(x, pr.position.y + 88), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w)
+	Kit.t(m, ("Build credit %s coins" % Kit.fmt(float(cred))) if cred > 0 else "Pick a building, then click the map", Vector2(x + 140, pr.position.y + 38), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w - 140)
+	Kit.t(m, "Categories", Vector2(x, pr.position.y + 88), 13, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w)
 	# entries
 	var ids: Array = CAT_IDS[m.op_cat]
 	for k in ids.size():
@@ -791,11 +875,10 @@ static func _draw_palette(m, s: Dictionary, o: Dictionary) -> void:
 		var tw: float = r.end.x - tx - 6.0
 		Kit.t(m, name_of(id), Vector2(tx, r.position.y + r.size.y * 0.42), 15 if r.size.x < 250.0 else 17, Kit.TEXT if ok else Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, tw)
 		var sub: String = Kit.fmt(float(cc["coins"]))
-		if not is_decor(id):
-			sub += "  ·  %d/%d  ·  power %d" % [n, lim, int(OutpostDB.get_def(id).get("power", 0))]
-		Kit.t(m, sub, Vector2(tx, r.position.y + r.size.y * 0.42 + 18), 13, Kit.GOLD if ok else Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, tw)
-		if k < 9:
-			Kit.t(m, Kit.hint(m, "hotbar_%d" % (k + 1)), Vector2(r.end.x - 8, r.position.y + 16), 12, Kit.DIM, HORIZONTAL_ALIGNMENT_RIGHT, 30.0)
+		if not is_decor(id) and r.size.x >= 180.0:
+			sub += "  ·  %d/%d" % [n, lim]
+		Kit.icon(m, "cur_coin", Rect2(tx, r.position.y + r.size.y * 0.42 + 5, 16, 16))
+		Kit.t(m, sub, Vector2(tx + 19, r.position.y + r.size.y * 0.42 + 18), 13, Kit.GOLD if ok else Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, tw - 19)
 	# selected
 	var sr: Rect2 = sel_rect(m)
 	Kit.panel(m, sr, Kit.EDGE, Kit.PANEL2)
@@ -829,7 +912,8 @@ static func _draw_selected(m, s: Dictionary, o: Dictionary, sr: Rect2) -> void:
 		Kit.icon(m, OutpostDB.art_id("relay", int(o["relay_lvl"])), Rect2(x, sr.position.y + 10, 72, 72))
 		Kit.t(m, "Core Relay  Lv%d" % int(o["relay_lvl"]), Vector2(x + 84, sr.position.y + 40), 19, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w - 84)
 		Kit.wrap(m, String(DESC["relay"]), Vector2(x + 84, sr.position.y + 54), 14, Kit.DIM, w - 84, 3)
-		Kit.t(m, "Power %d / %d  ·  Builders %d" % [int(Outpost.demand(o)), int(Outpost.supply(o)), Outpost.builders(s)], Vector2(x, sr.position.y + 130), 15, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w)
+		Kit.t(m, "Power %d / %d" % [int(Outpost.demand(o)), int(Outpost.supply(o))], Vector2(x, sr.position.y + 118), 15, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w)
+		_draw_delta(m, s, "relay", x, sr.position.y + 150.0, w)
 		return
 	if who.begins_with("d"):
 		var d: Dictionary = o["decor"][who.substr(1)]
@@ -859,28 +943,80 @@ static func _draw_selected(m, s: Dictionary, o: Dictionary, sr: Rect2) -> void:
 		for k in (lb["parts"] as Dictionary).keys():
 			parts.append("%s %+d%%" % [String(k), int(round(float(lb["parts"][k]) * 100.0))])
 		Kit.t(m, "Layout %+d%%  %s" % [int(round(float(lb["total"]) * 100.0)), ("(" + ", ".join(parts) + ")") if not parts.is_empty() else ""], Vector2(x, y + 62), 14, Kit.GREEN if float(lb["total"]) > 0.0 else Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w)
-	if not bool(b["built"]):
-		Kit.t(m, "Under construction", Vector2(x, y + 84), 15, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, w)
+	_draw_delta(m, s, who, x, sr.position.y + 202.0, w)
 
 
-static func _draw_queue(m, s: Dictionary, o: Dictionary) -> void:
-	var qr: Rect2 = queue_rect(m)
-	Kit.panel(m, qr, Kit.EDGE, Kit.PANEL)
-	Kit.icon(m, "op_builder", Rect2(qr.position.x + 12, qr.position.y + 18, 60, 60))
-	Kit.t(m, "BUILDERS  %d / %d" % [Outpost.busy(s), Outpost.builders(s)], Vector2(qr.position.x + 82, qr.position.y + 42), 17, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, 160.0)
-	Kit.t(m, "idle" if (o["queue"] as Array).is_empty() else "working", Vector2(qr.position.x + 82, qr.position.y + 66), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, 160.0)
-	var t: int = m.now()
-	var q: Array = o["queue"]
-	for k in q.size():
-		var j: Dictionary = q[k]
-		var jr: Rect2 = queue_job(m, k)
-		var uid: String = String(j["uid"])
-		var nm: String = "Core Relay" if uid == "relay" else (name_of(String((o["buildings"][uid] as Dictionary)["id"])) if (o["buildings"] as Dictionary).has(uid) else "?")
-		var to: String = "build" if String(j["kind"]) == "build" else "upgrade"
-		Kit.panel(m, jr, Kit.GOLD, Kit.PANEL2)
-		Kit.icon(m, "op_timer", Rect2(jr.position.x + 8, jr.position.y + 10, 36, 36))
-		Kit.t(m, "%s  (%s)" % [nm, to], Vector2(jr.position.x + 52, jr.position.y + 26), 15, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, jr.size.x - 60)
-		var rem: int = maxi(0, int(j["ends_at"]) - t)
-		Kit.t(m, Kit.dur(rem), Vector2(jr.position.x + 52, jr.position.y + 48), 15, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, 120.0)
-		var tot: float = maxf(1.0, float(int(j["ends_at"]) - int(j.get("start", int(j["ends_at"]) - maxi(1, rem)))))
-		Kit.bar(m, Rect2(jr.position.x + 8, jr.end.y - 16, jr.size.x - 112, 8), 1.0 - float(rem) / maxf(tot, float(rem) + 1.0), Kit.GOLD)
+# ============================================================ upgrade delta
+## FB1: what the next upgrade does, as [label, before, after] rows. Pure:
+## computed on a copy of the save with the level bumped.
+static func upgrade_delta(s: Dictionary, uid: String) -> Array:
+	var o: Dictionary = Outpost._o(s)
+	var s2: Dictionary = s.duplicate(true)
+	var o2: Dictionary = Outpost._o(s2)
+	var out: Array = []
+	if uid == "relay":
+		var rl: int = int(o["relay_lvl"])
+		o2["relay_lvl"] = rl + 1
+		out.append(["Power", "%d" % int(Outpost.supply(o)), "%d" % int(Outpost.supply(o2))])
+		out.append(["Max building level", "%d" % Outpost.max_lvl(s, "mill"), "%d" % Outpost.max_lvl(s2, "mill")])
+		for id in ["mill", "refinery", "gemmine", "keyforge"]:
+			var a: int = OutpostDB.limit(id, rl)
+			var b: int = OutpostDB.limit(id, rl + 1)
+			if a != b:
+				out.append(["%s limit" % name_of(id), "%d" % a, "%d" % b])
+		if rl + 1 == 3:
+			out.append(["Collect all", "no", "yes"])
+		return out
+	if not (o["buildings"] as Dictionary).has(uid):
+		return out
+	var b0: Dictionary = o["buildings"][uid]
+	var id2: String = String(b0["id"])
+	var lv: int = int(b0["lvl"])
+	(o2["buildings"][uid] as Dictionary)["lvl"] = lv + 1
+	out.append(["Level", "%d" % lv, "%d" % (lv + 1)])
+	if OutpostDB.GENERATORS.has(id2):
+		var res: String = String(OutpostDB.get_def(id2)["res"])
+		var c1: Dictionary = Outpost.connected(o)
+		var c2: Dictionary = Outpost.connected(o2)
+		out.append(["%s / hour" % res.capitalize(), _rate_txt(Outpost.rate(s, uid, c1)), _rate_txt(Outpost.rate(s2, uid, c2))])
+		out.append(["Storage", "%d" % int(Outpost.cap(s, uid, c1)), "%d" % int(Outpost.cap(s2, uid, c2))])
+	match id2:
+		"research":
+			out.append(["Research queues", "%d" % Outpost.research_queues(s), "%d" % Outpost.research_queues(s2)])
+		"barracks":
+			out.append(["Troop HP / damage", "+%d%%" % (10 * Outpost.level_of(s, "barracks")), "+%d%%" % (10 * Outpost.level_of(s2, "barracks"))])
+		"archive":
+			var r1: Dictionary = Outpost.run_mods(s)
+			var r2: Dictionary = Outpost.run_mods(s2)
+			out.append(["Insights per run", "+%d" % int(r1["insight_cap"]), "+%d" % int(r2["insight_cap"])])
+			out.append(["Banishes per run", "+%d" % int(r1["banish"]), "+%d" % int(r2["banish"])])
+		"warehouse":
+			out.append(["Nearby storage", "+%d%%" % (25 + 5 * (lv - 1)), "+%d%%" % (25 + 5 * lv)])
+		"scrapyard":
+			out.append(["Salvage Scrap", "+%d%%" % (10 + 2 * (lv - 1)), "+%d%%" % (10 + 2 * lv)])
+	return out
+
+
+static func _delta_text(rows: Array) -> String:
+	var lines: Array = []
+	for r in rows:
+		var a: Array = r
+		lines.append("%s: %s -> %s" % [String(a[0]), String(a[1]), String(a[2])])
+	return "\n".join(PackedStringArray(lines))
+
+
+## "NEXT UPGRADE" block: label, before (dim) -> after (green), one row each.
+static func _draw_delta(m, s: Dictionary, uid: String, x: float, y: float, w: float) -> void:
+	var rows: Array = upgrade_delta(s, uid)
+	if rows.is_empty():
+		return
+	Kit.t(m, "NEXT UPGRADE", Vector2(x, y), 14, Kit.GREEN, HORIZONTAL_ALIGNMENT_LEFT, w)
+	m.draw_line(Vector2(x, y + 6), Vector2(x + w, y + 6), Color(Kit.GREEN, 0.3), 1.0)
+	var ry: float = y + 26.0
+	for r in rows.slice(0, 5):
+		var a: Array = r
+		Kit.t(m, String(a[0]), Vector2(x, ry), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w * 0.5)
+		Kit.t(m, String(a[1]), Vector2(x + w * 0.62, ry), 14, Kit.TEXT, HORIZONTAL_ALIGNMENT_RIGHT, w * 0.2)
+		Kit.t(m, "->", Vector2(x + w * 0.69, ry), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, 30.0)
+		Kit.t(m, String(a[2]), Vector2(x + w, ry), 14, Kit.GREEN, HORIZONTAL_ALIGNMENT_RIGHT, w * 0.26)
+		ry += 19.0

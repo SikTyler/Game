@@ -195,7 +195,7 @@ static func build(m) -> void:
 			tip2 += " — opens at Core level %d" % (Parts.SET_SLOT_LVL if k == Parts.SET_SLOT else int(Parts.SLOT_LVLS[k]))
 		elif uid != "":
 			var it: Dictionary = Parts.item(s, uid)
-			tip2 = _part_tip(String(it.get("id", "")), int(it.get("lvl", 1)), int(it.get("stars", 0))) + "\nClick to select · right-click / Unequip to remove"
+			tip2 = _part_tip(String(it.get("id", "")), int(it.get("lvl", 1)), int(it.get("stars", 0))) + "\nClick to select · double-click to unequip"
 		else:
 			tip2 += " — drag a part here, or select a part and press Equip"
 		Kit.hit(m, r, func() -> void: _slot_click(m, sk), tip2, "SLOT %d" % k, open, Kit.SLOT_COL.get(typ, Kit.GOLD))
@@ -225,7 +225,7 @@ static func build(m) -> void:
 	for j in range(start, mini(ids.size(), start + pp)):
 		var uid2: String = ids[j]
 		var it2: Dictionary = Parts.item(s, uid2)
-		var hb: Button = Kit.hit(m, inv_cell(m, j - start), func() -> void: _press_part(m, uid2), _part_tip(String(it2["id"]), int(it2["lvl"]), int(it2["stars"])) + "\nDrag onto a slot to install", "PART " + String(it2["id"]), true, Kit.rarity_col(PartDB.rarity_of(String(it2["id"]))))
+		var hb: Button = Kit.hit(m, inv_cell(m, j - start), func() -> void: _press_part(m, uid2), _part_tip(String(it2["id"]), int(it2["lvl"]), int(it2["stars"])) + "\nDouble-click to equip / unequip · drag onto a slot", "PART " + String(it2["id"]), true, Kit.rarity_col(PartDB.rarity_of(String(it2["id"]))))
 		hb.set_meta("uid", uid2)
 	# detail actions
 	var pu: String = m.bay_part
@@ -252,6 +252,10 @@ static func _slot_click(m, k: int) -> void:
 	var s: Dictionary = m.save
 	var core: String = _core(m)
 	var row: Array = Parts.preset(s, core)
+	if String(row[k]) != "" and _is_double(m, "slot:%d" % k):
+		m.bay_part = String(row[k])
+		m.meta_act(Parts.unequip(s, core, k))
+		return
 	if m.bay_part != "" and installed_slot(m, m.bay_part) < 0 and Parts.fits(s, m.bay_part, k):
 		m.meta_act(Parts.equip(s, core, k, m.bay_part))
 		return
@@ -259,7 +263,48 @@ static func _slot_click(m, k: int) -> void:
 	m._rebuild_ui()
 
 
+const DOUBLE_MS: int = 450
+
+
+## FB1: true when this press is the second click on the same thing in time.
+static func _is_double(m, key: String) -> bool:
+	var now_ms: int = Time.get_ticks_msec()
+	var last: Array = m.get_meta("bay_last_click", ["", -100000])
+	var dbl: bool = String(last[0]) == key and now_ms - int(last[1]) <= DOUBLE_MS
+	m.set_meta("bay_last_click", ["", -100000] if dbl else [key, now_ms])
+	return dbl
+
+
+## FB1 double-click: an installed part unequips; any other part equips into
+## its best slot (an empty fitting slot, else it replaces the part there).
+static func toggle_part(m, uid: String) -> void:
+	var core: String = _core(m)
+	m.bay_part = uid
+	var at: int = installed_slot(m, uid)
+	if at >= 0:
+		m.meta_act(Parts.unequip(m.save, core, at))
+		return
+	var ts: int = target_slot(m, uid)
+	if ts >= 0:
+		m.meta_act(Parts.equip(m.save, core, ts, uid))
+		return
+	m._rebuild_ui()
+
+
+## Show a part: clear filters, page to it and select it.
+static func focus_part(m, uid: String) -> void:
+	m.bay_core = Cores.active(m.save)
+	m.bay_filter = {"slot": "", "rarity": "", "set": ""}
+	var ids: Array = _inv_ids(m)
+	var j: int = ids.find(uid)
+	m.bay_page = maxi(0, j) / per_page(m)
+	m.bay_part = uid
+
+
 static func _press_part(m, uid: String) -> void:
+	if _is_double(m, "part:" + uid):
+		toggle_part(m, uid)
+		return
 	if String(m.last_device) == "pad":
 		m.bay_part = uid
 		m._rebuild_ui()

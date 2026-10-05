@@ -464,6 +464,13 @@ func abandon_run() -> void:
 	_rebuild_ui()
 
 
+## FB1: a revealed crate part opens the Core Bay focused on it.
+func open_part_in_bay(uid: String) -> void:
+	set_tab("bay")
+	CoreBay.focus_part(self, uid)
+	_rebuild_ui()
+
+
 func set_tab(id: String) -> void:
 	if screen != "base":
 		return
@@ -1028,7 +1035,7 @@ func _input(event: InputEvent) -> void:
 		return
 	if overlay != "" or screen == "menu":
 		return
-	if screen == "base" and tab == "outpost" and OutpostView.map_rect(self).has_point(mb.position):
+	if screen == "base" and Hub.is_home(tab) and offline_offer.is_empty() and OutpostView.map_rect(self).has_point(mb.position):
 		if OutpostView.mouse(self, mb):
 			get_viewport().set_input_as_handled()
 		return
@@ -1148,7 +1155,7 @@ func _end_drag(pos: Vector2) -> void:
 			if k >= 0:
 				meta_act(Parts.equip(save, bay_core, k, part))
 				return
-	elif opd and screen == "base" and tab == "outpost":
+	elif opd and screen == "base" and Hub.is_home(tab):
 		if moved and OutpostView.map_rect(self).has_point(pos):
 			OutpostView.place_at(self, OutpostView.cell_at(self, pos))
 			return
