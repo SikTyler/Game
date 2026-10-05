@@ -1479,7 +1479,7 @@ static func combine(R: Dictionary) -> Dictionary:
 		# FEEDBACK-1 (new gate): a brand-new player's first run is short
 		# (5-8 real minutes at 1x) so they reach the meta features sooner.
 		"first_run_s": snappedf(float(M.get("first_run_s", -1.0)), 0.1),
-		"first_run_short": float(M.get("first_run_s", -1.0)) >= 300.0 and float(M.get("first_run_s", -1.0)) <= 480.0,
+		"first_run_short": float(M.get("first_run_s", -1.0)) >= 200.0 and float(M.get("first_run_s", -1.0)) <= 300.0,   # owner FB1: short, hard early runs (was 300-480 s)
 		"tier3_by_day30": t3 > 0,
 		"no_plateau_before_t3": stall_days.is_empty(),
 		"early_3day_rise": early,
@@ -1545,7 +1545,7 @@ static func fresh_checks(Fr: Dictionary) -> Dictionary:
 	var ml: float = _median(Fr["r_wall"])
 	return {
 		"fresh_runs": {"n": w.size(), "waves": w, "median_wave": mw, "min_wave": int(w.min()), "reach_w30": at30, "r_early_median": snappedf(me, 0.01), "r_wall_median": snappedf(ml, 0.01)},
-		"ac25_fresh_wall": w.size() >= 16 and mw >= 12.0 and mw <= 25.0 and at30 * 4 <= w.size() and me >= 2.0 and ml < 0.6,
+		"ac25_fresh_wall": w.size() >= 16 and mw >= 8.0 and mw <= 15.0 and at30 * 4 <= w.size() and me >= 2.0 and ml < 0.6,   # owner FB1: fresh wall at waves 8-15 (was 12-25)
 		"fresh_median_first_goal": w.size() >= 16 and mw >= float(FIRST_GOAL_WAVE) and int(w.min()) >= FIRST_GOAL_WAVE,
 	}
 
