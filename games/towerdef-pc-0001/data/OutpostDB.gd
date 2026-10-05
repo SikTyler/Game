@@ -28,20 +28,20 @@ const BLOCKED: Array = [Vector2i(13, 9), Vector2i(0, 0), Vector2i(13, 4)]
 
 ## Buildings. size = [w, h] at rot 0 (rot 1 swaps). rate = L1 output per hour
 ## of `res`; storage_h = hours of L1 output the building stores at L1
-## (+50% per level); time = L1 build seconds; power = draw.
+## (+50% per level); builds are instant (owner feedback #1); power = draw.
 const DEFS: Dictionary = {
-	"relay": {"name": "Core Relay", "size": [2, 2], "power": 0, "coins": 3000, "gems": 0, "time": 600, "res": "", "rate": 0.0, "storage_h": 0.0, "max_lvl": 10},
-	"mill": {"name": "Coin Mill", "size": [2, 2], "power": 2, "coins": 500, "gems": 0, "time": 120, "res": "coins", "rate": MILL_RATE, "storage_h": 8.0},
-	"refinery": {"name": "Scrap Refinery", "size": [2, 2], "power": 3, "coins": 1500, "gems": 0, "time": 600, "res": "scrap", "rate": 6.0, "storage_h": 12.0},
-	"gemmine": {"name": "Gem Mine", "size": [2, 2], "power": 4, "coins": 10000, "gems": 50, "time": 14400, "res": "gems", "rate": 1.0 / 3.0, "storage_h": 0.0, "hard_cap": 24.0},
-	"keyforge": {"name": "Key Forge", "size": [2, 1], "power": 3, "coins": 8000, "gems": 0, "time": 3600, "res": "keys", "rate": 1.0 / 24.0, "storage_h": 0.0, "hard_cap": 3.0},
-	"research": {"name": "Research Hall", "size": [3, 2], "power": 3, "coins": 1000, "gems": 0, "time": 900, "res": "", "rate": 0.0, "storage_h": 0.0},
-	"barracks": {"name": "Barracks", "size": [2, 2], "power": 2, "coins": 3000, "gems": 0, "time": 1800, "res": "", "rate": 0.0, "storage_h": 0.0},
-	"archive": {"name": "Archive", "size": [2, 2], "power": 1, "coins": 6000, "gems": 0, "time": 3600, "res": "", "rate": 0.0, "storage_h": 0.0},
-	"warehouse": {"name": "Warehouse", "size": [2, 2], "power": 1, "coins": 2000, "gems": 0, "time": 1200, "res": "", "rate": 0.0, "storage_h": 0.0},
-	"scrapyard": {"name": "Salvage Yard", "size": [2, 1], "power": 1, "coins": 4000, "gems": 0, "time": 1800, "res": "", "rate": 0.0, "storage_h": 0.0},
-	"conduit": {"name": "Conduit", "size": [1, 1], "power": 0, "coins": 10, "gems": 0, "time": 0, "res": "", "rate": 0.0, "storage_h": 0.0, "max_lvl": 1},
-	"beaconpost": {"name": "Outpost Beacon", "size": [1, 1], "power": 1, "coins": 2500, "gems": 0, "time": 600, "res": "", "rate": 0.0, "storage_h": 0.0},
+	"relay": {"name": "Core Relay", "size": [2, 2], "power": 0, "coins": 3000, "time": 0, "res": "", "rate": 0.0, "storage_h": 0.0, "max_lvl": 10},
+	"mill": {"name": "Coin Mill", "size": [2, 2], "power": 2, "coins": 500, "time": 0, "res": "coins", "rate": MILL_RATE, "storage_h": 8.0},
+	"refinery": {"name": "Scrap Refinery", "size": [2, 2], "power": 3, "coins": 1500, "time": 0, "res": "scrap", "rate": 6.0, "storage_h": 12.0},
+	"gemmine": {"name": "Deep Mine", "size": [2, 2], "power": 4, "coins": 10000, "time": 0, "res": "coins", "rate": MILL_RATE * 3.0, "storage_h": 8.0},
+	"keyforge": {"name": "Key Forge", "size": [2, 1], "power": 3, "coins": 8000, "time": 0, "res": "keys", "rate": 1.0 / 24.0, "storage_h": 0.0, "hard_cap": 3.0},
+	"research": {"name": "Research Hall", "size": [3, 2], "power": 3, "coins": 1000, "time": 0, "res": "", "rate": 0.0, "storage_h": 0.0},
+	"barracks": {"name": "Barracks", "size": [2, 2], "power": 2, "coins": 3000, "time": 0, "res": "", "rate": 0.0, "storage_h": 0.0},
+	"archive": {"name": "Archive", "size": [2, 2], "power": 1, "coins": 6000, "time": 0, "res": "", "rate": 0.0, "storage_h": 0.0},
+	"warehouse": {"name": "Warehouse", "size": [2, 2], "power": 1, "coins": 2000, "time": 0, "res": "", "rate": 0.0, "storage_h": 0.0},
+	"scrapyard": {"name": "Salvage Yard", "size": [2, 1], "power": 1, "coins": 4000, "time": 0, "res": "", "rate": 0.0, "storage_h": 0.0},
+	"conduit": {"name": "Conduit", "size": [1, 1], "power": 0, "coins": 10, "time": 0, "res": "", "rate": 0.0, "storage_h": 0.0, "max_lvl": 1},
+	"beaconpost": {"name": "Outpost Beacon", "size": [1, 1], "power": 1, "coins": 2500, "time": 0, "res": "", "rate": 0.0, "storage_h": 0.0},
 }
 const IDS: Array = ["mill", "refinery", "gemmine", "keyforge", "research", "barracks", "archive", "warehouse", "scrapyard", "conduit", "beaconpost"]
 const GENERATORS: Array = ["mill", "refinery", "gemmine", "keyforge"]
@@ -51,21 +51,21 @@ const LIMITS: Array = [[1, {"mill": 2, "refinery": 1, "gemmine": 1, "keyforge": 
 	[5, {"mill": 4, "refinery": 2, "gemmine": 2, "keyforge": 1}],
 	[8, {"mill": 5, "refinery": 2, "gemmine": 3, "keyforge": 1}]]
 
-## Decor (SYSTEMS §5.5): 1x1 or 2x1, coins or gems, tags drive adjacency.
+## Decor (SYSTEMS §5.5): 1x1 or 2x1, coins, tags drive adjacency.
 const DECOR: Dictionary = {
-	"dc_smelter": {"name": "Smelter", "size": [2, 1], "coins": 800, "gems": 0, "tag": "industrial"},
-	"dc_crates": {"name": "Crate Stack", "size": [1, 1], "coins": 150, "gems": 0, "tag": "industrial"},
-	"dc_bookshelf": {"name": "Bookshelf", "size": [1, 1], "coins": 300, "gems": 0, "tag": "scholar"},
-	"dc_orrery": {"name": "Orrery", "size": [1, 1], "coins": 2000, "gems": 0, "tag": "scholar"},
-	"dc_yard": {"name": "Training Yard", "size": [2, 1], "coins": 1200, "gems": 0, "tag": "training"},
-	"dc_dummy": {"name": "Target Dummy", "size": [1, 1], "coins": 200, "gems": 0, "tag": "training"},
-	"dc_lamp": {"name": "Lamp", "size": [1, 1], "coins": 100, "gems": 0, "tag": "light", "power": 0.5},
-	"dc_brazier": {"name": "Brazier", "size": [1, 1], "coins": 250, "gems": 0, "tag": "light"},
-	"dc_tree": {"name": "Ash Tree", "size": [1, 1], "coins": 50, "gems": 0, "tag": "nature"},
-	"dc_shrub": {"name": "Shrub", "size": [1, 1], "coins": 50, "gems": 0, "tag": "nature"},
-	"dc_pond": {"name": "Pond", "size": [2, 1], "coins": 600, "gems": 0, "tag": "nature"},
-	"dc_banner": {"name": "Banner", "size": [1, 1], "coins": 0, "gems": 20, "tag": "nature"},
-	"dc_trophy": {"name": "Trophy", "size": [1, 1], "coins": 0, "gems": 40, "tag": "nature"},
+	"dc_smelter": {"name": "Smelter", "size": [2, 1], "coins": 800, "tag": "industrial"},
+	"dc_crates": {"name": "Crate Stack", "size": [1, 1], "coins": 150, "tag": "industrial"},
+	"dc_bookshelf": {"name": "Bookshelf", "size": [1, 1], "coins": 300, "tag": "scholar"},
+	"dc_orrery": {"name": "Orrery", "size": [1, 1], "coins": 2000, "tag": "scholar"},
+	"dc_yard": {"name": "Training Yard", "size": [2, 1], "coins": 1200, "tag": "training"},
+	"dc_dummy": {"name": "Target Dummy", "size": [1, 1], "coins": 200, "tag": "training"},
+	"dc_lamp": {"name": "Lamp", "size": [1, 1], "coins": 100, "tag": "light", "power": 0.5},
+	"dc_brazier": {"name": "Brazier", "size": [1, 1], "coins": 250, "tag": "light"},
+	"dc_tree": {"name": "Ash Tree", "size": [1, 1], "coins": 50, "tag": "nature"},
+	"dc_shrub": {"name": "Shrub", "size": [1, 1], "coins": 50, "tag": "nature"},
+	"dc_pond": {"name": "Pond", "size": [2, 1], "coins": 600, "tag": "nature"},
+	"dc_banner": {"name": "Banner", "size": [1, 1], "coins": 400, "tag": "nature"},
+	"dc_trophy": {"name": "Trophy", "size": [1, 1], "coins": 800, "tag": "nature"},
 }
 
 

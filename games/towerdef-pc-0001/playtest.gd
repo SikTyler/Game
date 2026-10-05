@@ -63,7 +63,7 @@ var fail_count: int = 0
 const GATES: Array = ["solvent", "first_goal_reachable", "progressable", "no_death_spiral", "no_trivial_dominant",
 	"t2_by_day5", "tier3_by_day30", "no_plateau_before_t3", "early_3day_rise",
 	"gems_per_day_ok", "gem_sources_ok", "offline_below_active", "mix_beats_weapon", "mix_beats_eco", "no_dominant_perk",
-	"ac38_eco_mix", "ac39_no_mono", "day1_band", "no_plateau_after_t3", "seeds_ok",
+	"ac38_eco_mix", "ac39_no_mono", "day1_band", "first_run_short", "no_plateau_after_t3", "seeds_ok",
 	"pc_refinery_not_dominant", "pc_modifiers_reach_w25", "pc_modifiers_fair", "pc_endless_runs"]
 const EXTRA_SEEDS: Array = [5151, 6262]   # AC-38/AC-40 re-checked on more seeds (thin margins)
 
@@ -502,8 +502,6 @@ static func bot_step(S, policy: String, perk_pref: String = "") -> Array:
 	var ev: Array = []
 	if S.mutation_offer.size() > 0:
 		ev.append_array(S.choose_mutation(_pick_mutation(S)))
-	if S.active_quads.size() > 0 and not S.active_quads.has(S.focus_quad):
-		ev.append_array(S.set_focus(int(S.active_quads[0])))
 	if S.perk_offer.size() > 0:
 		var bp: int = 0
 		var bs: int = -99
@@ -536,6 +534,14 @@ static func bot_step(S, policy: String, perk_pref: String = "") -> Array:
 			ev.append_array(S.place(cell))
 		else:
 			ev.append_array(S.cancel_place())   # nowhere legal: skip the card
+	# FEEDBACK-1: an upgrade pick is applied onto the lowest-level copy.
+	if S.pending_upgrade != "":
+		var tg: Array = S.upgrade_targets(S.pending_upgrade)
+		var lo: int = -1
+		for c in tg:
+			if lo < 0 or S.lvl_at(int(c)) < S.lvl_at(lo):
+				lo = int(c)
+		ev.append_array(S.apply_upgrade(lo) if lo >= 0 else S.cancel_upgrade())
 	if not policy.begins_with("mono:"):
 		ev.append_array(_use_specials(S))
 	# A competent player focuses fire on a boss once it is inside Core range.
@@ -597,7 +603,7 @@ static func _place_cell(S, id: String) -> int:
 		var r: int = TowerState.ring_of(int(i))
 		var k: float = float(r) if inner else float(10 - r)
 		if PickDB.fam_of(id) == "hut":
-			k = 0.0 if TowerState.cell_quad(int(i)) == S.focus_quad else 1.0
+			k = float(10 - r)   # FEEDBACK-1: no lanes — huts sit on the outer cells
 		k += float(int(i)) * 0.001
 		if k < best_k:
 			best_k = k
@@ -785,7 +791,7 @@ static func outpost_spend(save: Dictionary, now: int) -> void:
 					if _op_has(save, id, int(a[2]), int(a[3])):
 						continue
 					var d: Dictionary = OutpostDB.get_def(id)
-					if int(d["coins"]) > budget or (int(d.get("gems", 0)) > 0 and int(save.get("gems", 0)) < int(d["gems"]) + 20):
+					if int(d["coins"]) > budget:
 						continue
 					did = not Outpost.place(save, id, int(a[2]), int(a[3]), int(a[4]), now).is_empty()
 				"plot":
@@ -830,8 +836,10 @@ const ModifierDB := preload("res://data/ModifierDB.gd")
 const DAYS: int = 30
 const SESSION_H: Array = [8, 8, 16, 16]        # 2 sessions x 2 runs; 8 h / 16 h offline gaps (AC-40)
 const NOW0: int = 1767225600                   # 2026-01-01 00:00 UTC (a day boundary)
-const LAB_PRIO: Array = ["dmg", "hp", "coin", "speed", "startcash", "labspeed", "xp", "offrate", "offcap", "reroll"]
-const LAB_W: Dictionary = {"dmg": 1.0, "hp": 1.0, "coin": 1.0, "speed": 0.6, "startcash": 1.6, "labspeed": 1.4, "xp": 1.8, "offrate": 2.0, "offcap": 2.0, "reroll": 2.5}
+## FEEDBACK-1: Grid Expansion is the first research a player buys (bigger
+## board = more buildings); Lab Speed is gone (research is instant).
+const LAB_PRIO: Array = ["grid", "dmg", "hp", "coin", "speed", "startcash", "xp", "offrate", "offcap", "reroll"]
+const LAB_W: Dictionary = {"grid": 0.25, "dmg": 1.0, "hp": 1.0, "coin": 1.0, "speed": 0.6, "startcash": 1.6, "xp": 1.8, "offrate": 2.0, "offcap": 2.0, "reroll": 2.5}
 const CARD_PRIO: Array = ["c_dmg", "c_hp", "c_wind", "c_coin", "c_cash", "c_xp", "c_skip", "c_reroll"]
 
 
@@ -895,15 +903,20 @@ static func camp_run(save: Dictionary, policy: String, seed_value: int, now: int
 	var we: int = maxi(1, S.wave / 2)
 	var early: float = float(rw.get(we, 0.0)) / maxf(0.001, float(whp.get(we, 0.0)) / wave_s)
 	var wall: float = front * PowerModel.required_dps(S.wave, S.tier) / maxf(0.001, PowerModel.required_dps(S.wave + 5, S.tier))
-	return {"wave": S.wave, "tier": S.tier, "coins": coins, "real_s": t, "gems": S.gems_run, "perks": S.perks_taken.duplicate(), "mode": S.mode, "mutations": S.mutations_taken.size(),
+	return {"wave": S.wave, "tier": S.tier, "coins": coins, "real_s": t, "gems": 0, "perks": S.perks_taken.duplicate(), "mode": S.mode, "mutations": S.mutations_taken.size(),
 		"r_front": front, "r_early": early, "r_wall": wall,
 		"r_hp": PowerModel.hp_ratio(snap, S.wave, S.tier), "timeout": not S.over, "boss_dps": PowerModel.single_target_dps(snap) * float(S.stats.get("boss_mult", 1.0))}
 
 
+## Cards (FEEDBACK-1: chests and slots cost coins now, gems are gone): a
+## player spends a bounded share of the bank on them.
 static func _gems_spend(save: Dictionary, rng: RandomNumberGenerator) -> void:
 	var guard: int = 0
+	var floor_c: int = int(float(save["coins"]) * (1.0 - TuneRef.num("pc_bot_card_frac", 0.15)))
 	while guard < 40:
 		guard += 1
+		if int(save["coins"]) - Cards.chest_cost() < floor_c:
+			break
 		var own: int = Cards.owned(save).size()
 		var want: String = "chest"
 		if Cards.slots(save) < 3 and own >= 3:
@@ -927,7 +940,9 @@ static func _gems_spend(save: Dictionary, rng: RandomNumberGenerator) -> void:
 
 
 static func _labs_spend(save: Dictionary, now: int, frac: float = 0.5) -> void:
-	while Labs.running(save).size() < Labs.slots(save):
+	var lguard: int = 0
+	while Labs.running(save).size() < Labs.slots(save) and lguard < 200:
+		lguard += 1
 		var best: String = ""
 		var best_sc: float = INF
 		for idv in LAB_PRIO:
@@ -1001,6 +1016,7 @@ static func campaign_days(seed0: int, policy: String = "balanced", n_days: int =
 	var run_idx: int = 0
 	var t2_day: int = -1
 	var t3_day: int = -1
+	var first_s: float = -1.0
 	for d in n_days:
 		for h in SESSION_H:
 			var now: int = maxi(NOW0 + d * 86400 + int(h) * 3600, int(save["last_seen"]) + 60)
@@ -1008,6 +1024,8 @@ static func campaign_days(seed0: int, policy: String = "balanced", n_days: int =
 			var t: int = pick_tier(save, rate, run_idx)
 			BaseMeta.select_tier(save, t)
 			var r: Dictionary = camp_run(save, policy, seed0 + 1000 + run_idx * 131, now, _mission_perk(save))
+			if run_idx == 0:
+				first_s = float(r["real_s"])   # fresh save: game speed 1x
 			run_idx += 1
 			var mins: float = maxf(0.1, float(r["real_s"]) / 60.0)
 			rate[t] = float(r["coins"]) / mins
@@ -1030,7 +1048,7 @@ static func campaign_days(seed0: int, policy: String = "balanced", n_days: int =
 		var row: Dictionary = {
 			"outpost_h": snappedf(op_h, 1.0), "outpost_ratio": snappedf(op_h / maxf(1.0, act_h), 0.001), "parts": Parts.count(save), "core_lvl": Cores.level(save, Cores.active(save)),
 			"day": d + 1, "tier": hi, "best_wave_hi_tier": bit, "best_wave": int(save["best_wave"]),
-			"coins_gross": int(led["gross_coins"]), "bank": int(save["coins"]), "gems": int(save["gems"]),
+			"coins_gross": int(led["gross_coins"]), "bank": int(save["coins"]), "gems": int(save.get("gems", 0)),
 			"gems_earned": _gems_total(save), "labs": lab_sum, "cards": Cards.owned(save).size(),
 			"progress_key": hi * 1000 + bit,
 		}
@@ -1038,7 +1056,7 @@ static func campaign_days(seed0: int, policy: String = "balanced", n_days: int =
 		say("CAMPAIGN " + policy + " day %2d: T%d best@T%d w%d best w%d | coins gross %d bank %d | gems %d (earned %d) | labs %d cards %d | core L%d parts %d outpost %d/h (x%.3f)" % [d + 1, hi, hi, bit, row["best_wave"], row["coins_gross"], row["bank"], row["gems"], row["gems_earned"], lab_sum, row["cards"], row["core_lvl"], row["parts"], int(op_h), float(row["outpost_ratio"])])
 		if d + 1 == 7 or d + 1 == 20:
 			snaps[d + 1] = save.duplicate(true)
-	return {"days": days, "save": save, "led": led, "rate": rate, "t2_day": t2_day, "t3_day": t3_day, "snaps": snaps}
+	return {"days": days, "save": save, "led": led, "rate": rate, "t2_day": t2_day, "t3_day": t3_day, "snaps": snaps, "first_run_s": first_s}
 
 
 ## Shard tree priority for the bot (power first, then economy, then speed).
@@ -1073,7 +1091,7 @@ static func wants_reforge(save: Dictionary) -> bool:
 
 
 static func _gems_total(save: Dictionary) -> int:
-	var gl: Dictionary = save["gem_log"]
+	var gl: Dictionary = save.get("gem_log", {})
 	var n: int = 0
 	for k in gl.keys():
 		n += int(gl[k])
@@ -1103,7 +1121,7 @@ static func job_main(seed0: int, dir: String) -> Dictionary:
 		var f := FileAccess.open(dir.path_join("snap%d.bin" % d), FileAccess.WRITE)
 		f.store_buffer(var_to_bytes((C["snaps"] as Dictionary)[d]))
 		f.close()
-	return {"days": C["days"], "led": C["led"], "gem_log": (C["save"] as Dictionary)["gem_log"], "t2_day": C["t2_day"], "t3_day": C["t3_day"]}
+	return {"days": C["days"], "led": C["led"], "gem_log": (C["save"] as Dictionary).get("gem_log", {}), "t2_day": C["t2_day"], "t3_day": C["t3_day"], "first_run_s": C["first_run_s"]}
 
 
 ## AC-38 (strategy level): a week of pure-weapon / pure-eco play from the same fresh save.
@@ -1458,11 +1476,17 @@ static func combine(R: Dictionary) -> Dictionary:
 		"perks_d20": PK.get("rows", {}), "perk_top_coin_ratio": snappedf(float(PK.get("top_ratio", 0.0)), 0.01), "dominant_perks": PK.get("dominant", []),
 		"t2_by_day5": int(M["t2_day"]) >= 3 and int(M["t2_day"]) <= 5,
 		"day1_band": day1 >= 18 and day1 <= 32,
+		# FEEDBACK-1 (new gate): a brand-new player's first run is short
+		# (5-8 real minutes at 1x) so they reach the meta features sooner.
+		"first_run_s": snappedf(float(M.get("first_run_s", -1.0)), 0.1),
+		"first_run_short": float(M.get("first_run_s", -1.0)) >= 300.0 and float(M.get("first_run_s", -1.0)) <= 480.0,
 		"tier3_by_day30": t3 > 0,
 		"no_plateau_before_t3": stall_days.is_empty(),
 		"early_3day_rise": early,
-		"gems_per_day_ok": gpd >= 10.0 and gpd <= 30.0,
-		"gem_sources_ok": float(gmax) <= 0.5 * float(gtot),
+		# FEEDBACK-1 (deliberate gate change): gems / premium currency are
+		# removed, so the AC-41 gem-income bands become "no gem is ever earned".
+		"gems_per_day_ok": gtot == 0 and gpd == 0.0,
+		"gem_sources_ok": gmax == 0,
 		"offline_below_active": off_rate <= 0.2 * active_rate,
 		"mix_beats_weapon": mix_w, "mix_beats_eco": mix_e,
 		"no_dominant_perk": PK.has("dominant") and (PK["dominant"] as Array).is_empty(),
@@ -1676,7 +1700,7 @@ static func forge_campaign(seed0: int, spec: String) -> Dictionary:
 	for x in loops:
 		say("REDESIGN %s loop: %s" % [spec, JSON.stringify(x)])
 	return {"spec": spec, "days": days, "loops": loops, "sessions": int(F["ses"]), "timeouts": int(F["timeouts"]),
-		"gem_log": save["gem_log"], "gems_total": _gems_total(save), "best_wave": int(save["best_wave"])}
+		"gem_log": save.get("gem_log", {}), "gems_total": _gems_total(save), "best_wave": int(save["best_wave"])}
 
 
 static func _forge_day(save: Dictionary, spec: String, day: int, key: int, runs: Array, led: Dictionary, rate: Dictionary) -> Dictionary:
@@ -1838,7 +1862,7 @@ static func redesign_checks(R: Dictionary) -> Dictionary:
 		for k in gl.keys():
 			gmax = maxi(gmax, int(gl[k]))
 		var gpd: float = float(F["gems_total"]) / maxf(1.0, float(days.size()))
-		var gems_ok: bool = gpd >= 10.0 and gpd <= 30.0 and float(gmax) <= 0.5 * float(F["gems_total"])
+		var gems_ok: bool = int(F["gems_total"]) == 0 and gmax == 0 and gpd == 0.0   # FEEDBACK-1: gems removed
 		var op_med: float = _median(opr)
 		op_all.append_array(opr)
 		specs[spec] = {"days": days.size(), "sessions": int(F["sessions"]), "best_wave": int(F["best_wave"]), "loops": loops,

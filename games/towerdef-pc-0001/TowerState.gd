@@ -9,10 +9,13 @@ extends RefCounted
 ## bought outside the run); inside the run cash buys 5 Core tracks (Damage,
 ## Rate, Range, Eco, Armor). The 7x7 grid starts EMPTY except for the Core:
 ## everything else is a roguelite pick (buildings, upgrade packs, specials,
-## troop huts, super-rare Insight). Rings 2/3 open at track totals 10/30.
+## troop huts, super-rare Insight). The run grid size is a Research unlock.
 ##
-## Concurrency contract: waves never pause. While a draft is open or a building
-## is waiting to be placed, simulated time runs at SLOWMO (20%), not zero.
+## Concurrency contract (owner feedback #1): waves never pause and never slow
+## down — drafts, perk offers and placement all happen with the sim live.
+## Enemies spawn from every direction (no lanes) and attack any building that
+## stands in their way (buildings have HP; a destroyed one is lost for the
+## run) before they reach the Core.
 
 const BuildingDB := preload("res://data/BuildingDB.gd")
 const EnemyDB := preload("res://data/EnemyDB.gd")
@@ -36,20 +39,22 @@ const EnemyHash := preload("res://EnemyHash.gd")
 
 const CENTER: Vector2 = Vector2(360, 470)
 const CELL: float = 52.0
-## PC 7x7 board. Cell index i = row * SIDE + col; the Core sits at (3,3).
-## Enemies stop beyond the ring-3 corners. (REDESIGN_SPEC §2.3 asks for 9x9
-## with 4 rings; the 7x7 arena geometry is kept until the UI rebuild decides
-## the field size — rings 2/3 open at track totals 10/30, see RING_OPEN.)
-const SIDE: int = 7
-const N: int = 49
-const CORE_SLOT: int = 24
-const SPAWN_R: float = 470.0
-const STOP_R: float = 200.0
-const SLOWMO: float = 0.2
+## PC board (owner feedback #1): an 11x11 index space with the Core at (5,5);
+## the playable run grid is a centred GxG window whose size is a Research
+## unlock (GRID_SIZES: 3x3 start -> 5x5 -> 7x7 -> 8x8 -> 10x10). Cell index
+## i = row * SIDE + col. Rings (Chebyshev distance to the Core) still drive
+## the per-ring range bonus and the Railgun ring-2 rule; they no longer open
+## during a run.
+const SIDE: int = 11
+const N: int = 121
+const CORE_SLOT: int = 60
+const GRID_SIZES: Array = [3, 5, 7, 8, 10]
+const SPAWN_R: float = 470.0      # legacy reference radius (7x7); see spawn_r()
+const STOP_R: float = 34.0        # melee contact distance from the Core centre
 const MAX_LVL: int = 5           # building / hut level cap (duplicate picks)
 const MAX_ENEMIES: int = 220
 const SUBSTEP: float = 0.05
-const CORE_RING: Array = [16, 17, 18, 23, 25, 30, 31, 32]
+const CORE_RING: Array = [48, 49, 50, 59, 61, 70, 71, 72]
 const TARGET_MODES: Array = ["nearest", "first", "strongest", "weakest"]
 const HIT_FLASH: float = 0.12   # view reads e["hit_t"] for the white hit flash
 const ECO_IDS: Array = ["mine", "oilmill", "bounty", "vault", "refinery"]
@@ -60,15 +65,29 @@ const BOSSY: Array = ["boss", "elite"]
 ## cash x1.10/wave the spec values hit every cap by ~w40); Tune keys
 ## pc_track_growth_<id> override.
 const TRACK_IDS: Array = ["dmg", "rate", "range", "eco", "armor"]
+## Owner feedback #1: few, BIG, expensive levels, each with a real drawback
+## (no spam-click increments). Per level: "desc" is the gain, "minus" the cost.
 const TRACKS: Dictionary = {
-	"dmg": {"name": "Damage", "base": 20.0, "growth": 1.21, "cap": 120, "desc": "x1.08 Core + building dmg"},
-	"rate": {"name": "Rate", "base": 30.0, "growth": 1.23, "cap": 60, "desc": "+3% Core attack rate"},
-	"range": {"name": "Range", "base": 40.0, "growth": 1.25, "cap": 20, "desc": "+0.1 Core range"},
-	"eco": {"name": "Eco", "base": 25.0, "growth": 1.20, "cap": 50, "desc": "+0.4 cash/s, interest cap +5"},
-	"armor": {"name": "Armor", "base": 25.0, "growth": 1.19, "cap": 120, "desc": "+5% HP, +0.2 regen, +0.5 armor"},
+	"dmg": {"name": "Damage", "base": 60.0, "growth": 2.1, "cap": 8, "desc": "x1.25 Core + building dmg", "minus": "-8% Core attack rate"},
+	"rate": {"name": "Rate", "base": 70.0, "growth": 2.1, "cap": 8, "desc": "+20% Core attack rate", "minus": "-6% Core dmg"},
+	"range": {"name": "Range", "base": 90.0, "growth": 2.3, "cap": 6, "desc": "+0.5 Core range", "minus": "-5% Core attack rate"},
+	"eco": {"name": "Eco", "base": 50.0, "growth": 2.0, "cap": 8, "desc": "+2 cash/s, interest cap +25", "minus": "-5% Core max HP"},
+	"armor": {"name": "Armor", "base": 60.0, "growth": 2.1, "cap": 8, "desc": "+20% HP, +1 regen, +2 armor", "minus": "-6% Core dmg"},
 }
-## Ring -> track-level total that opens it (ring 1 is open at start).
-const RING_OPEN: Dictionary = {2: 10, 3: 30}
+## Per-level track multipliers (gain / drawback).
+const DIFF_HP: float = 2.5
+const DIFF_DMG: float = 1.5
+const TRACK_DMG: float = 1.25
+const TRACK_DMG_RATE: float = 0.92
+const TRACK_RATE: float = 1.20
+const TRACK_RATE_DMG: float = 0.94
+const TRACK_RANGE: float = 0.5
+const TRACK_RANGE_RATE: float = 0.95
+const TRACK_ECO_CASH: float = 2.0
+const TRACK_ECO_ICAP: float = 25.0
+const TRACK_ECO_HP: float = 0.95
+const TRACK_ARMOR_HP: float = 0.20
+const TRACK_ARMOR_DMG: float = 0.94
 
 
 ## Building / hut level ceiling in a run (duplicate picks, L5).
@@ -85,6 +104,36 @@ static func bld_dmg() -> float:
 ## Grid "cell" in world px for every range in the design tables.
 static func cpx() -> float:
 	return TuneRef.num("pc_cell_px", 78.0)
+
+
+## Owner feedback #1: "game difficulty needs to be harder" — global enemy
+## HP / contact-damage multipliers (Tune pc_enemy_hp / pc_enemy_dmg).
+static func difficulty_hp() -> float:
+	return TuneRef.num("pc_enemy_hp", DIFF_HP)
+
+
+static func difficulty_dmg() -> float:
+	return TuneRef.num("pc_enemy_dmg", DIFF_DMG)
+
+
+## Grid side for a Research level (0 -> 3x3 ... 4 -> 10x10).
+static func grid_for_level(lv: int) -> int:
+	return int(GRID_SIZES[clampi(lv, 0, GRID_SIZES.size() - 1)])
+
+
+## First row/col of a centred GxG window (the Core sits at (5,5)).
+static func grid_lo(g: int) -> int:
+	return SIDE / 2 - (g - 1) / 2
+
+
+## Is cell i inside a GxG run grid?
+static func in_grid_n(i: int, g: int) -> bool:
+	if i < 0 or i >= N:
+		return false
+	var lo: int = grid_lo(g)
+	var r: int = i / SIDE
+	var c: int = i % SIDE
+	return r >= lo and r < lo + g and c >= lo and c < lo + g
 
 
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
@@ -109,20 +158,19 @@ var stats: Dictionary = {}
 var wave: int = 1
 var wave_t: float = 0.0
 var spawn_t: float = 0.5        # legacy (mobile timer); PC waves spawn from `plan`
-# PC multi-direction waves (PC_SPEC §2.3). 8 spawn points in 4 quadrants:
-# 0 = N/NE, 1 = E/SE, 2 = S/SW, 3 = W/NW. Each wave is planned when it is
-# telegraphed, so the telegraph counts are exactly what spawns.
-var plan: Array = []              # [{t, kind, quad, [marked]}] for `plan_wave`, sorted by t
+# Waves come from every direction (owner feedback #1: no lanes). Each wave is
+# planned when it is telegraphed, so the telegraph total is exactly what spawns.
+var plan: Array = []              # [{t, kind, [marked]}] for `plan_wave`, sorted by t
 var plan_idx: int = 0
 var plan_wave: int = 0
 var next_plan: Dictionary = {}    # telegraphed plan for wave+1
-var active_quads: Array = []      # quadrants of the current wave
-var boss_dir: int = -1            # boss quadrant of the current wave (-1 none)
-var wave_spawned: Dictionary = {} # quad -> planned enemies actually spawned this wave
-var last_wave_spawned: Dictionary = {}  # {wave, counts} of the wave that just ended
+var wave_spawned: int = 0         # planned entries actually spawned this wave
+var last_wave_spawned: Dictionary = {}  # {wave, n} of the wave that just ended
 var wave_started: bool = false    # wave 1 starts after the opening telegraph lead
-var focus_quad: int = 0           # lane focus (Orbital auto-target prefers it)
-var walls: Dictionary = {}        # quad -> {hp, max}: Barricade lane walls
+var grid_n: int = 3               # run grid side (Research unlock)
+var bld_hp: Array = []            # N x float: current building HP (0 = none)
+var bld_lost: Array = []          # ids of buildings destroyed this run
+var stats_prev_max: Dictionary = {} # bld_max of the previous recompute
 var wave_cash0: float = 0.0       # cash_earned at wave start
 var ironclad: float = 0.0         # Ironclad modifier: non-crit hits deal this much less
 
@@ -155,6 +203,7 @@ var build_cap: int = 48
 var count_mult: float = 1.0
 var draft: Array = []
 var pending_place: String = ""
+var pending_upgrade: String = ""  # a "plus" pick waiting to be applied onto a building
 var over: bool = false
 
 # Core (REDESIGN §2.1) + cash tracks (§2.2).
@@ -162,7 +211,6 @@ var core_id: String = "bastion"
 var core_def: Dictionary = {}
 var core_lvl: int = 1
 var tracks: Dictionary = {}
-var rings_open: int = 1
 var beam_eid: int = -1            # Lance: current beam target
 var beam_t: float = 0.0           # Lance: seconds held on it
 var pulse_n: int = 0              # Tempest: pulses fired (every 5th chains)
@@ -219,9 +267,6 @@ var cash_earned: float = 0.0
 var coins_wave: float = 0.0
 var coins_kill: float = 0.0
 var coins_boss: float = 0.0
-var gems_run: int = 0
-var boss_gem_awards: int = 0
-var boss_gem_left: int = 0       # AC-10a daily allowance left for this run
 
 # Perks (B7).
 var perks_taken: Array = []
@@ -296,16 +341,26 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	cooldowns.clear()
 	target_modes.clear()
 	build_cap = N - 1
+	# Grid size: Research "grid" level (opts.grid overrides for tests/tools);
+	# Bastion Heart (ring_delay) shrinks it one step.
+	var glv: int = int(mods.get("grid_lvl", 0)) - int(pf("ring_delay"))
+	grid_n = grid_for_level(glv)
+	if opts.has("grid"):
+		grid_n = clampi(int(opts["grid"]), 3, 10)
+	bld_hp.clear()
+	bld_lost = []
+	stats_prev_max = {}
 	for i in N:
 		slots.append({})
-		unlocked.append(i != CORE_SLOT and BaseMeta.cell_ring(i) == 1)
+		unlocked.append(i != CORE_SLOT and in_grid_n(i, grid_n))
 		cooldowns.append(0.0)
 		target_modes.append("nearest")
-	rings_open = 1
+		bld_hp.append(0.0)
 	en.clear()
 	next_eid = 1
 	draft.clear()
 	pending_place = ""
+	pending_upgrade = ""
 	wave = 1
 	wave_t = 0.0
 	spawn_t = 0.5
@@ -313,13 +368,9 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	plan_idx = 0
 	plan_wave = 0
 	next_plan = {}
-	active_quads.clear()
-	boss_dir = -1
-	wave_spawned = {}
+	wave_spawned = 0
 	last_wave_spawned = {}
 	wave_started = false
-	focus_quad = 0
-	walls = {}
 	wave_cash0 = 0.0
 	time_alive = 0.0
 	cash = 0.0 if modifiers.has("poverty") else float(int(mods.get("start_cash", 0)))
@@ -333,9 +384,6 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	coins_wave = 0.0
 	coins_kill = 0.0
 	coins_boss = 0.0
-	gems_run = 0
-	boss_gem_awards = 0
-	boss_gem_left = BaseMeta.boss_gem_allowance(save, now)
 	perks_taken.clear()
 	perk_offer.clear()
 	perk_pending = 0
@@ -364,7 +412,7 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	recompute()
 	hp = float(stats["max_hp"])
 	shield = float(stats.get("shield_max", 0.0))
-	var ev0: Array = [{"t": "run_start", "tier": tier, "speed": speed, "mode": mode, "modifiers": modifiers.duplicate(), "coin_mult": mod_coin * mode_coin, "seed": run_seed, "core": core_id, "core_lvl": core_lvl}]
+	var ev0: Array = [{"t": "run_start", "tier": tier, "speed": speed, "mode": mode, "modifiers": modifiers.duplicate(), "coin_mult": mod_coin * mode_coin, "seed": run_seed, "core": core_id, "core_lvl": core_lvl, "grid": grid_n}]
 	ev0.append_array(pre)
 	# Wave 1 is telegraphed at t=0 and starts pc_telegraph_s later.
 	_adopt_plan(_build_plan(1, telegraph_s()), ev0, true)
@@ -420,7 +468,7 @@ func _refresh_enemy_mods() -> void:
 	for m in mutations_taken:
 		n[m] = int(n.get(m, 0)) + 1
 	enemy_hp_mod = (0.7 if modifiers.has("swarm") else 1.0) * (1.0 + 0.2 * float(n.get("m_vigor", 0)))
-	count_mult = (1.6 if modifiers.has("swarm") else 1.0) * (1.0 + 0.2 * float(n.get("m_horde", 0)))
+	count_mult = (1.6 if modifiers.has("swarm") else 1.0) * (1.25 if modifiers.has("allsides") else 1.0) * (1.0 + 0.2 * float(n.get("m_horde", 0)))
 	enemy_spd_mod = (1.25 if modifiers.has("haste") else 1.0) * (1.0 + 0.1 * float(n.get("m_rush", 0)))
 	enemy_dmg_mod = 1.0 + 0.25 * float(n.get("m_fangs", 0))
 	elite_shield_add = 2 * int(n.get("m_plating", 0))
@@ -454,7 +502,27 @@ static func slot_pos(i: int) -> Vector2:
 
 
 static func ring_of(i: int) -> int:
-	return BaseMeta.cell_ring(i)
+	return maxi(absi(i / SIDE - SIDE / 2), absi(i % SIDE - SIDE / 2))
+
+
+func in_grid(i: int) -> bool:
+	return in_grid_n(i, grid_n)
+
+
+## Half-extent of the run grid in world px (the view fits the field to it).
+func grid_half_px() -> float:
+	return float(grid_n) * 0.5 * CELL
+
+
+## Spawn radius: the grid edge plus a fixed approach (shorter on small grids,
+## so the view can zoom in and keep the same travel time).
+func spawn_r() -> float:
+	return grid_half_px() * 1.42 + TuneRef.num("pc_spawn_gap", 260.0)
+
+
+## Railgun needs ring 2+; everything else goes anywhere on the grid.
+static func ring_ok(i: int, id: String) -> bool:
+	return not (id == "railgun" and ring_of(i) < 2)
 
 
 static func neighbors(i: int) -> Array:
@@ -522,7 +590,7 @@ func at_cap() -> bool:
 
 ## Can `id` go on cell i right now (free, open ring, ring rule)?
 func can_place(i: int, id: String) -> bool:
-	return is_free(i) and not at_cap() and BaseMeta.place_ok(i, id)
+	return is_free(i) and not at_cap() and ring_ok(i, id)
 
 
 # ------------------------------------------------------------------- stats
@@ -571,7 +639,7 @@ func compute_stats() -> Dictionary:
 		"kill_cash": 1.0,
 		"weapons": [],
 		"links": [],
-		"walls": {},
+		"bld_max": {},
 		"bounties": [],
 		"huts": [],
 		"interest_rate": float(cd["irate"]),
@@ -589,14 +657,14 @@ func compute_stats() -> Dictionary:
 	# Global multipliers: meta (labs/cards) x packs x Insight x Damage track.
 	var od_dmg: float = pow(TuneRef.num("overdrive_mult", 1.1), float(maxi(0, int(legacy.get("dmg", 0)) - BaseMeta.MAX_LVL)))
 	var od_hp: float = pow(TuneRef.num("overdrive_mult", 1.1), float(maxi(0, int(legacy.get("hp", 0)) - BaseMeta.MAX_LVL)))
-	var dmg_track: float = pow(TuneRef.num("pc_track_dmg_step", 1.08), float(tracks["dmg"]))
+	var dmg_track: float = pow(TuneRef.num("pc_track_dmg_step", TRACK_DMG), float(tracks["dmg"]))
 	# Legacy Core DMG levels lift every weapon (interim meta until Parts land).
 	var legacy_dmg: float = 1.0 + TuneRef.num("pc_legacy_dmg", 0.03) * float(legacy.get("dmg", 0))
 	var dmg_all: float = dmg_mult * od_dmg * legacy_dmg * dmg_track * (1.0 + 0.12 * float(pack_n("pk_arsenal"))) * (1.0 + 0.40 * float(pack_n("pk_gambit"))) * (1.0 + float(ins.get("in_dmg", 0.0)))
 	# Parts: all-damage (+ Bastion Heart per building, max 12 buildings).
 	dmg_all *= maxf(0.1, 1.0 + pf("dmg") + pf("dmg_per_bld") * float(mini(12, nb)))
 	# Mint 4-piece Dividend: the Eco track pays out as damage (full at Eco 50).
-	dmg_all *= 1.0 + pf("dividend") * float(mini(50, int(tracks["eco"]))) / 50.0
+	dmg_all *= 1.0 + pf("dividend") * float(mini(track_cap("eco"), int(tracks["eco"]))) / float(maxi(1, track_cap("eco")))
 	var rate_all: float = (1.0 + 0.08 * float(pack_n("pk_overclock"))) * (1.0 + float(ins.get("in_rate", 0.0)))
 	var range_add: float = 0.5 * float(pack_n("pk_optics"))
 	st["dmg_all"] = dmg_all
@@ -632,7 +700,7 @@ func compute_stats() -> Dictionary:
 						adj_rate[n] = float(adj_rate[n]) - 0.10
 						links.append([i, n, "OIL"])
 	# Core attack range (cells) first: Lance Focus taxes buildings inside it.
-	var core_range_c: float = maxf(1.0, float(cd["range"]) + 0.1 * float(tracks["range"]) + range_add + float(adj_range[CORE_SLOT]) + pf("range"))
+	var core_range_c: float = maxf(1.0, float(cd["range"]) + TRACK_RANGE * float(tracks["range"]) + range_add + float(adj_range[CORE_SLOT]) + pf("range"))
 	var core_range: float = core_range_c * px
 	var focus: bool = String(cd.get("trait", "")) == "focus"
 	var weapons: Array = st["weapons"]
@@ -670,9 +738,7 @@ func compute_stats() -> Dictionary:
 				st["shield_max"] = float(st["shield_max"]) + 60.0 * m2
 				st["shield_regen"] = float(st["shield_regen"]) + 6.0 * m2
 			"barricade":
-				var q: int = cell_quad(i)
-				var wl: Dictionary = st["walls"]
-				wl[q] = float(wl.get(q, 0.0)) + TuneRef.num("pc_wall_hp", 200.0) * m2 * pow(dmg_growth, float(wave - 1))
+				pass   # a high-HP blocker (see bld_max below)
 			"mine":
 				cash_add += 0.8 * m2
 			"oilmill":
@@ -689,24 +755,35 @@ func compute_stats() -> Dictionary:
 				st["lifesteal"] = float(st["lifesteal"]) + 0.01 * m2
 			"hut_infantry", "hut_sapper", "hut_drone":
 				var dir: Vector2 = (slot_pos(i) - CENTER).normalized()
-				(st["huts"] as Array).append({"slot": i, "id": id, "lvl": lvl_at(i), "home": slot_pos(i), "anchor": CENTER + dir * (STOP_R + 0.6 * px)})
+				(st["huts"] as Array).append({"slot": i, "id": id, "lvl": lvl_at(i), "home": slot_pos(i), "anchor": CENTER + dir * (grid_half_px() + 0.6 * px)})
+	# Building HP (owner feedback #1): enemies attack buildings in their way.
+	# L1 HP x1.35/level, x enemy dmg growth so a building holds the same number
+	# of hits at any wave; Barricade is the dedicated blocker.
+	var bmax: Dictionary = st["bld_max"]
+	var hp_w: float = pow(dmg_growth, float(wave - 1)) * hp_mult
+	for i in N:
+		var bid: String = id_at(i)
+		if bid == "":
+			continue
+		var base_hp: float = TuneRef.num("pc_wall_hp", 200.0) if bid == "barricade" else TuneRef.num("pc_bld_hp", 40.0)
+		bmax[i] = base_hp * pow(1.35, float(lvl_at(i) - 1)) * hp_w * maxf(0.1, 1.0 + pf("bld_hp"))
 	# Core sheet with tracks, packs, legacy core levels, Insight.
 	var arm_n: int = tracks["armor"]
-	st["max_hp"] = (float(st["max_hp"]) + hp_add) * (1.0 + 0.05 * float(arm_n)) * (1.0 + 0.20 * float(pack_n("pk_fort"))) * maxf(0.5, 1.0 - 0.05 * float(pack_n("pk_overclock"))) * max_hp_mult * (1.0 + float(ins.get("in_hp", 0.0))) * od_hp * maxf(0.1, 1.0 + pf("core_hp"))
-	st["regen"] = (float(st["regen"]) + 0.2 * float(arm_n)) * maxf(0.0, 1.0 + pf("regen"))
-	st["armor"] = float(st["armor"]) + 0.5 * float(arm_n) + float(pack_n("pk_fort")) + pf("armor")
+	st["max_hp"] = (float(st["max_hp"]) + hp_add) * (1.0 + TRACK_ARMOR_HP * float(arm_n)) * pow(TRACK_ECO_HP, float(tracks["eco"])) * (1.0 + 0.20 * float(pack_n("pk_fort"))) * maxf(0.5, 1.0 - 0.05 * float(pack_n("pk_overclock"))) * max_hp_mult * (1.0 + float(ins.get("in_hp", 0.0))) * od_hp * maxf(0.1, 1.0 + pf("core_hp"))
+	st["regen"] = (float(st["regen"]) + 1.0 * float(arm_n)) * maxf(0.0, 1.0 + pf("regen"))
+	st["armor"] = float(st["armor"]) + 2.0 * float(arm_n) + float(pack_n("pk_fort")) + pf("armor")
 	var eco_lv: int = tracks["eco"]
-	var cash_w1: float = maxf(0.0, float(st["cash_ps"]) + 0.4 * float(eco_lv) + 0.6 * float(pack_n("pk_ledger")) + cash_add + pf("cash_flat"))
+	var cash_w1: float = maxf(0.0, float(st["cash_ps"]) + TRACK_ECO_CASH * float(eco_lv) + 0.6 * float(pack_n("pk_ledger")) + cash_add + pf("cash_flat"))
 	st["cash_ps"] = cash_w1 * e * cash_mult * (1.0 + float(ins.get("in_cash", 0.0))) * steadfast * maxf(0.1, 1.0 + pf("cash"))
 	st["kill_cash"] = (1.0 + 0.05 * float(pack_n("pk_ledger"))) * (1.0 + float(ins.get("in_cash", 0.0))) * maxf(0.1, 1.0 + pf("kill_cash"))
 	st["interest_rate"] = float(st["interest_rate"]) + pf("interest")
-	var icap_w1: float = float(st["interest_cap"]) + 5.0 * float(eco_lv) + (50.0 if pf("interest") > 0.0 else 0.0)
+	var icap_w1: float = float(st["interest_cap"]) + TRACK_ECO_ICAP * float(eco_lv) + (50.0 if pf("interest") > 0.0 else 0.0)
 	if String(cd.get("trait", "")) == "compound":
-		icap_w1 += 10.0 * float(eco_lv) * tm
+		icap_w1 += 50.0 * float(eco_lv) * tm
 	st["interest_cap"] = icap_w1 * e
 	# The Core's own weapon (always last in `weapons`; the view reads .back()).
-	var core_dmg: float = float(cd["dmg"]) * CoreDB.lvl_mult("dmg", L) * dmg_all * steadfast * float(adj_dmg[CORE_SLOT]) * (1.0 + TuneRef.num("pc_core_surge_dmg", 0.15) * float(pack_n("pk_core"))) * maxf(0.1, 1.0 + pf("core_dmg"))
-	var core_rate: float = float(cd["rate"]) * (1.0 + 0.03 * float(tracks["rate"])) * rate_all * float(adj_rate[CORE_SLOT]) * (1.0 + TuneRef.num("pc_core_surge_rate", 0.05) * float(pack_n("pk_core"))) * maxf(0.1, 1.0 + pf("rate"))
+	var core_dmg: float = float(cd["dmg"]) * CoreDB.lvl_mult("dmg", L) * dmg_all * steadfast * float(adj_dmg[CORE_SLOT]) * (1.0 + TuneRef.num("pc_core_surge_dmg", 0.15) * float(pack_n("pk_core"))) * maxf(0.1, 1.0 + pf("core_dmg")) * pow(TRACK_RATE_DMG, float(tracks["rate"])) * pow(TRACK_ARMOR_DMG, float(arm_n))
+	var core_rate: float = float(cd["rate"]) * pow(TRACK_RATE, float(tracks["rate"])) * pow(TRACK_DMG_RATE, float(tracks["dmg"])) * pow(TRACK_RANGE_RATE, float(tracks["range"])) * rate_all * float(adj_rate[CORE_SLOT]) * (1.0 + TuneRef.num("pc_core_surge_rate", 0.05) * float(pack_n("pk_core"))) * maxf(0.1, 1.0 + pf("rate"))
 	var cw: Dictionary = {"slot": CORE_SLOT, "kind": "core", "attack": String(cd["attack"]), "dmg": core_dmg, "rate": core_rate, "range": core_range, "range_cells": core_range_c}
 	# Parts on the Core attack: primary-target mult, splash, pierce, free pulse.
 	cw["single_mult"] = maxf(0.1, 1.0 + pf("core_single"))
@@ -747,7 +824,7 @@ func compute_stats() -> Dictionary:
 	Perks.apply(st, perks_taken)
 	st["cash_ps"] = float(st["cash_ps"]) * float(st["perk_cash"])
 	# Display hooks the current view reads.
-	st["overcharge_step"] = TuneRef.num("pc_track_dmg_step", 1.08) - 1.0
+	st["overcharge_step"] = TuneRef.num("pc_track_dmg_step", TRACK_DMG) - 1.0
 	st["overcharge"] = dmg_track
 	st["bounty_mult"] = float(st["kill_cash"])
 	return st
@@ -756,7 +833,7 @@ func compute_stats() -> Dictionary:
 func recompute() -> void:
 	var old_max: float = float(stats.get("max_hp", 0.0))
 	stats = compute_stats()
-	_sync_walls()
+	_sync_bld_hp()
 	var new_max: float = float(stats["max_hp"])
 	if old_max > 0.0 and new_max > old_max:
 		hp += new_max - old_max   # HP gains heal by their bonus
@@ -781,29 +858,57 @@ func _troop_mods() -> Dictionary:
 	}
 
 
-## Barricade walls follow the board: a new/upgraded Barricade adds its HP now,
-## a sold one removes its lane's wall.
-func _sync_walls() -> void:
-	var want: Dictionary = stats.get("walls", {})
-	for q in walls.keys():
-		if not want.has(q):
-			walls.erase(q)
-	for q in want.keys():
-		var mx: float = float(want[q])
-		if not walls.has(q):
-			walls[q] = {"hp": mx, "max": mx}
+## Building HP follows the board: a new building starts full, a level-up or
+## wave growth adds its HP gain, an empty cell holds 0.
+func _sync_bld_hp() -> void:
+	var bm: Dictionary = stats.get("bld_max", {})
+	for i in N:
+		if not bm.has(i):
+			bld_hp[i] = 0.0
+			continue
+		var mx: float = float(bm[i])
+		var old: float = float(stats_prev_max.get(i, 0.0))
+		if float(bld_hp[i]) <= 0.0:
+			bld_hp[i] = mx
+		elif mx > old:
+			bld_hp[i] = minf(mx, float(bld_hp[i]) + (mx - old))
 		else:
-			var wd: Dictionary = walls[q]
-			var grow: float = maxf(0.0, mx - float(wd["max"]))
-			wd["max"] = mx
-			wd["hp"] = minf(mx, float(wd["hp"]) + grow)
+			bld_hp[i] = minf(mx, float(bld_hp[i]))
+	stats_prev_max = bm.duplicate()
 
 
-func _rebuild_walls(ev: Array) -> void:
-	for q in walls.keys():
-		var wd: Dictionary = walls[q]
-		wd["hp"] = float(wd["max"])
-		ev.append({"t": "wall_up", "quad": int(q), "hp": float(wd["hp"])})
+## Wave start: every building repairs pc_bld_wave_heal of its max HP.
+func _repair_buildings(ev: Array) -> void:
+	var bm: Dictionary = stats.get("bld_max", {})
+	var f: float = TuneRef.num("pc_bld_wave_heal", 0.5)
+	var n: int = 0
+	for i in bm.keys():
+		var mx: float = float(bm[i])
+		if float(bld_hp[int(i)]) < mx:
+			bld_hp[int(i)] = minf(mx, float(bld_hp[int(i)]) + f * mx)
+			n += 1
+	if n > 0:
+		ev.append({"t": "bld_repair", "n": n, "frac": f})
+
+
+## Building max HP on cell i (0 when empty).
+func bld_max(i: int) -> float:
+	return float((stats.get("bld_max", {}) as Dictionary).get(i, 0.0))
+
+
+## A building at 0 HP is destroyed and lost for the rest of the run.
+func _destroy_building(i: int, ev: Array) -> void:
+	var id: String = id_at(i)
+	if id == "":
+		return
+	slots[i] = {}
+	bld_hp[i] = 0.0
+	cooldowns[i] = 0.0
+	target_modes[i] = "nearest"
+	bld_lost.append(id)
+	ev.append({"t": "building_destroyed", "slot": i, "id": id, "pos": slot_pos(i)})
+	if pending_upgrade != "" and upgrade_targets(pending_upgrade).is_empty():
+		ev.append_array(cancel_upgrade())
 
 
 # ------------------------------------------------------------------ curves
@@ -854,8 +959,9 @@ func unlock_cost() -> int:
 	return 0
 
 
+## Owner feedback #1: the sim stays live (no slow-mo) during drafts/placement.
 func time_scale() -> float:
-	return SLOWMO if (draft.size() > 0 or pending_place != "" or perk_offer.size() > 0 or mutation_offer.size() > 0) else 1.0
+	return 1.0
 
 
 ## Coins multiplier for everything earned this run (tier × lab × card × perks).
@@ -899,6 +1005,7 @@ func tick(delta: float) -> Array:
 ##   {"t":"kills","n","cash","by_kind":{kind:n},"pos_sample":[<=16]}
 ##   {"t":"hits","n","sum","crit_n","top":[{eid,pos,amt,crit}] (<=8 largest)}
 ##   {"t":"core_hits","n","dmg","shots","pos_sample":[<=8]}
+##   {"t":"bld_hits","n","dmg"}   (per-body building hits; destroys stay single)
 const AGG_POS: int = 16
 const AGG_TOP: int = 8
 static func aggregate_events(ev: Array, at: int = 0) -> void:
@@ -915,6 +1022,8 @@ static func aggregate_events(ev: Array, at: int = 0) -> void:
 	var cshots: int = 0
 	var cdmg: float = 0.0
 	var cpos: Array = []
+	var bn: int = 0
+	var bdmg: float = 0.0
 	for i in range(at, ev.size()):
 		var e: Dictionary = ev[i]
 		var t: String = String(e.get("t", ""))
@@ -947,9 +1056,12 @@ static func aggregate_events(ev: Array, at: int = 0) -> void:
 			cdmg += float(e.get("dmg", 0.0))
 			if cpos.size() < AGG_TOP:
 				cpos.append(e["pos"])
+		elif t == "bld_hit":
+			bn += 1
+			bdmg += float(e.get("dmg", 0.0))
 		else:
 			keep.append(e)
-	if kn == 0 and hn == 0 and cn == 0:
+	if kn == 0 and hn == 0 and cn == 0 and bn == 0:
 		return
 	ev.resize(at)
 	ev.append_array(keep)
@@ -959,6 +1071,8 @@ static func aggregate_events(ev: Array, at: int = 0) -> void:
 		ev.append({"t": "kills", "n": kn, "cash": kcash, "by_kind": by_kind, "pos_sample": kpos})
 	if cn > 0:
 		ev.append({"t": "core_hits", "n": cn, "dmg": cdmg, "shots": cshots, "pos_sample": cpos})
+	if bn > 0:
+		ev.append({"t": "bld_hits", "n": bn, "dmg": bdmg})
 
 
 func _step(sub: float, ev: Array) -> void:
@@ -973,7 +1087,7 @@ func _step(sub: float, ev: Array) -> void:
 		_spawn_due(ev)
 	if not wave_started and wave == 1 and wave_t >= telegraph_s():
 		wave_started = true
-		ev.append({"t": "wave_start", "wave": wave, "quadrants": active_quads.duplicate(), "boss_dir": boss_dir})
+		ev.append({"t": "wave_start", "wave": wave, "boss": wave % boss_every == 0})
 	if next_plan.is_empty() and wave_t >= wave_time - telegraph_s():
 		next_plan = _build_plan(wave + 1, 0.0)
 		ev.append(_telegraph_event(next_plan))
@@ -1090,7 +1204,7 @@ func _advance_wave(ev: Array) -> void:
 		_enter_wave(wave + 1)
 		ev.append({"t": "wave_skip", "skipped": skipped, "wave": wave, "coins": c})
 	_wave_coins(wave, 1.0)
-	recompute()   # cash/s, walls and troops scale with the wave
+	recompute()   # cash/s, building HP and troops scale with the wave
 	_drain_troop_events(ev)
 	ev.append({"t": "wave", "wave": wave})
 	if next_plan.is_empty() or int(next_plan["wave"]) != wave:
@@ -1098,7 +1212,7 @@ func _advance_wave(ev: Array) -> void:
 		ev.append(_telegraph_event(next_plan))   # late telegraph (skipped wave)
 	_adopt_plan(next_plan, ev, false)
 	if wave % boss_every == 0:
-		_spawn("boss", ev, Vector2.INF, boss_dir)
+		_spawn("boss", ev)
 	if Drops.courier_roll(drop_rng, wave):
 		_spawn_courier(ev)
 
@@ -1122,7 +1236,7 @@ func _on_death(ev: Array) -> void:
 	var coins: int = int(coins_run) + cashout
 	var bd: Dictionary = {
 		"wave": int(coins_wave), "kills": int(coins_kill), "boss": int(coins_boss),
-		"cashout": cashout, "mult": run_coin_mult(), "tier": tier, "gems": gems_run,
+		"cashout": cashout, "mult": run_coin_mult(), "tier": tier,
 		"mod_mult": mod_coin, "mode_mult": mode_coin,
 	}
 	var build: Array = []
@@ -1134,7 +1248,7 @@ func _on_death(ev: Array) -> void:
 		"core": core_id, "core_lvl": core_lvl, "picks": picks_taken.duplicate(), "insight": insight_found.duplicate(),
 		"loot": loot.duplicate(true), "specials_cast": special_casts, "tracks": tracks.duplicate(), "couriers": _couriers_caught()})
 	# Endless records its own best and never feeds the tier ladder (§3.1).
-	ev.append_array(BaseMeta.bank(save, coins, wave, tier, time_alive / 60.0, now_unix, gems_run, mode != "endless"))
+	ev.append_array(BaseMeta.bank(save, coins, wave, tier, time_alive / 60.0, now_unix, mode != "endless"))
 	if mode == "endless":
 		BaseMeta.record_endless(save, wave)
 	# Insight (win or loss) + loot are banked permanently.
@@ -1167,100 +1281,54 @@ static func telegraph_s() -> float:
 	return TuneRef.num("pc_telegraph_s", 3.0)
 
 
-## PC_SPEC §2.3 schedule: waves 1-9 one quadrant, 10-24 two, 25-49 three, 50+ four.
-func quad_count(w: int) -> int:
-	if w >= 50 or modifiers.has("allsides"):
-		return 4
-	if w >= 25:
-		return 3
-	if w >= 10:
-		return 2
-	return 1
-
-
-## Quadrant of a battlefield point: sectors [-112.5 + 90q, -22.5 + 90q) deg.
-static func quad_of(p: Vector2) -> int:
-	var d: Vector2 = p - CENTER
-	var deg: float = rad_to_deg(atan2(d.y, d.x))
-	return posmod(int(floor((deg + 112.5) / 90.0)), 4)
-
-
-## Quadrant of a base cell (Barricade lanes); the core cell has none.
-static func cell_quad(i: int) -> int:
-	if i == CORE_SLOT:
-		return -1
-	return quad_of(slot_pos(i))
-
-
 ## Spawn interval for wave w (the mobile curve, then perks / modifiers).
 func interval_for(w: int) -> float:
 	var pm: float = float(stats.get("perk_spawn", 1.0))
 	return maxf(min_spawn, spawn_base * pow(spawn_decay, float(w - 1))) * pm / maxf(0.01, count_mult)
 
 
-## Seeded plan for wave w: n distinct quadrants (manual Fisher-Yates), then
-## one entry per spawn tick, round-robin over the quadrants. `lead` delays
-## the first spawn (wave 1 opens with the telegraph lead). A marked elite
-## (loot carrier, from w8) is chosen on the separate drop RNG.
+## Seeded plan for wave w: one entry per spawn tick. `lead` delays the first
+## spawn (wave 1 opens with the telegraph lead). A marked elite (loot carrier,
+## from w8) is chosen on the separate drop RNG. Directions are rolled at spawn
+## time, uniformly around the Core.
 func _build_plan(w: int, lead: float) -> Dictionary:
-	var all_q: Array = [0, 1, 2, 3]
-	for i in range(all_q.size() - 1, 0, -1):
-		var j: int = rng.randi_range(0, i)
-		var tmp: Variant = all_q[i]
-		all_q[i] = all_q[j]
-		all_q[j] = tmp
-	var qs: Array = all_q.slice(0, quad_count(w))
-	qs.sort()
 	var iv: float = interval_for(w)
 	var t: float = lead + 0.5 * iv if lead > 0.0 else 0.5 * iv
 	var entries: Array = []
-	var counts: Dictionary = {}
-	for q in qs:
-		counts[int(q)] = 0
 	var elites: int = 0
-	var start: int = rng.randi_range(0, qs.size() - 1)
-	var k: int = 0
 	var cap: int = TuneRef.int_of("pc_plan_max", 400)
 	while t < wave_time - 0.001 and entries.size() < cap:
 		var kind: String = _roll_kind(w)
-		var q2: int = int(qs[(start + k) % qs.size()])
-		entries.append({"t": t, "kind": kind, "quad": q2})
-		counts[q2] = int(counts[q2]) + 1
+		entries.append({"t": t, "kind": kind})
 		if kind == "elite":
 			elites += 1
 		t += iv
-		k += 1
-	var bd: int = -1
-	if w % boss_every == 0:
-		bd = int(qs[rng.randi_range(0, qs.size() - 1)])
 	if entries.size() > 0 and Drops.elite_mark_roll(drop_rng, w):
 		var mi: int = drop_rng.randi_range(entries.size() / 4, entries.size() - 1)
 		(entries[mi] as Dictionary)["marked"] = true
-	return {"wave": w, "entries": entries, "quads": qs, "counts": counts, "elites": elites, "boss_dir": bd}
+	return {"wave": w, "entries": entries, "elites": elites, "boss": w % boss_every == 0}
 
 
 func _telegraph_event(p: Dictionary) -> Dictionary:
-	return {"t": "wave_telegraph", "wave": int(p["wave"]), "quadrants": (p["quads"] as Array).duplicate(), "counts": (p["counts"] as Dictionary).duplicate(), "total": (p["entries"] as Array).size(), "elites": int(p["elites"]), "boss_dir": int(p["boss_dir"]), "lead": telegraph_s()}
+	return {"t": "wave_telegraph", "wave": int(p["wave"]), "total": (p["entries"] as Array).size(), "elites": int(p["elites"]), "boss": bool(p["boss"]), "lead": telegraph_s()}
 
 
 ## Make `p` the current wave's plan. The opening wave telegraphs here (it has
 ## no previous wave to do it); later waves emit wave_start here.
 func _adopt_plan(p: Dictionary, ev: Array, opening: bool) -> void:
 	if plan_wave > 0:
-		last_wave_spawned = {"wave": plan_wave, "counts": wave_spawned}
+		last_wave_spawned = {"wave": plan_wave, "n": wave_spawned}
 	plan = p["entries"]
 	plan_idx = 0
 	plan_wave = int(p["wave"])
-	active_quads = (p["quads"] as Array).duplicate()
-	boss_dir = int(p["boss_dir"])
-	wave_spawned = {}
+	wave_spawned = 0
 	next_plan = {}
 	wave_cash0 = cash_earned
-	_rebuild_walls(ev)
+	_repair_buildings(ev)
 	if opening:
 		ev.append(_telegraph_event(p))
 	else:
-		ev.append({"t": "wave_start", "wave": wave, "quadrants": active_quads.duplicate(), "boss_dir": boss_dir})
+		ev.append({"t": "wave_start", "wave": wave, "boss": wave % boss_every == 0})
 
 
 func _spawn_due(ev: Array) -> void:
@@ -1272,21 +1340,12 @@ func _spawn_due(ev: Array) -> void:
 	while plan_idx < plan.size() and float((plan[plan_idx] as Dictionary)["t"]) <= wave_t:
 		var pe: Dictionary = plan[plan_idx]
 		plan_idx += 1
-		var q: int = int(pe["quad"])
 		var pk: String = String(pe["kind"])
 		var pm: bool = bool(pe.get("marked", false))
 		var gm: int = 1 if (pm or pk == "boss" or pk == "elite" or pk == "courier") else horde_mult
-		if _spawn(pk, ev, Vector2.INF, q, pm, 1.0 / float(gm)):
-			wave_spawned[q] = int(wave_spawned.get(q, 0)) + 1
+		if _spawn(pk, ev, Vector2.INF, pm, 1.0 / float(gm)):
+			wave_spawned += 1
 			_spawn_clones(gm)
-
-
-## Lane focus (Orbital auto-target prefers it): one of the 4 quadrants.
-func set_focus(q: int) -> Array:
-	if q < 0 or q > 3:
-		return []
-	focus_quad = q
-	return [{"t": "lane_focus", "quad": q}]
 
 
 ## Weighted roll in SPEC order: hauler, splitter, elite, ranged, skitter, drone.
@@ -1338,28 +1397,22 @@ func _spawn_clones(gm: int) -> void:
 		var d: Dictionary = en.get_dict(src)
 		d.erase("eid")
 		d["pos"] = CENTER + (en.pos[src] - CENTER).rotated(a)
-		var s2: int = add_enemy(d)
-		en.quad[s2] = quad_of(en.pos[s2])
+		add_enemy(d)
 
 
-func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF, quad: int = -1, marked: bool = false, share: float = 1.0) -> bool:
+func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF, marked: bool = false, share: float = 1.0) -> bool:
 	if en.count() >= max_bodies():
 		return false
 	var d: Dictionary = EnemyDB.get_def(kind)
-	var sc: float = scale() * hp_mult * float(stats.get("perk_enemy_hp", 1.0)) * enemy_hp_mod * (1.0 + 0.15 * float(pack_n("pk_gambit")))
+	var sc: float = scale() * hp_mult * float(stats.get("perk_enemy_hp", 1.0)) * enemy_hp_mod * (1.0 + 0.15 * float(pack_n("pk_gambit"))) * difficulty_hp()
 	var pos: Vector2 = at
 	if at == Vector2.INF:
-		var q: int = quad
-		if q < 0:
-			q = int(active_quads[rng.randi_range(0, active_quads.size() - 1)]) if active_quads.size() > 0 else rng.randi_range(0, 3)
-		var pt: int = 2 * q + rng.randi_range(0, 1)
-		var a: float = deg_to_rad(-90.0 + 45.0 * float(pt)) + rng.randf_range(-0.2, 0.2)
-		pos = CENTER + Vector2.from_angle(a) * SPAWN_R
+		pos = CENTER + Vector2.from_angle(rng.randf() * TAU) * spawn_r()
 	var e: int = en.alloc(next_eid, kind, pos)
 	en.hp[e] = float(d["hp"]) * sc
 	en.max_hp[e] = float(d["hp"]) * sc
 	en.spd[e] = float(d["spd"]) * float(stats.get("perk_enemy_spd", 1.0)) * enemy_spd_mod
-	en.dmg[e] = float(d["dmg"]) * pow(dmg_growth, float(wave - 1)) * hp_mult * enemy_dmg_mod
+	en.dmg[e] = float(d["dmg"]) * pow(dmg_growth, float(wave - 1)) * hp_mult * enemy_dmg_mod * difficulty_dmg()
 	en.cash[e] = float(d["cash"])
 	en.xp[e] = float(d["xp"])
 	en.coin[e] = float(d["coin"])
@@ -1395,9 +1448,8 @@ func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF, quad: int = -1, 
 		en.cash[e] = en.cash[e] * share
 		en.xp[e] = en.xp[e] * share
 		en.coin[e] = en.coin[e] * share
-	en.quad[e] = quad_of(pos)
 	if kind == "boss":
-		ev.append({"t": "boss", "pos": en.pos[e], "quad": en.quad[e]})
+		ev.append({"t": "boss", "pos": en.pos[e]})
 	if marked:
 		ev.append({"t": "elite_marked", "eid": en.eid[e], "pos": en.pos[e]})
 	return true
@@ -1452,11 +1504,10 @@ func set_enemy(id: int, fields: Dictionary) -> void:
 ## Courier (REDESIGN §2.6): a rare loot runner that crosses the field on a
 ## chord well outside the wall at 3x speed and escapes if not killed.
 func _spawn_courier(ev: Array) -> void:
-	var q: int = int(active_quads[0]) if active_quads.size() > 0 else 0
-	var a: float = deg_to_rad(-90.0 + 90.0 * float(q) + 22.5)
-	var from: Vector2 = CENTER + Vector2.from_angle(a) * SPAWN_R
-	var to: Vector2 = CENTER + Vector2.from_angle(a + deg_to_rad(110.0)) * SPAWN_R
-	if not _spawn("courier", ev, from, q):
+	var a: float = drop_rng.randf() * TAU
+	var from: Vector2 = CENTER + Vector2.from_angle(a) * spawn_r()
+	var to: Vector2 = CENTER + Vector2.from_angle(a + deg_to_rad(110.0)) * spawn_r()
+	if not _spawn("courier", ev, from):
 		return
 	var cd: int = en.order[en.order.size() - 1]
 	en.exit[cd] = to
@@ -1490,30 +1541,47 @@ func _core_damage(amt: float, ev: Array, kind: String, from: Vector2, src: int =
 func _move_enemies(dt: float, ev: Array) -> void:
 	var r_stop: float = TuneRef.num("ranged_stop", 230.0)
 	var r_fire: float = TuneRef.num("ranged_fire", 2.0)
-	var wall_r: float = TuneRef.num("pc_wall_r", STOP_R + 50.0)
-	var wall_slow: float = 1.0 - TuneRef.num("pc_wall_slow", 0.30)
 	var frozen: bool = float(buffs.get("warp_t", 0.0)) > 0.0
+	# Occupancy of standing buildings (the Core cell is never a blocker).
+	var blk: PackedByteArray = PackedByteArray()
+	blk.resize(N)
+	var any_b: bool = false
+	for i in N:
+		if i != CORE_SLOT and float(bld_hp[i]) > 0.0 and id_at(i) != "":
+			blk[i] = 1
+			any_b = true
 	# The hot pass runs inside EnemyStore (own-member packed access is ~5x
 	# faster than en.x[s] from here). It returns an ordered action log; the
-	# Core-side effects replay in the same order, so events/results are
-	# identical to the old single loop (nothing replayed feeds back into
-	# another body's movement).
-	var acts: PackedInt32Array = en.move(dt, frozen, CENTER, STOP_R, r_stop, r_fire, wall_r, wall_slow, walls)
+	# Core / building effects replay in the same order.
+	var acts: PackedInt32Array = en.move(dt, frozen, CENTER, STOP_R, r_stop, r_fire, blk if any_b else PackedByteArray(), SIDE, CELL)
 	var k: int = 0
 	var escaped: Array = []
+	var lost: bool = false
 	while k < acts.size():
 		var op: int = acts[k]
 		var e: int = acts[k + 1]
 		k += 2
 		match op:
-			EnemyStore.ACT_WALL:
-				ev.append({"t": "wall_broken", "quad": e})
+			EnemyStore.ACT_BLD:
+				var c: int = acts[k]
+				k += 1
+				if float(bld_hp[c]) <= 0.0 or id_at(c) == "":
+					continue
+				var amt: float = en.dmg[e]
+				bld_hp[c] = float(bld_hp[c]) - amt
+				ev.append({"t": "bld_hit", "slot": c, "dmg": amt, "pos": en.pos[e]})
+				if float(bld_hp[c]) <= 0.0:
+					_destroy_building(c, ev)
+					lost = true
 			EnemyStore.ACT_SHOT:
 				_core_damage(en.dmg[e], ev, "enemy_shot", en.pos[e], -1, en.share[e])
 			EnemyStore.ACT_HIT:
 				_core_damage(en.dmg[e], ev, "core_hit", en.pos[e], e, en.share[e])
 			EnemyStore.ACT_ESCAPE:
 				escaped.append(e)
+	if lost:
+		recompute()
+		_drain_troop_events(ev)
 	for x in escaped:
 		var xs: int = x
 		ev.append({"t": "courier_escape", "eid": en.eid[xs], "pos": en.pos[xs]})
@@ -2002,7 +2070,7 @@ func _reap(ev: Array) -> void:
 		var sp: Vector2 = (p as Array)[0]
 		var ssh: float = float((p as Array)[1])
 		for k in nc:
-			_spawn("mite", ev, sp + Vector2.from_angle(TAU * float(k) / float(maxi(1, nc))) * 10.0, -1, false, ssh)
+			_spawn("mite", ev, sp + Vector2.from_angle(TAU * float(k) / float(maxi(1, nc))) * 10.0, false, ssh)
 		ev.append({"t": "split", "pos": sp, "n": nc})
 
 
@@ -2026,18 +2094,12 @@ func _roll_drops(ed: int, ev: Array) -> void:
 		ev.append(d)
 
 
-## SPEC B3: boss kill pays a coin bounty plus gems (capped awards per run).
+## SPEC B3: boss kill pays a coin bounty (gems removed, owner feedback #1).
 func _boss_bounty(pos: Vector2, ev: Array) -> void:
 	var c: int = int(floor(TuneRef.num("boss_bounty_base", 25.0) * float(wave) / 10.0 * coin_mult))
 	coins_run += float(c)
 	coins_boss += float(c)
-	var g: int = 0
-	if boss_gem_awards < TuneRef.int_of("boss_gem_cap", 3):
-		boss_gem_awards += 1
-		g = mini(boss_gem_left, TuneRef.int_of("boss_gem_t3", 2) if tier >= 3 else 1)
-		boss_gem_left -= g
-		gems_run += g
-	ev.append({"t": "boss_bounty", "coins": c, "gems": g, "pos": pos})
+	ev.append({"t": "boss_bounty", "coins": c, "pos": pos})
 
 
 func _check_queue(ev: Array) -> void:
@@ -2048,7 +2110,7 @@ func _check_queue(ev: Array) -> void:
 
 
 func _busy() -> bool:
-	return draft.size() > 0 or pending_place != "" or perk_offer.size() > 0 or mutation_offer.size() > 0
+	return draft.size() > 0 or pending_place != "" or pending_upgrade != "" or perk_offer.size() > 0 or mutation_offer.size() > 0
 
 
 ## Endless mutation pick (every 25 waves): 3 distinct, non-maxed mutations.
@@ -2097,12 +2159,14 @@ func _check_level(ev: Array) -> void:
 ## Draft context for Draft.roll_hand (what the run can use right now).
 func _draft_ctx(guarantee: String) -> Dictionary:
 	var owned: Dictionary = {}
+	var copies: Dictionary = {}
 	var free: bool = false
 	var free_outer: bool = false
 	for i in N:
 		var id: String = id_at(i)
 		if id != "":
-			owned[id] = lvl_at(i)
+			owned[id] = mini(int(owned.get(id, 99)), lvl_at(i))
+			copies[id] = int(copies.get(id, 0)) + 1
 		elif is_free(i):
 			free = true
 			if ring_of(i) >= 2:
@@ -2116,7 +2180,7 @@ func _draft_ctx(guarantee: String) -> Dictionary:
 		if PickDB.insight_capped(save, String(id)) or insight_found.has(id):
 			blocked.append(id)
 	return {
-		"owned": owned, "free": free and not at_cap(), "free_outer": free_outer and not at_cap(), "huts": hut_count(),
+		"owned": owned, "copies": copies, "free": free and not at_cap(), "free_outer": free_outer and not at_cap(), "huts": hut_count(),
 		"hut_max": PickDB.HUT_MAX + int(pf("hut_max")),
 		"packs": packs, "specials": sp, "banished": banished, "luck": luck,
 		"eco_mult": 1.5 if String(core_def.get("trait", "")) == "compound" else 1.0,
@@ -2191,17 +2255,18 @@ func choose_card(idx: int, arg: int = -1) -> Array:
 	match kind:
 		"new":
 			pending_place = id
-			ev.append({"t": "place_mode", "id": id})
-			ev.append({"t": "pick_applied", "id": id, "fam": String(card["fam"]), "kind": kind, "rarity": String(card["rarity"])})
+			ev.append({"t": "place_mode", "id": id, "dup": bool(card.get("dup", false))})
+			ev.append({"t": "pick_applied", "id": id, "fam": String(card["fam"]), "kind": kind, "rarity": String(card["rarity"]), "reward": "building"})
 			return ev
 		"plus":
-			var si: int = slot_of_id(id)
-			if si >= 0:
-				var s: Dictionary = slots[si]
-				s["run"] = mini(lvl_cap(), int(s["run"]) + 1)
-				recompute()
-				ev.append({"t": "building_level", "slot": si, "id": id, "level": lvl_at(si)})
-				ev.append({"t": "upgraded", "slot": si, "level": lvl_at(si)})
+			# Owner feedback #1: an upgrade is applied by clicking / dragging it
+			# onto the building (apply_upgrade), never silently.
+			var cand: Array = upgrade_targets(id)
+			if not cand.is_empty():
+				pending_upgrade = id
+				ev.append({"t": "upgrade_mode", "id": id, "slots": cand})
+				ev.append({"t": "pick_applied", "id": id, "fam": String(card["fam"]), "kind": kind, "rarity": String(card["rarity"]), "reward": "upgrade"})
+				return ev
 		"pack":
 			packs[id] = pack_n(id) + 1
 			recompute()
@@ -2219,7 +2284,7 @@ func choose_card(idx: int, arg: int = -1) -> Array:
 		"insight":
 			insight_found.append(id)
 			ev.append({"t": "insight_found", "id": id, "name": String(PickDB.get_def(id).get("name", id))})
-	ev.append({"t": "pick_applied", "id": id, "fam": String(card["fam"]), "kind": kind, "rarity": String(card["rarity"])})
+	ev.append({"t": "pick_applied", "id": id, "fam": String(card["fam"]), "kind": kind, "rarity": String(card["rarity"]), "reward": Draft.reward_of(kind)})
 	_drain_troop_events(ev)
 	_check_queue(ev)
 	return ev
@@ -2305,6 +2370,57 @@ func place(i: int) -> Array:
 	return ev
 
 
+## Cells holding `id` below the level cap (targets of a pending upgrade).
+func upgrade_targets(id: String) -> Array:
+	var out: Array = []
+	for i in N:
+		if id_at(i) == id and lvl_at(i) < mini(lvl_cap(), PickDB.max_of(id)):
+			out.append(i)
+	return out
+
+
+## Apply the pending upgrade onto the building on cell i (click / drag-drop).
+func apply_upgrade(i: int) -> Array:
+	var ev: Array = []
+	if pending_upgrade == "" or i < 0 or i >= N or not upgrade_targets(pending_upgrade).has(i):
+		return ev
+	var id: String = pending_upgrade
+	pending_upgrade = ""
+	var s: Dictionary = slots[i]
+	s["run"] = mini(lvl_cap(), int(s["run"]) + 1)
+	recompute()
+	ev.append({"t": "building_level", "slot": i, "id": id, "level": lvl_at(i)})
+	ev.append({"t": "upgraded", "slot": i, "level": lvl_at(i)})
+	_drain_troop_events(ev)
+	_check_queue(ev)
+	return ev
+
+
+## Drop a pending upgrade (Esc / its building was destroyed).
+func cancel_upgrade() -> Array:
+	if pending_upgrade == "":
+		return []
+	var id: String = pending_upgrade
+	pending_upgrade = ""
+	var ev: Array = [{"t": "upgrade_cancelled", "id": id}]
+	_check_queue(ev)
+	return ev
+
+
+## Everything that buffs the run without a building (owner feedback #1: the
+## left "Perks" list): upgrade packs, gold perks and Insight found.
+func perk_list() -> Array:
+	var out: Array = []
+	for id in packs.keys():
+		out.append({"id": String(id), "kind": "pack", "n": int(packs[id]), "name": String(PickDB.get_def(String(id)).get("name", id)), "desc": String(PickDB.get_def(String(id)).get("desc", ""))})
+	for id in perks_taken:
+		var d: Dictionary = PerkDB.get_def(String(id))
+		out.append({"id": String(id), "kind": "gold", "n": 1, "name": String(d.get("name", id)), "desc": String(d.get("desc", ""))})
+	for id in insight_found:
+		out.append({"id": String(id), "kind": "insight", "n": 1, "name": String(PickDB.get_def(String(id)).get("name", id)), "desc": String(PickDB.get_def(String(id)).get("desc", ""))})
+	return out
+
+
 ## Drop a pending placement (no legal cell / player cancels with Esc).
 func cancel_place() -> Array:
 	if pending_place == "":
@@ -2316,8 +2432,8 @@ func cancel_place() -> Array:
 	return ev
 
 
-## Buy one level of a Core cash track (REDESIGN §2.2); opens rings 2/3 at
-## track totals 10/30.
+## Buy one level of a Core cash track (REDESIGN §2.2, owner feedback #1:
+## few, big, expensive levels with a drawback each).
 func buy_track(t: String) -> Array:
 	var ev: Array = []
 	if over or not TRACKS.has(t):
@@ -2331,30 +2447,7 @@ func buy_track(t: String) -> Array:
 	recompute()
 	ev.append({"t": "track", "track": t, "level": int(tracks[t]), "cost": c})
 	ev.append({"t": "upgraded", "slot": CORE_SLOT, "level": int(tracks[t]), "track": t})
-	_open_rings(ev)
 	return ev
-
-
-## Track total that opens ring r; Bastion Heart (ring_delay) opens each ring
-## one step later (ring 2 at ring 3's threshold, ring 3 at 60).
-func ring_threshold(r: int) -> int:
-	var steps: Array = [int(RING_OPEN[2]), int(RING_OPEN[3]), 60, 100]
-	return int(steps[clampi(r - 2 + int(pf("ring_delay")), 0, steps.size() - 1)])
-
-
-func _open_rings(ev: Array) -> void:
-	var tot: int = track_total()
-	for r in [2, 3]:
-		var ring: int = r
-		if rings_open >= ring or tot < ring_threshold(ring):
-			continue
-		rings_open = ring
-		var cells: Array = []
-		for i in N:
-			if ring_of(i) == ring:
-				unlocked[i] = true
-				cells.append(i)
-		ev.append({"t": "ring_open", "ring": ring, "cells": cells})
 
 
 ## Legacy view hook: the Core cell buys the Damage track; buildings level only
@@ -2365,7 +2458,7 @@ func upgrade(i: int) -> Array:
 	return []
 
 
-## Rings open through Core track totals now (no per-cell cash unlocks).
+## The grid size is a Research unlock (no per-cell cash unlocks in a run).
 func unlock_plot(_i: int) -> Array:
 	return []
 
@@ -2446,8 +2539,8 @@ func cast_special(k: int, cell: Variant = -1) -> Dictionary:
 	return {"result": "ok", "ev": ev}
 
 
-## Centre of the enemy with the most neighbours within r (ties: the focused
-## lane, then the closest to the Core) — deterministic Orbital auto-aim.
+## Centre of the enemy with the most neighbours within r (ties: the closest
+## to the Core) — deterministic Orbital auto-aim.
 func _densest(r: float) -> Vector2:
 	var best: Vector2 = Vector2.INF
 	var best_n: int = -1
@@ -2457,8 +2550,6 @@ func _densest(r: float) -> Vector2:
 			continue
 		var p: Vector2 = en.pos[ed]
 		var n: int = eh.density(p, r)   # exact neighbour count via the hash
-		if en.quad[ed] == focus_quad:
-			n += 1
 		var d: float = CENTER.distance_squared_to(p)
 		if n > best_n or (n == best_n and d < best_d):
 			best_n = n
@@ -2556,9 +2647,9 @@ func move_building(a: int, b: int, paused: bool = false) -> Array:
 		return []
 	var ida: String = id_at(a)
 	var idb: String = id_at(b)
-	if ida == "" or not bool(unlocked[b]) or not BaseMeta.place_ok(b, ida):
+	if ida == "" or not bool(unlocked[b]) or not ring_ok(b, ida):
 		return []
-	if idb != "" and not BaseMeta.place_ok(a, idb):
+	if idb != "" and not ring_ok(a, idb):
 		return []
 	var c: int = move_cost(a, b, paused)
 	if cash < float(c):

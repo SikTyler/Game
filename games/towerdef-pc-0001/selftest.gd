@@ -5,6 +5,7 @@ extends SceneTree
 ## Run: godot --headless --path games/towerdef-pc-0001/ --script res://selftest.gd
 
 const TowerState := preload("res://TowerState.gd")
+const MissionDB := preload("res://data/MissionDB.gd")
 const BaseMeta := preload("res://BaseMeta.gd")
 const Draft := preload("res://Draft.gd")
 const BuildingDB := preload("res://data/BuildingDB.gd")
@@ -58,6 +59,12 @@ func _c(i5: int) -> int:
 	return BaseMeta.idx5_to_7(i5)
 
 
+## Mobile 5x5 index -> run board index (FEEDBACK-1: 11x11, Core at (5,5)):
+## (r, c) -> (r+3, c+3); rings are the same as on the old 7x7 board.
+func _r(i5: int) -> int:
+	return (i5 / 5 + 3) * 11 + (i5 % 5 + 3)
+
+
 func _fresh(save: Dictionary = {}) -> RefCounted:
 	var S = TowerState.new()
 	S.setup(1234, BaseMeta.normalize(save))
@@ -69,27 +76,27 @@ func _initialize() -> void:
 	var S = _fresh()
 	# REDESIGN: the Core's HP comes from its CoreDB sheet (Bastion L1 = 120).
 	_check("setup: full hp (Bastion sheet)", is_equal_approx(S.hp, 120.0) and S.core_id == "bastion" and S.core_lvl == 1)
-	_check("setup: inner ring unlocked, outer locked", bool(S.unlocked[_c(6)]) and not bool(S.unlocked[_c(0)]) and not bool(S.unlocked[_c(12)]))
+	_check("setup: inner ring unlocked, outer locked", bool(S.unlocked[_r(6)]) and not bool(S.unlocked[_r(0)]) and not bool(S.unlocked[_r(12)]))
 	_check("setup: 8 free slots", S.free_slots().size() == 8)
 	_check("setup: core is the only weapon", (S.stats["weapons"] as Array).size() == 1)
 
 	# --- Stage 2: stats math + adjacency -------------------------------------
 	# REDESIGN (deliberate): building numbers follow REDESIGN_SYSTEMS §2.3
 	# (L1 sheet, +35% main stat per level); Armory is +15% to neighbours.
-	S.slots[_c(7)] = {"id": "gun", "perm": 0, "run": 1}
+	S.slots[_r(7)] = {"id": "gun", "perm": 0, "run": 1}
 	S.recompute()
 	var gun_dmg: float = float((S.stats["weapons"] as Array)[0]["dmg"])
 	_check("gatling L1 6 dmg x building scale (Steadfast-free)", is_equal_approx(gun_dmg, 6.0 * TowerState.bld_dmg()))
-	S.slots[_c(6)] = {"id": "armory", "perm": 0, "run": 1}   # adjacent to gun (7) and core (12)
+	S.slots[_r(6)] = {"id": "armory", "perm": 0, "run": 1}   # adjacent to gun (7) and core (12)
 	S.recompute()
 	var buffed: float = float((S.stats["weapons"] as Array)[0]["dmg"])
-	_check("armory buffs adjacent gun +15%", is_equal_approx(buffed, gun_dmg * 1.15) and _has_link(S, _c(6), _c(7), "ARM"))
-	S.slots[_c(0)] = {"id": "armory", "perm": 0, "run": 1}   # NOT adjacent to 7
+	_check("armory buffs adjacent gun +15%", is_equal_approx(buffed, gun_dmg * 1.15) and _has_link(S, _r(6), _r(7), "ARM"))
+	S.slots[_r(0)] = {"id": "armory", "perm": 0, "run": 1}   # NOT adjacent to 7
 	S.recompute()
 	_check("armory does not buff non-adjacent", is_equal_approx(float((S.stats["weapons"] as Array)[0]["dmg"]), buffed))
 	S = _fresh()
-	S.slots[_c(16)] = {"id": "mine", "perm": 0, "run": 2}
-	S.slots[_c(18)] = {"id": "bulwark", "perm": 0, "run": 1}
+	S.slots[_r(16)] = {"id": "mine", "perm": 0, "run": 2}
+	S.slots[_r(18)] = {"id": "bulwark", "perm": 0, "run": 1}
 	S.recompute()
 	_check("mine L2 cash/s = Core 2.0 + 0.8x1.35, Steadfast +1%/building", is_equal_approx(float(S.stats["cash_ps"]), (2.0 + 0.8 * 1.35) * 1.02))
 	_check("bulwark raises max hp +40", is_equal_approx(float(S.stats["max_hp"]), 160.0))
@@ -108,7 +115,9 @@ func _initialize() -> void:
 	S = _fresh()
 	S.spawn_hold = true
 	S.stats["weapons"] = []   # disarm to isolate
-	S.add_enemy({"kind": "hauler", "pos": TowerState.CENTER + Vector2(140, 0), "hp": 999.0, "max_hp": 999.0, "spd": 28.0, "dmg": 10.0, "cash": 3.0, "xp": 3.0, "coin": 0.6, "size": 26.0, "atk_cd": 0.0, "slow_t": 0.0})
+	# FEEDBACK-1: melee contact is at STOP_R from the Core centre (enemies now
+	# walk through the grid; buildings in the way are attacked first).
+	S.add_enemy({"kind": "hauler", "pos": TowerState.CENTER + Vector2(TowerState.STOP_R + 1.0, 0), "hp": 999.0, "max_hp": 999.0, "spd": 28.0, "dmg": 10.0, "cash": 3.0, "xp": 3.0, "coin": 0.6, "size": 26.0, "atk_cd": 0.0, "slow_t": 0.0})
 	ev = S.tick(0.1)
 	_check("enemy at wall hits core (10 dmg - 2 armor)", S.hp < 120.0 and S.hp > 111.0)
 
@@ -145,21 +154,49 @@ func _initialize() -> void:
 		if (c["tags"] as Array).has("eco"):
 			eco_n += 1
 	_check("G1 draft offers eco AND non-eco", eco_n >= 1 and eco_n <= 2)
-	_check("draft slows time", is_equal_approx(S.time_scale(), 0.2))
+	_check("FB1 the sim stays live during a draft (no slow-mo)", is_equal_approx(S.time_scale(), 1.0))
 	S.draft = [Draft.card_for("mortar", S._draft_ctx("")), Draft.card_for("mine", S._draft_ctx("")), Draft.card_for("pk_arsenal", S._draft_ctx(""))]
 	var card: Dictionary = S.draft[0]
 	S.choose_card(0)
 	_check("new card enters place mode", S.pending_place == String(card["id"]) and S.draft.is_empty())
-	S.place(_c(0))  # locked — rejected
+	S.place(_r(0))  # locked — rejected
 	_check("cannot place on locked slot", S.pending_place != "")
-	ev = S.place(_c(6))
-	_check("placed building in free slot", S.id_at(_c(6)) == "mortar" and S.pending_place == "" and is_equal_approx(S.time_scale(), 1.0))
+	ev = S.place(_r(6))
+	_check("placed building in free slot", S.id_at(_r(6)) == "mortar" and S.pending_place == "" and is_equal_approx(S.time_scale(), 1.0))
 	S.grant_draft()
-	var plus: Dictionary = Draft.card_for("mortar", S._draft_ctx(""))
-	_check("owned building offers only a plus card (Lv1 -> 2)", String(plus["kind"]) == "plus" and int(plus["lvl"]) == 1 and int(plus["to"]) == 2)
+	# FEEDBACK-1 (deliberate): a duplicate WEAPON is a new individual building;
+	# a duplicate non-weapon is an upgrade applied onto the existing building.
+	var dup: Dictionary = Draft.card_for("mortar", S._draft_ctx(""))
+	_check("FB1 duplicate weapon = new individual building", String(dup["kind"]) == "new" and bool(dup["dup"]) and String(dup["reward"]) == "building")
+	S.slots[_r(8)] = {"id": "mine", "perm": 0, "run": 1}
+	S.recompute()
+	var plus: Dictionary = Draft.card_for("mine", S._draft_ctx(""))
+	_check("owned non-weapon offers only a plus card (Lv1 -> 2)", String(plus["kind"]) == "plus" and int(plus["lvl"]) == 1 and int(plus["to"]) == 2 and String(plus["reward"]) == "upgrade")
 	S.draft = [plus]
+	ev = S.choose_card(0)
+	_check("FB1 an upgrade waits to be applied onto its building", S.lvl_at(_r(8)) == 1 and S.pending_upgrade == "mine" and _evts(ev, "upgrade_mode").size() == 1 and (_evts(ev, "upgrade_mode")[0]["slots"] as Array) == [_r(8)])
+	_check("FB1 apply_upgrade refuses another building", S.apply_upgrade(_r(6)).is_empty() and S.pending_upgrade == "mine")
+	ev = S.apply_upgrade(_r(8))
+	_check("plus card raises owned level (applied by click)", S.lvl_at(_r(8)) == 2 and S.pending_upgrade == "" and _evts(ev, "building_level").size() == 1)
+	# Every card names its reward type; perks land in the Perks list.
+	var typed: bool = true
+	var rr := RandomNumberGenerator.new()
+	rr.seed = 5
+	for k in 40:
+		for c in Draft.roll_hand(rr, S._draft_ctx("")):
+			typed = typed and ["building", "upgrade", "perk", "ability"].has(String((c as Dictionary).get("reward", "")))
+	_check("FB1 every draft card carries its reward type", typed)
+	S.draft = [Draft.card_for("pk_arsenal", S._draft_ctx(""))]
+	ev = S.choose_card(0)
+	S.perks_taken.append("p_dmg")
+	var pl: Array = S.perk_list()
+	_check("FB1 perk picks apply instantly and list under Perks (packs + gold perks)", int(S.packs.get("pk_arsenal", 0)) == 1 and String(_evts(ev, "pick_applied")[0]["reward"]) == "perk" and pl.any(func(p: Variant) -> bool: return String((p as Dictionary)["id"]) == "pk_arsenal" and String((p as Dictionary)["kind"]) == "pack") and pl.any(func(p: Variant) -> bool: return String((p as Dictionary)["kind"]) == "gold"))
+	# A pending upgrade whose only target is destroyed is cancelled.
+	S.draft = [Draft.card_for("mine", S._draft_ctx(""))]
 	S.choose_card(0)
-	_check("plus card raises owned level", S.lvl_at(_c(6)) == 2)
+	var dev2: Array = []
+	S._destroy_building(_r(8), dev2)
+	_check("FB1 destroying the upgrade's last target cancels it", S.pending_upgrade == "" and _evts(dev2, "upgrade_cancelled").size() == 1 and _evts(dev2, "building_destroyed").size() == 1)
 	var r1 := RandomNumberGenerator.new()
 	r1.seed = 99
 	var r2 := RandomNumberGenerator.new()
@@ -171,15 +208,15 @@ func _initialize() -> void:
 	# REDESIGN (deliberate): cash buys the 5 Core tracks; buildings level only
 	# through duplicate picks; rings open by track total (no per-cell unlock).
 	S = _fresh()
-	S.slots[_c(7)] = {"id": "gun", "perm": 0, "run": 1}
+	S.slots[_r(7)] = {"id": "gun", "perm": 0, "run": 1}
 	S.recompute()
 	S.cash = 5.0
 	_check("track refused when broke", S.buy_track("dmg").is_empty() and S.core_run_lvl == 0)
 	S.cash = 1000.0
-	_check("cash cannot level a building", S.upgrade(_c(7)).is_empty() and S.lvl_at(_c(7)) == 1)
-	S.upgrade(_c(12))
+	_check("cash cannot level a building", S.upgrade(_r(7)).is_empty() and S.lvl_at(_r(7)) == 1)
+	S.upgrade(_r(12))
 	_check("Core cell upgrade = Damage track", S.core_run_lvl == 1 and int(S.tracks["dmg"]) == 1 and S.cash < 1000.0)
-	_check("no per-cell run unlocks", S.unlock_plot(_c(0)).is_empty() and not bool(S.unlocked[_c(0)]))
+	_check("no per-cell run unlocks", S.unlock_plot(_r(0)).is_empty() and not bool(S.unlocked[_r(0)]))
 
 	# --- Stage 8: death banks coins into permanent save ----------------------
 	var save: Dictionary = BaseMeta.default_save()
@@ -204,7 +241,7 @@ func _initialize() -> void:
 	S.setup(6, save)
 	# REDESIGN (deliberate): the run grid starts EMPTY — permanent buildings
 	# no longer enter runs (the Outpost replaces them in ENGINE-META).
-	_check("run grid starts empty (no perm buildings / unlocks)", S.building_count() == 0 and not bool(S.unlocked[_c(0)]))
+	_check("run grid starts empty (no perm buildings / unlocks)", S.building_count() == 0 and not bool(S.unlocked[_r(0)]))
 	_check("legacy perm core hp applied to the Core (+3%/lvl)", is_equal_approx(S.hp, 120.0 * 1.03))
 
 	# --- Stage 10: persistence round-trip ------------------------------------
@@ -279,12 +316,11 @@ func _meta_stages() -> void:
 	var m: Dictionary = BaseMeta.normalize(BaseMeta.migrate(v1))
 	var rf1: int = BaseMeta.place_cost("gun") + BaseMeta.upgrade_cost(1) + BaseMeta.upgrade_cost(2) + 2 * 500 + BaseMeta.core_cost(1)
 	_check("AC-1 v1 -> v4: base refunded, Core stats -> Bastion L2", int(m["coins"]) == 123 + rf1 and int(m["runs"]) == 5 and int(m["core"]["hp"]) == 0 and (m["slots"] as Dictionary).is_empty() and Cores.level(m, "bastion") == 2)
-	_check("AC-1 migrate v2 fields", int(m["best_wave_by_tier"]["1"]) == 37 and int(m["best_wave"]) == 37 and int(m["gems"]) == 0 and int(m["tier"]) == 1 and int(m["last_seen"]) == 0 and int(m["version"]) == BaseMeta.VERSION)
+	_check("AC-1 migrate v2 fields", int(m["best_wave_by_tier"]["1"]) == 37 and int(m["best_wave"]) == 37 and not m.has("gems") and int(m["tier"]) == 1 and int(m["last_seen"]) == 0 and int(m["version"]) == BaseMeta.VERSION)
 	# REDESIGN (ENGINE-META, deliberate): labs live in save.research now.
 	_check("AC-1 armor lab dropped, others kept", not (m["research"]["lvls"] as Dictionary).has("armor") and int(m["research"]["lvls"]["coin"]) == 2)
 	_check("normalize on raw v1 also migrates", int(BaseMeta.normalize(v1)["version"]) == BaseMeta.VERSION and int(BaseMeta.normalize(v1)["best_wave_by_tier"]["1"]) == 37)
 	var v2: Dictionary = BaseMeta.normalize(m)
-	v2["gems"] = 77
 	v2["last_seen"] = NOW
 	v2["best_coin_rate"] = 12.5
 	v2["research"]["running"] = [{"track": "dmg", "to_lvl": 1, "start": NOW, "end": NOW + 300}]
@@ -292,7 +328,7 @@ func _meta_stages() -> void:
 	v2["cards"]["equipped"] = ["c_dmg"]
 	v2 = BaseMeta.normalize(v2)
 	var rt: Dictionary = BaseMeta.normalize(JSON.parse_string(JSON.stringify(v2)))
-	_check("AC-2 v2 round-trips through JSON", JSON.stringify(rt) == JSON.stringify(v2) and int(rt["gems"]) == 77)
+	_check("AC-2 v2 round-trips through JSON", JSON.stringify(rt) == JSON.stringify(v2) and not rt.has("gems"))
 	var bad: Dictionary = BaseMeta.normalize(v2)
 	bad["slots"][str(_c(8))] = {"id": "laser_of_doom", "lvl": 1}
 	bad["slots"][str(_c(7))] = {"id": "gun", "lvl": 99}   # legacy view key (v4 keeps it empty)
@@ -310,8 +346,8 @@ func _meta_stages() -> void:
 	_check("AC-4 first v2 boot pays no offline (Outpost away report)", int(Outpost.away_report(m, NOW)["coins"]) == 0)
 	# bank + perm cap
 	var b: Dictionary = BaseMeta.default_save()
-	var bev: Array = BaseMeta.bank(b, 100, 35, 1, 10.0, NOW, 2)
-	_check("bank records tier best, rate, last_seen, gems", int(b["best_wave_by_tier"]["1"]) == 35 and is_equal_approx(float(b["best_coin_rate"]), 10.0) and int(b["last_seen"]) == NOW and int(b["gems"]) == 2 and int(b["gem_log"]["boss"]) == 2 and bev.is_empty())
+	var bev: Array = BaseMeta.bank(b, 100, 35, 1, 10.0, NOW)
+	_check("bank records tier best, rate, last_seen, coins (no gems)", int(b["best_wave_by_tier"]["1"]) == 35 and is_equal_approx(float(b["best_coin_rate"]), 10.0) and int(b["last_seen"]) == NOW and int(b["coins"]) == 100 and not b.has("gems") and bev.is_empty())
 	_check("perm lvl cap 10 at T1", BaseMeta.perm_lvl_cap(b) == 10)
 	b["coins"] = 1_000_000
 	BaseMeta.try_place(b, _c(7), "gun")
@@ -323,11 +359,11 @@ func _meta_stages() -> void:
 	_check("T1 only at start", Tiers.highest(b) == 1 and Tiers.is_unlocked(b, 1) and not Tiers.is_unlocked(b, 2))
 	bev = BaseMeta.bank(b, 10, 39, 1, 1.0, NOW)
 	_check("w39 in T1 does not unlock T2", Tiers.highest(b) == 1 and bev.is_empty())
-	var g0: int = int(b["gems"])
+	var g0: int = int(b["coins"])
 	bev = BaseMeta.bank(b, 10, 40, 1, 1.0, NOW)
-	_check("AC-5 w40 in T1 unlocks T2 with +10 gems", Tiers.highest(b) == 2 and _evts(bev, "tier_unlocked").size() == 1 and int(b["gems"]) == g0 + 10 and int(b["gem_log"]["tier"]) == 10)
+	_check("AC-5 w40 in T1 unlocks T2 with +500 coins (FB1: was 10 gems)", Tiers.highest(b) == 2 and _evts(bev, "tier_unlocked").size() == 1 and int(b["coins"]) == g0 + 10 + 500)
 	bev = BaseMeta.bank(b, 10, 45, 1, 1.0, NOW)
-	_check("AC-5 tier unlock rewarded once", bev.is_empty() and int(b["gems"]) == g0 + 10)
+	_check("AC-5 tier unlock rewarded once", bev.is_empty() and int(b["coins"]) == g0 + 10 + 500 + 10)
 	_check("perm cap +5 per tier", BaseMeta.perm_lvl_cap(b) == 15)
 	bev = BaseMeta.bank(b, 10, 49, 2, 1.0, NOW)
 	_check("w49 in T2 does not unlock T3", Tiers.highest(b) == 2)
@@ -350,28 +386,21 @@ func _meta_stages() -> void:
 	_hall(L, 4)
 	L["coins"] = 50
 	_check("lab cost table", Labs.cost("dmg", 0) == 80 and Labs.cost("dmg", 1) == 144 and Labs.cost("coin", 0) == 60)
-	_check("lab duration table", Labs.duration(L, "dmg", 0) == 300 and Labs.duration(L, "speed", 1) == 5400)
+	# FEEDBACK-1 (deliberate): research is INSTANT — no timers, no rush, no gems.
+	_check("FB1 lab duration is 0 (instant)", Labs.duration(L, "dmg", 0) == 0 and Labs.duration(L, "speed", 1) == 0)
 	var snap: String = JSON.stringify(L)
 	_check("AC-11 start fails when broke, no mutation", Labs.start(L, "dmg", NOW).is_empty() and JSON.stringify(L) == snap)
 	L["coins"] = 10000
 	var lev: Array = Labs.start(L, "dmg", NOW)
-	_check("AC-11 start deducts cost, sets end", _evts(lev, "lab_started").size() == 1 and int(L["coins"]) == 10000 - 80 and int((Labs.running(L)[0] as Dictionary)["end"]) == NOW + 300)
-	_check("cannot double-start a track", Labs.start(L, "dmg", NOW).is_empty())
+	_check("FB1 start deducts cost and completes at once", _evts(lev, "lab_started").size() == 1 and _evts(lev, "lab_done").size() == 1 and int(L["coins"]) == 10000 - 80 and Labs.level(L, "dmg") == 1 and Labs.running(L).is_empty())
+	_check("FB1 the same track can be bought again right away", not Labs.start(L, "dmg", NOW).is_empty() and Labs.level(L, "dmg") == 2)
 	Labs.start(L, "coin", NOW)
-	snap = JSON.stringify(L)
-	_check("AC-11 start fails without free slot, no mutation", Labs.start(L, "xp", NOW).is_empty() and JSON.stringify(L) == snap)
-	_check("AC-12 claim before end is a no-op", Labs.claim(L, NOW + 299).is_empty() and Labs.level(L, "dmg") == 0)
-	_check("progress halfway", is_equal_approx(Labs.progress(L, 0, NOW + 150), 0.5))
-	lev = Labs.claim(L, NOW + 300)
-	_check("AC-12 claim completes exactly the finished slot", _evts(lev, "lab_done").size() == 2 and Labs.level(L, "dmg") == 1 and Labs.level(L, "coin") == 1 and Labs.running(L).is_empty())
-	Labs.start(L, "speed", NOW)   # 1800 s = 30 min -> 1 gem
-	(Labs.running(L)[0] as Dictionary)["end"] = NOW + 5400   # 90 min left -> 3 gems
-	_check("AC-13 rush cost ceil(rem_min/30)", Labs.rush_cost(L, 0, NOW) == 3 and Labs.rush_cost(L, 0, NOW + 1801) == 2 and Labs.rush_cost(L, 0, NOW + 5399) == 1)
-	snap = JSON.stringify(L)
-	_check("AC-13 rush fails w/o gems, no mutation", Labs.rush(L, 0, NOW).is_empty() and JSON.stringify(L) == snap)
-	L["gems"] = 5
-	lev = Labs.rush(L, 0, NOW)
-	_check("AC-13 rush completes now", _evts(lev, "lab_rushed").size() == 1 and int(L["gems"]) == 2 and Labs.level(L, "speed") == 1)
+	_check("FB1 no queue limit with a Hall (instant)", not Labs.start(L, "xp", NOW).is_empty() and Labs.level(L, "coin") == 1 and Labs.level(L, "xp") == 1)
+	# Old saves: a project left in `running` completes on the next claim.
+	(Labs.running(L) as Array).append({"track": "speed", "to_lvl": 1, "start": NOW, "end": NOW + 99999})
+	lev = Labs.claim(L, NOW)
+	_check("FB1 legacy queued research completes on claim", _evts(lev, "lab_done").size() == 1 and Labs.level(L, "speed") == 1 and Labs.running(L).is_empty())
+	_check("FB1 no rush / gem API left", not Labs.new().has_method("rush") and not Labs.new().has_method("rush_cost") and not BaseMeta.default_save().has("gems"))
 	_check("A4 speed steps follow speed lab", Labs.speed_steps(L) == [1.0, 1.5] and Labs.speed_steps(BaseMeta.default_save()) == [1.0])
 	var hq: Dictionary = BaseMeta.default_save()
 	var qok: Array = []
@@ -381,9 +410,9 @@ func _meta_stages() -> void:
 	var nohall: Dictionary = BaseMeta.default_save()
 	nohall["outpost"]["buildings"] = {}
 	_check("AC-20 queues 1/2/3 at Hall L1/L4/L8, 0 without a Hall", qok == [1, 1, 2, 2, 3, 3] and Labs.slots(nohall) == 0 and Labs.start(nohall, "dmg", NOW).is_empty())
-	_check("AC-20 every LabDB project + Part Analysis + Crate Theory", LabDB.IDS.size() == 12 and LabDB.DEFS.has("part_analysis") and LabDB.DEFS.has("crate_theory") and String(LabDB.DEFS["offcap"]["name"]) == "Storage Tech" and String(LabDB.DEFS["offrate"]["name"]) == "Logistics Tech")
-	L["research"]["lvls"]["labspeed"] = 10
-	_check("lab speed floors at 0.4x", is_equal_approx(Labs.speed_mult(L), 0.4) and Labs.duration(L, "dmg", 0) == 120)
+	# FEEDBACK-1: +Grid Expansion, -Lab Speed (research time is gone) -> still 12.
+	_check("AC-20 every LabDB project + Part Analysis + Crate Theory + Grid", LabDB.IDS.size() == 12 and LabDB.DEFS.has("grid") and not LabDB.DEFS.has("labspeed") and LabDB.DEFS.has("part_analysis") and LabDB.DEFS.has("crate_theory") and String(LabDB.DEFS["offcap"]["name"]) == "Storage Tech" and String(LabDB.DEFS["offrate"]["name"]) == "Logistics Tech")
+	_check("FB1 grid research 3/5/7/8/10, cost 150 x3^L", LabDB.max_of("grid") == 4 and Labs.cost("grid", 0) == 150 and Labs.cost("grid", 3) == 4050 and TowerState.grid_for_level(0) == 3 and TowerState.grid_for_level(1) == 5 and TowerState.grid_for_level(2) == 7 and TowerState.grid_for_level(3) == 8 and TowerState.grid_for_level(4) == 10)
 	L["research"]["lvls"]["dmg"] = 30
 	_check("maxed track cannot start", Labs.start(L, "dmg", NOW).is_empty())
 	var lm: Dictionary = Labs.modifiers(L)
@@ -429,23 +458,24 @@ func _meta_stages() -> void:
 		differs = differs or JSON.stringify(Missions.list(M3)) != day1
 	_check("different days roll differently", differs)
 	# force a known list to test progress deterministically
-	M["missions"]["list"] = [{"tpl": "kill", "target": 3, "prog": 0, "claimed": false, "gems": 3}, {"tpl": "wave", "target": 10, "prog": 0, "claimed": false, "gems": 4}, {"tpl": "perk", "target": 2, "prog": 0, "claimed": false, "gems": 2}]
-	var gm: int = int(M["gems"])
+	# FEEDBACK-1 (deliberate): mission rewards are coins (gems x40).
+	M["missions"]["list"] = [{"tpl": "kill", "target": 3, "prog": 0, "claimed": false, "coins": 120}, {"tpl": "wave", "target": 10, "prog": 0, "claimed": false, "coins": 160}, {"tpl": "perk", "target": 2, "prog": 0, "claimed": false, "coins": 80}]
+	var gm: int = int(M["coins"])
 	_check("AC-29 cannot claim unfinished", Missions.claim(M, 0).is_empty())
 	mev = Missions.on_run_events(M, [{"t": "kill"}, {"t": "kill"}, {"t": "kill"}, {"t": "kill"}, {"t": "wave", "wave": 12}, {"t": "perk_taken", "id": "p_dmg"}, {"t": "perk_taken", "id": "p_glass"}, {"t": "perk_taken", "id": "p_greed"}])
 	_check("AC-29 run events advance progress", _evts(mev, "mission_done").size() == 3 and int(Missions.list(M)[0]["prog"]) == 3 and int(Missions.list(M)[1]["prog"]) == 10 and int(Missions.list(M)[2]["prog"]) == 2 and int(M["stats"]["kills"]) == 4)
-	_check("AC-29 claim pays once", not Missions.claim(M, 0).is_empty() and int(M["gems"]) == gm + 3 and Missions.claim(M, 0).is_empty())
+	_check("AC-29 claim pays once", not Missions.claim(M, 0).is_empty() and int(M["coins"]) == gm + 120 and Missions.claim(M, 0).is_empty())
 	_check("bonus needs all claimed", Missions.claim_bonus(M).is_empty())
 	Missions.claim(M, 1)
 	Missions.claim(M, 2)
-	_check("AC-29 all-clear bonus +5 once", not Missions.claim_bonus(M).is_empty() and int(M["gems"]) == gm + 3 + 4 + 2 + 5 and Missions.claim_bonus(M).is_empty() and int(M["gem_log"]["mission"]) == 14)
+	_check("AC-29 all-clear bonus +200 coins once", not Missions.claim_bonus(M).is_empty() and int(M["coins"]) == gm + 120 + 160 + 80 + 200 and Missions.claim_bonus(M).is_empty() and MissionDB.reward("kill") == 120)
 	Missions.roll(M, NOW + 86400)
 	var fresh: bool = true
 	for e in Missions.list(M):
 		fresh = fresh and int(e["prog"]) == 0 and not bool(e["claimed"])
 	_check("AC-28 new day re-rolls + resets", fresh and not bool(M["missions"]["bonus_claimed"]))
 	# permanent upgrades + lab starts feed missions
-	M["missions"]["list"] = [{"tpl": "upgrade", "target": 3, "prog": 0, "claimed": false, "gems": 2}, {"tpl": "lab", "target": 2, "prog": 0, "claimed": false, "gems": 2}, {"tpl": "eco", "target": 4, "prog": 0, "claimed": false, "gems": 2}]
+	M["missions"]["list"] = [{"tpl": "upgrade", "target": 3, "prog": 0, "claimed": false, "coins": 80}, {"tpl": "lab", "target": 2, "prog": 0, "claimed": false, "coins": 80}, {"tpl": "eco", "target": 4, "prog": 0, "claimed": false, "coins": 80}]
 	M["coins"] = 100000
 	BaseMeta.try_core(M, "dmg")
 	BaseMeta.try_place(M, _c(6), "mine")
@@ -461,9 +491,10 @@ func _meta_stages() -> void:
 	_check("AC-30 once per day", Missions.streak_claim(K, NOW + 100).is_empty())
 	for k in range(1, 6):
 		Missions.streak_claim(K, NOW + 86400 * k)
-	_check("streak day 6", int(K["streak"]["day_idx"]) == 6 and int(K["gems"]) == 2 + 3 + 4)
+	# FEEDBACK-1: the streak pays coins only (gem days -> coins).
+	_check("streak day 6", int(K["streak"]["day_idx"]) == 6 and int(K["coins"]) == 50 + 80 + 100 + 120 + 200 + 160)
 	sev = Missions.streak_claim(K, NOW + 86400 * 6)
-	_check("AC-30 day 7 = 10 gems + free chest", int(K["streak"]["day_idx"]) == 7 and int(K["gems"]) == 19 and _evts(sev, "chest_opened").size() == 1 and (K["cards"]["owned"] as Dictionary).size() == 1 and int(K["gem_log"]["streak"]) == 19)
+	_check("AC-30 day 7 = 400 coins + free chest", int(K["streak"]["day_idx"]) == 7 and int(K["coins"]) == 710 + 400 and _evts(sev, "chest_opened").size() == 1 and (K["cards"]["owned"] as Dictionary).size() == 1 and not K.has("gems"))
 	var c0: int = int(K["coins"])
 	Missions.streak_claim(K, NOW + 86400 * 7)
 	_check("streak loops with x1.1 coins", int(K["streak"]["day_idx"]) == 1 and int(K["streak"]["loops"]) == 1 and int(K["coins"]) == c0 + 55)
@@ -474,15 +505,16 @@ func _meta_stages() -> void:
 	var C: Dictionary = BaseMeta.default_save()
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 42
-	_check("AC-31 chest needs 20 gems", Cards.open_chest(C, rng).is_empty())
-	C["gems"] = 20 * 40
+	# FEEDBACK-1: card chests and slots cost coins (gems removed).
+	_check("AC-31 chest needs 400 coins", Cards.open_chest(C, rng).is_empty())
+	C["coins"] = 400 * 40
 	var r1 := RandomNumberGenerator.new()
 	r1.seed = 7
 	var r2 := RandomNumberGenerator.new()
 	r2.seed = 7
 	var C2: Dictionary = C.duplicate(true)
 	var cev: Array = Cards.open_chest(C, r1)
-	_check("AC-31 chest costs 20 + seeded", int(C["gems"]) == 780 and JSON.stringify(cev) == JSON.stringify(Cards.open_chest(C2, r2)) and bool(cev[0]["new"]))
+	_check("AC-31 chest costs 400 coins + seeded", int(C["coins"]) == 400 * 39 and JSON.stringify(cev) == JSON.stringify(Cards.open_chest(C2, r2)) and bool(cev[0]["new"]))
 	# force-level a card: set owned and open many chests
 	C["cards"]["owned"] = {"c_dmg": {"lvl": 1, "copies": 0}}
 	var lvl_ok: bool = true
@@ -512,8 +544,8 @@ func _meta_stages() -> void:
 	_check("AC-32 only 2 free slots", Cards.equip(C, "c_cash").is_empty())
 	var cm: Dictionary = Cards.mods(C)
 	_check("AC-32 only equipped cards modify", is_equal_approx(float(cm["dmg"]), 0.40) and is_equal_approx(float(cm["hp"]), 0.15) and is_equal_approx(float(cm["cash"]), 0.0))
-	C["gems"] = 30 + 60 + 100
-	_check("card slots 30/60/100, max 5", not Cards.buy_slot(C).is_empty() and int(C["gems"]) == 160 and not Cards.buy_slot(C).is_empty() and not Cards.buy_slot(C).is_empty() and int(C["gems"]) == 0 and Cards.slots(C) == 5 and Cards.buy_slot(C).is_empty())
+	C["coins"] = 1500 + 4000 + 10000
+	_check("card slots 1500/4000/10000 coins, max 5", not Cards.buy_slot(C).is_empty() and int(C["coins"]) == 14000 and not Cards.buy_slot(C).is_empty() and not Cards.buy_slot(C).is_empty() and int(C["coins"]) == 0 and Cards.slots(C) == 5 and Cards.buy_slot(C).is_empty())
 	Cards.equip(C, "c_reroll")
 	_check("reroll card gives int rerolls", int(Cards.mods(C)["reroll"]) == 2)
 	Cards.unequip(C, "c_dmg")
@@ -576,11 +608,15 @@ func _last(S) -> Dictionary:
 
 ## HORDE Phase 1 gates: the 120 s seeded golden (recorded from the Dict
 ## implementation before the SoA port) and the store/hash invariants.
-const HORDE_FP_GOLDEN: String = "99dfcba3534b3101b3260e9bda5903de0557a4adf3b14aa3196ae043411f72c8"
+## FEEDBACK-1 (deliberate): no lanes, building blocking, live drafts, new
+## tracks and difficulty change the sim, so the golden was re-recorded from
+## this build (bit-identity to the Dict impl only held while rules matched).
+const HORDE_FP_GOLDEN: String = "57f8f0e5eb23bee8fa8c81265d8e9c5f03529fab0a2b34fb3151c5c2ad3f4e9e"
 func _horde_stages() -> void:
 	var FP = load("res://horde_fp.gd")
 	var got: String = FP.run_all()
-	_check("HORDE 120 s seeded fingerprint bit-identical to the Dict impl (%s)" % got.left(8), got == HORDE_FP_GOLDEN)
+	_check("HORDE 120 s seeded fingerprint matches the recorded golden (%s)" % got.left(8), got == HORDE_FP_GOLDEN)
+	_check("HORDE fingerprint is deterministic (two runs)", FP.run_all() == got)
 	var S = _fresh()
 	S.spawn_hold = true
 	var a: Dictionary = _enemy("drone", TowerState.CENTER + Vector2(0, -300), 5.0)
@@ -605,7 +641,7 @@ func _horde_stages() -> void:
 	var S4 = _fresh()
 	S4.spawn_hold = true
 	S4.horde_mult = 4
-	S4._spawn("hauler", [], TowerState.CENTER + Vector2(0, -400), -1, false, 0.25)
+	S4._spawn("hauler", [], TowerState.CENTER + Vector2(0, -400), false, 0.25)
 	S4._spawn_clones(4)
 	var sum_hp: float = 0.0
 	var sum_cash: float = 0.0
@@ -676,7 +712,7 @@ func _engine_b_stages() -> void:
 	_check("B1 tier 2 multipliers", S.tier == 2 and is_equal_approx(S.hp_mult, 1.5) and is_equal_approx(S.coin_mult, 1.6))
 	S.spawn_hold = true
 	S._spawn("drone", [])
-	_check("B1 enemy hp x tier hp_mult", is_equal_approx(float(S.enemy_list()[0]["hp"]), 6.0 * 1.5))
+	_check("B1 enemy hp x tier hp_mult", is_equal_approx(float(S.enemy_list()[0]["hp"]), 6.0 * 1.5 * TowerState.difficulty_hp()))   # FB1: x difficulty
 	S.set_enemies([])
 	S.wave_t = S.wave_time - 0.001
 	S.tick(0.01)
@@ -727,32 +763,16 @@ func _engine_b_stages() -> void:
 		S._reap(bev)
 	var bb: Array = _evts(bev, "boss_bounty")
 	_check("boss bounty coins 25*w/10", bb.size() == 4 and int(bb[0]["coins"]) == 50)
-	_check("AC-10 boss gems capped at 3 awards", S.gems_run == 3 and int(bb[3]["gems"]) == 0)
-	# AC-10: 2 gems per award from T3; AC-10a: daily boss-gem allowance.
-	var sv3b: Dictionary = BaseMeta.default_save()
-	sv3b["best_wave_by_tier"] = {"1": 40, "2": 50}
-	BaseMeta.select_tier(sv3b, 3)
-	var T3S = TowerState.new()
-	T3S.setup(9, sv3b, 1767225600)
-	T3S.spawn_hold = true
-	T3S.wave = 20
-	var b3ev: Array = []
-	for k in 4:
-		T3S.add_enemy(_enemy("boss", TowerState.CENTER + Vector2(100, 0), 0.0))
-		T3S._reap(b3ev)
-	_check("AC-10 T3 boss gems = 2 per award, 3 awards", T3S.tier == 3 and T3S.gems_run == 6 and int(_evts(b3ev, "boss_bounty")[0]["gems"]) == 2)
-	BaseMeta.bank(sv3b, 0, 20, 3, 1.0, 1767225600 + 60, 6)
-	_check("AC-10a daily allowance 10 -> 4 left same day", BaseMeta.boss_gem_allowance(sv3b, 1767225600 + 120) == 4 and BaseMeta.boss_gem_allowance(sv3b, 1767225600 + 86400) == 10)
-	T3S = TowerState.new()
-	T3S.setup(10, sv3b, 1767225600 + 120)
-	T3S.spawn_hold = true
-	T3S.wave = 20
-	for k in 3:
-		T3S.add_enemy(_enemy("boss", TowerState.CENTER + Vector2(100, 0), 0.0))
-		T3S._reap(b3ev)
-	_check("AC-10a run gems clipped by the daily allowance", T3S.gems_run == 4)
-	_check("AC-10a allowance survives normalize", int(BaseMeta.normalize(JSON.parse_string(JSON.stringify(sv3b)))["boss_gems_today"]["n"]) == 6)
-	S.slots[_c(7)] = {"id": "mine", "perm": 0, "run": 1}
+	# FEEDBACK-1 (deliberate): gems are gone — bosses pay coins only, and an
+	# old save's gem balance converts to coins (GEM_COINS each) on load.
+	_check("FB1 boss bounty carries no gems", not (bb[0] as Dictionary).has("gems") and not ("gems_run" in S))
+	var gsv: Dictionary = BaseMeta.default_save()
+	gsv["gems"] = 4
+	gsv["gem_log"] = {"boss": 4}
+	gsv["coins"] = 10
+	var gn: Dictionary = BaseMeta.normalize(gsv)
+	_check("FB1 legacy gems -> coins on load, gem blocks dropped", int(gn["coins"]) == 10 + 4 * BaseMeta.GEM_COINS and not gn.has("gems") and not gn.has("gem_log") and not gn.has("boss_gems_today"))
+	S.slots[_r(7)] = {"id": "mine", "perm": 0, "run": 1}
 	S.wave = 11
 	S.recompute()
 	# REDESIGN: every cash amount scales with the run cash index 1.10^(w-1).
@@ -763,8 +783,8 @@ func _engine_b_stages() -> void:
 	S.stats["regen"] = 0.0
 	var dev: Array = S.tick(0.01)
 	var go: Array = _evts(dev, "game_over")
-	_check("AC-22 game_over itemises cash-out (12% of index-deflated cash)", go.size() == 1 and int(go[0]["breakdown"]["cashout"]) == 120 and int(go[0]["coins"]) == c_before + 120 and int(go[0]["breakdown"]["gems"]) == 3)
-	_check("death banks coins + boss gems", int(sv3["coins"]) == c_before + 120 and int(sv3["gems"]) == 3 and int(sv3["gem_log"]["boss"]) == 3)
+	_check("AC-22 game_over itemises cash-out (12% of index-deflated cash)", go.size() == 1 and int(go[0]["breakdown"]["cashout"]) == 120 and int(go[0]["coins"]) == c_before + 120 and not (go[0]["breakdown"] as Dictionary).has("gems"))
+	_check("death banks coins (no gems)", int(sv3["coins"]) == c_before + 120 and not sv3.has("gems"))
 	_check("dead stays the last event", String(dev.back()["t"]) == "dead")
 
 	# --- Stage 22: B4 enemy roster (AC-25..27) --------------------------------
@@ -808,11 +828,11 @@ func _engine_b_stages() -> void:
 	_check("elite takes damage after shield breaks", float(el["hp"]) <= 0.0)
 	S = _fresh()
 	S.spawn_hold = true
-	S.slots[_c(7)] = {"id": "tesla", "perm": 0, "run": 3}
+	S.slots[_r(7)] = {"id": "tesla", "perm": 0, "run": 3}
 	S.recompute()
 	S.stats["weapons"] = [_weapon(S, "tesla")]
 	S._spawn("elite", [])
-	S.set_enemy(int(S.enemy_list()[0]["eid"]), {"pos": TowerState.slot_pos(_c(7)) + Vector2(60, 0), "spd": 0.0})
+	S.set_enemy(int(S.enemy_list()[0]["eid"]), {"pos": TowerState.slot_pos(_r(7)) + Vector2(60, 0), "spd": 0.0})
 	var tev: Array = S.tick(0.05)
 	_check("AC-26 tesla chain hit counts as a shield hit", _evts(tev, "shield_hit").size() == 1 and int(S.enemy_list()[0]["shield"]) == 2)
 	S = _fresh()
@@ -835,24 +855,24 @@ func _engine_b_stages() -> void:
 	# REDESIGN (deliberate): the S1-S11 adjacency web and the DR stack are
 	# replaced by the redesign building sheet; these checks cover it.
 	S = _open_run()
-	S.slots[_c(7)] = {"id": "gun", "perm": 0, "run": 1}
+	S.slots[_r(7)] = {"id": "gun", "perm": 0, "run": 1}
 	S.recompute()
 	var gr: float = float(_weapon(S, "gun")["rate"])
 	_check("gatling L1: 6 dmg, 2.0/s", is_equal_approx(float(_weapon(S, "gun")["dmg"]), 6.0 * TowerState.bld_dmg()) and is_equal_approx(gr, 2.0))
-	S.slots[_c(7)] = {"id": "gun", "perm": 0, "run": 5}
+	S.slots[_r(7)] = {"id": "gun", "perm": 0, "run": 5}
 	S.recompute()
-	_check("level-ups +35% main stat (L5 = 1.35^4)", is_equal_approx(float(_weapon(S, "gun")["dmg"]), 6.0 * TowerState.bld_dmg() * pow(1.35, 4.0)) and S.lvl_at(_c(7)) == 5)
-	S.slots[_c(7)] = {"id": "gun", "perm": 0, "run": 9}
-	_check("building level capped at 5", S.lvl_at(_c(7)) == 5 and TowerState.lvl_cap() == 5)
-	S.slots[_c(7)] = {"id": "gun", "perm": 0, "run": 1}
-	S.slots[_c(8)] = {"id": "oilmill", "perm": 0, "run": 1}
+	_check("level-ups +35% main stat (L5 = 1.35^4)", is_equal_approx(float(_weapon(S, "gun")["dmg"]), 6.0 * TowerState.bld_dmg() * pow(1.35, 4.0)) and S.lvl_at(_r(7)) == 5)
+	S.slots[_r(7)] = {"id": "gun", "perm": 0, "run": 9}
+	_check("building level capped at 5", S.lvl_at(_r(7)) == 5 and TowerState.lvl_cap() == 5)
+	S.slots[_r(7)] = {"id": "gun", "perm": 0, "run": 1}
+	S.slots[_r(8)] = {"id": "oilmill", "perm": 0, "run": 1}
 	S.recompute()
-	_check("oil mill: +2.0 cash/s, adjacent buildings -10% rate", is_equal_approx(float(_weapon(S, "gun")["rate"]), gr * 0.9) and _has_link(S, _c(8), _c(7), "OIL"))
-	S.slots[_c(8)] = {}
+	_check("oil mill: +2.0 cash/s, adjacent buildings -10% rate", is_equal_approx(float(_weapon(S, "gun")["rate"]), gr * 0.9) and _has_link(S, _r(8), _r(7), "OIL"))
+	S.slots[_r(8)] = {}
 	S.slots[_rc(4, 1)] = {"id": "beacon", "perm": 0, "run": 1}
 	S.recompute()
 	var gb: Dictionary = _weapon(S, "gun")
-	_check("beacon radius 2: +10% rate, +0.3 range", is_equal_approx(float(gb["rate"]), gr * 1.1) and is_equal_approx(float(gb["range"]), 3.3 * TowerState.cpx()) and _has_link(S, _rc(4, 1), _c(7), "BEA"))
+	_check("beacon radius 2: +10% rate, +0.3 range", is_equal_approx(float(gb["rate"]), gr * 1.1) and is_equal_approx(float(gb["range"]), 3.3 * TowerState.cpx()) and _has_link(S, _rc(4, 1), _r(7), "BEA"))
 	S.slots[_rc(4, 1)] = {}
 	S.slots[_rc(0, 0)] = {"id": "beacon", "perm": 0, "run": 1}
 	S.recompute()
@@ -860,7 +880,7 @@ func _engine_b_stages() -> void:
 	# Aegis: Core shield absorbs hits, regenerates after 4 s without damage.
 	S = _fresh()
 	S.spawn_hold = true
-	S.slots[_c(13)] = {"id": "aegis", "perm": 0, "run": 1}
+	S.slots[_r(13)] = {"id": "aegis", "perm": 0, "run": 1}
 	S.recompute()
 	S.shield = float(S.stats["shield_max"])
 	_check("aegis shield 60 pts", is_equal_approx(S.shield, 60.0))
@@ -880,7 +900,7 @@ func _engine_b_stages() -> void:
 	# Vault interest: Core 2% + Vault 2%, cap (50 + 100) x cash index.
 	S = _fresh()
 	S.spawn_hold = true
-	S.slots[_c(7)] = {"id": "vault", "perm": 0, "run": 1}
+	S.slots[_r(7)] = {"id": "vault", "perm": 0, "run": 1}
 	S.recompute()
 	S.cash = 100.0
 	S.wave_t = S.wave_time - 0.001
@@ -928,7 +948,7 @@ func _engine_b_stages() -> void:
 	_sync(S, [fe])
 	_check("cryo spire: slows 30% + chills (1.5 per pulse, 2/s)", is_equal_approx(float(fe["slow_m"]), 0.7) and float(fe["slow_t"]) > 0.0 and is_equal_approx(999.0 - float(fe["hp"]), 1.5 * TowerState.bld_dmg()))
 	S = _fresh()
-	S.slots[_c(7)] = {"id": "obelisk", "perm": 0, "run": 1}
+	S.slots[_r(7)] = {"id": "obelisk", "perm": 0, "run": 1}
 	S.recompute()
 	S.hp = 50.0
 	S._hit(S.add_enemy(_enemy("hauler", TowerState.CENTER + Vector2(0, 300))), 100.0, [])
@@ -974,7 +994,7 @@ func _engine_b_stages() -> void:
 	var had_draft: bool = S.draft.size() == 3
 	S.draft = [Draft.card_for("pk_arsenal", S._draft_ctx(""))]
 	pev.append_array(S.choose_card(0))
-	_check("AC-23 perk_offer at wave 5 (right after the wave-4 draft)", had_draft and _evts(pev, "perk_offer").size() == 1 and S.perk_offer.size() == 3 and is_equal_approx(S.time_scale(), 0.2))
+	_check("AC-23 perk_offer at wave 5 (right after the wave-4 draft)", had_draft and _evts(pev, "perk_offer").size() == 1 and S.perk_offer.size() == 3 and is_equal_approx(S.time_scale(), 1.0))   # FB1: sim stays live
 	S = _fresh()
 	S.spawn_hold = true
 	S.wave = 4
@@ -1005,7 +1025,7 @@ func _engine_b_stages() -> void:
 	_check("AC-24 Frenzy + Hair Trigger rate, regen 0", is_equal_approx(float(_weapon(S, "core")["rate"]), base_rate * 1.45) and is_equal_approx(float(S.stats["regen"]), 0.0))
 	S.perks_taken = ["p_greed", "p_miser", "p_bloodmoon"]
 	S.recompute()
-	_check("AC-24 economy tradeoffs", is_equal_approx(S.run_coin_mult(), 1.5 * TuneRef.num("perk_bloodmoon", 1.25)) and is_equal_approx(S.run_cash_mult(), 1.5) and is_equal_approx(float(S.stats["xp_mult"]), 0.7) and S.upgrade_cost(TowerState.CORE_SLOT) == 14)
+	_check("AC-24 economy tradeoffs", is_equal_approx(S.run_coin_mult(), 1.5 * TuneRef.num("perk_bloodmoon", 1.25)) and is_equal_approx(S.run_cash_mult(), 1.5) and is_equal_approx(float(S.stats["xp_mult"]), 0.7) and S.upgrade_cost(TowerState.CORE_SLOT) == 42)   # FB1: Damage track base 60 (x0.7 Miser)
 	var worst: bool = true
 	var tr: Array = ["p_glass", "p_greed", "p_fort", "p_frenzy", "p_miser", "p_bloodmoon"]
 	for mask in 64:
@@ -1072,23 +1092,24 @@ func _fix_round_stages() -> void:
 	S.setup(5, od)
 	_check("Overdrive: dmg lvl 17 -> core dmg x 1.1^2", is_equal_approx(float(_weapon(S, "core")["dmg"]), 10.0 * (1.0 + 0.03 * 17.0) * pow(1.1, 2.0)))
 	# REDESIGN (deliberate): Core Overcharge is replaced by the Damage cash
-	# track: x1.08 per level on the Core AND every building, cost 20 x 1.18^n.
+	# track. FEEDBACK-1 (deliberate): fewer, bigger levels — x1.25 per level on
+	# the Core AND every building (drawback -8% Core rate), cost 60 x 2.1^n.
 	S = _fresh()
-	S.slots[_c(7)] = {"id": "gun", "perm": 0, "run": 1}
+	S.slots[_r(7)] = {"id": "gun", "perm": 0, "run": 1}
 	S.recompute()
 	var g0: float = float(_weapon(S, "gun")["dmg"])
 	var c0: float = float(_weapon(S, "core")["dmg"])
 	S.cash = 1000.0
 	S.upgrade(TowerState.CORE_SLOT)
 	S.upgrade(TowerState.CORE_SLOT)
-	_check("Damage track: 2 levels -> Core + buildings x1.08^2", S.core_run_lvl == 2 and is_equal_approx(float(_weapon(S, "gun")["dmg"]), g0 * 1.1664) and is_equal_approx(float(_weapon(S, "core")["dmg"]), c0 * 1.1664))
-	_check("Damage track cost 20 x growth^n", S.upgrade_cost(TowerState.CORE_SLOT) == int(round(20.0 * pow(float(TowerState.TRACKS["dmg"]["growth"]), 2.0))) and is_equal_approx(float(S.stats["overcharge_step"]), 0.08))
+	_check("Damage track: 2 levels -> Core + buildings x1.25^2", S.core_run_lvl == 2 and is_equal_approx(float(_weapon(S, "gun")["dmg"]), g0 * 1.5625) and is_equal_approx(float(_weapon(S, "core")["dmg"]), c0 * 1.5625))
+	_check("Damage track cost 60 x growth^n", S.upgrade_cost(TowerState.CORE_SLOT) == int(round(60.0 * pow(float(TowerState.TRACKS["dmg"]["growth"]), 2.0))) and is_equal_approx(float(S.stats["overcharge_step"]), 0.25))
 	# Enemy damage ramp 1.06/wave so HP (labs, perks, Overdrive) matters late.
 	S = _fresh()
 	S.wave = 41
 	var sev: Array = []
 	S._spawn("drone", sev)
-	_check("enemy dmg ramp 1.06^(w-1)", is_equal_approx(float(_last(S)["dmg"]), 4.0 * pow(1.06, 40.0)))
+	_check("enemy dmg ramp 1.06^(w-1)", is_equal_approx(float(_last(S)["dmg"]), 4.0 * pow(1.06, 40.0) * TowerState.difficulty_dmg()))   # FB1: x difficulty
 
 
 ## VFX/gameplay pass: per-weapon targeting modes, hit flash + dmg events,
@@ -1096,7 +1117,7 @@ func _fix_round_stages() -> void:
 func _juice_targeting_stages() -> void:
 	var S = _fresh()
 	S.set_enemies([])
-	var from: Vector2 = TowerState.slot_pos(_c(7))
+	var from: Vector2 = TowerState.slot_pos(_r(7))
 	# a: nearest to weapon, low hp, far from core
 	var a: Dictionary = _enemy("drone", from + Vector2(0, -60), 5.0)
 	# b: closest to core, mid hp
@@ -1113,25 +1134,25 @@ func _juice_targeting_stages() -> void:
 	_check("target none in range", S.pick_target(from + Vector2(0, -5000), 50.0, "first") == -1)
 	# Per-slot modes: only weapon slots, cycle wraps, fire() uses the mode.
 	S = _fresh()
-	S.slots[_c(7)] = {"id": "gun", "perm": 0, "run": 1}
+	S.slots[_r(7)] = {"id": "gun", "perm": 0, "run": 1}
 	S.recompute()
-	_check("default target mode nearest", String(S.target_modes[_c(7)]) == "nearest")
-	_check("non-weapon slot rejects mode", S.set_target_mode(_c(3), "first").is_empty())
-	var cev: Array = S.cycle_target_mode(_c(7))
-	_check("cycle -> first + event", String(S.target_modes[_c(7)]) == "first" and cev.size() == 1 and String((cev[0] as Dictionary)["t"]) == "target_mode")
-	S.cycle_target_mode(_c(7))
-	S.cycle_target_mode(_c(7))
-	S.cycle_target_mode(_c(7))
-	_check("cycle wraps to nearest", String(S.target_modes[_c(7)]) == "nearest")
-	S.set_target_mode(_c(7), "strongest")
+	_check("default target mode nearest", String(S.target_modes[_r(7)]) == "nearest")
+	_check("non-weapon slot rejects mode", S.set_target_mode(_r(3), "first").is_empty())
+	var cev: Array = S.cycle_target_mode(_r(7))
+	_check("cycle -> first + event", String(S.target_modes[_r(7)]) == "first" and cev.size() == 1 and String((cev[0] as Dictionary)["t"]) == "target_mode")
+	S.cycle_target_mode(_r(7))
+	S.cycle_target_mode(_r(7))
+	S.cycle_target_mode(_r(7))
+	_check("cycle wraps to nearest", String(S.target_modes[_r(7)]) == "nearest")
+	S.set_target_mode(_r(7), "strongest")
 	S.set_enemies([])
-	var from7: Vector2 = TowerState.slot_pos(_c(7))
+	var from7: Vector2 = TowerState.slot_pos(_r(7))
 	var weak: Dictionary = _enemy("drone", from7 + Vector2(0, -40), 10.0)
 	var strong: Dictionary = _enemy("drone", from7 + Vector2(0, -150), 900.0)
 	S.set_enemies([weak, strong])
 	for k in TowerState.N:
 		S.cooldowns[k] = 99.0
-	S.cooldowns[_c(7)] = 0.0
+	S.cooldowns[_r(7)] = 0.0
 	var fev: Array = []
 	S._fire(0.01, fev)
 	_sync(S, [weak, strong])
@@ -1140,7 +1161,7 @@ func _juice_targeting_stages() -> void:
 	# REDESIGN (deliberate): every building is run-only, so modes are run-scoped.
 	var S2 = TowerState.new()
 	S2.setup(77, S.save)
-	_check("target modes are run-scoped (fresh run starts nearest)", String(S2.target_modes[_c(7)]) == "nearest" and not (S.save as Dictionary).has("target_modes"))
+	_check("target modes are run-scoped (fresh run starts nearest)", String(S2.target_modes[_r(7)]) == "nearest" and not (S.save as Dictionary).has("target_modes"))
 	# Stress: tier 5, wave 60, forced spawn flood for 10 s -> cap holds.
 	S = _fresh()
 	S.tier = 5
@@ -1175,16 +1196,16 @@ func _pc_engine_stages() -> void:
 
 ## PC-E1 7x7 ring unlocks, PC-E2 build cap.
 func _pc_board_stages() -> void:
-	_check("PC-E1 cell_ring 0..3", BaseMeta.cell_ring_rc(3, 3) == 0 and BaseMeta.cell_ring_rc(2, 4) == 1 and BaseMeta.cell_ring_rc(1, 3) == 2 and BaseMeta.cell_ring_rc(0, 6) == 3 and BaseMeta.cell_ring(TowerState.CORE_SLOT) == 0)
+	_check("PC-E1 cell_ring 0..3", BaseMeta.cell_ring_rc(3, 3) == 0 and BaseMeta.cell_ring_rc(2, 4) == 1 and BaseMeta.cell_ring_rc(1, 3) == 2 and BaseMeta.cell_ring_rc(0, 6) == 3 and BaseMeta.cell_ring(BaseMeta.CORE_SLOT) == 0)
 	var ring_n: Array = [0, 0, 0, 0]
-	for i in TowerState.N:
+	for i in BaseMeta.N:   # FEEDBACK-1: the meta 7x7 base and the run board are separate now
 		ring_n[BaseMeta.cell_ring(i)] = int(ring_n[BaseMeta.cell_ring(i)]) + 1
 	_check("PC-E1 ring sizes 1/8/16/24", ring_n == [1, 8, 16, 24])
 	var S = _fresh()
 	var open_ok: bool = true
 	for i in TowerState.N:
-		open_ok = open_ok and bool(S.unlocked[i]) == (BaseMeta.cell_ring(i) == 1)
-	_check("PC-E1 new save: exactly ring 1 unlocked", open_ok and S.free_slots().size() == 8)
+		open_ok = open_ok and bool(S.unlocked[i]) == (TowerState.ring_of(i) == 1)
+	_check("PC-E1 new save: exactly ring 1 unlocked (3x3 grid)", open_ok and S.free_slots().size() == 8 and S.grid_n == 3)
 	var sv: Dictionary = BaseMeta.default_save()
 	var edge2: int = 1 * 7 + 3      # (1,3) ring 2 edge
 	var corner2: int = 1 * 7 + 1    # (1,1) ring 2 corner
@@ -1200,22 +1221,42 @@ func _pc_board_stages() -> void:
 	sv["best_wave_by_tier"] = {"1": 40, "2": 50}
 	_check("PC-E1 ring 3 unlocks at T3", Tiers.highest(sv) == 3 and BaseMeta.try_unlock(sv, edge3) and int(sv["coins"]) == c3 - 2500)
 	_check("PC-E1 ring 3 price grows 1.22^n", BaseMeta.unlock_cost(sv, 0 * 7 + 2) == int(2500.0 * 1.22))
-	_check("PC-E1 core / ring 1 cannot be bought", not BaseMeta.try_unlock(sv, TowerState.CORE_SLOT) and not BaseMeta.try_unlock(sv, 2 * 7 + 2))
-	# REDESIGN (deliberate): run rings open by Core track total (ring 2 at 10,
-	# ring 3 at 30), not by per-cell cash unlocks.
+	_check("PC-E1 core / ring 1 cannot be bought", not BaseMeta.try_unlock(sv, BaseMeta.CORE_SLOT) and not BaseMeta.try_unlock(sv, 2 * 7 + 2))
+	# FEEDBACK-1 (deliberate): the run grid is a Research unlock (3x3 -> 5x5 ->
+	# 7x7 -> 8x8 -> 10x10, Core centred); Core tracks no longer open rings.
 	var S1 = TowerState.new()
 	S1.setup(3, BaseMeta.default_save())
 	S1.cash = 1.0e9
-	_check("PC-E1 run: per-cell unlock is gone", S1.unlock_plot(edge2).is_empty() and not bool(S1.unlocked[edge2]))
+	var e2c: int = _rc(1, 3)   # ring 2 edge (7x7 coords)
+	_check("PC-E1 run: per-cell unlock is gone", S1.unlock_plot(e2c).is_empty() and not bool(S1.unlocked[e2c]))
 	var rev: Array = []
-	for k in 9:
-		rev.append_array(S1.buy_track("armor"))
-	_check("PC-E1 run: ring 2 still shut at track total 9", not bool(S1.unlocked[edge2]) and _evts(rev, "ring_open").is_empty())
-	rev = S1.buy_track("eco")
-	_check("PC-E1 run: ring 2 opens at track total 10", bool(S1.unlocked[edge2]) and bool(S1.unlocked[corner2]) and not bool(S1.unlocked[edge3]) and _evts(rev, "ring_open").size() == 1 and int(_evts(rev, "ring_open")[0]["ring"]) == 2)
-	for k in 20:
-		rev = S1.buy_track("dmg")
-	_check("PC-E1 run: ring 3 opens at track total 30", bool(S1.unlocked[edge3]) and S1.rings_open == 3)
+	for t in TowerState.TRACK_IDS:
+		for k in 3:
+			rev.append_array(S1.buy_track(String(t)))
+	_check("FB1 run: tracks never open grid cells", not bool(S1.unlocked[e2c]) and _evts(rev, "ring_open").is_empty() and S1.track_total() == 15)
+	var gsz: Array = []
+	var gopen: Array = []
+	for lv in 5:
+		var gs: Dictionary = BaseMeta.default_save()
+		gs["research"]["lvls"]["grid"] = lv
+		var G = TowerState.new()
+		G.setup(7, gs)
+		gsz.append(G.grid_n)
+		var n_open: int = 0
+		var centred: bool = true
+		for i in TowerState.N:
+			if bool(G.unlocked[i]):
+				n_open += 1
+				centred = centred and G.in_grid(i)
+		gopen.append(n_open)
+	_check("FB1 grid research 3/5/7/8/10 opens GxG-1 cells", gsz == [3, 5, 7, 8, 10] and gopen == [8, 24, 48, 63, 99])
+	_check("FB1 even grids keep the Core inside (8x8 rows 2..9, 10x10 rows 1..10)", TowerState.grid_lo(8) == 2 and TowerState.grid_lo(10) == 1 and TowerState.in_grid_n(TowerState.CORE_SLOT, 8) and TowerState.in_grid_n(TowerState.CORE_SLOT, 10) and not TowerState.in_grid_n(0, 10))
+	var G2 = TowerState.new()
+	G2.setup(7, BaseMeta.default_save(), 0, {"grid": 7})
+	_check("FB1 opts.grid override (tests/tools)", G2.grid_n == 7 and bool(G2.unlocked[_rc(0, 3)]) and not bool(G2.unlocked[_rc(-1, 3)]))
+	var G3 = TowerState.new()
+	G3.setup(7, BaseMeta.default_save(), 0, {"grid": 10})
+	_check("FB1 view fits: spawn radius grows with the grid", float(G3.spawn_r()) > float(G2.spawn_r()) and float(G2.spawn_r()) > float(S1.spawn_r()))
 	# Land development: +1 perm level cap per 4 outer cells (max +10).
 	var ld: Dictionary = BaseMeta.default_save()
 	var cap0: int = BaseMeta.perm_lvl_cap(ld)
@@ -1224,7 +1265,7 @@ func _pc_board_stages() -> void:
 	ld["unlocked"] = [8, 9, 10, 11]
 	var cap4: int = BaseMeta.perm_lvl_cap(ld)
 	var many: Array = []
-	for i in TowerState.N:
+	for i in BaseMeta.N:
 		if BaseMeta.cell_ring(i) >= 2:
 			many.append(i)
 	ld["unlocked"] = many
@@ -1262,7 +1303,7 @@ func _pc_board_stages() -> void:
 	var ps: Dictionary = BaseMeta.default_save()
 	ps["coins"] = 1_000_000
 	var pn: int = 0
-	for i in TowerState.N:
+	for i in BaseMeta.N:
 		if BaseMeta.is_unlocked(ps, i) and BaseMeta.try_place(ps, i, "gun"):
 			pn += 1
 	ps["best_wave_by_tier"] = {"1": 0}
@@ -1298,19 +1339,15 @@ func _sim_waves(S, waves: int, ev0: Array = []) -> Array:
 			out.append(d2)
 		S.draft.clear()
 		S.pending_place = ""
+		S.pending_upgrade = ""
 		S.perk_offer.clear()
 	return out
 
 
-## PC-E5 multi-direction spawns + telegraph.
+## PC-E5 spawns + telegraph. FEEDBACK-1 (deliberate): lanes are gone —
+## enemies come from every direction from wave 1; the telegraph announces the
+## wave's total / elites / boss instead of quadrants.
 func _pc_spawn_stages() -> void:
-	var S = _fresh()
-	var sched: bool = true
-	for w in range(1, 120):
-		var want: int = 1 if w < 10 else (2 if w < 25 else (3 if w < 50 else 4))
-		sched = sched and S.quad_count(w) == want
-	_check("PC-E5 quadrant schedule 1/2/3/4 at w1/10/25/50", sched)
-	_check("PC-E5 quad_of sectors N/NE=0 E/SE=1 S/SW=2 W/NW=3", TowerState.quad_of(TowerState.CENTER + Vector2(0, -100)) == 0 and TowerState.quad_of(TowerState.CENTER + Vector2(70, -70)) == 0 and TowerState.quad_of(TowerState.CENTER + Vector2(100, 0)) == 1 and TowerState.quad_of(TowerState.CENTER + Vector2(70, 70)) == 1 and TowerState.quad_of(TowerState.CENTER + Vector2(0, 100)) == 2 and TowerState.quad_of(TowerState.CENTER + Vector2(-70, 70)) == 2 and TowerState.quad_of(TowerState.CENTER + Vector2(-100, 0)) == 3 and TowerState.quad_of(TowerState.CENTER + Vector2(-70, -70)) == 3)
 	var runs: Array = []
 	for rep in 2:
 		var R = TowerState.new()
@@ -1320,19 +1357,16 @@ func _pc_spawn_stages() -> void:
 	var evs: Array = runs[0]["ev"]
 	var tele: Dictionary = {}
 	var start_t: Dictionary = {}
-	var quads_ok: bool = true
 	var lead_ok: bool = true
 	var order_ok: bool = true
-	var counts_ok: bool = true
 	var boss_ok: bool = false
-	var dir_ok: bool = true
+	var schema_ok: bool = true
 	for e in evs:
 		var d: Dictionary = e
 		match String(d["t"]):
 			"wave_telegraph":
-				var w: int = int(d["wave"])
-				tele[w] = d
-				quads_ok = quads_ok and (d["quadrants"] as Array).size() == runs[0]["S"].quad_count(w)
+				tele[int(d["wave"])] = d
+				schema_ok = schema_ok and not d.has("quadrants") and d.has("total") and d.has("boss")
 			"wave_start":
 				var w2: int = int(d["wave"])
 				start_t[w2] = float(d["_t"])
@@ -1345,13 +1379,16 @@ func _pc_spawn_stages() -> void:
 				var bw: int = 0
 				for k in start_t.keys():
 					bw = maxi(bw, int(k))
-				boss_ok = tele.has(bw) and int((tele[bw] as Dictionary)["boss_dir"]) == int(d["quad"]) and int(d["quad"]) >= 0
-	# Spawned enemies of a wave all come from that wave's telegraphed quadrants.
+				boss_ok = tele.has(bw) and bool((tele[bw] as Dictionary)["boss"])
+	# Spawned bodies of wave 1 already come from every side of the Core.
 	var S2 = TowerState.new()
 	var e2: Array = S2.setup(99, BaseMeta.default_save())
 	_godmode(S2)
+	var sectors: Dictionary = {}
+	var r_ok: bool = true
+	var tot_ok: bool = true
+	var seen: Dictionary = {}
 	var last_tele: Dictionary = {}
-	var seen_counts: Dictionary = {}
 	for e in e2:
 		if String((e as Dictionary)["t"]) == "wave_telegraph":
 			last_tele[int((e as Dictionary)["wave"])] = e
@@ -1365,38 +1402,37 @@ func _pc_spawn_stages() -> void:
 				last_tele[int(d3["wave"])] = d3
 		S2.draft.clear()
 		S2.pending_place = ""
+		S2.pending_upgrade = ""
 		S2.perk_offer.clear()
-		var aq: Array = S2.active_quads
 		var l2: Array = S2.enemy_list() if S2.enemy_count() > n0 else []
 		for k in range(n0, l2.size()):
 			var en: Dictionary = l2[k]
-			if String(en["kind"]) != "mite" and not aq.has(int(en["quad"])):
-				dir_ok = false
+			if String(en["kind"]) in ["mite", "courier"]:
+				continue
+			var off: Vector2 = (en["pos"] as Vector2) - TowerState.CENTER
+			r_ok = r_ok and absf(off.length() - float(S2.spawn_r())) < 40.0
+			if S2.wave == 1:
+				sectors[posmod(int(floor(rad_to_deg(off.angle()) / 90.0)), 4)] = true
 		var lw: Dictionary = S2.last_wave_spawned
-		if not lw.is_empty() and not seen_counts.has(int(lw["wave"])):
-			seen_counts[int(lw["wave"])] = true
-			var tc: Dictionary = (last_tele[int(lw["wave"])] as Dictionary)["counts"]
-			var sc: Dictionary = lw["counts"]
-			for q in tc.keys():
-				counts_ok = counts_ok and int(tc[q]) == int(sc.get(int(q), 0))
-			for q2 in sc.keys():
-				counts_ok = counts_ok and tc.has(q2)
-	_check("PC-E5 telegraph quadrant count follows the schedule", quads_ok and tele.has(1) and tele.has(10) and tele.has(25))
+		if not lw.is_empty() and not seen.has(int(lw["wave"])):
+			seen[int(lw["wave"])] = true
+			tot_ok = tot_ok and int((last_tele[int(lw["wave"])] as Dictionary)["total"]) == int(lw["n"])
 	_check("PC-E5 wave_telegraph precedes wave_start by pc_telegraph_s", order_ok and lead_ok and start_t.size() >= 25)
-	_check("PC-E5 telegraph counts == actual spawns per quadrant", counts_ok and seen_counts.size() >= 10)
-	_check("PC-E5 spawns come only from active quadrants", dir_ok)
-	_check("PC-E5 boss comes from the telegraphed boss_dir", boss_ok)
-	var a_dirs: Array = []
-	var b_dirs: Array = []
+	_check("FB1 telegraph carries total/boss, no quadrants", schema_ok and tele.has(1) and tele.has(25))
+	_check("FB1 telegraph total == actual spawns per wave", tot_ok and seen.size() >= 10)
+	_check("FB1 no lanes: wave 1 spawns on all 4 sides, on the spawn ring", sectors.size() == 4 and r_ok)
+	_check("PC-E5 boss wave is telegraphed as a boss wave", boss_ok)
+	var a_t: Array = []
+	var b_t: Array = []
 	for e in runs[0]["ev"]:
 		if String((e as Dictionary)["t"]) == "wave_telegraph":
-			a_dirs.append([(e as Dictionary)["quadrants"], (e as Dictionary)["counts"], (e as Dictionary)["boss_dir"]])
+			a_t.append([(e as Dictionary)["total"], (e as Dictionary)["elites"], (e as Dictionary)["boss"]])
 	for e in runs[1]["ev"]:
 		if String((e as Dictionary)["t"]) == "wave_telegraph":
-			b_dirs.append([(e as Dictionary)["quadrants"], (e as Dictionary)["counts"], (e as Dictionary)["boss_dir"]])
-	_check("PC-E5 same seed -> same directions", a_dirs.size() >= 25 and JSON.stringify(a_dirs) == JSON.stringify(b_dirs))
-	S = _fresh()
-	_check("PC-E5 lane focus", S.set_focus(2).size() == 1 and S.focus_quad == 2 and S.set_focus(7).is_empty() and S.focus_quad == 2)
+			b_t.append([(e as Dictionary)["total"], (e as Dictionary)["elites"], (e as Dictionary)["boss"]])
+	_check("PC-E5 same seed -> same telegraphs", a_t.size() >= 25 and JSON.stringify(a_t) == JSON.stringify(b_t))
+	var S = _fresh()
+	_check("FB1 lane focus API is gone", not S.has_method("set_focus") and not S.has_method("quad_count") and not ("focus_quad" in S) and not ("walls" in S))
 
 
 ## A run with every cell unlocked and nothing firing on its own.
@@ -1408,8 +1444,10 @@ func _open_run():
 	return S
 
 
+## (r, c) in the legacy 7x7 coordinates (Core at (3,3)) -> run board index
+## (FEEDBACK-1: 11x11 board, Core at (5,5); rings are unchanged by the shift).
 func _rc(r: int, c: int) -> int:
-	return r * TowerState.SIDE + c
+	return (r + 2) * TowerState.SIDE + (c + 2)
 
 
 ## PC-E3 new buildings + synergies S8-S11.
@@ -1479,33 +1517,45 @@ func _pc_building_stages() -> void:
 	S.packs = {"pk_crit": 2}
 	S.recompute()
 	_check("PC-E3 Precision packs: +8% crit each (global)", is_equal_approx(float(S.stats["crit"]), 0.16))
-	# Barricade: lane wall, -30% speed, 200 HP x1.35^(L-1) (x enemy dmg growth), rebuilt each wave.
+	# FEEDBACK-1 (deliberate): lane walls are gone. Every building has HP and
+	# enemies attack buildings standing in their way before the Core; the
+	# Barricade is the dedicated high-HP blocker (200 HP x1.35^(L-1) x enemy
+	# dmg growth; others 40 HP). Destroyed = lost for the run.
 	S = _open_run()
-	S.stats["weapons"] = []
 	S.slots[r2] = {"id": "barricade", "perm": 0, "run": 2}
+	S.slots[_rc(3, 1)] = {"id": "mine", "perm": 0, "run": 1}
 	S.recompute()
 	S.stats["weapons"] = []
 	var whp: float = 200.0 * 1.35
-	_check("PC-E3 barricade wall on its lane, 200 HP x1.35/lv", TowerState.cell_quad(r2) == 0 and S.walls.has(0) and is_equal_approx(float(S.walls[0]["hp"]), whp))
-	var wn: Dictionary = _enemy("drone", TowerState.CENTER + Vector2(0, -260))
-	wn["quad"] = 0
-	var ws: Dictionary = _enemy("drone", TowerState.CENTER + Vector2(0, 260))
-	ws["quad"] = 2
+	_check("FB1 barricade HP 200 x1.35/lv, other buildings 40", is_equal_approx(S.bld_max(r2), whp) and is_equal_approx(float(S.bld_hp[r2]), whp) and is_equal_approx(S.bld_max(_rc(3, 1)), 40.0) and S.bld_max(_rc(3, 3)) == 0.0)
+	var wn: Dictionary = _enemy("drone", TowerState.slot_pos(r2) + Vector2(0, -60))
+	wn["dmg"] = 10.0
+	var ws: Dictionary = _enemy("drone", TowerState.CENTER + Vector2(0, 150))
 	S.set_enemies([wn, ws])
-	S._move_enemies(0.1, [])
+	var bev: Array = []
+	for k in 40:
+		S._move_enemies(0.1, bev)
 	_sync(S, [wn, ws])
-	var dn: float = 260.0 - (wn["pos"] as Vector2).distance_to(TowerState.CENTER)
-	var ds: float = 260.0 - (ws["pos"] as Vector2).distance_to(TowerState.CENTER)
-	_check("PC-E3 wall slows its lane 30%, other lanes free", is_equal_approx(dn, ds * 0.7) and float(S.walls[0]["hp"]) < whp)
+	_check("FB1 enemy stops at a building in its way and attacks it", (wn["pos"] as Vector2).distance_to(TowerState.slot_pos(r2)) > TowerState.CELL * 0.5 and _evts(bev, "bld_hit").size() >= 3 and float(S.bld_hp[r2]) < whp and float(S.bld_hp[r2]) > 0.0)
+	_check("FB1 an unblocked enemy walks on to the Core", (ws["pos"] as Vector2).distance_to(TowerState.CENTER) <= TowerState.STOP_R + 0.01)
 	wn["dmg"] = 5000.0
 	_push(S, wn)
-	var wev: Array = []
-	S._move_enemies(0.1, wev)
-	_check("PC-E3 wall breaks under damage", _evts(wev, "wall_broken").size() == 1 and float(S.walls[0]["hp"]) == 0.0)
+	bev = []
+	for k in 12:
+		S._move_enemies(0.1, bev)
+	_check("FB1 a building at 0 HP is destroyed and lost for the run", _evts(bev, "building_destroyed").size() == 1 and S.id_at(r2) == "" and S.bld_lost == ["barricade"] and float(S.bld_hp[r2]) == 0.0)
+	_sync(S, [wn])
+	var p0: Vector2 = wn["pos"]
+	S._move_enemies(0.5, [])
+	_sync(S, [wn])
+	_check("FB1 the attacker moves on after the building falls", (wn["pos"] as Vector2).distance_to(TowerState.CENTER) < p0.distance_to(TowerState.CENTER))
+	# Wave start repairs pc_bld_wave_heal (50%) of max HP; HP grows with the wave.
 	S.set_enemies([])
+	var mi: int = _rc(3, 1)
+	S.bld_hp[mi] = 1.0
 	S.wave_t = S.wave_time - 0.001
-	wev = S.tick(0.01)
-	_check("PC-E3 wall rebuilt next wave (x1.06 enemy dmg growth)", _evts(wev, "wall_up").size() == 1 and is_equal_approx(float(S.walls[0]["hp"]), whp * 1.06))
+	bev = S.tick(0.01)
+	_check("FB1 wave start repairs 50% of building HP (x1.06 growth)", _evts(bev, "bld_repair").size() == 1 and is_equal_approx(S.bld_max(mi), 40.0 * 1.06) and absf(float(S.bld_hp[mi]) - (1.0 + (40.0 * 1.06 - 40.0) + 0.5 * 40.0 * 1.06)) < 0.01)
 	# Outer rings reach further (+8% per ring past 1).
 	S = _open_run()
 	S.slots[r1] = {"id": "gun", "perm": 0, "run": 1}
@@ -1560,11 +1610,15 @@ func _pc_move_stages() -> void:
 	var cev: Array = S.cancel_place()
 	_check("cancel_place drops a pending card", S.pending_place == "" and cev.size() == 1 and String(cev[0]["t"]) == "place_cancelled" and S.cancel_place().is_empty())
 	_check("PC-E4 core / locked cells refused", S.move_building(c, TowerState.CORE_SLOT).is_empty())
+	# The permanent (meta) base keeps its own 7x7 indexing (FEEDBACK-1).
+	var a7: int = 2 * 7 + 3
+	var b7: int = 2 * 7 + 2
+	var c7: int = 2 * 7 + 4
 	var bs: Dictionary = BaseMeta.default_save()
 	bs["coins"] = 1000
-	BaseMeta.try_place(bs, a, "gun")
-	BaseMeta.try_place(bs, c, "mine")
-	_check("PC-E4 base move + swap", BaseMeta.try_move(bs, a, b) and String(BaseMeta.slot_of(bs, b)["id"]) == "gun" and BaseMeta.try_move(bs, b, c) and String(BaseMeta.slot_of(bs, c)["id"]) == "gun" and String(BaseMeta.slot_of(bs, b)["id"]) == "mine" and not BaseMeta.try_move(bs, c, _rc(0, 0)))
+	BaseMeta.try_place(bs, a7, "gun")
+	BaseMeta.try_place(bs, c7, "mine")
+	_check("PC-E4 base move + swap", BaseMeta.try_move(bs, a7, b7) and String(BaseMeta.slot_of(bs, b7)["id"]) == "gun" and BaseMeta.try_move(bs, b7, c7) and String(BaseMeta.slot_of(bs, c7)["id"]) == "gun" and String(BaseMeta.slot_of(bs, b7)["id"]) == "mine" and not BaseMeta.try_move(bs, c7, 0))
 
 
 func _mod_run(mods: Array, sv: Dictionary = {}, seed_value: int = 1234):
@@ -1593,7 +1647,7 @@ func _pc_mode_stages() -> void:
 	S._spawn("drone", [])
 	var p0: int = int(S0._build_plan(3, 0.0)["entries"].size())
 	var p1: int = int(S._build_plan(3, 0.0)["entries"].size())
-	_check("PC-E6 Swarm: -30% HP each, +60% count", is_equal_approx(float(S.enemy_list()[0]["hp"]), 6.0 * 0.7) and float(p1) >= 1.5 * float(p0) and float(p1) <= 1.7 * float(p0))
+	_check("PC-E6 Swarm: -30% HP each, +60% count", is_equal_approx(float(S.enemy_list()[0]["hp"]), 6.0 * 0.7 * TowerState.difficulty_hp()) and float(p1) >= 1.5 * float(p0) and float(p1) <= 1.7 * float(p0))
 	S = _mod_run(["ironclad"])
 	var e1: Dictionary = _enemy("hauler", TowerState.CENTER + Vector2(0, 300))
 	var e2: Dictionary = _enemy("hauler", TowerState.CENTER + Vector2(0, 300))
@@ -1611,8 +1665,9 @@ func _pc_mode_stages() -> void:
 	S.add_enemy(_enemy("drone", TowerState.CENTER + Vector2(0, 300), 0.0))
 	S._reap([])
 	_check("PC-E6 Austerity: kill cash -30%", is_equal_approx(S.cash, 1.0 * 0.7))
+	# FEEDBACK-1: every wave comes from all sides now; Encircled = +25% enemies.
 	S = _mod_run(["allsides"])
-	_check("PC-E6 Encircled: 4 lanes from wave 1", S.active_quads.size() == 4 and S.quad_count(1) == 4)
+	_check("PC-E6 Encircled: +25% enemy count", is_equal_approx(S.count_mult, 1.25))
 	S = _mod_run(["noperks"])
 	S.spawn_hold = true
 	S.wave = 4
@@ -1650,13 +1705,13 @@ func _pc_mode_stages() -> void:
 	E.wave_t = E.wave_time - 0.001
 	var mev: Array = E.tick(0.01)
 	var mo: Array = _evts(mev, "mutation_offer")
-	_check("PC-E7 mutation offer at wave 25 (3 distinct)", E.wave == 25 and mo.size() == 1 and E.mutation_offer.size() == 3 and E.mutation_offer[0] != E.mutation_offer[1] and E.mutation_offer[1] != E.mutation_offer[2] and is_equal_approx(E.time_scale(), 0.2))
+	_check("PC-E7 mutation offer at wave 25 (3 distinct)", E.wave == 25 and mo.size() == 1 and E.mutation_offer.size() == 3 and E.mutation_offer[0] != E.mutation_offer[1] and E.mutation_offer[1] != E.mutation_offer[2] and is_equal_approx(E.time_scale(), 1.0))   # FB1: sim stays live
 	E.mutation_offer = ["m_vigor", "m_rush", "m_horde"]
 	var cm0: float = E.run_coin_mult()
 	var tk: Array = E.choose_mutation(0)
 	E._spawn("drone", [])
 	var vh: float = float(_last(E)["hp"]) / E.scale()
-	_check("PC-E7 mutation pays +15% coins and buffs enemies", _evts(tk, "mutation_taken").size() == 1 and is_equal_approx(E.run_coin_mult(), cm0 * 1.15) and is_equal_approx(vh, 6.0 * 1.2) and E.mutation_offer.is_empty())
+	_check("PC-E7 mutation pays +15% coins and buffs enemies", _evts(tk, "mutation_taken").size() == 1 and is_equal_approx(E.run_coin_mult(), cm0 * 1.15) and is_equal_approx(vh, 6.0 * 1.2 * TowerState.difficulty_hp()) and E.mutation_offer.is_empty())
 	N0.mode = "normal"
 	N0.wave = 49
 	N0.wave_t = N0.wave_time - 0.001
@@ -1721,7 +1776,7 @@ func _pc_stats_stages() -> void:
 	_check("PC-E8 history entry recorded", h.size() == 1 and int(h[0]["seed"]) == 9 and int(h[0]["wave"]) == 33 and (h[0]["modifiers"] as Array) == ["glass"] and int(h[0]["tier"]) == 2)
 	var sp: Dictionary = BaseMeta.default_save()
 	sp["coins"] = 5000
-	BaseMeta.try_place(sp, _rc(2, 3), "gun")
+	BaseMeta.try_place(sp, 2 * 7 + 3, "gun")   # meta base: 7x7 index
 	BaseMeta.try_core(sp, "dmg")
 	_check("PC-E8 coins_spent fed by BaseMeta spends", int(sp["stats"]["coins_spent"]) == 15 + 30)
 	var M: Dictionary = BaseMeta.default_save()
@@ -1764,7 +1819,7 @@ func _pc_save_stages() -> void:
 	_check("PC-E9 v2 -> v3: version, cells offset (r+1,c+1)", int(m3["version"]) == 3 and slot_ok and _c(6) == 16 and _c(24) == 40)
 	_check("PC-E9 v2 -> v3: unlocks land on ring 2", (m3["unlocked"] as Array) == [_c(0), _c(4), _c(24)] and BaseMeta.cell_ring(_c(0)) == 2)
 	var m: Dictionary = BaseMeta.normalize(BaseMeta.migrate(v2))
-	_check("PC-E9 v2 -> v4 keeps meta fields", int(m["coins"]) >= 4321 and int(m["gems"]) == 12 and int(m["runs"]) == 9 and int(m["best_wave_by_tier"]["1"]) == 44 and int(m["tier"]) == 2 and int(m["research"]["lvls"]["dmg"]) == 3 and int(m["stats"]["kills"]) == 999 and int(m["stats"]["bosses"]) == 4 and int(m["version"]) == 4)
+	_check("PC-E9 v2 -> v4 keeps meta fields", int(m["coins"]) >= 4321 + 12 * BaseMeta.GEM_COINS and not m.has("gems") and int(m["runs"]) == 9 and int(m["best_wave_by_tier"]["1"]) == 44 and int(m["tier"]) == 2 and int(m["research"]["lvls"]["dmg"]) == 3 and int(m["stats"]["kills"]) == 999 and int(m["stats"]["bosses"]) == 4 and int(m["version"]) == 4)
 	_check("PC-E9 v3 blocks filled", (m["history"] as Array).is_empty() and int(m["endless"]["best"]) == 0 and (m["stats"] as Dictionary).has("kills_by_kind"))
 	_check("PC-E9 target modes remapped", String((m3["target_modes"] as Dictionary)[str(_c(7))]) == "first")
 	_check("PC-E9 migrate is idempotent on v4", JSON.stringify(BaseMeta.migrate(m)) == JSON.stringify(m))
@@ -2124,16 +2179,17 @@ func _core_stages() -> void:
 	_check("CORE opts.core ignored when not owned", O.core_id == "bastion")
 	# Traits.
 	var T = _core_run("bastion", 10)
-	for i in [16, 17, 18]:
+	for i in [_rc(2, 2), _rc(2, 3), _rc(2, 4)]:
 		T.slots[i] = {"id": "mine", "perm": 0, "run": 1}
 	T.recompute()
 	_check("CORE Steadfast: +1%/building x1.25 at L10 on Core dmg + cash", is_equal_approx(float(_weapon(T, "core")["dmg"]), 10.0 * pow(1.06, 9.0) * (1.0 + 0.03 * 1.25)) and is_equal_approx(float(T.stats["cash_ps"]), (2.0 * pow(1.04, 9.0) + 2.4) * (1.0 + 0.03 * 1.25)))
 	var F = _core_run("foundry")
 	F.tracks["eco"] = 2
 	F.recompute()
-	_check("CORE Compound: interest cap +5 +10 per Eco level", is_equal_approx(float(F.stats["interest_cap"]), 150.0 + 2.0 * 15.0) and is_equal_approx(float(F._draft_ctx("")["eco_mult"]), 1.5))
+	# FEEDBACK-1: Eco levels are 5x bigger (+25 cap; Compound +50 per level).
+	_check("CORE Compound: interest cap +25 +50 per Eco level", is_equal_approx(float(F.stats["interest_cap"]), 150.0 + 2.0 * 75.0) and is_equal_approx(float(F._draft_ctx("")["eco_mult"]), 1.5))
 	var L = _core_run("lance")
-	L.slots[16] = {"id": "gun", "perm": 0, "run": 1}
+	L.slots[_rc(2, 2)] = {"id": "gun", "perm": 0, "run": 1}
 	L.recompute()
 	_check("CORE Focus: buildings in Core range -10% rate", is_equal_approx(float(_weapon(L, "gun")["rate"]), 2.0 * 0.9))
 
@@ -2142,21 +2198,25 @@ func _core_stages() -> void:
 func _track_stages() -> void:
 	var S = _fresh()
 	_check("TRACK 5 tracks start at 0 (head_start 0)", S.tracks == {"dmg": 0, "rate": 0, "range": 0, "eco": 0, "armor": 0})
-	_check("TRACK base costs 20/30/40/25/25", S.track_cost("dmg") == 20 and S.track_cost("rate") == 30 and S.track_cost("range") == 40 and S.track_cost("eco") == 25 and S.track_cost("armor") == 25)
+	# FEEDBACK-1 (deliberate): few, big, expensive levels with a drawback each.
+	_check("TRACK base costs 60/70/90/50/60", S.track_cost("dmg") == 60 and S.track_cost("rate") == 70 and S.track_cost("range") == 90 and S.track_cost("eco") == 50 and S.track_cost("armor") == 60)
+	_check("FB1 every track names its drawback, caps <= 8", TowerState.TRACK_IDS.all(func(t: Variant) -> bool: return String((TowerState.TRACKS[t] as Dictionary).get("minus", "")) != "" and TowerState.track_cap(String(t)) <= 8))
 	S.cash = 1.0e9
 	for t in ["rate", "range", "eco", "armor"]:
 		S.buy_track(String(t))
-	_check("TRACK cost grows by its growth", S.track_cost("rate") == int(round(30.0 * float(TowerState.TRACKS["rate"]["growth"]))) and S.track_cost("eco") == int(round(25.0 * float(TowerState.TRACKS["eco"]["growth"]))) and S.track_cost("armor") == int(round(25.0 * float(TowerState.TRACKS["armor"]["growth"]))))
+	_check("TRACK cost grows by its growth", S.track_cost("rate") == int(round(70.0 * float(TowerState.TRACKS["rate"]["growth"]))) and S.track_cost("eco") == int(round(50.0 * float(TowerState.TRACKS["eco"]["growth"]))) and S.track_cost("armor") == int(round(60.0 * float(TowerState.TRACKS["armor"]["growth"]))))
 	var cw: Dictionary = _weapon(S, "core")
-	_check("TRACK Rate +3%, Range +0.1 cell", is_equal_approx(float(cw["rate"]), 1.25 * 1.03) and is_equal_approx(float(cw["range"]), 4.1 * TowerState.cpx()))
-	_check("TRACK Eco +0.4 cash/s, interest cap +5", is_equal_approx(float(S.stats["cash_ps"]), 2.4) and is_equal_approx(float(S.stats["interest_cap"]), 55.0))
-	_check("TRACK Armor +5% HP, +0.2 regen, +0.5 armor", is_equal_approx(float(S.stats["max_hp"]), 126.0) and is_equal_approx(float(S.stats["regen"]), 1.2) and is_equal_approx(float(S.stats["armor"]), 2.5))
-	S.tracks["range"] = 20
+	_check("TRACK Rate +20% (Range -5% rate), Range +0.5 cell", is_equal_approx(float(cw["rate"]), 1.25 * 1.20 * 0.95) and is_equal_approx(float(cw["range"]), 4.5 * TowerState.cpx()))
+	_check("TRACK Eco +2 cash/s, interest cap +25", is_equal_approx(float(S.stats["cash_ps"]), 4.0) and is_equal_approx(float(S.stats["interest_cap"]), 75.0))
+	_check("TRACK Armor +20% HP (Eco -5% HP), +1 regen, +2 armor", is_equal_approx(float(S.stats["max_hp"]), 120.0 * 1.2 * 0.95) and is_equal_approx(float(S.stats["regen"]), 2.0) and is_equal_approx(float(S.stats["armor"]), 4.0))
+	var S0 = _fresh()
+	_check("FB1 Rate and Armor cost Core dmg (-6% each)", is_equal_approx(float(cw["dmg"]), float(_weapon(S0, "core")["dmg"]) * 0.94 * 0.94))
+	S.tracks["range"] = 6
 	S.recompute()
-	_check("TRACK capped (range 20) -> cost -1, buy refused", S.track_cost("range") == -1 and S.buy_track("range").is_empty())
+	_check("TRACK capped (range 6) -> cost -1, buy refused", S.track_cost("range") == -1 and S.buy_track("range").is_empty())
 	S.packs = {"pk_logistics": 2}
 	S.recompute()
-	_check("TRACK Logistics packs -12% cost each", S.track_cost("dmg") == int(round(20.0 * 0.88 * 0.88)))
+	_check("TRACK Logistics packs -12% cost each", S.track_cost("dmg") == int(round(60.0 * 0.88 * 0.88)))
 	var hs: Dictionary = BaseMeta.default_save()
 	hs["reforge"] = {"count": 1, "nodes": {"head_start": 3}}
 	var H = TowerState.new()
@@ -2363,8 +2423,14 @@ func _draft_stages() -> void:
 	_check("DRAFT boss guarantee: slot 0 is Epic+", ep)
 	# Eligibility.
 	var ctx3: Dictionary = _ctx_empty()
-	ctx3["owned"] = {"gun": 5, "mortar": 2}
-	_check("DRAFT owned L5 building never offered; owned L2 -> plus 2->3", Draft.card_for("gun", ctx3).is_empty() and String(Draft.card_for("mortar", ctx3)["kind"]) == "plus" and int(Draft.card_for("mortar", ctx3)["to"]) == 3)
+	ctx3["owned"] = {"gun": 5, "mortar": 2, "mine": 5, "vault": 2}
+	ctx3["copies"] = {"gun": 5, "mortar": 1, "mine": 1, "vault": 1}
+	# FEEDBACK-1: weapon duplicates are new buildings (up to max copies);
+	# non-weapon duplicates are upgrades applied onto the building.
+	_check("DRAFT owned L5 building never offered; owned L2 -> plus 2->3", Draft.card_for("gun", ctx3).is_empty() and Draft.card_for("mine", ctx3).is_empty() and String(Draft.card_for("vault", ctx3)["kind"]) == "plus" and int(Draft.card_for("vault", ctx3)["to"]) == 3)
+	_check("FB1 weapon duplicate with a free cell -> new building (dup)", String(Draft.card_for("mortar", ctx3)["kind"]) == "new" and bool(Draft.card_for("mortar", ctx3)["dup"]))
+	ctx3["free"] = false
+	_check("FB1 weapon duplicate without a free cell -> plus", String(Draft.card_for("mortar", ctx3)["kind"]) == "plus" and int(Draft.card_for("mortar", ctx3)["to"]) == 3)
 	ctx3["free"] = false
 	_check("DRAFT no free cell -> no NEW building / hut; plus still ok", Draft.card_for("tesla", ctx3).is_empty() and Draft.card_for("hut_infantry", ctx3).is_empty() and not Draft.card_for("mortar", ctx3).is_empty())
 	var ctx4: Dictionary = _ctx_empty()
@@ -2470,7 +2536,7 @@ func _draft_stages() -> void:
 	S.draft = [Draft.card_for("pk_gambit", S._draft_ctx(""))]
 	S.choose_card(0)
 	S._spawn("drone", [])
-	_check("DRAFT Gambit +40% dmg, enemies +15% HP", is_equal_approx(float(_weapon(S, "core")["dmg"]), dmg0 * 1.12 * 1.4) and is_equal_approx(float(_last(S)["hp"]), 6.0 * 1.15))
+	_check("DRAFT Gambit +40% dmg, enemies +15% HP", is_equal_approx(float(_weapon(S, "core")["dmg"]), dmg0 * 1.12 * 1.4) and is_equal_approx(float(_last(S)["hp"]), 6.0 * 1.15 * TowerState.difficulty_hp()))
 	S.packs = {"pk_core": 1, "pk_overclock": 1, "pk_fort": 1, "pk_optics": 1}
 	S.recompute()
 	var cw: Dictionary = _weapon(S, "core")
@@ -2758,11 +2824,10 @@ func _insight_drop_stages() -> void:
 	# Courier spawns, runs on a chord outside the wall, escapes or drops.
 	var K = _fresh()
 	K.spawn_hold = true
-	K.active_quads = [0]
 	var kev: Array = []
 	K._spawn_courier(kev)
 	var cour: Dictionary = _last(K)
-	_check("COURIER spawn event, 2x drone HP, 3x speed", _evts(kev, "courier_spawn").size() == 1 and String(cour["kind"]) == "courier" and is_equal_approx(float(cour["max_hp"]), 12.0) and is_equal_approx(float(cour["spd"]), 135.0))
+	_check("COURIER spawn event, 2x drone HP, 3x speed", _evts(kev, "courier_spawn").size() == 1 and String(cour["kind"]) == "courier" and is_equal_approx(float(cour["max_hp"]), 12.0 * TowerState.difficulty_hp()) and is_equal_approx(float(cour["spd"]), 135.0))
 	var min_d: float = INF
 	var esc: Array = []
 	for k in 200:
@@ -2788,8 +2853,8 @@ func _insight_drop_stages() -> void:
 			marked_seen = marked_seen or bool((en as Dictionary).get("marked", false))
 	_check("MARK marked elites appear from w8", marked_seen and not _plan_has_mark(M, 7))
 	M.spawn_hold = true
-	M._spawn("drone", [], Vector2.INF, 0, true)
-	_check("MARK marked enemy x3 HP + flag", bool(_last(M)["marked"]) and is_equal_approx(float(_last(M)["max_hp"]), 18.0))
+	M._spawn("drone", [], Vector2.INF, true)
+	_check("MARK marked enemy x3 HP + flag", bool(_last(M)["marked"]) and is_equal_approx(float(_last(M)["max_hp"]), 18.0 * TowerState.difficulty_hp()))   # FB1: x difficulty
 
 
 func _plan_has_mark(S, w: int) -> bool:
@@ -3060,7 +3125,14 @@ func _parts_engine_stages() -> void:
 	var Q = _parts_run(["c_quickcap"], "bastion", 12)
 	_check("RUN Quick Cap: special cd x0.821, dmg x0.879", is_equal_approx(float(Q.mods["special_cd"]), 1.0 - 0.179) and is_equal_approx(float(Q.mods["special_dmg"]), 1.0 - 0.121))
 	var H = _parts_run(["e_bastionheart"], "bastion", 20)
-	_check("RUN Bastion Heart: rings open one step later", H.ring_threshold(2) == 30 and H.ring_threshold(3) == 60 and B.ring_threshold(2) == 10)
+	# FEEDBACK-1: rings no longer open in a run; Bastion Heart's drawback is a
+	# one-step-smaller grid (never below 3x3).
+	var hsv: Dictionary = _parts_save(["e_bastionheart"], "bastion", 20)
+	_equip_all(hsv, ["e_bastionheart"])
+	hsv["research"]["lvls"]["grid"] = 2
+	var H2 = TowerState.new()
+	H2.setup(1234, hsv)
+	_check("RUN Bastion Heart: grid one step smaller", H.grid_n == 3 and H2.grid_n == 5 and B.grid_n == 3)
 	# Hunter Scope: bosses take more, normal enemies less (in _hit).
 	var S = _parts_run(["c_scope"], "bastion", 12)
 	var eb: Dictionary = _enemy("boss", Vector2(400, 400), 1000.0)
@@ -3096,12 +3168,13 @@ func _parts_engine_stages() -> void:
 	# Swarm 4-piece lifts the Queen Engine hold-fire (+13% all damage).
 	var Sw = _parts_run(["f_hivecomb", "b_droneport", "c_pheromone", "e_queen"], "bastion", 40)
 	_check("RUN Swarm 4-piece: Queen hold-fire lifted, +13% all damage", is_zero_approx(Sw.pf("queen_hold")) and is_equal_approx(Sw.pf("dmg"), 0.13) and Sw.pf("troop_ls") > 0.0)
-	# Mint 4-piece Dividend in a run: all damage x(1 + 0.20 * Eco/50).
+	# Mint 4-piece Dividend in a run: all damage x(1 + 0.20 * Eco/cap);
+	# FEEDBACK-1: the Eco cap is 8 now (was 50), so half = Eco 4.
 	var Mi = _parts_run(["f_ledgerframe", "b_bounty", "c_interest", "e_mintpress"], "bastion", 40)
 	var mi0: float = float(Mi.stats["dmg_all"])
-	Mi.tracks["eco"] = 25
+	Mi.tracks["eco"] = 4
 	Mi.recompute()
-	_check("RUN Mint 4-piece Dividend: +10% all damage at Eco 25", is_equal_approx(float(Mi.stats["dmg_all"]) / mi0, 1.10), "%.4f" % (float(Mi.stats["dmg_all"]) / mi0))
+	_check("RUN Mint 4-piece Dividend: +10% all damage at half Eco (4/8)", is_equal_approx(float(Mi.stats["dmg_all"]) / mi0, 1.10), "%.4f" % (float(Mi.stats["dmg_all"]) / mi0))
 	# interest_fast engine fx (was the Mint 4-piece until the AC-29 eco pass;
 	# no data source carries it now, the mechanic stays covered): interest
 	# every 15 s instead of per wave.
@@ -3180,15 +3253,16 @@ func _crate_stages() -> void:
 	var lev: Array = Crates.open(lg, "vault", "keys", rng3)
 	_check("CRATE Vault: 4 parts, Legendary pity at 15, paid 4 Keys", (lev[0]["rarities"] as Array).size() == 4 and (lev[0]["rarities"] as Array).has("legendary") and int(lg["keys"]) == 0 and Parts.count(lg) >= 1)
 	var sp: Dictionary = BaseMeta.normalize(BaseMeta.default_save())
-	_check("CRATE refused when unaffordable", Crates.open(sp, "supply", "gems", rng3).is_empty() and Crates.open(sp, "field", "coins", rng3).is_empty() and Crates.open(sp, "field", "token", rng3).is_empty())
-	sp["gems"] = 60
-	var sev: Array = Crates.open(sp, "supply", "gems", rng3)
-	_check("CRATE Supply: 2 parts for 60 gems", (sev[0]["rarities"] as Array).size() == 2 and int(sp["gems"]) == 0 and int(sp["stats"]["crates_opened"]) == 1)
+	# FEEDBACK-1: gems are gone — Supply/Vault open with Keys only.
+	_check("CRATE refused when unaffordable", Crates.open(sp, "supply", "keys", rng3).is_empty() and Crates.open(sp, "supply", "gems", rng3).is_empty() and Crates.open(sp, "field", "coins", rng3).is_empty() and Crates.open(sp, "field", "token", rng3).is_empty())
+	sp["keys"] = 1
+	var sev: Array = Crates.open(sp, "supply", "keys", rng3)
+	_check("CRATE Supply: 2 parts for 1 Key", (sev[0]["rarities"] as Array).size() == 2 and int(sp["keys"]) == 0 and int(sp["stats"]["crates_opened"]) == 1)
 	var vr: Dictionary = BaseMeta.normalize(BaseMeta.default_save())
-	vr["gems"] = 300 * 50
+	vr["keys"] = 4 * 50
 	var vok: bool = true
 	for k in 50:
-		var vv: Array = Crates.open(vr, "vault", "gems", rng3)
+		var vv: Array = Crates.open(vr, "vault", "keys", rng3)
 		var best: int = 0
 		for r in vv[0]["rarities"]:
 			best = maxi(best, int(Crates.RANK[r]))
@@ -3199,13 +3273,13 @@ func _crate_stages() -> void:
 	_check("CRATE free Field token opens once", Crates.open(tk, "field", "token", rng3).size() >= 2 and Crates.tokens(tk) == 0 and Crates.open(tk, "field", "token", rng3).is_empty())
 	var same1: Dictionary = BaseMeta.normalize(BaseMeta.default_save())
 	var same2: Dictionary = BaseMeta.normalize(BaseMeta.default_save())
-	same1["gems"] = 600
-	same2["gems"] = 600
+	same1["keys"] = 10
+	same2["keys"] = 10
 	var ra := RandomNumberGenerator.new()
 	var rb := RandomNumberGenerator.new()
 	ra.seed = 5
 	rb.seed = 5
-	_check("CRATE opens are seeded (same seed -> same parts)", JSON.stringify(Crates.open(same1, "supply", "gems", ra)) == JSON.stringify(Crates.open(same2, "supply", "gems", rb)))
+	_check("CRATE opens are seeded (same seed -> same parts)", JSON.stringify(Crates.open(same1, "supply", "keys", ra)) == JSON.stringify(Crates.open(same2, "supply", "keys", rb)))
 
 
 const OT0: int = 1767225600
@@ -3214,7 +3288,6 @@ const OT0: int = 1767225600
 func _op_save(coins: int = 1000000) -> Dictionary:
 	var sv: Dictionary = BaseMeta.normalize(BaseMeta.default_save())
 	sv["coins"] = coins
-	sv["gems"] = 1000
 	return sv
 
 
@@ -3279,30 +3352,28 @@ func _outpost_stages() -> void:
 	nb["outpost"]["buildings"][nu]["last_tick"] = 0
 	Outpost.tick(nb, OT0 + 86400)
 	_check("OP last_tick 0 = start the clock (no double pay after migration)", is_equal_approx(float(nb["outpost"]["buildings"][nu]["stored"]), 0.0) and int(nb["outpost"]["buildings"][nu]["last_tick"]) == OT0 + 86400)
-	# Timers + builders (AC-18).
+	# FEEDBACK-1 (deliberate): builds and upgrades are INSTANT (no timers, no
+	# builders limit, no gem skips).
 	var t: Dictionary = _op_save()
 	var pe: Array = Outpost.place(t, "mill", 4, 4, 0, OT0)
 	var tu: String = String(_evts(pe, "op_placed")[0]["uid"])
-	_check("AC-18 one job per builder (2nd build refused)", Outpost.place(t, "mill", 4, 6, 0, OT0).is_empty() and Outpost.busy(t) == 1 and Outpost.builders(t) == 1)
-	_check("AC-18 Conduits are instant (no builder)", not Outpost.place(t, "conduit", 2, 6, 0, OT0).is_empty())
-	Outpost.tick(t, OT0 + 119)
-	_check("AC-18 build not done before ends_at", not bool(t["outpost"]["buildings"][tu]["built"]))
-	var dev: Array = Outpost.tick(t, OT0 + 120 + 3600)
-	_check("AC-18 build completes at ends_at, produces from then", _evts(dev, "build_done").size() == 1 and bool(t["outpost"]["buildings"][tu]["built"]) and absf(float(t["outpost"]["buildings"][tu]["stored"]) - OutpostDB.MILL_RATE) < 0.01)
+	_check("FB1 a build completes on placement", _evts(pe, "build_done").size() == 1 and bool(t["outpost"]["buildings"][tu]["built"]) and Outpost.busy(t) == 0)
+	_check("FB1 no builder limit (2nd build at once)", not Outpost.place(t, "mill", 4, 6, 0, OT0).is_empty() and not Outpost.place(t, "conduit", 2, 6, 0, OT0).is_empty())
+	var dev: Array = Outpost.tick(t, OT0 + 3600)
+	_check("FB1 an instant build produces from placement", float(t["outpost"]["buildings"][tu]["stored"]) > 0.0 and absf(float(t["outpost"]["buildings"][tu]["stored"]) - Outpost.rate(t, tu)) < 0.01)
+	var nr1: float = Outpost.nominal_rate(t, tu)
 	var uc: int = Outpost.cost("mill", 1)
 	var c1: int = int(t["coins"])
 	var uev: Array = Outpost.upgrade(t, tu, OT0 + 3720)
-	_check("OP upgrade cost x1.6^(L-1), time x1.4^(L-1)", uev.size() >= 1 and int(t["coins"]) == c1 - uc and Outpost.cost("mill", 3) == int(round(500.0 * 2.56)) and Outpost.build_time(t, "mill", 2) == int(round(120.0 * 1.4)))
-	Outpost.tick(t, OT0 + 3720 + 120)
-	_check("OP upgrade done: L2 = +25% production", int(t["outpost"]["buildings"][tu]["lvl"]) == 2 and is_equal_approx(Outpost.nominal_rate(t, tu), 1.25 * OutpostDB.MILL_RATE))
+	_check("OP upgrade cost x1.6^(L-1), instant", _evts(uev, "upgrade_done").size() == 1 and int(t["coins"]) == c1 - uc and Outpost.cost("mill", 3) == int(round(500.0 * 2.56)) and Outpost.build_time(t, "mill", 2) == 0)
+	_check("OP upgrade done: L2 = +25% production", int(t["outpost"]["buildings"][tu]["lvl"]) == 2 and is_equal_approx(Outpost.nominal_rate(t, tu), 1.25 * nr1))
 	_check("OP max level = min(10, Relay L + 2)", Outpost.max_lvl(t, "mill") == 3)
 	var sk: Dictionary = _op_save()
-	Outpost.place(sk, "research", 0, 6, 0, OT0)
-	Outpost.place(sk, "barracks", 4, 2, 0, OT0)
-	_check("OP skip cost = 1 gem per 3 min (rounded up)", Outpost.skip_cost(sk, 0, OT0) == 10 and Outpost.skip_cost(sk, 0, OT0 + 1500) == 2)
-	var g0: int = int(sk["gems"])
-	Outpost.skip(sk, 0, OT0)
-	_check("OP skip finishes the job for gems", int(sk["gems"]) == g0 - 10 and Outpost.level_of(sk, "barracks") == 1)
+	sk["outpost"]["queue"] = [{"uid": "relay", "kind": "upgrade", "ends_at": OT0 + 99999}]
+	var skn: Dictionary = BaseMeta.normalize(sk)
+	Outpost.tick(skn, OT0)
+	_check("FB1 a job queued in an old save completes on the next tick", int(skn["outpost"]["relay_lvl"]) == 2 and (skn["outpost"]["queue"] as Array).is_empty() and not Outpost.new().has_method("skip"))
+	var _dv: int = dev.size()
 	# Adjacency + cap (AC-19).
 	var j: Dictionary = _op_save()
 	j["outpost"]["plots"] = [0, 1]
@@ -3348,19 +3419,19 @@ func _outpost_stages() -> void:
 	for lp in [Vector2i(2, 6), Vector2i(2, 7), Vector2i(0, 5), Vector2i(1, 5)]:
 		Outpost.place_decor(gl, "dc_lamp", lp.x, lp.y, 0)
 	_check("AC-19 decor stack capped at +20% (4 lit Lamps on a Gem Mine)", is_equal_approx(float(Outpost.layout_bonus(gl["outpost"], gmu)["total"]), 0.20))
-	# Gem Mine: rate band, hard cap 24, daily cap 25.
+	# FEEDBACK-1 (deliberate): the Gem Mine is now the Deep Mine — a coin
+	# generator (3x a Mill's base rate, 8 h storage); no gems, no daily cap.
 	var gm: Dictionary = _op_save()
 	var gu: String = _op_build(gm, "gemmine", 0, 6)
 	_op_build(gm, "conduit", 2, 6)
-	_check("OP Gem Mine 1 gem / 3 h at L1", is_equal_approx(Outpost.rate(gm, gu), 1.0 / 3.0))
+	_check("OP Deep Mine: 3x Mill rate in coins", String(OutpostDB.get_def("gemmine")["res"]) == "coins" and is_equal_approx(Outpost.nominal_rate(gm, gu), 3.0 * OutpostDB.MILL_RATE * Outpost.global_mult(gm)))
 	Outpost.tick(gm, OT0 + 86400 * 30)
-	_check("OP Gem Mine hard cap 24 stored", is_equal_approx(float(gm["outpost"]["buildings"][gu]["stored"]), 24.0))
-	var gg: int = int(gm["gems"])
+	_check("OP Deep Mine storage cap = 8 h of output", is_equal_approx(float(gm["outpost"]["buildings"][gu]["stored"]), Outpost.cap(gm, gu)) and is_equal_approx(Outpost.cap(gm, gu), 8.0 * Outpost.nominal_rate(gm, gu) * (1.0 + Outpost.warehouse_bonus(gm["outpost"], gu))))
+	var gg: int = int(gm["coins"])
+	var gst: float = float(gm["outpost"]["buildings"][gu]["stored"])
 	Outpost.collect(gm, gu, OT0 + 86400 * 30)
-	gm["outpost"]["buildings"][gu]["stored"] = 24.0
-	Outpost.collect(gm, gu, OT0 + 86400 * 30)
-	_check("OP Gem Mine daily cap 25 (gem_log mine)", int(gm["gems"]) == gg + 25 and int(gm["gem_log"]["mine"]) == 25 and is_equal_approx(float(gm["outpost"]["buildings"][gu]["stored"]), 23.0))
-	# Plots: cost, adjacency, gems-or-coins x3.
+	_check("OP Deep Mine collect pays coins", int(gm["coins"]) == gg + int(floor(gst)) and not gm.has("gems"))
+	# Plots: cost, adjacency (coins only — FEEDBACK-1).
 	var p: Dictionary = _op_save(10000000)
 	_check("OP plot 0 costs 5,000; a non-adjacent plot is refused", int(Outpost.plot_cost(p)["coins"]) == 5000 and Outpost.unlock_plot(p, 5).is_empty())
 	Outpost.unlock_plot(p, 0)
@@ -3368,10 +3439,9 @@ func _outpost_stages() -> void:
 	Outpost.unlock_plot(p, 1)
 	Outpost.unlock_plot(p, 2)
 	var pc4: Dictionary = Outpost.plot_cost(p)
-	var gp: int = int(p["gems"])
 	var cp4: int = int(p["coins"])
 	Outpost.unlock_plot(p, 3, "coins")
-	_check("OP 5th plot: coins x3 instead of 80 gems (gems never gate)", int(pc4["gems"]) == 80 and int(p["coins"]) == cp4 - int(pc4["coins"]) * 3 and int(p["gems"]) == gp)
+	_check("FB1 5th plot: plain coin price 5,000 x 2.2^4, no gem option", not pc4.has("gems") and int(pc4["coins"]) == int(round(5000.0 * pow(2.2, 4.0))) and int(p["coins"]) == cp4 - int(pc4["coins"]))
 	# Decor + Charm.
 	var d: Dictionary = _op_save()
 	d["outpost"]["plots"] = [0, 1, 2, 3, 4, 5, 6, 7]
@@ -3394,11 +3464,13 @@ func _outpost_stages() -> void:
 	var c3: int = int(mv["coins"])
 	Outpost.demolish(mv, ku, OT0)
 	_check("OP demolish after build refunds 50%", int(mv["coins"]) == c3 + 250)
+	# FEEDBACK-1: builds are instant, so nothing is ever "queued" — a fresh
+	# building demolishes at the normal 50% refund and no builder is held.
 	var qd: Dictionary = _op_save()
 	var qe: Array = Outpost.place(qd, "barracks", 4, 2, 0, OT0)
 	var c4: int = int(qd["coins"])
 	Outpost.demolish(qd, String(_evts(qe, "op_placed")[0]["uid"]), OT0)
-	_check("OP demolish while queued refunds 100% and frees the builder", int(qd["coins"]) == c4 + 3000 and Outpost.busy(qd) == 0)
+	_check("FB1 demolish right after placing refunds 50%, no builder held", int(qd["coins"]) == c4 + 1500 and Outpost.busy(qd) == 0)
 	# Blueprints: save / export / import / one-click rebuild.
 	var bp: Dictionary = _op_save()
 	var bu: String = _op_build(bp, "mill", 4, 4)
@@ -3454,7 +3526,6 @@ func _reforge_stages() -> void:
 	var sv: Dictionary = _parts_save(["f_glass", "b_hollow"], "bastion", 20)
 	_equip_all(sv, ["f_glass", "b_hollow"])
 	sv["coins"] = 50000
-	sv["gems"] = 77
 	sv["keys"] = 3
 	sv["best_wave_by_tier"] = {"1": 39}
 	sv["best_wave"] = 39
@@ -3482,8 +3553,8 @@ func _reforge_stages() -> void:
 	var ev: Array = Reforge.reforge(sv, OT0 + 100)
 	var ok_reset: bool = int(sv["coins"]) == 0 and Cores.level(sv, "bastion") == 1 and int(Parts.item(sv, gu)["lvl"]) == 1 and int(sv["outpost"]["buildings"][mu]["lvl"]) == 1 and int(sv["outpost"]["relay_lvl"]) == 1 and int(sv["research"]["lvls"]["dmg"]) == 0 and int(sv["tier"]) == 1 and Tiers.highest(sv) == 1
 	_check("AC-21 resets: coins, Core levels, part levels, Outpost levels + Relay, research, tier", c_before > 0 and _evts(ev, "reforge").size() == 1 and ok_reset)
-	var ok_keep: bool = Parts.owns(sv, "f_glass") and Parts.equipped(sv, "bastion").size() == 2 and (sv["outpost"]["plots"] as Array) == [0] and (sv["outpost"]["decor"] as Dictionary).size() == 1 and (sv["outpost"]["blueprints"] as Array).size() == 1 and int(sv["outpost"]["buildings"][mu]["x"]) == 4 and int(sv["gems"]) == 77 and int(sv["keys"]) == 3 and int(sv["insight"]["in_dmg"]) == 4 and (sv["cards"]["owned"] as Dictionary).has("c_dmg") and int(sv["best_wave"]) == 39
-	_check("AC-21 keeps: parts + presets, layout/plots/decor/blueprints, gems, Keys, Insight, cards, best wave", ok_keep)
+	var ok_keep: bool = Parts.owns(sv, "f_glass") and Parts.equipped(sv, "bastion").size() == 2 and (sv["outpost"]["plots"] as Array) == [0] and (sv["outpost"]["decor"] as Dictionary).size() == 1 and (sv["outpost"]["blueprints"] as Array).size() == 1 and int(sv["outpost"]["buildings"][mu]["x"]) == 4 and not sv.has("gems") and int(sv["keys"]) == 3 and int(sv["insight"]["in_dmg"]) == 4 and (sv["cards"]["owned"] as Dictionary).has("c_dmg") and int(sv["best_wave"]) == 39
+	_check("AC-21 keeps: parts + presets, layout/plots/decor/blueprints, Keys, Insight, cards, best wave", ok_keep)
 	_check("AC-21 part levels refund 50% Scrap", int(sv["scrap"]) == PartDB.invested("f_glass", 4) / 2)
 	_check("AC-21 shards banked, count + cum, Lance unlocks, Core Cores", int(sv["shards"]) == sh1 and Reforge.count(sv) == 1 and int(sv["reforge"]["cum_shards"]) == sh1 and int(sv["reforge"]["coins_since"]) == 0 and Cores.is_owned(sv, "lance") and int(sv["stats"]["reforges"]) == 1)
 	_check("AC-21 gate re-arms after a Reforge (tier progress reset)", not Reforge.can_reforge(sv))
@@ -3556,7 +3627,7 @@ func _save_v4_stages() -> void:
 	var m: Dictionary = BaseMeta.normalize(BaseMeta.migrate(v3))
 	# Bastion: 1 + floor(27 / 3) = 10; leftover dmg 12 -> levels 9..11, hp 9 -> none.
 	var core_ref: int = BaseMeta.core_cost(9) + BaseMeta.core_cost(10) + BaseMeta.core_cost(11)
-	_check("AC-22 refund coins credited (+ Core leftover)", int(m["coins"]) == 10000 + refund + core_ref)
+	_check("AC-22 refund coins credited (+ Core leftover, + 40 legacy gems as coins)", int(m["coins"]) == 10000 + refund + core_ref + 40 * BaseMeta.GEM_COINS)
 	_check("AC-22 Bastion level per formula (1 + floor(sum/3))", Cores.level(m, "bastion") == 10 and int(m["core"]["dmg"]) == 0)
 	var con: Dictionary = Outpost.connected(m["outpost"])
 	var mill_ok: bool = false
@@ -3570,7 +3641,7 @@ func _save_v4_stages() -> void:
 	_check("AC-22 Coin Mill + Research Hall placed and connected", mill_ok and hall_ok and (m["slots"] as Dictionary).is_empty() and (m["unlocked"] as Array).is_empty())
 	_check("AC-22 Outpost starter credit = 25% of the refund (cap 50k)", int(m["outpost"]["credit"]) == mini(50000, refund / 4))
 	_check("AC-22 research levels equal old labs; slots 3 -> Hall L8 (3 queues); running kept", int(m["research"]["lvls"]["dmg"]) == 7 and int(m["research"]["lvls"]["offcap"]) == 2 and Labs.slots(m) == 3 and (m["research"]["running"] as Array).size() == 1 and int(m["research"]["running"][0]["end"]) == OT0 + 500 and not m.has("labs"))
-	_check("AC-22 keeps cards, tiers, stats, achievements, gems, settings, endless, streak", int(m["gems"]) == 40 and (m["cards"]["owned"] as Dictionary).has("c_dmg") and int(m["best_wave_by_tier"]["2"]) == 31 and int(m["stats"]["kills"]) == 5000 and (m["achievements"]["unlocked"] as Dictionary).has("ACH_FIRST_RUN") and is_equal_approx(float(m["settings"]["music"]), 0.5) and int(m["endless"]["best"]) == 12 and int(m["streak"]["day_idx"]) == 3)
+	_check("AC-22 keeps cards, tiers, stats, achievements, settings, endless, streak (gems -> coins)", not m.has("gems") and (m["cards"]["owned"] as Dictionary).has("c_dmg") and int(m["best_wave_by_tier"]["2"]) == 31 and int(m["stats"]["kills"]) == 5000 and (m["achievements"]["unlocked"] as Dictionary).has("ACH_FIRST_RUN") and is_equal_approx(float(m["settings"]["music"]), 0.5) and int(m["endless"]["best"]) == 12 and int(m["streak"]["day_idx"]) == 3)
 	_check("AC-22 defaults: Bastion active, 1 free Field Crate, zero new keys", Cores.active(m) == "bastion" and Crates.tokens(m) == 1 and int(m["shards"]) == 0 and Parts.count(m) == 0 and Reforge.count(m) == 0)
 	# No double offline pay: the first tick after migration only starts clocks.
 	var away: Dictionary = Outpost.away_report(m, OT0)
@@ -3579,7 +3650,7 @@ func _save_v4_stages() -> void:
 	_check("AC-22 no double offline pay (accrues from the migration time)", int(away["coins"]) == 0 and absf(float(Outpost.pending(m, OT0 + 3600)["coins"]) - OutpostDB.MILL_RATE * (1.0 + OutpostDB.MILL_TIER)) < 0.01)
 	# Idempotent: migrating / normalizing again changes nothing.
 	var m2: Dictionary = BaseMeta.normalize(BaseMeta.migrate(m))
-	_check("AC-22 migration idempotent (v4 -> v4)", JSON.stringify(m2) == JSON.stringify(m) and int(BaseMeta.normalize(BaseMeta.normalize(BaseMeta.migrate(v3)))["coins"]) == 10000 + refund + core_ref)
+	_check("AC-22 migration idempotent (v4 -> v4)", JSON.stringify(m2) == JSON.stringify(m) and int(BaseMeta.normalize(BaseMeta.normalize(BaseMeta.migrate(v3)))["coins"]) == 10000 + refund + core_ref + 40 * BaseMeta.GEM_COINS)
 	_check("AC-22 v4 JSON round-trip", JSON.stringify(BaseMeta.normalize(JSON.parse_string(JSON.stringify(m)))) == JSON.stringify(m))
 	# Sanitize: negative ints clamp, unknown part ids drop, uids stay unique.
 	var bad: Dictionary = m.duplicate(true)

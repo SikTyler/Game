@@ -10,7 +10,10 @@ extends RefCounted
 ##    tiers_rewarded:[N], best_coin_rate:float, speed:float,
 ##    labs:{lvls,slots,running}, cards:{owned,equipped,slots},
 ##    missions:{day,list,bonus_claimed}, streak:{day_idx,last_day,loops},
-##    last_seen:int, stats:{kills,bosses}, gem_log:{boss,mission,streak,tier}}
+##    last_seen:int, stats:{kills,bosses}}
+## Owner feedback #1: gems (premium currency) are gone. normalize() converts a
+## legacy gem balance into coins at GEM_COINS each and drops gem_log /
+## boss_gems_today.
 
 const BuildingDB := preload("res://data/BuildingDB.gd")
 const LabDB := preload("res://data/LabDB.gd")
@@ -39,12 +42,12 @@ const CORE_STATS: Array = ["dmg", "hp", "regen"]
 const MAX_LVL: int = 15
 ## Hard ceiling for migrated core levels; the live cap is core_cap(s).
 const CORE_HARD_MAX: int = 60
-const GEM_SOURCES: Array = ["boss", "mission", "streak", "tier", "mine"]
+const GEM_COINS: int = 25   # legacy gem -> coins conversion
 
 
 static func default_save() -> Dictionary:
 	return {
-		"version": VERSION, "coins": 0, "gems": 0,
+		"version": VERSION, "coins": 0,
 		"core": {"dmg": 0, "hp": 0, "regen": 0}, "slots": {}, "unlocked": [],
 		"runs": 0, "best_wave": 0, "tier": 1, "best_wave_by_tier": {"1": 0},
 		"tiers_rewarded": [], "best_coin_rate": 0.0, "speed": 1.0,
@@ -53,8 +56,6 @@ static func default_save() -> Dictionary:
 		"missions": {"day": -1, "list": [], "bonus_claimed": false},
 		"streak": {"day_idx": 0, "last_day": -1, "loops": 0},
 		"last_seen": 0, "stats": Stats.default_stats(), "history": [],
-		"gem_log": {"boss": 0, "mission": 0, "streak": 0, "tier": 0},
-		"boss_gems_today": {"day": -1, "n": 0},
 		"settings": {"music": 0.8, "sfx": 1.0, "mute": false},
 		"endless": {"best": 0},
 		"achievements": {"unlocked": {}, "missions_claimed": 0},
@@ -216,8 +217,7 @@ static func normalize(s_in: Dictionary) -> Dictionary:
 	if int(s_in.get("version", 1)) < VERSION:
 		s = migrate(s_in)
 	var d: Dictionary = default_save()
-	d["coins"] = maxi(0, int(s.get("coins", 0)))
-	d["gems"] = maxi(0, int(s.get("gems", 0)))
+	d["coins"] = maxi(0, int(s.get("coins", 0))) + GEM_COINS * maxi(0, int(s.get("gems", 0)))
 	d["runs"] = maxi(0, int(s.get("runs", 0)))
 	# tiers
 	var bw_in: Dictionary = s.get("best_wave_by_tier", {})
@@ -321,15 +321,12 @@ static func normalize(s_in: Dictionary) -> Dictionary:
 		var tpl: String = String(me.get("tpl", ""))
 		if MissionDB.DEFS.has(tpl) and ml.size() < Missions.PER_DAY:
 			var tg: int = maxi(1, int(me.get("target", 1)))
-			ml.append({"tpl": tpl, "target": tg, "prog": clampi(int(me.get("prog", 0)), 0, tg), "claimed": bool(me.get("claimed", false)), "gems": int(me.get("gems", MissionDB.reward(tpl)))})
+			ml.append({"tpl": tpl, "target": tg, "prog": clampi(int(me.get("prog", 0)), 0, tg), "claimed": bool(me.get("claimed", false)), "coins": MissionDB.reward(tpl)})
 	m["list"] = ml
 	var st_in: Dictionary = s.get("streak", {})
 	d["streak"] = {"day_idx": clampi(int(st_in.get("day_idx", 0)), 0, 7), "last_day": int(st_in.get("last_day", -1)), "loops": maxi(0, int(st_in.get("loops", 0)))}
 	d["stats"] = Stats.normalize_stats(s.get("stats", {}))
 	d["history"] = Stats.normalize_history(s.get("history", []))
-	d["gem_log"] = _int_dict(s.get("gem_log", {}), GEM_SOURCES)
-	var bg_in: Dictionary = s.get("boss_gems_today", {})
-	d["boss_gems_today"] = {"day": int(bg_in.get("day", -1)), "n": maxi(0, int(bg_in.get("n", 0)))}
 	var se_in: Dictionary = s.get("settings", {})
 	var en_in: Dictionary = s.get("endless", {}) if s.get("endless", {}) is Dictionary else {}
 	d["endless"] = {"best": maxi(0, int(en_in.get("best", 0)))}
@@ -401,7 +398,7 @@ static func run_mods(s: Dictionary) -> Dictionary:
 		"lab_dmg": float(lm["dmg"]), "lab_hp": float(lm["hp"]),
 		"lab_coin": float(lm["coin"]), "lab_xp": float(lm["xp"]),
 		"start_cash": int(lm["start_cash"]) + int(rm["rf_start_cash"]), "rerolls": int(lm["rerolls"]),
-		"cards": Cards.mods(s), "speed": sp,
+		"cards": Cards.mods(s), "speed": sp, "grid_lvl": Labs.level(s, "grid"),
 		"allow_new_bldg": int(s.get("runs", 0)) >= 2,
 	}
 
@@ -581,19 +578,9 @@ static func try_core(s: Dictionary, stat: String) -> bool:
 	return true
 
 
-## AC-10a: boss gems are capped per calendar day (boss_gem_daily) on top of
-## the 3-awards-per-run cap, so the T3 doubling cannot dominate gem income.
-static func boss_gem_allowance(s: Dictionary, now: int) -> int:
-	var cap: int = TuneRef.int_of("boss_gem_daily", 10)
-	var bg: Dictionary = s.get("boss_gems_today", {})
-	if int(bg.get("day", -1)) != Missions.day_of(now):
-		return cap
-	return maxi(0, cap - int(bg.get("n", 0)))
-
-
-## Bank a finished run: coins + gems, per-tier record, best coin rate,
+## Bank a finished run: coins, per-tier record, best coin rate,
 ## last_seen, and first-time tier unlock rewards. Returns events.
-static func bank(s: Dictionary, coins: int, wave: int, tier: int = 1, run_minutes: float = 0.0, now: int = 0, gems: int = 0, record: bool = true) -> Array:
+static func bank(s: Dictionary, coins: int, wave: int, tier: int = 1, run_minutes: float = 0.0, now: int = 0, record: bool = true) -> Array:
 	var ev: Array = []
 	var hi_before: int = Tiers.highest(s)
 	s["coins"] = int(s["coins"]) + maxi(0, coins)
@@ -610,12 +597,6 @@ static func bank(s: Dictionary, coins: int, wave: int, tier: int = 1, run_minute
 		s["best_coin_rate"] = maxf(float(s.get("best_coin_rate", 0.0)), float(coins) / run_minutes)
 	if now > 0:
 		s["last_seen"] = now
-	if gems > 0:
-		Missions.add_gems(s, "boss", gems)
-		var day: int = Missions.day_of(now)
-		var bg: Dictionary = s.get("boss_gems_today", {})
-		var used: int = int(bg.get("n", 0)) if int(bg.get("day", -1)) == day else 0
-		s["boss_gems_today"] = {"day": day, "n": used + gems}
 	if not s.has("tiers_rewarded"):
 		s["tiers_rewarded"] = []
 	var tr: Array = s["tiers_rewarded"]
@@ -623,12 +604,12 @@ static func bank(s: Dictionary, coins: int, wave: int, tier: int = 1, run_minute
 	for n in range(2, hi + 1):
 		if not tr.has(n):
 			tr.append(n)
-			var g: int = TuneRef.int_of("tier_gems", 10)
-			Missions.add_gems(s, "tier", g)
+			var g: int = TuneRef.int_of("tier_coins", 500)
+			s["coins"] = int(s["coins"]) + g
 			# Redesign: every tier clear also pays Core Cores (Core level gates).
 			var ccs: int = TuneRef.int_of("pc_tier_corecores", 2)
 			s["core_cores"] = int(s.get("core_cores", 0)) + ccs
-			ev.append({"t": "tier_unlocked", "tier": n, "gems": g, "core_cores": ccs})
+			ev.append({"t": "tier_unlocked", "tier": n, "coins": g, "core_cores": ccs})
 	return ev
 
 

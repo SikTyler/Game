@@ -242,7 +242,10 @@ func content_rect() -> Rect2:
 ## Battlefield transform: world (engine) space -> screen, zoomed about the Core.
 func world_xform() -> Transform2D:
 	var fr: Rect2 = field_rect()
-	var k: float = minf(fr.size.x, fr.size.y) / WORLD_SPAN * zoom
+	# Owner feedback #1: the field zooms to the run grid (bigger grid -> smaller
+	# scale), framing the spawn ring of this run.
+	var span: float = WORLD_SPAN if S == null else 2.0 * float(S.spawn_r()) * 0.78
+	var k: float = minf(fr.size.x, fr.size.y) / span * zoom
 	return Transform2D(0.0, Vector2(k, k), 0.0, fr.get_center() - TowerState.CENTER * k)
 
 
@@ -281,7 +284,7 @@ func boot(raw: Dictionary, t: int) -> void:
 	ev.append_array(Missions.roll(save, t))
 	var off: Dictionary = Outpost.away_report(save, t)
 	var any: bool = false
-	for k in ["coins", "scrap", "gems", "keys"]:
+	for k in ["coins", "scrap", "keys"]:
 		if int(off[k]) > 0:
 			any = true
 	if any:
@@ -404,15 +407,6 @@ func copy_slot(n: int) -> void:
 	_rebuild_ui()
 
 
-## History "Retry": same seed, tier, mode and modifiers (Stats.retry_opts).
-func retry_entry(e: Dictionary) -> void:
-	var o: Dictionary = Stats.retry_opts(e)
-	run_opts = {"mode": String(o["mode"]), "modifiers": (o["modifiers"] as Array).duplicate()}
-	if Tiers.is_unlocked(save, int(o["tier"])):
-		view_tier = int(o["tier"])
-	screen = "base"
-	overlay = ""
-	start_run(int(o["seed"]))
 
 
 func _fade_in() -> void:
@@ -566,6 +560,9 @@ func place_at(i: int) -> void:
 	if S != null and S.pending_place != "" and i >= 0:
 		_handle(S.place(i))
 		_rebuild_ui()
+	elif S != null and S.pending_upgrade != "" and i >= 0:
+		_handle(S.apply_upgrade(i))
+		_rebuild_ui()
 
 
 # ------------------------------------------------------------- fx helpers
@@ -657,8 +654,6 @@ func ev_text(e: Dictionary) -> String:
 			return "Research done: %s Lv%d" % [String((LabDB.DEFS[String(e["track"])] as Dictionary)["name"]), int(e["lvl"])]
 		"lab_started":
 			return "Researching %s" % String((LabDB.DEFS[String(e["track"])] as Dictionary)["name"])
-		"lab_rushed":
-			return "Research rushed (-%d gems)" % int(e["gems"])
 		"card_slot":
 			return "Card slot %d unlocked" % int(e["n"])
 		"chest_opened":
@@ -675,17 +670,17 @@ func ev_text(e: Dictionary) -> String:
 		"achievement":
 			return "Achievement: " + String(e.get("name", ""))
 		"mission_claimed":
-			return "Mission reward +%d gems" % int(e["gems"])
+			return "Mission reward +%d coins" % int(e.get("coins", 0))
 		"mission_bonus":
-			return "All-clear bonus +%d gems" % int(e["gems"])
+			return "All-clear bonus +%d coins" % int(e.get("coins", 0))
 		"mission_done":
 			return "Mission complete!"
 		"streak_claimed":
-			return "Day %d reward: +%d coins +%d gems" % [int(e["day"]), int(e["coins"]), int(e["gems"])]
+			return "Day %d reward: +%d coins" % [int(e["day"]), int(e["coins"])]
 		"offline":
 			return "Collected the Outpost: +%s coins" % fmt_num(int(e["coins"]))
 		"tier_unlocked":
-			return "Tier %d unlocked! +%d gems" % [int(e["tier"]), int(e["gems"])]
+			return "Tier %d unlocked! +%d coins" % [int(e["tier"]), int(e.get("coins", 0))]
 		"missions_rolled":
 			return "New daily missions"
 		"core_level":
@@ -739,7 +734,7 @@ func _meta_sfx(ev: Array) -> void:
 				sfx_play("lab_done")
 			"chest_opened", "crate_open":
 				sfx_play("card_open")
-			"lab_started", "lab_rushed", "card_slot", "core_level", "part_level", "op_upgrade", "shard_node", "part_equipped":
+			"lab_started", "card_slot", "core_level", "part_level", "op_upgrade", "shard_node", "part_equipped":
 				sfx_play("upgrade")
 			"op_placed", "decor_placed", "op_moved", "plot_open":
 				sfx_play("place")
@@ -872,8 +867,6 @@ func _handle(events: Array) -> void:
 			"boss_bounty":
 				_ring(ev["pos"], 120.0, 0.6, GOLD)
 				var bt: String = "BOUNTY +%d coins" % int(ev["coins"])
-				if int(ev["gems"]) > 0:
-					bt += "  +%d gems" % int(ev["gems"])
 				# Banner sits below the grid (never over cells).
 				_pop(TowerState.CENTER + Vector2(0, (float(TowerState.SIDE) * 0.5 + 1.4) * TowerState.CELL), bt, 1.6, GOLD, 24)
 			"revive":
@@ -919,15 +912,19 @@ func _handle(events: Array) -> void:
 					_ring(ev["pos"], float(ev["aoe"]), 0.35, Kit.RUST)
 			"troop_die":
 				_ring(ev["pos"], 14.0, 0.3, Kit.DIM)
-			"wall_broken":
-				_pop(TowerState.CENTER + Battle.quad_dir(int(ev["quad"])) * 150.0, "WALL DOWN", 1.0, ENEMY, 18)
+			"building_destroyed":
+				_ring(ev["pos"], 40.0, 0.5, ENEMY)
+				_pop(ev["pos"], "DESTROYED", 1.0, ENEMY, 18)
+				rebuild = true
+			"upgrade_mode":
+				rebuild = true
 			"perk_taken":
 				_pop(TowerState.CENTER + Vector2(0, -230), String(ev["name"]), 1.4, GOLD, 30)
 				rebuild = true
 			"pick_applied":
 				level_burst = 0.35
 				rebuild = true
-			"levelup", "perk_offer", "draft_offer", "draft_reroll", "draft_banish", "speed", "mutation_offer", "mutation_taken", "track", "target_mode", "lane_focus", "place_cancelled":
+			"levelup", "perk_offer", "draft_offer", "draft_reroll", "draft_banish", "speed", "mutation_offer", "mutation_taken", "track", "target_mode", "place_cancelled", "upgrade_cancelled":
 				rebuild = true
 			"placed", "upgraded", "building_level":
 				slot_pop[int(ev["slot"])] = 0.3
@@ -1001,6 +998,8 @@ func _input(event: InputEvent) -> void:
 				aim_special = -1
 			elif S != null and S.pending_place != "":
 				_handle(S.cancel_place())
+			elif S != null and S.pending_upgrade != "":
+				_handle(S.cancel_upgrade())
 			else:
 				sel = slot_at(s2w(mb.position))
 			_rebuild_ui()
@@ -1048,7 +1047,7 @@ func tap_at(pos: Vector2) -> void:
 		cast_at(pos)
 		return
 	var i: int = slot_at(s2w(pos))
-	if S.pending_place != "" and i >= 0:
+	if (S.pending_place != "" or S.pending_upgrade != "") and i >= 0:
 		place_at(i)
 		return
 	sel = i
@@ -1084,6 +1083,13 @@ func _end_drag(pos: Vector2) -> void:
 				_handle(S.choose_card(card))
 				if S.pending_place != "":
 					_handle(S.place(i))
+				_rebuild_ui()
+				return
+			# drag an upgrade card onto the building it upgrades
+			if i >= 0 and String(cd.get("kind", "")) == "plus" and S.upgrade_targets(String(cd["id"])).has(i):
+				_handle(S.choose_card(card))
+				if S.pending_upgrade != "":
+					_handle(S.apply_upgrade(i))
 				_rebuild_ui()
 				return
 		elif not moved:

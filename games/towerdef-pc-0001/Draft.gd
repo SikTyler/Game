@@ -3,8 +3,14 @@ extends RefCounted
 ## wide_draft) picks rolled from PickDB by rarity, filtered by what the run can
 ## use right now. Cards:
 ##   {kind, id, fam, rarity, tags, [lvl, to]}
-##   kind: "new" (place a building / hut on a free cell), "plus" (level up the
-##   owned building, Lv lvl -> to), "pack", "special", "insight".
+##   kind: "new" (place a building / hut on a free cell), "plus" (level up an
+##   owned building, Lv lvl -> to: the player applies it by clicking/dragging
+##   onto that building), "pack", "special", "insight".
+##   reward (owner feedback #1, so the player always knows what a pick does):
+##   "building" (placed on the grid; a duplicate WEAPON is a new individual
+##   building, dup=true), "upgrade" (applied onto an existing building),
+##   "perk" (stat buff, applied instantly, listed under Perks), "ability"
+##   (a special on the ability bar).
 ## Rarity weights C60/R28/E10/L2; each Luck point (max 10) moves 1 point of
 ## Common weight into Epic+ (split 10:2 between Epic and Legendary). Insight
 ## replaces a slot with p = insight_p per slot, at most one per hand, and is
@@ -12,7 +18,8 @@ extends RefCounted
 ## caller). Eco guarantee G1: a hand with no eco card, or no non-eco card,
 ## rerolls its last slot once from the missing pool. Never Array.shuffle.
 ## ctx keys (all optional):
-##   owned {id: lvl} buildings+huts on the grid, free (bool), free_outer (bool),
+##   owned {id: lvl} buildings+huts on the grid (lowest level per id),
+##   copies {id: n}, free (bool), free_outer (bool),
 ##   huts (int), packs {id: n}, specials {id: copies}, banished [ids], luck,
 ##   eco_mult, choices, insight_p, insight_ok, insight_blocked [ids],
 ##   guarantee ("" | "rare" | "epic"), weapons (weapon buildings owned).
@@ -23,6 +30,12 @@ const PickDB := preload("res://data/PickDB.gd")
 
 
 const WEAPONS: Array = ["gun", "mortar", "tesla", "flak", "railgun", "frost"]
+const REWARD: Dictionary = {"new": "building", "plus": "upgrade", "pack": "perk", "insight": "perk", "special": "ability"}
+
+
+## The reward type of a card kind (building / upgrade / perk / ability).
+static func reward_of(kind: String) -> String:
+	return String(REWARD.get(kind, "perk"))
 
 
 static func is_weapon(c: Dictionary) -> bool:
@@ -52,10 +65,18 @@ static func card_for(id: String, ctx: Dictionary) -> Dictionary:
 		"building", "hut":
 			var owned: Dictionary = ctx.get("owned", {})
 			if owned.has(id):
+				# Duplicate weapon: a new individual building while a cell is free.
+				var copies: int = int((ctx.get("copies", {}) as Dictionary).get(id, 1))
+				if WEAPONS.has(id) and bool(ctx.get("free", false)) and copies < PickDB.max_of(id) and (id != "railgun" or bool(ctx.get("free_outer", false))):
+					base["kind"] = "new"
+					base["dup"] = true
+					base["reward"] = "building"
+					return base
 				var lv: int = int(owned[id])
 				if lv >= PickDB.max_of(id):
 					return {}
 				base["kind"] = "plus"
+				base["reward"] = "upgrade"
 				base["lvl"] = lv
 				base["to"] = lv + 1
 				return base
@@ -66,6 +87,7 @@ static func card_for(id: String, ctx: Dictionary) -> Dictionary:
 			if fam == "hut" and int(ctx.get("huts", 0)) >= int(ctx.get("hut_max", PickDB.HUT_MAX)):
 				return {}
 			base["kind"] = "new"
+			base["reward"] = "building"
 			return base
 		"pack":
 			if int((ctx.get("packs", {}) as Dictionary).get(id, 0)) >= PickDB.max_of(id):
@@ -73,18 +95,21 @@ static func card_for(id: String, ctx: Dictionary) -> Dictionary:
 			if id == "pk_barracks" and int(ctx.get("huts", 0)) <= 0:
 				return {}
 			base["kind"] = "pack"
+			base["reward"] = "perk"
 			return base
 		"special":
 			var sp: Dictionary = ctx.get("specials", {})
 			if int(sp.get(id, 0)) >= PickDB.SPECIAL_COPIES:
 				return {}
 			base["kind"] = "special"
+			base["reward"] = "ability"
 			base["lvl"] = int(sp.get(id, 0))
 			return base
 		"insight":
 			if (ctx.get("insight_blocked", []) as Array).has(id):
 				return {}
 			base["kind"] = "insight"
+			base["reward"] = "perk"
 			return base
 	return {}
 

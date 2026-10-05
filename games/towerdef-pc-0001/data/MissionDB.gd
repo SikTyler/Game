@@ -1,24 +1,25 @@
 extends RefCounted
 ## Daily mission templates (SYSTEMS §9). Targets scale with best wave B.
+## Rewards are coins (owner feedback #1: gems removed).
 
 const DEFS: Dictionary = {
-	"kill":    {"text": "Kill %d enemies",            "gems": 3},
-	"wave":    {"text": "Reach wave %d",              "gems": 4},
-	"boss":    {"text": "Defeat %d bosses",           "gems": 4},
-	"eco":     {"text": "Place %d eco buildings",     "gems": 2},
-	"cash":    {"text": "Earn $%d cash in one run",   "gems": 3},
-	"perk":    {"text": "Take %d tradeoff perks",     "gems": 2},
-	"lab":     {"text": "Start %d lab researches",    "gems": 2},
-	"upgrade": {"text": "Buy %d permanent upgrades",  "gems": 2},
+	"kill":    {"text": "Kill %d enemies",            "coins": 120},
+	"wave":    {"text": "Reach wave %d",              "coins": 160},
+	"boss":    {"text": "Defeat %d bosses",           "coins": 160},
+	"eco":     {"text": "Place %d eco buildings",     "coins": 80},
+	"cash":    {"text": "Earn $%d cash in one run",   "coins": 120},
+	"perk":    {"text": "Take %d tradeoff perks",     "coins": 80},
+	"lab":     {"text": "Start %d lab researches",    "coins": 80},
+	"upgrade": {"text": "Buy %d permanent upgrades",  "coins": 80},
 }
 
 const IDS: Array = ["kill", "wave", "boss", "eco", "cash", "perk", "lab", "upgrade"]
 
 ## Streak ladder: day 1..7.
 const STREAK: Array = [
-	{"coins": 50, "gems": 0}, {"coins": 0, "gems": 2}, {"coins": 100, "gems": 0},
-	{"coins": 0, "gems": 3}, {"coins": 200, "gems": 0}, {"coins": 0, "gems": 4},
-	{"coins": 0, "gems": 10, "chest": true},
+	{"coins": 50}, {"coins": 80}, {"coins": 100},
+	{"coins": 120}, {"coins": 200}, {"coins": 160},
+	{"coins": 400, "chest": true},
 ]
 
 const TRADEOFF_PERKS: Array = ["p_glass", "p_greed", "p_fort", "p_frenzy", "p_miser", "p_bloodmoon"]
@@ -53,4 +54,4 @@ static func text(tpl: String, tgt: int) -> String:
 
 static func reward(tpl: String) -> int:
 	var d: Dictionary = DEFS.get(tpl, {})
-	return int(d.get("gems", 0))
+	return int(d.get("coins", 0))

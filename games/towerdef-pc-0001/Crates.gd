@@ -99,7 +99,7 @@ static func roll_rarity(rng: RandomNumberGenerator, o: Dictionary) -> String:
 	return "common"
 
 
-## How the crate can be paid: "token" | "coins" | "keys" | "gems" ("" = none).
+## How the crate can be paid: "token" | "coins" | "keys" (gems are gone).
 static func can_pay(s: Dictionary, crate: String, pay: String) -> bool:
 	var d: Dictionary = CrateDB.get_def(crate)
 	if d.is_empty():
@@ -111,8 +111,6 @@ static func can_pay(s: Dictionary, crate: String, pay: String) -> bool:
 			return int(d.get("coins", 0)) > 0 and int(s.get("coins", 0)) >= coin_cost(s, crate)
 		"keys":
 			return int(d.get("keys", 0)) > 0 and int(s.get("keys", 0)) >= int(d["keys"])
-		"gems":
-			return int(d.get("gems", 0)) > 0 and int(s.get("gems", 0)) >= int(d["gems"])
 	return false
 
 
@@ -131,9 +129,6 @@ static func _pay(s: Dictionary, crate: String, pay: String) -> Dictionary:
 		"keys":
 			s["keys"] = int(s["keys"]) - int(d["keys"])
 			return {"keys": int(d["keys"])}
-		"gems":
-			s["gems"] = int(s["gems"]) - int(d["gems"])
-			return {"gems": int(d["gems"])}
 	return {}
 
 

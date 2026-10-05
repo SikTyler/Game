@@ -29,8 +29,8 @@ const DESC: Dictionary = {
 	"relay": "The heart of the Outpost. Its level sets power, building limits and max levels; Lv3 unlocks Collect all.",
 	"mill": "Mints coins. +10% per adjacent Mill (max +30%), +15% next to a Warehouse.",
 	"refinery": "Refines Scrap for part levels. -10% next to a Mill; a Smelter next to it adds +20%.",
-	"gemmine": "Mines gems (premium). Crystal Vein only; lit Lamps next to it +10% each. 25 gems a day.",
-	"keyforge": "Forges Keys for Supply and Vault crates. +10% next to a Gem Mine.",
+	"gemmine": "Deep Mine: a big coin generator. Crystal Vein only; lit Lamps next to it +10% each.",
+	"keyforge": "Forges Keys for Supply and Vault crates. +10% next to a Deep Mine.",
 	"research": "Runs research projects; queues at Hall Lv1 / 4 / 8. Scholar decor speeds it.",
 	"barracks": "Each level: +10% troop HP and damage in runs. Training decor adds more.",
 	"archive": "Lv3 / 6: +1 / +2 Insight per run; Lv9: +1 banish per run.",
@@ -39,7 +39,7 @@ const DESC: Dictionary = {
 	"conduit": "Carries power: buildings work only when linked to the Relay.",
 	"beaconpost": "+5% production to buildings within 2 cells.",
 }
-const ERR: Dictionary = {"outside": "Outside the map", "locked": "Locked land — buy the plot", "blocked": "Rock", "occupied": "Occupied", "needs_vein": "Gem Mine needs a Crystal Vein", "limit": "Limit reached — upgrade the Relay", "unknown": "?"}
+const ERR: Dictionary = {"outside": "Outside the map", "locked": "Locked land — buy the plot", "blocked": "Rock", "occupied": "Occupied", "needs_vein": "Deep Mine needs a Crystal Vein", "limit": "Limit reached — upgrade the Relay", "unknown": "?"}
 
 
 static func map_rect(m) -> Rect2:
@@ -96,9 +96,9 @@ static func name_of(id: String) -> String:
 static func cost_of(id: String) -> Dictionary:
 	if is_decor(id):
 		var d: Dictionary = OutpostDB.DECOR[id]
-		return {"coins": int(d["coins"]), "gems": int(d["gems"])}
+		return {"coins": int(d["coins"])}
 	var b: Dictionary = OutpostDB.get_def(id)
-	return {"coins": int(b.get("coins", 0)), "gems": int(b.get("gems", 0))}
+	return {"coins": int(b.get("coins", 0))}
 
 
 static func size_of(id: String, rot: int) -> Vector2i:
@@ -238,10 +238,8 @@ static func _why(m, id: String, c: Vector2i) -> String:
 	if err != "":
 		return String(ERR.get(err, err))
 	var cc: Dictionary = cost_of(id)
-	if not Outpost.can_afford(m.save, int(cc["coins"]), int(cc["gems"])):
-		return "Not enough coins / gems"
-	if not is_decor(id) and int(OutpostDB.get_def(id).get("time", 0)) > 0 and Outpost.busy(m.save) >= Outpost.builders(m.save):
-		return "All builders are busy"
+	if not Outpost.can_afford(m.save, int(cc["coins"])):
+		return "Not enough coins"
 	return "Can't build here"
 
 
@@ -354,8 +352,8 @@ static func build(m) -> void:
 		var r: Rect2 = pal_entry(m, k)
 		var cc: Dictionary = cost_of(id)
 		var lim_ok: bool = is_decor(id) or Outpost.count_of(o, id) < OutpostDB.limit(id, int(o["relay_lvl"]))
-		var ok: bool = Outpost.can_afford(s, int(cc["coins"]), int(cc["gems"])) and lim_ok
-		var tip: String = "%s\n%s\n%s coins%s%s  [%s]" % [name_of(id), String(DESC.get(id, "Decor: +1% Charm per 10 pieces; tags buff neighbours")), Kit.fmt(float(cc["coins"])), (" + %d gems" % int(cc["gems"])) if int(cc["gems"]) > 0 else "", ("" if is_decor(id) else "  ·  power %d  ·  %s" % [int(OutpostDB.get_def(id).get("power", 0)), Kit.dur(int(OutpostDB.get_def(id).get("time", 0)))]), Kit.hint(m, "hotbar_%d" % (k + 1)) if k < 9 else "-"]
+		var ok: bool = Outpost.can_afford(s, int(cc["coins"])) and lim_ok
+		var tip: String = "%s\n%s\n%s coins%s%s  [%s]" % [name_of(id), String(DESC.get(id, "Decor: +1% Charm per 10 pieces; tags buff neighbours")), Kit.fmt(float(cc["coins"])), "", ("" if is_decor(id) else "  ·  power %d  ·  instant" % int(OutpostDB.get_def(id).get("power", 0))), Kit.hint(m, "hotbar_%d" % (k + 1)) if k < 9 else "-"]
 		Kit.hit(m, r, func() -> void: _press_palette(m, id), tip, "OPBUILD " + id, ok, Kit.GREEN)
 	# selected panel buttons
 	var sr: Rect2 = sel_rect(m)
@@ -369,8 +367,6 @@ static func build(m) -> void:
 		var pc: Dictionary = Outpost.plot_cost(s)
 		var adj: bool = Outpost.plot_adjacent(o, k2)
 		Kit.btn(m, "Buy  %s coins" % Kit.fmt(float(pc["coins_alt"])), Rect2(sr.position.x + 10, by, bw * 1.5, 44), func() -> void: m.op_sel = ""; m.meta_act(Outpost.unlock_plot(m.save, k2, "coins")), "Open this plot for coins", adj and int(s["coins"]) >= int(pc["coins_alt"]), Kit.GOLD, "OP PLOT COINS", "cur_coin", 15)
-		if int(pc["gems"]) > 0:
-			Kit.btn(m, "%s + %d gems" % [Kit.fmt(float(pc["coins"])), int(pc["gems"])], Rect2(sr.position.x + 20 + bw * 1.5, by, bw * 1.5, 44), func() -> void: m.op_sel = ""; m.meta_act(Outpost.unlock_plot(m.save, k2, "gems")), "Open this plot for fewer coins plus gems", adj and int(s["coins"]) >= int(pc["coins"]) and int(s["gems"]) >= int(pc["gems"]), Kit.GEM, "OP PLOT GEMS", "cur_gem", 15)
 	elif who != "":
 		var is_d: bool = who.begins_with("d")
 		if not is_d:
@@ -379,7 +375,7 @@ static func build(m) -> void:
 			if OutpostDB.GENERATORS.has(bid):
 				Kit.btn(m, "Collect", Rect2(sr.position.x + 10, by - 50, bw, 44), func() -> void: m.meta_act(Outpost.collect(m.save, who, m.now())), "Collect what this building stored", float(b["stored"]) >= 1.0, Kit.GOLD, "OP COLLECT", "ui_collect", 15)
 			var uc: int = Outpost.cost(bid, int(b["lvl"]))
-			Kit.btn(m, "Upgrade %s [%s]" % [Kit.fmt(float(uc)), Kit.hint(m, "upgrade")], Rect2(sr.position.x + 20 + bw, by - 50, bw * 2.0, 44), func() -> void: upgrade(m), "Lv%d -> %d: %s coins, %s (max Lv%d at this Relay level)" % [int(b["lvl"]), int(b["lvl"]) + 1, Kit.fmt(float(uc)), Kit.dur(Outpost.build_time(s, bid, int(b["lvl"]))), Outpost.max_lvl(s, bid)], Outpost.can_upgrade(s, who), Kit.GREEN, "OP UPGRADE", "", 15)
+			Kit.btn(m, "Upgrade %s [%s]" % [Kit.fmt(float(uc)), Kit.hint(m, "upgrade")], Rect2(sr.position.x + 20 + bw, by - 50, bw * 2.0, 44), func() -> void: upgrade(m), "Lv%d -> %d: %s coins, instant (max Lv%d at this Relay level)" % [int(b["lvl"]), int(b["lvl"]) + 1, Kit.fmt(float(uc)), Outpost.max_lvl(s, bid)], Outpost.can_upgrade(s, who), Kit.GREEN, "OP UPGRADE", "", 15)
 		Kit.btn(m, "Move [%s]" % Kit.hint(m, "tab_missions"), Rect2(sr.position.x + 10, by, bw, 44), func() -> void: begin_move(m), "Pick it up and click a new spot (R rotates)", true, Kit.GEM if m.op_moving else Kit.NEUTRAL, "OP MOVE", "ui_move", 15)
 		Kit.btn(m, "Rotate [%s]" % Kit.hint(m, "ability_4"), Rect2(sr.position.x + 15 + bw, by, bw, 44), func() -> void: _rotate_selected(m), "Rotate in place (where it fits)", true, Kit.NEUTRAL, "OP ROTATE", "ui_rotate", 15)
 		Kit.btn(m, "Demolish [%s]" % Kit.hint(m, "sell"), Rect2(sr.position.x + 20 + bw * 2.0, by, bw, 44), func() -> void: demolish(m), "Remove it: refunds half (all if still queued)", true, Kit.ENEMY, "OP DEMOLISH", "ui_demolish", 15)
@@ -396,11 +392,7 @@ static func build(m) -> void:
 	# queue + collect all
 	var qr: Rect2 = queue_rect(m)
 	var q: Array = o["queue"]
-	for k in q.size():
-		var idx: int = k
-		var jr: Rect2 = queue_job(m, k)
-		var sc: int = Outpost.skip_cost(s, k, m.now())
-		Kit.btn(m, "Skip %d" % sc, Rect2(jr.end.x - 96, jr.position.y + jr.size.y - 46, 88, 40), func() -> void: m.meta_act(Outpost.skip(m.save, idx, m.now())), "Finish now for %d gems (1 per 3 minutes left)" % sc, int(s["gems"]) >= sc and sc > 0, Kit.GEM, "OP SKIP %d" % k, "", 14)
+	var _nq: int = q.size()   # builds are instant: the queue is always empty
 	Kit.btn(m, "Collect all", Rect2(qr.end.x - 200, qr.position.y + 26, 190, 50), func() -> void: m.meta_act(Outpost.collect_all(m.save, m.now())), "Collect every building at once (Relay Lv3)" if Outpost.collect_all_unlocked(s) else "Collect all unlocks at Relay Lv3 — click buildings to collect them one by one", Outpost.collect_all_unlocked(s), Kit.GOLD, "OP COLLECT ALL", "ui_collect", 16)
 
 
@@ -478,7 +470,7 @@ static func map_tip(m, p: Vector2) -> String:
 	var pl: int = Outpost.plot_of(c)
 	if pl >= 0 and not (o["plots"] as Array).has(pl):
 		var pc: Dictionary = Outpost.plot_cost(s)
-		return "Locked land (plot %d)\n%s coins%s\n%s" % [pl + 1, Kit.fmt(float(pc["coins_alt"])), ("  or %s coins + %d gems" % [Kit.fmt(float(pc["coins"])), int(pc["gems"])]) if int(pc["gems"]) > 0 else "", "Click to buy" if Outpost.plot_adjacent(o, pl) else "Must touch open land"]
+		return "Locked land (plot %d)\n%s coins%s\n%s" % [pl + 1, Kit.fmt(float(pc["coins_alt"])), "", "Click to buy" if Outpost.plot_adjacent(o, pl) else "Must touch open land"]
 	var who: String = String(Outpost.occupancy(o).get(c, ""))
 	if who == "relay":
 		return "Core Relay  Lv%d\n%s\nPower %d / %d" % [int(o["relay_lvl"]), String(DESC["relay"]), int(Outpost.demand(o)), int(Outpost.supply(o))]
@@ -488,7 +480,7 @@ static func map_tip(m, p: Vector2) -> String:
 	if who != "":
 		return building_text(m, who)
 	if OutpostDB.VEINS.has(c):
-		return "Crystal Vein — the Gem Mine must stand on one"
+		return "Crystal Vein — the Deep Mine must stand on one"
 	if OutpostDB.BLOCKED.has(c):
 		return "Rock — can't build here"
 	return ""
@@ -779,7 +771,7 @@ static func _draw_palette(m, s: Dictionary, o: Dictionary) -> void:
 	Kit.t(m, "OUTPOST", Vector2(x, pr.position.y + 34), 22, Kit.RUST, HORIZONTAL_ALIGNMENT_LEFT, w)
 	var prod: Dictionary = Outpost.production(s)
 	var cred: int = int(o.get("credit", 0))
-	Kit.t(m, "%s coins/h  ·  %s Scrap/h  ·  %.2f gems/h" % [Kit.fmt(float(prod["coins"])), _rate_txt(float(prod["scrap"])), float(prod["gems"])], Vector2(x, pr.position.y + 62), 15, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, w)
+	Kit.t(m, "%s coins/h  ·  %s Scrap/h" % [Kit.fmt(float(prod["coins"])), _rate_txt(float(prod["scrap"]))], Vector2(x, pr.position.y + 62), 15, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, w)
 	m.stat_tips.append([Rect2(x, pr.position.y + 44, w, 24), "Total Outpost production per hour (linked, built buildings; layout and power included)"])
 	Kit.t(m, ("Build credit %s coins" % Kit.fmt(float(cred))) if cred > 0 else "Build with coins earned in runs", Vector2(x, pr.position.y + 88), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w)
 	# entries
@@ -790,7 +782,7 @@ static func _draw_palette(m, s: Dictionary, o: Dictionary) -> void:
 		var cc: Dictionary = cost_of(id)
 		var lim: int = 99 if is_decor(id) else OutpostDB.limit(id, int(o["relay_lvl"]))
 		var n: int = 0 if is_decor(id) else Outpost.count_of(o, id)
-		var ok: bool = Outpost.can_afford(s, int(cc["coins"]), int(cc["gems"])) and n < lim
+		var ok: bool = Outpost.can_afford(s, int(cc["coins"])) and n < lim
 		var armed: bool = m.op_arm == id
 		Kit.panel(m, r, Kit.GOLD if armed else (Kit.EDGE if ok else Color("2a3038")), Color("232a33") if ok else Color("1a1e24"), 3 if armed else 1)
 		var isz: float = r.size.y - 10.0
@@ -799,8 +791,6 @@ static func _draw_palette(m, s: Dictionary, o: Dictionary) -> void:
 		var tw: float = r.end.x - tx - 6.0
 		Kit.t(m, name_of(id), Vector2(tx, r.position.y + r.size.y * 0.42), 15 if r.size.x < 250.0 else 17, Kit.TEXT if ok else Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, tw)
 		var sub: String = Kit.fmt(float(cc["coins"]))
-		if int(cc["gems"]) > 0:
-			sub += (" + " if int(cc["coins"]) > 0 else "") + "%d gems" % int(cc["gems"])
 		if not is_decor(id):
 			sub += "  ·  %d/%d  ·  power %d" % [n, lim, int(OutpostDB.get_def(id).get("power", 0))]
 		Kit.t(m, sub, Vector2(tx, r.position.y + r.size.y * 0.42 + 18), 13, Kit.GOLD if ok else Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, tw)
@@ -821,7 +811,7 @@ static func _draw_selected(m, s: Dictionary, o: Dictionary, sr: Rect2) -> void:
 	var who: String = m.op_sel
 	if m.op_arm != "":
 		Kit.t(m, "PLACING  " + name_of(m.op_arm), Vector2(x, sr.position.y + 30), 18, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, w)
-		Kit.wrap(m, String(DESC.get(m.op_arm, "Decor: every 10 pieces add +1% Charm; tags buff neighbours (lamps light Gem Mines, scholars speed research, training helps the Barracks).")), Vector2(x, sr.position.y + 48), 15, Kit.DIM, w, 4)
+		Kit.wrap(m, String(DESC.get(m.op_arm, "Decor: every 10 pieces add +1% Charm; tags buff neighbours (lamps light Deep Mines, scholars speed research, training helps the Barracks).")), Vector2(x, sr.position.y + 48), 15, Kit.DIM, w, 4)
 		Kit.wrap(m, "Click the map to place  ·  %s rotates  ·  right-click / %s cancels%s" % [Kit.hint(m, "ability_4"), Kit.hint(m, "cancel"), "  ·  stays armed: paint a line" if m.op_arm == "conduit" or is_decor(m.op_arm) else ""], Vector2(x, sr.position.y + 160), 14, Kit.TEXT, w, 3)
 		return
 	if who == "":
@@ -833,7 +823,7 @@ static func _draw_selected(m, s: Dictionary, o: Dictionary, sr: Rect2) -> void:
 		var pc: Dictionary = Outpost.plot_cost(s)
 		Kit.t(m, "LOCKED LAND  (plot %d)" % (k + 1), Vector2(x, sr.position.y + 30), 18, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, w)
 		Kit.wrap(m, "Expand the Outpost: more room for Mills, a second Crystal Vein and decor. Each plot costs more than the last." + ("" if Outpost.plot_adjacent(o, k) else "\nThis plot must touch open land first."), Vector2(x, sr.position.y + 50), 15, Kit.DIM, w, 5)
-		Kit.t(m, "%s coins%s" % [Kit.fmt(float(pc["coins_alt"])), ("  or  %s + %d gems" % [Kit.fmt(float(pc["coins"])), int(pc["gems"])]) if int(pc["gems"]) > 0 else ""], Vector2(x, sr.position.y + 170), 17, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, w)
+		Kit.t(m, "%s coins%s" % [Kit.fmt(float(pc["coins_alt"])), ""], Vector2(x, sr.position.y + 170), 17, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, w)
 		return
 	if who == "relay":
 		Kit.icon(m, OutpostDB.art_id("relay", int(o["relay_lvl"])), Rect2(x, sr.position.y + 10, 72, 72))

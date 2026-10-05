@@ -1,10 +1,10 @@
 extends RefCounted
-## Real-time research in the Outpost's Research Hall (SPEC A3/A4, REDESIGN
-## SPEC §3.3). Pure static rules over save["research"] (was "labs" in v3):
-##   {lvls:{id:int}, running:[{track,to_lvl,start,end}]}
-## Queue count = Research Hall level (1/2/3 at Hall L1/L4/L8; 0 without a
-## Hall); gem-bought lab slots are gone. Scholar decor next to the Hall speeds
-## research (Outpost.hall_speed). Every time function takes `now`.
+## Research in the Outpost's Research Hall (SPEC A3, REDESIGN_SPEC §3.3).
+## Pure static rules over save["research"] (was "labs" in v3):
+##   {lvls:{id:int}, running:[]}
+## Owner feedback #1: research is INSTANT (no timers, no rush, no gems). A
+## Research Hall is still required (Outpost.research_queues > 0). `running`
+## stays in the schema for old saves: claim() completes anything left in it.
 
 const Stats := preload("res://Stats.gd")
 const LabDB := preload("res://data/LabDB.gd")
@@ -54,16 +54,9 @@ static func cost(id: String, lvl: int) -> int:
 	return int(float(d["base"]) * pow(float(d["growth"]), float(lvl)))
 
 
-static func speed_mult(s: Dictionary) -> float:
-	return maxf(0.4, 1.0 - 0.06 * float(level(s, "labspeed")))
-
-
-## Seconds to research `id` from lvl -> lvl+1.
-static func duration(s: Dictionary, id: String, lvl: int) -> int:
-	var d: Dictionary = LabDB.DEFS.get(id, {})
-	if d.is_empty():
-		return 0
-	return int(float(d["dur_base"]) * pow(float(d["dur_growth"]), float(lvl)) * speed_mult(s) / Outpost.hall_speed(s))
+## Research is instant: 0 seconds (kept for callers / old views).
+static func duration(_s: Dictionary, _id: String, _lvl: int) -> int:
+	return 0
 
 
 static func is_running(s: Dictionary, id: String) -> bool:
@@ -77,7 +70,7 @@ static func can_start(s: Dictionary, id: String) -> bool:
 	if not LabDB.DEFS.has(id) or is_running(s, id):
 		return false
 	var lvl: int = level(s, id)
-	if lvl >= LabDB.max_of(id) or running(s).size() >= slots(s):
+	if lvl >= LabDB.max_of(id) or slots(s) <= 0:
 		return false
 	return int(s["coins"]) >= cost(id, lvl)
 
@@ -88,54 +81,27 @@ static func start(s: Dictionary, id: String, now: int) -> Array:
 	var lvl: int = level(s, id)
 	Stats.on_event(s, {"t": "coins_spent", "n": cost(id, lvl)})
 	s["coins"] = int(s["coins"]) - cost(id, lvl)
-	var end_t: int = now + duration(s, id, lvl)
-	running(s).append({"track": id, "to_lvl": lvl + 1, "start": now, "end": end_t})
-	var ev: Array = [{"t": "lab_started", "track": id, "to_lvl": lvl + 1, "end": end_t, "slot": running(s).size() - 1}]
+	var ev: Array = [{"t": "lab_started", "track": id, "to_lvl": lvl + 1, "end": now, "slot": 0}]
+	(_rb(s)["lvls"] as Dictionary)[id] = lvl + 1
+	ev.append({"t": "lab_done", "track": id, "lvl": lvl + 1})
 	ev.append_array(Missions.progress(s, "lab", 1))
 	return ev
 
 
-## Completes every slot whose end has passed.
-static func claim(s: Dictionary, now: int) -> Array:
+## Completes every leftover queued project from an old save (instant now).
+static func claim(s: Dictionary, _now: int) -> Array:
 	var ev: Array = []
 	var keep: Array = []
 	var labs: Dictionary = _rb(s)
 	var lv: Dictionary = labs["lvls"]
 	for r in running(s):
 		var e: Dictionary = r
-		if now >= int(e["end"]):
+		if LabDB.DEFS.has(String(e["track"])):
 			var id: String = String(e["track"])
 			var to_lvl: int = mini(int(e["to_lvl"]), LabDB.max_of(id))
 			lv[id] = maxi(int(lv.get(id, 0)), to_lvl)
 			ev.append({"t": "lab_done", "track": id, "lvl": to_lvl})
-		else:
-			keep.append(e)
 	labs["running"] = keep
-	return ev
-
-
-static func rush_cost(s: Dictionary, slot: int, now: int) -> int:
-	var run: Array = running(s)
-	if slot < 0 or slot >= run.size():
-		return 0
-	var rem: int = maxi(0, int((run[slot] as Dictionary)["end"]) - now)
-	if rem <= 0:
-		return 0
-	var per: float = TuneRef.num("lab_rush_min_per_gem", 30.0)
-	return maxi(1, int(ceil(float(rem) / 60.0 / per)))
-
-
-static func rush(s: Dictionary, slot: int, now: int) -> Array:
-	var run: Array = running(s)
-	if slot < 0 or slot >= run.size():
-		return []
-	var g: int = rush_cost(s, slot, now)
-	if int(s["gems"]) < g:
-		return []
-	s["gems"] = int(s["gems"]) - g
-	(run[slot] as Dictionary)["end"] = now
-	var ev: Array = [{"t": "lab_rushed", "gems": g, "slot": slot}]
-	ev.append_array(claim(s, now))
 	return ev
 
 

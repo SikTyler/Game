@@ -31,7 +31,6 @@ const CoreBay := preload("res://ui/CoreBay.gd")
 const OVERLAYS: Array = ["pause", "settings", "credits", "stats", "history", "achievements", "modes"]
 const SET_TABS: Array = ["video", "audio", "controls", "gameplay"]
 const KEYS_PER_PAGE: int = 11
-const QUAD_NAMES: Array = ["North-east", "South-east", "South-west", "North-west"]
 
 ## Joypad axes report "pressed" on every motion past the deadzone: an action
 ## fires once per crossing (cleared again on its release event).
@@ -49,7 +48,7 @@ static func modal_rect(m, w: float, h: float) -> Rect2:
 ## The boot "while you were away" modal grows with the number of resources.
 static func offline_rect(m) -> Rect2:
 	var n: int = 0
-	for k in ["coins", "scrap", "gems", "keys"]:
+	for k in ["coins", "scrap", "keys"]:
 		if int(m.offline_offer.get(k, 0)) > 0:
 			n += 1
 	return modal_rect(m, 760, 300.0 + 66.0 * float(maxi(1, n)))
@@ -112,7 +111,7 @@ static func _build_topbar(m) -> void:
 	else:
 		items.append(["Menu", "Save slots and quit", m.go_menu, "HUD Menu", "icon_menu"])
 	items.append(["Settings", "Video, audio, controls (key remapping) and gameplay", func() -> void: m.set_overlay("settings"), "HUD Settings", "icon_gear"])
-	items.append(["Records [%s]" % hint(m, "tab_stats"), "Lifetime stats, run history (retry a seed) and achievements", func() -> void: m.set_overlay("stats"), "HUD Stats", "icon_stats"])
+	items.append(["Records [%s]" % hint(m, "tab_stats"), "Lifetime stats, run history and achievements", func() -> void: m.set_overlay("stats"), "HUD Stats", "icon_stats"])
 	for it in items:
 		var a: Array = it
 		var w: float = 168.0
@@ -337,10 +336,7 @@ static func _build_records(m) -> void:
 	if m.overlay == "history":
 		var h: Array = m.save.get("history", [])
 		var n: int = mini(12, h.size())
-		for k in n:
-			var e: Dictionary = h[h.size() - 1 - k]
-			var entry: Dictionary = e
-			Kit.btn(m, "Retry", Rect2(r.end.x - 160, r.position.y + 160 + k * 52.0, 130, 44), func() -> void: m.retry_entry(entry), "Replay seed %d (Tier %d, %s)" % [int(e["seed"]), int(e["tier"]), String(e["mode"])], m.screen != "run", Kit.GEM, "HIST RETRY %d" % k)
+		var _n: int = n   # run history is read-only (seeds are never replayable)
 	Kit.btn(m, "Close [%s]" % hint(m, "cancel"), Rect2(r.end.x - 220, r.end.y - 70, 200, 52), func() -> void: m.set_overlay("pause" if m.screen == "run" else ""), "Close", true, Kit.RUST, "REC CLOSE")
 
 
@@ -396,8 +392,8 @@ static func handle_action(m, event: InputEvent) -> bool:
 	if _pressed(m, event, "fullscreen"):
 		apply_settings(m, Settings.toggle_fullscreen(m.settings))
 		return true
-	if _pressed(m, event, "retry") and (m.screen == "run" or m.screen == "results") and m.last_seed != 0:
-		m.start_run(m.last_seed)
+	if _pressed(m, event, "retry") and m.screen == "results":
+		m.start_run()   # a fresh, randomly seeded run (no seed replay)
 		return true
 	if _pressed(m, event, "cancel"):
 		_cancel(m)
@@ -450,20 +446,12 @@ static func _run_action(m, event: InputEvent) -> bool:
 	if _pressed(m, event, "speed_down"):
 		m.cycle_speed(-1)
 		return true
-	if _pressed(m, event, "lane_next"):
-		m._handle(S.set_focus((S.focus_quad + 1) % 4))
-		m._rebuild_ui()
-		return true
-	if _pressed(m, event, "lane_prev"):
-		m._handle(S.set_focus((S.focus_quad + 3) % 4))
-		m._rebuild_ui()
-		return true
 	for d in [["cursor_up", -TowerState.SIDE], ["cursor_down", TowerState.SIDE], ["cursor_left", -1], ["cursor_right", 1]]:
 		if _pressed(m, event, String(d[0])):
 			move_cursor(m, int(d[1]))
 			return true
 	if _pressed(m, event, "confirm"):
-		if S.pending_place != "" and m.sel >= 0:
+		if (S.pending_place != "" or S.pending_upgrade != "") and m.sel >= 0:
 			m.place_at(m.sel)
 		elif not S.draft.is_empty():
 			m.pick_card(0)
@@ -513,6 +501,9 @@ static func _cancel(m) -> void:
 			m._rebuild_ui()
 		elif m.S.pending_place != "":
 			m._handle(m.S.cancel_place())
+			m._rebuild_ui()
+		elif m.S.pending_upgrade != "":
+			m._handle(m.S.cancel_upgrade())
 			m._rebuild_ui()
 		elif m.sel >= 0:
 			m.sel = -1
@@ -605,11 +596,18 @@ static func draw_topbar(m) -> void:
 	Kit.t(m, "COREHOLD", Vector2(58, 37), 22, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, 150.0)
 	var s: Dictionary = m.save
 	var x: float = 200.0
+	# Owner feedback #1: during a run the bar counts this run's coins / loot live.
+	var live_c: int = 0
+	var live_sc: int = 0
+	var live_k: int = 0
+	if m.screen == "run" and m.S != null and not m.S.over:
+		live_c = int(m.S.coins_run)
+		live_sc = int((m.S.loot as Dictionary).get("scrap", 0))
+		live_k = int((m.S.loot as Dictionary).get("keys", 0))
 	var cur: Array = [
-		["cur_coin", Kit.fmt(float(int(s["coins"]))), Kit.GOLD, "Coins — Core levels, crates, the Outpost and research", 128.0],
-		["cur_gem", str(int(s["gems"])), Kit.GEM, "Gems — premium currency (Gem Mine, bosses, missions): crates, card chests, build skips", 96.0],
-		["cur_scrap", Kit.fmt(float(int(s.get("scrap", 0)))), Kit.SCRAP, "Scrap — levels up parts (salvage parts, Scrap Refinery)", 100.0],
-		["cur_key", str(int(s.get("keys", 0))), Kit.KEYC, "Keys — open Supply and Vault crates (Key Forge, drops)", 76.0],
+		["cur_coin", Kit.fmt(float(int(s["coins"]) + live_c)), Kit.GOLD, "Coins — Core levels, crates, the Outpost and research (live during a run)", 128.0],
+		["cur_scrap", Kit.fmt(float(int(s.get("scrap", 0)) + live_sc)), Kit.SCRAP, "Scrap — levels up parts (salvage parts, Scrap Refinery)", 100.0],
+		["cur_key", str(int(s.get("keys", 0)) + live_k), Kit.KEYC, "Keys — open Supply and Vault crates (Key Forge, drops)", 76.0],
 		["cur_corecore", str(int(s.get("core_cores", 0))), Kit.CORECORE, "Core Cores — rare boss drops; needed for Core levels 5+", 76.0],
 		["cur_shard", str(int(s.get("shards", 0))), Kit.SHARD, "Reforge shards — spend on the permanent Reforge tree", 76.0],
 	]
@@ -742,7 +740,7 @@ static func _draw_offline(m) -> void:
 	Kit.panel(m, r, Kit.GOLD, Kit.PANEL2, 3)
 	Kit.t(m, "WHILE YOU WERE AWAY", Vector2(r.get_center().x, r.position.y + 70), 36, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
 	Kit.t(m, "Away %s — your Outpost kept producing" % Kit.dur(int(off.get("minutes", 0)) * 60), Vector2(r.get_center().x, r.position.y + 108), 19, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
-	var rows: Array = [["cur_coin", "coins", "coins", Kit.GOLD], ["cur_scrap", "scrap", "Scrap", Kit.SCRAP], ["cur_gem", "gems", "gems", Kit.GEM], ["cur_key", "keys", "Keys", Kit.KEYC]]
+	var rows: Array = [["cur_coin", "coins", "coins", Kit.GOLD], ["cur_scrap", "scrap", "Scrap", Kit.SCRAP], ["cur_key", "keys", "Keys", Kit.KEYC]]
 	var y: float = r.position.y + 150.0
 	for rw in rows:
 		var a: Array = rw

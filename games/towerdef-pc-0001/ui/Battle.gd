@@ -17,7 +17,6 @@ const Hotbar := preload("res://ui/Hotbar.gd")
 
 const ENEMY2: Color = Color("e04bc0")
 const SHIELD: Color = Color("7fd8ff")
-const QUAD_NAMES: Array = ["North-east", "South-east", "South-west", "North-west"]
 const TRACK_ICON: Dictionary = {"dmg": "pk_arsenal", "rate": "pk_overclock", "range": "pk_optics", "eco": "pk_ledger", "armor": "pk_fort"}
 const TRACK_TIP: Dictionary = {
 	"dmg": "Damage track: x1.08 Core and building damage per level",
@@ -30,10 +29,6 @@ const TRACK_TIP: Dictionary = {
 
 static func speed_str(v: float) -> String:
 	return str(int(v)) if absf(v - roundf(v)) < 0.01 else "%.1f" % v
-
-
-static func quad_dir(q: int) -> Vector2:
-	return Vector2.from_angle(deg_to_rad(-67.5 + 90.0 * float(q)))
 
 
 static func pick_name(id: String) -> String:
@@ -77,7 +72,7 @@ static func build_results(m) -> void:
 	var r: Rect2 = results_rect(m)
 	var bw: float = (r.size.x - 72.0) * 0.5
 	Kit.btn(m, "Back to base", Rect2(r.position.x + 24, r.end.y - 76, bw, 56), m.go_base, "Return to the hub to spend your loot", true, Kit.RUST, "DBACK", "", 22)
-	Kit.btn(m, "Retry seed %d [%s]" % [int(m.last_seed), Kit.hint(m, "retry")], Rect2(r.position.x + 48 + bw, r.end.y - 76, bw, 56), func() -> void: m.start_run(m.last_seed), "Replay this exact run (same seed, tier and modifiers)", true, Kit.GEM, "RETRY SEED", "", 18)
+	Kit.btn(m, "Play again", Rect2(r.position.x + 48 + bw, r.end.y - 76, bw, 56), func() -> void: m.start_run(), "Start a new run (every run is randomly seeded)", true, Kit.GREEN, "PLAY AGAIN", "", 20)
 
 
 static func results_rect(m) -> Rect2:
@@ -178,12 +173,13 @@ static func cell_text(m, i: int) -> String:
 		var cd: Dictionary = CoreDB.get_def(S.core_id)
 		return "%s Core  Lv%d\n%s: %s\nTrait %s: %s" % [String(cd["name"]), int(S.core_lvl), String(cd["attack_name"]), String(cd["attack_desc"]), String(cd["trait_name"]), String(cd["trait_desc"])]
 	if not bool(S.unlocked[i]):
-		return "Closed cell (ring %d)\nOpens when your Core track levels total %d" % [ring, S.ring_threshold(ring)]
+		return "Outside your grid\nResearch Grid Expansion to build here"
 	var id: String = S.id_at(i)
 	if id == "":
 		return "Empty cell (ring %d)\nDraft a building and drop it here" % ring
 	var d: Dictionary = PickDB.get_def(id)
-	return "%s  Lv%d / %d  (%s)\n%s" % [String(d["name"]), S.lvl_at(i), PickDB.max_of(id), String(d["rarity"]).capitalize(), String(d["desc"])]
+	var up: String = "\nClick to apply the %s upgrade here" % pick_name(S.pending_upgrade) if S.pending_upgrade == id and S.upgrade_targets(id).has(i) else ""
+	return "%s  Lv%d / %d  (%s)\nHP %d / %d\n%s%s" % [String(d["name"]), S.lvl_at(i), PickDB.max_of(id), String(d["rarity"]).capitalize(), int(S.bld_hp[i]), int(S.bld_max(i)), String(d["desc"]), up]
 
 
 # ===================================================================== draw
@@ -197,7 +193,6 @@ static func draw(m, off: Vector2) -> void:
 		_draw_world(m)
 		_draw_fx(m)
 		m.draw_set_transform(Vector2.ZERO)
-		_draw_lanes(m, fr)
 		_draw_field_hud(m, fr)
 	if m.flash > 0.0:
 		m.draw_rect(fr, Color(0.9, 0.15, 0.2, m.flash * 0.35))
@@ -229,14 +224,11 @@ static func _draw_grid(m) -> void:
 	var S = m.S
 	var C: Vector2 = TowerState.CENTER
 	var c: float = TowerState.CELL
-	# spawn ring + lane wedges
-	m.draw_arc(C, TowerState.SPAWN_R, 0, TAU, 128, Color(1, 1, 1, 0.07), 2.0)
-	for q in 4:
-		var on: bool = S.active_quads.has(q)
-		var dir: Vector2 = quad_dir(q)
-		m.draw_line(C + dir * (3.6 * c), C + dir * TowerState.SPAWN_R, Color(Kit.ENEMY, 0.16 if on else 0.05), 26.0)
-	var hs: float = float(TowerState.SIDE) * 0.5
-	var plate := Rect2(C - Vector2(hs * c + 8, hs * c + 8), Vector2(2.0 * hs * c + 16, 2.0 * hs * c + 16))
+	# spawn ring (enemies come from every direction)
+	m.draw_arc(C, float(S.spawn_r()), 0, TAU, 128, Color(1, 1, 1, 0.07), 2.0)
+	var hs: float = float(S.grid_n) * 0.5
+	var goff: Vector2 = Vector2(0.5, 0.5) * c if S.grid_n % 2 == 0 else Vector2.ZERO
+	var plate := Rect2(C + goff - Vector2(hs * c + 8, hs * c + 8), Vector2(2.0 * hs * c + 16, 2.0 * hs * c + 16))
 	m.draw_rect(plate, Color("0d1014"))
 	m.draw_rect(plate, Color(Kit.RUST, 0.55), false, 3.0)
 	var placing: bool = S.pending_place != "" or m.drag_card >= 0
@@ -247,7 +239,7 @@ static func _draw_grid(m) -> void:
 			sc = 1.0 + 0.3 * float(m.slot_pop[i]) / 0.3
 		var half: float = (c * 0.5 - 3.0) * sc
 		var r := Rect2(p - Vector2(half, half), Vector2(half * 2, half * 2))
-		if i == TowerState.CORE_SLOT:
+		if i == TowerState.CORE_SLOT or not S.in_grid(i):
 			continue
 		if not bool(S.unlocked[i]):
 			m.draw_rect(r, Color("15191e"))
@@ -271,12 +263,17 @@ static func _draw_grid(m) -> void:
 			var lv: int = S.lvl_at(i)
 			for k in lv:
 				m.draw_rect(Rect2(r.position + Vector2(4 + k * 7, r.size.y - 7), Vector2(5, 4)), Kit.GOLD)
+			# building HP (enemies attack buildings in their way)
+			var bmx: float = float(S.bld_max(i))
+			if bmx > 0.0 and float(S.bld_hp[i]) < bmx:
+				var f: float = clampf(float(S.bld_hp[i]) / bmx, 0.0, 1.0)
+				m.draw_rect(Rect2(r.position + Vector2(2, 2), Vector2(r.size.x - 4, 4)), Color(0, 0, 0, 0.6))
+				m.draw_rect(Rect2(r.position + Vector2(2, 2), Vector2((r.size.x - 4) * f, 4)), Kit.GREEN.lerp(Kit.ENEMY, 1.0 - f))
+			# pending upgrade: glow the buildings it can be applied to
+			if S.pending_upgrade == id and S.upgrade_targets(id).has(i):
+				m.draw_rect(r.grow(3), Color(Kit.GOLD, 0.6 + 0.35 * sin(m.t_anim * 8.0)), false, 3.0)
 		if i == m.sel:
 			m.draw_rect(r.grow(4), Color(1, 1, 1, 0.9), false, 3.0)
-	# ring outlines
-	for ring in [1, 2]:
-		var rh: float = (float(ring) + 0.5) * c + 2.0
-		m.draw_rect(Rect2(C - Vector2(rh, rh), Vector2(rh * 2.0, rh * 2.0)), Color(Kit.RUST, 0.25 if ring == 1 else 0.15), false, 2.0)
 	# Core
 	var cw: Dictionary = (S.stats["weapons"] as Array).back() if (S.stats.get("weapons", []) as Array).size() > 0 else {}
 	if m.sel == TowerState.CORE_SLOT or m.mouse_pos.distance_to(m.w2s(C)) < c * m.world_scale():
@@ -294,14 +291,6 @@ static func _draw_grid(m) -> void:
 
 static func _draw_world(m) -> void:
 	var S = m.S
-	# walls
-	for q in S.walls.keys():
-		var wd: Dictionary = S.walls[q]
-		if float(wd.get("hp", 0.0)) <= 0.0:
-			continue
-		var dir: Vector2 = quad_dir(int(q))
-		var a: float = dir.angle()
-		m.draw_arc(TowerState.CENTER, TowerState.STOP_R + 30.0, a - 0.35, a + 0.35, 16, Color(Kit.SCRAP, 0.4 + 0.5 * float(wd["hp"]) / maxf(1.0, float(wd["max"]))), 8.0)
 	# Lance beam
 	if S.core_id == "lance" and int(S.beam_eid) >= 0:
 		var bp: Variant = m.enemy_pos(int(S.beam_eid))
@@ -467,41 +456,12 @@ static func _draw_fx(m) -> void:
 		Kit.t(m, String(fd3["text"]), pp - Vector2(0, lift), int(fd3["size"]), Color(pc, minf(1.0, float(fd3["t"]) * 2.5)), HORIZONTAL_ALIGNMENT_CENTER, 600.0)
 
 
-## Lane telegraphs at the field edge + the incoming-wave banner (screen space).
-static func _draw_lanes(m, fr: Rect2) -> void:
-	var S = m.S
-	var c: Vector2 = m.w2s(TowerState.CENTER)
-	var tele: bool = not S.next_plan.is_empty()
-	var quads: Array = (S.next_plan.get("quads", []) as Array) if tele else S.active_quads
-	var counts: Dictionary = S.next_plan.get("counts", {}) if tele else S.wave_spawned
-	var bd: int = int(S.next_plan.get("boss_dir", -1)) if tele else S.boss_dir
-	var inner: Rect2 = fr.grow(-40.0)
-	for q in range(4):
-		var dir: Vector2 = quad_dir(q)
-		var tx: float = (inner.end.x - c.x) / dir.x if dir.x > 0.0 else (inner.position.x - c.x) / dir.x
-		var ty: float = (inner.end.y - c.y) / dir.y if dir.y > 0.0 else (inner.position.y - c.y) / dir.y
-		var p: Vector2 = c + dir * minf(tx, ty)
-		var on: bool = quads.has(q)
-		var col: Color = (ENEMY2 if bd == q else Kit.ENEMY) if on else Color(1, 1, 1, 0.12)
-		if on and tele:
-			col = Color(col, 0.55 + 0.45 * sin(m.t_anim * 8.0))
-		var tip: Vector2 = p - dir * 30.0
-		var side: Vector2 = dir.orthogonal() * 18.0
-		m.draw_colored_polygon(PackedVector2Array([tip, p + side, p - side]), col)
-		if q == S.focus_quad:
-			m.draw_arc(p, 28.0, 0, TAU, 32, Kit.GEM, 2.0)
-		if on and (int(counts.get(q, 0)) > 0 or bd == q):
-			Kit.t(m, "%d%s" % [int(counts.get(q, 0)), " BOSS" if bd == q else ""], p - dir * 54.0 + Vector2(0, 8), 18, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, 120.0)
-		m.stat_tips.append([Rect2(p - Vector2(30, 30), Vector2(60, 60)), "%s lane%s. %s/%s move the lane focus (Orbital auto-target)." % [String(QUAD_NAMES[q]), " — focused" if q == S.focus_quad else "", Kit.hint(m, "lane_prev"), Kit.hint(m, "lane_next")]])
-
-
 ## Field banners: incoming wave, placement / aim prompts, Insight fanfare.
 static func _draw_field_hud(m, fr: Rect2) -> void:
 	var S = m.S
 	var cx: float = fr.get_center().x
 	if not S.next_plan.is_empty():
-		var quads: Array = S.next_plan.get("quads", [])
-		var txt: String = "WAVE %d INCOMING  ·  %d lane%s%s" % [int(S.next_plan.get("wave", 0)), quads.size(), "" if quads.size() == 1 else "s", "  ·  BOSS" if int(S.next_plan.get("boss_dir", -1)) >= 0 else ""]
+		var txt: String = "WAVE %d INCOMING  ·  %d enemies%s" % [int(S.next_plan.get("wave", 0)), (S.next_plan.get("entries", []) as Array).size(), "  ·  BOSS" if bool(S.next_plan.get("boss", false)) else ""]
 		Kit.panel(m, Rect2(cx - 230, fr.position.y + 12, 460, 40), Kit.ENEMY, Color(0.16, 0.06, 0.07, 0.9))
 		Kit.t(m, txt, Vector2(cx, fr.position.y + 39), 18, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, 440.0)
 	var prompt: String = ""
@@ -513,6 +473,8 @@ static func _draw_field_hud(m, fr: Rect2) -> void:
 			m.draw_circle(m.mouse_pos, rr, Color(Kit.GOLD, 0.1))
 	elif S.pending_place != "":
 		prompt = "Place %s: click a glowing cell  ·  %s cancels" % [pick_name(S.pending_place), Kit.hint(m, "cancel")]
+	elif S.pending_upgrade != "":
+		prompt = "Upgrade %s: click (or drag onto) a glowing %s  ·  %s cancels" % [pick_name(S.pending_upgrade), pick_name(S.pending_upgrade), Kit.hint(m, "cancel")]
 	elif m.banish_mode:
 		prompt = "Banish: click a draft card to remove it from this run"
 	if prompt != "":
@@ -610,12 +572,7 @@ static func _draw_right(m) -> void:
 	# tracks
 	var ty: float = track_y(m)
 	var th: float = track_h(m)
-	var tot: int = S.track_total()
-	var nxt: int = S.ring_threshold(S.rings_open + 1) if S.rings_open < 3 else 0
 	Kit.head(m, "CORE TRACKS  (cash, this run)", Vector2(x, ty - 30), w)
-	if nxt > 0:
-		Kit.bar(m, Rect2(x, ty - 18, w, 8), float(tot) / float(nxt), Color(Kit.GREEN, 0.7))
-		m.stat_tips.append([Rect2(x, ty - 22, w, 14), "Track levels total %d — ring %d of the grid opens at %d" % [tot, S.rings_open + 1, nxt]])
 	for k in TowerState.TRACK_IDS.size():
 		var tid: String = TowerState.TRACK_IDS[k]
 		var td: Dictionary = TowerState.TRACKS[tid]
@@ -625,7 +582,7 @@ static func _draw_right(m) -> void:
 		Kit.panel(m, r, Kit.GREEN if can else Kit.EDGE, Color("1a2a1e") if can else Color("1b2027"))
 		Kit.icon(m, String(TRACK_ICON[tid]), Rect2(r.position.x + 8, r.position.y + (th - 36) * 0.5, 36, 36), Color.WHITE if can else Color(1, 1, 1, 0.5))
 		Kit.t(m, "%s  Lv %d" % [String(td["name"]), int(S.tracks[tid])], Vector2(r.position.x + 52, r.position.y + th * 0.45), 18, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w - 150)
-		Kit.t(m, String(td["desc"]), Vector2(r.position.x + 52, r.position.y + th * 0.45 + 18), 13, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w - 150)
+		Kit.t(m, "%s  ·  %s" % [String(td["desc"]), String(td.get("minus", ""))], Vector2(r.position.x + 52, r.position.y + th * 0.45 + 18), 13, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w - 150)
 		Kit.t(m, ("$%s" % Kit.fmt(float(c))) if c >= 0 else "MAX", Vector2(r.end.x - 34, r.position.y + th * 0.45), 18, Kit.GREEN if can else Kit.DIM, HORIZONTAL_ALIGNMENT_RIGHT, 100.0)
 		Kit.panel(m, Rect2(r.end.x - 30, r.position.y + th * 0.5 - 2, 24, 22), Kit.EDGE, Color("101317"), 1)
 		Kit.t(m, "%d" % (k + 1), Vector2(r.end.x - 18, r.position.y + th * 0.5 + 15), 13, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, 24.0)
@@ -656,9 +613,6 @@ static func _draw_results(m) -> void:
 	var yb: float = y + 34 + rows.size() * 30.0 + 20.0
 	Kit.icon(m, "cur_coin", Rect2(x, yb - 4, 40, 40))
 	Kit.t(m, "+%s coins" % Kit.fmt(float(lr.get("coins", 0))), Vector2(x + 48, yb + 28), 28, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, w)
-	if int(bd.get("gems", 0)) > 0:
-		Kit.icon(m, "cur_gem", Rect2(x, yb + 46, 32, 32))
-		Kit.t(m, "+%d gems" % int(bd.get("gems", 0)), Vector2(x + 44, yb + 70), 20, Kit.GEM, HORIZONTAL_ALIGNMENT_LEFT, w)
 	Kit.t(m, "%d missions completed" % m.run_missions, Vector2(x, yb + 104), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w)
 	# loot
 	var lx: float = r.get_center().x + 20.0

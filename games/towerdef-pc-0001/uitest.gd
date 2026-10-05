@@ -229,7 +229,6 @@ func _run() -> void:
 	_check("PC-U1: overlays ignore the mouse", main.tipbox.mouse_filter == Control.MOUSE_FILTER_IGNORE and main.ui.mouse_filter == Control.MOUSE_FILTER_IGNORE and main.fader.mouse_filter == Control.MOUSE_FILTER_IGNORE)
 	main.save = BaseMeta.default_save()
 	main.save["coins"] = 50000
-	main.save["gems"] = 500
 	main.save["scrap"] = 2000
 	main.save["keys"] = 5
 	main.save["core_cores"] = 10
@@ -435,7 +434,6 @@ func _crates() -> void:
 func _outpost() -> void:
 	var s: Dictionary = main.save
 	s["coins"] = 200000
-	s["gems"] = 500
 	_key(KEY_O)
 	await _frames()
 	_check("OP: O opens the Outpost", main.tab == "outpost")
@@ -458,14 +456,12 @@ func _outpost() -> void:
 	_click(_op_scr(4, 6))
 	await _frames()
 	var o2: Dictionary = main.save["outpost"]
-	_check("OP: click on the map places it (coins spent, builder busy)", Outpost.count_of(o2, "mill") == mills0 + 1 and int(main.save["coins"]) == c0 - Outpost.cost("mill", 1) and Outpost.busy(main.save) == 1)
+	# FEEDBACK-1 (deliberate): builds are instant — no builder is held.
+	_check("OP: click on the map places it (coins spent, built at once)", Outpost.count_of(o2, "mill") == mills0 + 1 and int(main.save["coins"]) == c0 - Outpost.cost("mill", 1) and Outpost.busy(main.save) == 0)
 	var new_uid: String = main.op_sel
 	_check("OP: the new building is selected", new_uid != "" and (o2["buildings"] as Dictionary).has(new_uid))
-	# skip the build timer for gems
-	var g0: int = int(main.save["gems"])
-	_press("OP SKIP 0")
-	await _frames()
-	_check("OP: Skip finishes the build for gems", bool((o2["buildings"][new_uid] as Dictionary)["built"]) and int(main.save["gems"]) < g0)
+	# FEEDBACK-1: no build timers, so no gem Skip button either.
+	_check("OP: the build is finished at once (no Skip)", bool((o2["buildings"][new_uid] as Dictionary)["built"]) and _find("OP SKIP 0") == null and not main.save.has("gems"))
 	# drag a Conduit from the palette onto the map
 	_press("OPCAT infra")
 	await _frames()
@@ -482,10 +478,8 @@ func _outpost() -> void:
 	_check("OP: clicking a building selects it", main.op_sel == new_uid)
 	_key(KEY_U)
 	await _frames()
-	_check("OP: U queues an upgrade", Outpost.has_job(main.save, new_uid))
-	_press("OP SKIP 0")
-	await _frames()
-	_check("OP: the upgrade completes after Skip", int((o2["buildings"][new_uid] as Dictionary)["lvl"]) == 2)
+	_check("OP: U upgrades instantly", not Outpost.has_job(main.save, new_uid) and int((o2["buildings"][new_uid] as Dictionary)["lvl"]) == 2)
+	_check("OP: the upgrade is complete (no Skip needed)", int((o2["buildings"][new_uid] as Dictionary)["lvl"]) == 2 and _find("OP SKIP 0") == null)
 	_key(KEY_M)
 	await _frames()
 	_check("OP: M picks the building up", main.op_moving)
@@ -579,20 +573,18 @@ func _research_cards_missions() -> void:
 	var lc: int = int(s["coins"])
 	_press("LAB dmg")
 	await _frames()
-	_check("RES: click a project starts it", Labs.is_running(main.save, "dmg") and int(main.save["coins"]) == lc - Labs.cost("dmg", 0))
-	var g0: int = int(main.save["gems"])
-	_press("Rush")
-	await _frames()
-	_check("RES: Rush finishes it for gems", Labs.level(main.save, "dmg") == 1 and int(main.save["gems"]) < g0)
+	# FEEDBACK-1 (deliberate): research is instant — no queue, no Rush.
+	_check("RES: click a project researches it instantly", Labs.level(main.save, "dmg") == 1 and not Labs.is_running(main.save, "dmg") and int(main.save["coins"]) == lc - Labs.cost("dmg", 0))
+	_check("RES: no Rush button (no timers, no gems)", _find("Rush") == null)
 	_key(KEY_C)
 	await _frames()
 	_check("CARDS: C opens Cards", main.tab == "cards" and _find("Open Chest") != null)
 	_audit("cards")
-	var g1: int = int(main.save["gems"])
+	var g1: int = int(main.save["coins"])
 	main.sfx.clear_log()
 	_press("Open Chest")
 	await _frames()
-	_check("CARDS: Open Chest (sfx card_open)", Cards.owned(main.save).size() == 1 and int(main.save["gems"]) == g1 - Cards.chest_cost() and main.sfx.played("card_open"))
+	_check("CARDS: Open Chest for coins (sfx card_open)", Cards.owned(main.save).size() == 1 and int(main.save["coins"]) == g1 - Cards.chest_cost() and main.sfx.played("card_open"))
 	var cid: String = String(Cards.owned(main.save).keys()[0])
 	_press("CARD " + cid)
 	await _frames()
@@ -617,10 +609,10 @@ func _research_cards_missions() -> void:
 		_press("MCLAIM %d" % k)
 		await _frames()
 	_check("MIS: mission claims", Missions.all_claimed(main.save))
-	var g3: int = int(main.save["gems"])
+	var g3: int = int(main.save["coins"])
 	_press("BONUS")
 	await _frames()
-	_check("MIS: all-clear bonus", bool(main.save["missions"]["bonus_claimed"]) and int(main.save["gems"]) > g3)
+	_check("MIS: all-clear bonus (coins)", bool(main.save["missions"]["bonus_claimed"]) and int(main.save["coins"]) > g3)
 
 
 # ================================================================= REFORGE
@@ -830,6 +822,9 @@ func _run_screen() -> void:
 	Specials.take(S.specials, "sp_repair")
 	Specials.take(S.specials, "sp_orbital")
 	S._spawn("hauler", [])
+	# a durable target: with the sim live the Core would otherwise kill it
+	# before the aimed cast below (FEEDBACK-1: enemies walk into Core range).
+	S.set_enemy(int((S.enemy_list().back() as Dictionary)["eid"]), {"hp": 1.0e9, "max_hp": 1.0e9})
 	main._rebuild_ui()
 	await _frames()
 	_check("RUN: the hotbar shows the specials", _find("SPECIAL 1") != null and not _find("SPECIAL 1").disabled and _find("SPECIAL 3").disabled)
@@ -851,7 +846,7 @@ func _run_screen() -> void:
 	await _frames()
 	_click(main.w2s(TowerState.CENTER + Vector2(160, -40)))
 	await _frames()
-	_check("RUN: clicking the field drops the Orbital Strike there", S.special_casts == casts0 + 2 and S.orbitals.size() == 1 and (S.orbitals[0]["pos"] as Vector2).distance_to(TowerState.CENTER + Vector2(160, -40)) < 2.0)
+	_check("RUN: clicking the field drops the Orbital Strike there", S.special_casts == casts0 + 2 and S.orbitals.size() == 1 and (S.orbitals[0]["pos"] as Vector2).distance_to(TowerState.CENTER + Vector2(160, -40)) < 2.0, "casts %d/%d orb %s aim %d" % [S.special_casts, casts0, str(S.orbitals), main.aim_special])
 	# wheel zoom
 	for k in 8:
 		_mouse(main.w2s(TowerState.CENTER), MOUSE_BUTTON_WHEEL_UP, true)
@@ -868,14 +863,13 @@ func _run_screen() -> void:
 	_key(KEY_SPACE)
 	await _frames(4)
 	_check("RUN: Space resumes", main.overlay == "" and S.time_alive > ta)
-	var fq: int = S.focus_quad
+	# FEEDBACK-1 (deliberate): no lanes, no seed replay.
 	_key(KEY_V)
 	await _frames()
-	_check("RUN: V moves the lane focus", S.focus_quad == (fq + 1) % 4)
-	var seed_now: int = main.last_seed
+	_check("RUN: no lane focus (V does nothing)", not ("focus_quad" in S) and main.S == S)
 	_key(KEY_R, true)
 	await _frames()
-	_check("RUN: Ctrl+R retries the same seed", main.S != S and int(main.S.run_seed) == seed_now)
+	_check("RUN: Ctrl+R never replays a seed mid-run", main.S == S)
 	var S2 = main.S
 	S2.coins_run = 33.0
 	var runs_b: int = int(main.save["runs"])
@@ -884,7 +878,7 @@ func _run_screen() -> void:
 	_press("Abandon")
 	await _frames(3)
 	_check("RUN: Abandon ends the run -> results (banked)", S2.over and main.screen == "results" and int(main.save["runs"]) == runs_b + 1)
-	_check("RUN: results offer Back to base + Retry seed", _find("DBACK") != null and _find("RETRY SEED") != null)
+	_check("RUN: results offer Back to base + Play again (no seed retry)", _find("DBACK") != null and _find("PLAY AGAIN") != null and _find("RETRY SEED") == null)
 	_audit("results")
 	_check("sfx: game_over clip", main.sfx.played("game_over"))
 	_press("DBACK")

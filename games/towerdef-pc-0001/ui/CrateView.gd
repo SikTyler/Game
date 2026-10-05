@@ -14,7 +14,7 @@ const Kit := preload("res://ui/Kit.gd")
 const SHAKE: float = 0.7
 const BURST: float = 0.35
 const FLIP: float = 0.35
-const PAY_LABEL: Dictionary = {"coins": "cur_coin", "gems": "cur_gem", "keys": "cur_key", "token": "crate_field"}
+const PAY_LABEL: Dictionary = {"coins": "cur_coin", "keys": "cur_key", "token": "crate_field"}
 
 
 static func card_rect(m, k: int) -> Rect2:
@@ -35,7 +35,7 @@ static func _pays(crate: String) -> Array:
 	var out: Array = []
 	if crate == "field":
 		out.append("token")
-	for p in ["coins", "gems", "keys"]:
+	for p in ["coins", "keys"]:
 		if int(d.get(p, 0)) > 0:
 			out.append(p)
 	return out
@@ -46,8 +46,6 @@ static func price(m, crate: String, pay: String) -> String:
 	match pay:
 		"coins":
 			return "%s coins" % Kit.fmt(float(Crates.coin_cost(m.save, crate)))
-		"gems":
-			return "%d gems" % int(d["gems"])
 		"keys":
 			return "%d Key%s" % [int(d["keys"]), "" if int(d["keys"]) == 1 else "s"]
 		"token":
@@ -79,7 +77,7 @@ static func build(m) -> void:
 			var pay: String = pays[j]
 			if pay == "token" and Crates.tokens(s) <= 0:
 				continue
-			Kit.btn(m, price(m, crate, pay), Rect2(r.position.x + 12 + j * (bw + 8.0), r.end.y - 58, bw, 46), func() -> void: open(m, crate, pay), "Open a %s with %s" % [String(CrateDB.get_def(crate)["name"]), pay], Crates.can_pay(s, crate, pay), Kit.GOLD if pay == "coins" else (Kit.GEM if pay == "gems" else Kit.KEYC), "CRATE %s %s" % [crate.to_upper(), pay.to_upper()], String(PAY_LABEL[pay]), 15)
+			Kit.btn(m, price(m, crate, pay), Rect2(r.position.x + 12 + j * (bw + 8.0), r.end.y - 58, bw, 46), func() -> void: open(m, crate, pay), "Open a %s with %s" % [String(CrateDB.get_def(crate)["name"]), pay], Crates.can_pay(s, crate, pay), Kit.GOLD if pay == "coins" else Kit.KEYC, "CRATE %s %s" % [crate.to_upper(), pay.to_upper()], String(PAY_LABEL[pay]), 15)
 	if m.crate_anim.has("crate"):
 		var st: Rect2 = stage_rect(m)
 		if _done(m):

@@ -112,7 +112,7 @@ static func draw(m) -> void:
 					var md: Dictionary = ModifierDB.MUTATIONS.get(String(ids[k]), {})
 					_draw_simple(m, r, "icon_endless", "MUTATION", String(md.get("name", "")), String(md.get("desc", "")), Kit.MAG, k)
 		if kind == "draft":
-			Kit.t(m, "Time is held while you choose", Vector2(x, lr.end.y - 22), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w)
+			Kit.t(m, "The battle keeps running while you choose", Vector2(x, lr.end.y - 22), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w)
 		return
 	if S.pending_place != "":
 		var d2: Dictionary = PickDB.get_def(S.pending_place)
@@ -121,7 +121,16 @@ static func draw(m) -> void:
 		Kit.icon(m, S.pending_place, Rect2(x + 14, lr.position.y + 70, 80, 80))
 		Kit.t(m, String(d2["name"]), Vector2(x + 108, lr.position.y + 100), 22, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w - 120)
 		Kit.wrap(m, String(d2["desc"]), Vector2(x + 14, lr.position.y + 176), 15, Kit.DIM, w - 28, 3)
-		Kit.wrap(m, "Click a glowing cell on the grid. Ring 1 hugs the Core; outer rings open as your Core tracks grow.", Vector2(x, lr.position.y + 330), 15, Kit.DIM, w, 4)
+		Kit.wrap(m, "Click a glowing cell on the grid. Enemies attack buildings in their way — a destroyed building is lost for the run.", Vector2(x, lr.position.y + 330), 15, Kit.DIM, w, 4)
+		return
+	if S.pending_upgrade != "":
+		var d3: Dictionary = PickDB.get_def(S.pending_upgrade)
+		Kit.t(m, "APPLY UPGRADE", Vector2(x, lr.position.y + 34), 22, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, w)
+		Kit.panel(m, Rect2(x, lr.position.y + 54, w, 180), Kit.rarity_col(String(d3["rarity"])), Kit.PANEL2)
+		Kit.icon(m, S.pending_upgrade, Rect2(x + 14, lr.position.y + 70, 80, 80))
+		Kit.t(m, String(d3["name"]) + "  +1 level", Vector2(x + 108, lr.position.y + 100), 22, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w - 120)
+		Kit.wrap(m, String(d3["desc"]), Vector2(x + 14, lr.position.y + 176), 15, Kit.DIM, w - 28, 3)
+		Kit.wrap(m, "Click (or drag onto) a glowing %s on the grid to level it up." % String(d3["name"]), Vector2(x, lr.position.y + 330), 15, Kit.DIM, w, 4)
 		return
 	_draw_info(m, lr, x, w)
 
@@ -144,11 +153,15 @@ static func _draw_card(m, r: Rect2, cd: Dictionary, k: int) -> void:
 	var isz: float = minf(r.size.y - 44.0, 92.0)
 	Kit.panel(m, Rect2(r.position.x + 10, r.position.y + 34, isz, isz), Color(rc, 0.5), Color("101418"), 1)
 	Kit.icon(m, id, Rect2(r.position.x + 14, r.position.y + 38, isz - 8, isz - 8))
+	# Owner feedback #1: every card names its reward type up front.
 	var head: String = String(FAM_LABEL.get(fam, fam.to_upper()))
+	var rw: String = String(cd.get("reward", ""))
 	if String(cd.get("kind", "")) == "plus":
-		head = "LEVEL UP  Lv%d -> %d" % [int(cd.get("lvl", 1)), int(cd.get("to", 2))]
-	elif String(cd.get("kind", "")) == "new" and fam == "building":
-		head = "NEW BUILDING"
+		head = "UPGRADE (click a building)  Lv%d -> %d" % [int(cd.get("lvl", 1)), int(cd.get("to", 2))]
+	elif String(cd.get("kind", "")) == "new" and (fam == "building" or fam == "hut"):
+		head = "BUILDING (place on grid)" + ("  · another copy" if bool(cd.get("dup", false)) else "")
+	elif rw == "perk":
+		head = "PERK (instant stat buff)"
 	elif fam == "special" and S.specials.any(func(s: Variant) -> bool: return String((s as Dictionary)["id"]) == id):
 		head = "SPECIAL  +1 copy"
 	elif fam == "pack":
@@ -217,8 +230,8 @@ static func _draw_info(m, lr: Rect2, x: float, w: float) -> void:
 	y += 22.0
 	var blds: int = S.building_count()
 	Kit.row(m, "Buildings  ·  huts", "%d  ·  %d" % [blds - S.hut_count(), S.hut_count()], Vector2(x, y + 18), w, Kit.TEXT, "Buildings on the grid (huts included) — duplicates level them to L5", 15)
-	Kit.row(m, "Rings open", "%d / 3" % int(S.rings_open), Vector2(x, y + 40), w, Kit.TEXT, "Outer rings open as Core track levels grow", 15)
-	Kit.row(m, "Troops", str(S.troops.filter(func(t: Variant) -> bool: return String((t as Dictionary).get("state", "")) != "dead").size()), Vector2(x, y + 62), w, Kit.TEXT, "Troops roaming the lanes from your huts", 15)
+	Kit.row(m, "Grid", "%dx%d" % [int(S.grid_n), int(S.grid_n)], Vector2(x, y + 40), w, Kit.TEXT, "Run grid size — research Grid Expansion for a bigger one", 15)
+	Kit.row(m, "Troops", str(S.troops.filter(func(t: Variant) -> bool: return String((t as Dictionary).get("state", "")) != "dead").size()), Vector2(x, y + 62), w, Kit.TEXT, "Troops roaming out from your huts", 15)
 	y += 76.0
 	# packs owned
 	var px: float = x
@@ -249,7 +262,7 @@ static func _draw_info(m, lr: Rect2, x: float, w: float) -> void:
 		bits.append("%d Core Cores" % int(lt["core_cores"]))
 	Kit.row(m, "Loot", ", ".join(bits) if not bits.is_empty() else "none yet", Vector2(x, y + 20), w, Kit.SCRAP, "Banked when the run ends: bosses, marked elites and Couriers drop parts", 15)
 	# hotkey legend
-	var leg: Array = [["hotbar_1", "Specials (1-4)"], ["ability_1", "Draft picks (Q W E R)"], ["track_1", "Core tracks (Shift+1-5)"], ["reroll", "Reroll"], ["pause", "Pause"], ["lane_next", "Lane focus"]]
+	var leg: Array = [["hotbar_1", "Specials (1-4)"], ["ability_1", "Draft picks (Q W E R)"], ["track_1", "Core tracks (Shift+1-5)"], ["reroll", "Reroll"], ["pause", "Pause"]]
 	var ly: float = lr.end.y - 22.0 * float(leg.size()) - 12.0
 	if ly > y + 40.0:
 		Kit.head(m, "HOTKEYS", Vector2(x, ly - 8), w, Kit.DIM)

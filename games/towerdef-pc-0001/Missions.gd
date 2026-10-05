@@ -1,6 +1,6 @@
 extends RefCounted
 ## Daily missions + login streak (SPEC A6). save["missions"] =
-## {day, list:[{tpl,target,prog,claimed,gems}], bonus_claimed}; save["streak"] =
+## {day, list:[{tpl,target,prog,claimed,coins}], bonus_claimed}; save["streak"] =
 ## {day_idx(0..7), last_day, loops}. Same day => same missions (seeded by day).
 
 const MissionDB := preload("res://data/MissionDB.gd")
@@ -41,7 +41,7 @@ static func roll(s: Dictionary, now: int, tz_offset: int = 0) -> Array:
 	var out: Array = []
 	for k in PER_DAY:
 		var tpl: String = String(pool[k])
-		out.append({"tpl": tpl, "target": MissionDB.target(tpl, b), "prog": 0, "claimed": false, "gems": MissionDB.reward(tpl)})
+		out.append({"tpl": tpl, "target": MissionDB.target(tpl, b), "prog": 0, "claimed": false, "coins": MissionDB.reward(tpl)})
 	m["day"] = day
 	m["list"] = out
 	m["bonus_claimed"] = false
@@ -110,9 +110,9 @@ static func claim(s: Dictionary, idx: int) -> Array:
 	if bool(e["claimed"]) or not is_done(e):
 		return []
 	e["claimed"] = true
-	var g: int = int(e["gems"])
-	add_gems(s, "mission", g)
-	return [{"t": "mission_claimed", "idx": idx, "gems": g}]
+	var g: int = int(e.get("coins", 0))
+	add_coins(s, g)
+	return [{"t": "mission_claimed", "idx": idx, "coins": g}]
 
 
 static func all_claimed(s: Dictionary) -> bool:
@@ -130,9 +130,9 @@ static func claim_bonus(s: Dictionary) -> Array:
 	if bool(m["bonus_claimed"]) or not all_claimed(s):
 		return []
 	m["bonus_claimed"] = true
-	var g: int = TuneRef.int_of("mission_bonus_gems", 5)
-	add_gems(s, "mission", g)
-	return [{"t": "mission_bonus", "gems": g}]
+	var g: int = TuneRef.int_of("mission_bonus_coins", 200)
+	add_coins(s, g)
+	return [{"t": "mission_bonus", "coins": g}]
 
 
 static func has_claimable(s: Dictionary) -> bool:
@@ -179,10 +179,8 @@ static func streak_claim(s: Dictionary, now: int, tz_offset: int = 0) -> Array:
 	var r: Dictionary = MissionDB.STREAK[idx - 1]
 	var mult: float = minf(2.0, 1.0 + 0.1 * float(st["loops"]))
 	var coins: int = int(floor(float(r["coins"]) * mult))
-	var gems: int = int(r["gems"])
 	s["coins"] = int(s["coins"]) + coins
-	add_gems(s, "streak", gems)
-	var ev: Array = [{"t": "streak_claimed", "day": idx, "coins": coins, "gems": gems}]
+	var ev: Array = [{"t": "streak_claimed", "day": idx, "coins": coins}]
 	if bool(r.get("chest", false)):
 		var rng := RandomNumberGenerator.new()
 		rng.seed = hash(day * 7 + 3)
@@ -190,7 +188,6 @@ static func streak_claim(s: Dictionary, now: int, tz_offset: int = 0) -> Array:
 	return ev
 
 
-static func add_gems(s: Dictionary, src: String, g: int) -> void:
-	s["gems"] = int(s["gems"]) + g
-	var gl: Dictionary = s.get("gem_log", {})
-	gl[src] = int(gl.get(src, 0)) + g
+## Meta coin reward (missions / bonus).
+static func add_coins(s: Dictionary, n: int) -> void:
+	s["coins"] = int(s.get("coins", 0)) + n

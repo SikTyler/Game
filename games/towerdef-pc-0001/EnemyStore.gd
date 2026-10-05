@@ -11,8 +11,9 @@ extends RefCounted
 
 const F_MARKED: int = 1
 const F_EXIT: int = 2
-## move() action log opcodes: [op, arg] pairs, replayed in order by TowerState.
-const ACT_WALL: int = 0      # arg = quad whose wall broke
+## move() action log opcodes: [op, arg] pairs (ACT_BLD: [op, slot, cell]),
+## replayed in order by TowerState.
+const ACT_BLD: int = 0       # arg = slot of a body hitting the building on `cell`
 const ACT_SHOT: int = 1      # arg = slot of a ranged body firing at the Core
 const ACT_HIT: int = 2       # arg = slot of a melee body hitting the Core
 const ACT_ESCAPE: int = 3    # arg = slot of a courier that reached its exit
@@ -149,13 +150,16 @@ func has_exit(s: int) -> bool:
 	return (flags[s] & F_EXIT) != 0
 
 
-## The per-substep hot pass (timers, courier run, taunt pin, seek to the stop
-## ring, Barricade slow + wear, ranged / melee attack timers), in spawn order.
-## Same expressions and order as the Dict-era TowerState._move_enemies; the
-## Core-side effects are returned as an ordered [op, arg] log.
-func move(dt: float, frozen: bool, center: Vector2, stop_r: float, r_stop: float, r_fire: float, wall_r: float, wall_slow: float, walls: Dictionary) -> PackedInt32Array:
+## The per-substep hot pass (timers, courier run, taunt pin, seek the Core,
+## building block + attack, ranged / melee attack timers), in spawn order.
+## `blk` (empty = no buildings) flags grid cells holding a standing building:
+## a body whose leading edge touches one stops and attacks it (owner feedback
+## #1: buildings in the way are destroyed first). Effects are returned as an
+## ordered action log.
+func move(dt: float, frozen: bool, center: Vector2, stop_r: float, r_stop: float, r_fire: float, blk: PackedByteArray, side: int, cell: float) -> PackedInt32Array:
 	var acts: PackedInt32Array = PackedInt32Array()
-	var has_walls: bool = not walls.is_empty()
+	var has_b: bool = not blk.is_empty()
+	var half: int = side / 2
 	for e in order:
 		var p: Vector2 = pos[e]
 		var st: float = slow_t[e]
@@ -188,21 +192,25 @@ func move(dt: float, frozen: bool, center: Vector2, stop_r: float, r_stop: float
 		var to_c: Vector2 = center - p
 		var dist: float = to_c.length()
 		if dist > stop + 0.001:
-			# Barricade: a standing wall on this lane slows enemies pressing on
-			# it, and they wear it down with their contact damage.
-			if has_walls:
-				var wq: int = quad[e]
-				if dist <= wall_r + 15.0 and walls.has(wq):
-					var wd: Dictionary = walls[wq]
-					if float(wd["hp"]) > 0.0:
-						mult *= wall_slow
-						wd["hp"] = float(wd["hp"]) - dmg[e] * dt
-						if float(wd["hp"]) <= 0.0:
-							wd["hp"] = 0.0
-							acts.append(ACT_WALL)
-							acts.append(wq)
-			var step: float = minf(dist - stop, spd[e] * mult * dt)
-			pos[e] = p + to_c.normalized() * step
+			var dir: Vector2 = to_c / dist
+			var bc: int = -1
+			if has_b:
+				var ahead: Vector2 = p + dir * (size[e] * 0.5 + 2.0) - center
+				var col: int = int(floor(ahead.x / cell + 0.5)) + half
+				var row: int = int(floor(ahead.y / cell + 0.5)) + half
+				if col >= 0 and col < side and row >= 0 and row < side and blk[row * side + col] == 1:
+					bc = row * side + col
+			if bc >= 0:
+				# blocked by a building: attack it (ranged at their fire cadence)
+				atk_cd[e] = atk_cd[e] - dt
+				if atk_cd[e] <= 0.0:
+					atk_cd[e] = r_fire if ranged else 1.0
+					acts.append(ACT_BLD)
+					acts.append(e)
+					acts.append(bc)
+			else:
+				var step: float = minf(dist - stop, spd[e] * mult * dt)
+				pos[e] = p + dir * step
 		elif ranged:
 			fire_cd[e] = fire_cd[e] - dt
 			if fire_cd[e] <= 0.0:

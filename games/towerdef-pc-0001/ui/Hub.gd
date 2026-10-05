@@ -56,7 +56,7 @@ static func badge(m, id: String) -> bool:
 			return Crates.tokens(s) > 0 or Crates.can_pay(s, "field", "coins") or Crates.can_pay(s, "supply", "keys")
 		"outpost":
 			var p: Dictionary = Outpost.pending(s, t)
-			return float(p["coins"]) >= 1.0 or float(p["gems"]) >= 1.0 or float(p["scrap"]) >= 1.0 or float(p["keys"]) >= 1.0
+			return float(p["coins"]) >= 1.0 or float(p["scrap"]) >= 1.0 or float(p["keys"]) >= 1.0
 		"missions":
 			return Missions.has_claimable(s) or Missions.streak_available(s, t)
 		"reforge":
@@ -231,7 +231,7 @@ static func _draw_play(m, _cr: Rect2) -> void:
 	Kit.head(m, "OUTPOST", Vector2(x, y), w - 200.0)
 	var prod: Dictionary = Outpost.production(s)
 	var pend: Dictionary = Outpost.pending(s, m.now())
-	var res: Array = [["cur_coin", "coins", Kit.GOLD], ["cur_scrap", "scrap", Kit.SCRAP], ["cur_gem", "gems", Kit.GEM], ["cur_key", "keys", Kit.KEYC]]
+	var res: Array = [["cur_coin", "coins", Kit.GOLD], ["cur_scrap", "scrap", Kit.SCRAP], ["cur_key", "keys", Kit.KEYC]]
 	for k in res.size():
 		var a: Array = res[k]
 		var ry: float = y + 40.0 + float(k) * 42.0
@@ -286,15 +286,12 @@ static func _build_research(m) -> void:
 	var run: Array = Labs.running(s)
 	for k in run.size():
 		var slot: int = k
-		var rc: int = Labs.rush_cost(s, k, t)
-		var qr: Rect2 = _queue_rect(m, k)
-		if rc > 0:
-			Kit.btn(m, "Rush %d gem%s" % [rc, "" if rc == 1 else "s"], Rect2(qr.end.x - 170, qr.end.y - 52, 156, 42), func() -> void: m.meta_act(Labs.rush(m.save, slot, m.now())), "Finish this research now for gems", int(s["gems"]) >= rc, Kit.GEM, "Rush", "cur_gem", 16)
+		var _qr: Rect2 = _queue_rect(m, slot)
 	for k in LabDB.IDS.size():
 		var id: String = LabDB.IDS[k]
 		var d: Dictionary = LabDB.DEFS[id]
 		var lvl: int = Labs.level(s, id)
-		var tip: String = "%s  Lv%d/%d\n%s\nNext: %s coins, %s" % [String(d["name"]), lvl, LabDB.max_of(id), String(d["effect"]), Kit.fmt(float(Labs.cost(id, lvl))), Kit.dur(Labs.duration(s, id, lvl))]
+		var tip: String = "%s  Lv%d/%d\n%s\nNext: %s coins (instant)" % [String(d["name"]), lvl, LabDB.max_of(id), String(d["effect"]), Kit.fmt(float(Labs.cost(id, lvl)))]
 		Kit.hit(m, _lab_rect(m, k), func() -> void: m.meta_act(Labs.start(m.save, id, m.now())), tip, "LAB " + id, Labs.can_start(s, id), Kit.LAB)
 
 
@@ -337,7 +334,7 @@ static func _draw_research(m, cr: Rect2) -> void:
 		Kit.t(m, String(d2["name"]), Vector2(r2.position.x + 76, r2.position.y + 34), 19, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, r2.size.x - 90)
 		Kit.t(m, "Lv %d / %d" % [lvl, mx], Vector2(r2.end.x - 12, r2.position.y + 34), 15, Kit.DIM, HORIZONTAL_ALIGNMENT_RIGHT, 100.0)
 		Kit.wrap(m, String(d2["effect"]), Vector2(r2.position.x + 76, r2.position.y + 48), 14, Kit.DIM, r2.size.x - 90, 2)
-		var status: String = "%s coins  ·  %s" % [Kit.fmt(float(Labs.cost(id2, lvl))), Kit.dur(Labs.duration(s, id2, lvl))]
+		var status: String = "%s coins  ·  instant" % Kit.fmt(float(Labs.cost(id2, lvl)))
 		var sc: Color = Kit.GOLD
 		if Labs.is_running(s, id2):
 			status = "RESEARCHING"
@@ -373,7 +370,7 @@ static func _build_cards(m) -> void:
 			var id: String = String(eq[k])
 			Kit.hit(m, _eq_rect(m, k), func() -> void: m.meta_act(Cards.unequip(m.save, id)), "%s — click to unequip" % String((CardDB.DEFS[id] as Dictionary)["name"]), "EQ " + id)
 		elif k == n:
-			Kit.btn(m, "Buy slot\n%d gems" % Cards.slot_cost(s), _eq_rect(m, k), func() -> void: m.meta_act(Cards.buy_slot(m.save)), "Unlock another card slot", int(s["gems"]) >= Cards.slot_cost(s), Kit.GEM, "CSLOT", "", 18)
+			Kit.btn(m, "Buy slot\n%s coins" % Kit.fmt(float(Cards.slot_cost(s))), _eq_rect(m, k), func() -> void: m.meta_act(Cards.buy_slot(m.save)), "Unlock another card slot", int(s["coins"]) >= Cards.slot_cost(s), Kit.GOLD, "CSLOT", "cur_coin", 18)
 	for k in CardDB.IDS.size():
 		var id2: String = CardDB.IDS[k]
 		if own.has(id2):
@@ -381,7 +378,7 @@ static func _build_cards(m) -> void:
 			var cb: Callable = func() -> void: m.meta_act(Cards.unequip(m.save, id2) if Cards.equipped(m.save).has(id2) else Cards.equip(m.save, id2))
 			Kit.hit(m, _card_rect(m, k), cb, "%s\n%s\nClick to %s" % [String((CardDB.DEFS[id2] as Dictionary)["name"]), CardDB.describe(id2, Cards.level(s, id2)), "unequip" if is_eq else "equip"], "CARD " + id2, is_eq or eq.size() < n)
 	var cr: Rect2 = m.content_rect()
-	Kit.btn(m, "Open Chest  ·  %d gems" % Cards.chest_cost(), Rect2(cr.get_center().x - 220, cr.end.y - 84, 440, 64), func() -> void: m.meta_act(Cards.open_chest(m.save, m.meta_rng)), "Open a card chest (new card or a copy)", int(s["gems"]) >= Cards.chest_cost(), Kit.GEM, "Open Chest", "chest", 22)
+	Kit.btn(m, "Open Chest  ·  %s coins" % Kit.fmt(float(Cards.chest_cost())), Rect2(cr.get_center().x - 220, cr.end.y - 84, 440, 64), func() -> void: m.meta_act(Cards.open_chest(m.save, m.meta_rng)), "Open a card chest (new card or a copy)", int(s["coins"]) >= Cards.chest_cost(), Kit.GOLD, "Open Chest", "chest", 22)
 
 
 static func _draw_cards(m, cr: Rect2) -> void:
@@ -450,7 +447,7 @@ static func _build_missions(m) -> void:
 		var idx: int = k
 		var r: Rect2 = _mission_rect(m, k)
 		var claimed: bool = bool(e["claimed"])
-		Kit.btn(m, "Done" if claimed else "Claim +%d" % int(e["gems"]), Rect2(r.end.x - 200, r.position.y + 26, 180, 50), func() -> void: m.meta_act(Missions.claim(m.save, idx)), "Claim the mission's gem reward", Missions.is_done(e) and not claimed, Kit.GEM, "MCLAIM %d" % k, "cur_gem")
+		Kit.btn(m, "Done" if claimed else "Claim +%d" % int(e.get("coins", 0)), Rect2(r.end.x - 200, r.position.y + 26, 180, 50), func() -> void: m.meta_act(Missions.claim(m.save, idx)), "Claim the mission's coin reward", Missions.is_done(e) and not claimed, Kit.GOLD, "MCLAIM %d" % k, "cur_coin")
 	var br: Rect2 = _mission_rect(m, lst.size())
 	var bonus: bool = Missions.all_claimed(s) and not bool((s["missions"] as Dictionary)["bonus_claimed"])
 	var bdone: bool = bool((s["missions"] as Dictionary)["bonus_claimed"])
@@ -471,10 +468,9 @@ static func _draw_missions(m, cr: Rect2) -> void:
 		Kit.panel(m, r, Kit.GOLD if is_next else (Kit.GREEN if done else Kit.EDGE), Color(0.15, 0.25, 0.15) if done else Color("1f252c"))
 		Kit.t(m, "Day %d" % (k + 1), Vector2(r.get_center().x, r.position.y + 26), 17, Kit.TEXT if (done or is_next) else Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
 		var rw: Dictionary = MissionDB.STREAK[k]
-		var icon_id: String = "chest" if bool(rw.get("chest", false)) else ("cur_gem" if int(rw["gems"]) > 0 else "cur_coin")
+		var icon_id: String = "chest" if bool(rw.get("chest", false)) else "cur_coin"
 		Kit.icon(m, icon_id, Rect2(r.get_center().x - 22, r.position.y + 38, 44, 44))
-		var amt: String = "%d" % int(rw["gems"]) if int(rw["gems"]) > 0 else Kit.fmt(float(rw["coins"]))
-		Kit.t(m, amt, Vector2(r.get_center().x, r.end.y - 16), 19, Kit.GEM if int(rw["gems"]) > 0 else Kit.GOLD, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
+		Kit.t(m, Kit.fmt(float(rw["coins"])), Vector2(r.get_center().x, r.end.y - 16), 19, Kit.GOLD, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
 	Kit.head(m, "DAILY MISSIONS", Vector2(cr.position.x + 20, cr.position.y + 274), cr.size.x - 40)
 	var lst: Array = Missions.list(s)
 	for k in lst.size():
@@ -491,6 +487,6 @@ static func _draw_missions(m, cr: Rect2) -> void:
 	Kit.panel(m, br, Kit.GOLD if Missions.all_claimed(s) else Kit.EDGE, Kit.PANEL2)
 	Kit.icon(m, "chest", Rect2(br.position.x + 16, br.position.y + 20, 60, 60))
 	Kit.t(m, "All-clear bonus", Vector2(br.position.x + 90, br.position.y + 42), 21, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, 400.0)
-	Kit.t(m, "+%d gems when all 3 are claimed" % TuneRef.int_of("mission_bonus_gems", 5), Vector2(br.position.x + 90, br.position.y + 72), 16, Kit.GEM, HORIZONTAL_ALIGNMENT_LEFT, 500.0)
+	Kit.t(m, "+%d coins when all 3 are claimed" % TuneRef.int_of("mission_bonus_coins", 200), Vector2(br.position.x + 90, br.position.y + 72), 16, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, 500.0)
 	var day: int = Missions.day_of(t)
 	Kit.t(m, "New missions in %s" % Kit.dur((day + 1) * 86400 - t), Vector2(cr.end.x - 20, cr.position.y + 274), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_RIGHT, 400.0)

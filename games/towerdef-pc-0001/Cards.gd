@@ -30,15 +30,16 @@ static func level(s: Dictionary, id: String) -> int:
 	return int(o.get("lvl", 0))
 
 
+## Card chest price in COINS (owner feedback #1: gems / premium currency removed).
 static func chest_cost() -> int:
-	return TuneRef.int_of("chest_gems", 20)
+	return TuneRef.int_of("chest_coins", 400)
 
 
 static func open_chest(s: Dictionary, rng: RandomNumberGenerator, free: bool = false) -> Array:
 	var c: int = 0 if free else chest_cost()
-	if int(s["gems"]) < c:
+	if int(s["coins"]) < c:
 		return []
-	s["gems"] = int(s["gems"]) - c
+	s["coins"] = int(s["coins"]) - c
 	var id: String = String(CardDB.IDS[rng.randi_range(0, CardDB.IDS.size() - 1)])
 	var own: Dictionary = owned(s)
 	var is_new: bool = not own.has(id)
@@ -57,7 +58,7 @@ static func open_chest(s: Dictionary, rng: RandomNumberGenerator, free: bool = f
 			e["lvl"] = lvl
 			e["copies"] = copies if lvl < CardDB.MAX_LVL else 0
 	var e2: Dictionary = own[id]
-	return [{"t": "chest_opened", "card": id, "new": is_new, "lvl_up": lvl_up, "lvl": int(e2["lvl"]), "gems": c}]
+	return [{"t": "chest_opened", "card": id, "new": is_new, "lvl_up": lvl_up, "lvl": int(e2["lvl"]), "coins": c}]
 
 
 static func equip(s: Dictionary, id: String) -> Array:
@@ -79,11 +80,11 @@ static func unequip(s: Dictionary, id: String) -> Array:
 static func slot_cost(s: Dictionary) -> int:
 	match slots(s):
 		2:
-			return TuneRef.int_of("card_slot_gems_3", 30)
+			return TuneRef.int_of("card_slot_coins_3", 1500)
 		3:
-			return TuneRef.int_of("card_slot_gems_4", 60)
+			return TuneRef.int_of("card_slot_coins_4", 4000)
 		4:
-			return TuneRef.int_of("card_slot_gems_5", 100)
+			return TuneRef.int_of("card_slot_coins_5", 10000)
 	return 0
 
 
@@ -92,11 +93,11 @@ static func buy_slot(s: Dictionary) -> Array:
 	if n >= MAX_SLOTS:
 		return []
 	var c: int = slot_cost(s)
-	if int(s["gems"]) < c:
+	if int(s["coins"]) < c:
 		return []
-	s["gems"] = int(s["gems"]) - c
+	s["coins"] = int(s["coins"]) - c
 	_c(s)["slots"] = n + 1
-	return [{"t": "card_slot", "n": n + 1, "gems": c}]
+	return [{"t": "card_slot", "n": n + 1, "coins": c}]
 
 
 ## Merged effects of the equipped cards only.

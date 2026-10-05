@@ -6,7 +6,7 @@ extends RefCounted
 ##     buildings: {"<uid>": {id, x, y, rot, lvl, stored, last_tick, built, spent}},
 ##     queue: [{uid, kind: "build"|"upgrade", ends_at}], (uid "relay" = Relay)
 ##     decor: {"<uid>": {id, x, y, rot}}, blueprints: [{name, layout}],
-##     theme, gem_day: {day, n}}
+##     theme}
 ## Rules: placement inside open land, not blocked/occupied, Gem Mine on a
 ## Crystal Vein, quantity limits by Relay level; connectivity is a 4-neighbour
 ## flood fill from the Relay through Conduits and buildings (unconnected
@@ -25,12 +25,11 @@ const TuneRef := preload("res://Tune.gd")
 const HALL_POS: Vector2i = Vector2i(0, 2)
 const DIRS: Array = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
 const BLUEPRINTS_MAX: int = 5
-const GEM_DAILY: int = 25
 
 
 static func default_block(with_hall: bool = true) -> Dictionary:
 	var o: Dictionary = {"relay_lvl": 1, "plots": [], "next_uid": 1, "credit": 0, "buildings": {}, "queue": [],
-		"decor": {}, "blueprints": [], "theme": "ash", "gem_day": {"day": -1, "n": 0}}
+		"decor": {}, "blueprints": [], "theme": "ash"}
 	if with_hall:
 		_add_building(o, "research", HALL_POS.x, HALL_POS.y, 0, true)
 	return o
@@ -65,8 +64,6 @@ static func normalize_block(raw: Variant) -> Dictionary:
 	o["plots"] = pl
 	o["credit"] = maxi(0, int(r.get("credit", 0)))
 	o["theme"] = String(r.get("theme", "ash"))
-	var gd: Dictionary = r.get("gem_day", {}) if r.get("gem_day", {}) is Dictionary else {}
-	o["gem_day"] = {"day": int(gd.get("day", -1)), "n": maxi(0, int(gd.get("n", 0)))}
 	var hi: int = 0
 	var bl: Dictionary = {}
 	var bin: Dictionary = r.get("buildings", {}) if r.get("buildings", {}) is Dictionary else {}
@@ -97,7 +94,8 @@ static func normalize_block(raw: Variant) -> Dictionary:
 		if x is Dictionary:
 			var u: String = String((x as Dictionary).get("uid", ""))
 			if u == "relay" or bl.has(u):
-				q.append({"uid": u, "kind": String((x as Dictionary).get("kind", "build")), "ends_at": maxi(0, int((x as Dictionary).get("ends_at", 0)))})
+				# builds are instant now: a job left in an old save completes on the next tick
+				q.append({"uid": u, "kind": String((x as Dictionary).get("kind", "build")), "ends_at": 0})
 	o["queue"] = q
 	var bps: Array = []
 	for x in r.get("blueprints", []):
@@ -483,8 +481,9 @@ static func nominal_rate(s: Dictionary, uid: String, con: Dictionary = {}) -> fl
 	var lay: float = float(layout_bonus(o, uid, con)["total"])
 	match id:
 		"gemmine":
-			# 1 gem / 3 h at L1 -> 1 gem / h at L10; only Lamps boost it.
-			return (1.0 / 3.0 + (1.0 - 1.0 / 3.0) * float(L - 1) / 9.0) * (1.0 + lay)
+			# Deep Mine (was the Gem Mine; gems are gone): a big coin generator
+			# on a vein; only Lamps boost its layout.
+			return float(d["rate"]) * (1.0 + 0.25 * float(L - 1)) * (1.0 + lay) * global_mult(s)
 		"keyforge":
 			return (1.0 / 24.0 + (1.0 / 10.0 - 1.0 / 24.0) * float(L - 1) / 9.0) * (1.0 + lay) * global_mult(s)
 		"mill":
@@ -505,7 +504,7 @@ static func rate(s: Dictionary, uid: String, con: Dictionary = {}) -> float:
 
 
 ## Storage cap: storage_h hours of nominal output x Warehouse x Storage Tech
-## (+10%/L); Gem Mine 24 and Key Forge 3 are hard caps.
+## (+10%/L); Key Forge 3 is a hard cap.
 static func cap(s: Dictionary, uid: String, con: Dictionary = {}) -> float:
 	var o: Dictionary = _o(s)
 	var b: Dictionary = o["buildings"][uid]
@@ -576,11 +575,11 @@ static func _complete(s: Dictionary, job: Dictionary) -> Array:
 	return [{"t": "upgrade_done", "uid": uid, "id": String(b["id"]), "lvl": int(b["lvl"])}]
 
 
-## Preview of what is stored at `now` (no mutation): {coins, scrap, gems, keys}.
+## Preview of what is stored at `now` (no mutation): {coins, scrap, keys}.
 static func pending(s: Dictionary, now: int) -> Dictionary:
 	var c: Dictionary = s.duplicate(true)
 	tick(c, now)
-	var out: Dictionary = {"coins": 0.0, "scrap": 0.0, "gems": 0.0, "keys": 0.0}
+	var out: Dictionary = {"coins": 0.0, "scrap": 0.0, "keys": 0.0}
 	var o: Dictionary = _o(c)
 	for k in o["buildings"].keys():
 		var b: Dictionary = o["buildings"][k]
@@ -594,7 +593,7 @@ static func pending(s: Dictionary, now: int) -> Dictionary:
 static func production(s: Dictionary) -> Dictionary:
 	var o: Dictionary = _o(s)
 	var con: Dictionary = connected(o)
-	var out: Dictionary = {"coins": 0.0, "scrap": 0.0, "gems": 0.0, "keys": 0.0}
+	var out: Dictionary = {"coins": 0.0, "scrap": 0.0, "keys": 0.0}
 	for k in o["buildings"].keys():
 		var res: String = String(OutpostDB.get_def(String((o["buildings"][k] as Dictionary)["id"])).get("res", ""))
 		if res != "":
@@ -614,12 +613,9 @@ static func _pay_res(s: Dictionary, res: String, n: int) -> void:
 			s["scrap"] = int(s.get("scrap", 0)) + n
 		"keys":
 			s["keys"] = int(s.get("keys", 0)) + n
-		"gems":
-			Missions.add_gems(s, "mine", n)
 
 
-## Collect one building's whole units (fractions stay). Gems obey the
-## daily cap (25/day); the rest stays stored.
+## Collect one building's whole units (fractions stay).
 static func collect(s: Dictionary, uid: String, now: int) -> Array:
 	var ev: Array = tick(s, now)
 	var o: Dictionary = _o(s)
@@ -630,16 +626,6 @@ static func collect(s: Dictionary, uid: String, now: int) -> Array:
 	var n: int = int(floor(float(b["stored"])))
 	if res == "" or n <= 0:
 		return ev
-	if res == "gems":
-		var day: int = Missions.day_of(now)
-		var gd: Dictionary = o["gem_day"]
-		if int(gd["day"]) != day:
-			gd["day"] = day
-			gd["n"] = 0
-		n = mini(n, maxi(0, GEM_DAILY - int(gd["n"])))
-		gd["n"] = int(gd["n"]) + n
-		if n <= 0:
-			return ev
 	b["stored"] = float(b["stored"]) - float(n)
 	_pay_res(s, res, n)
 	if s.get("stats", null) is Dictionary:
@@ -649,14 +635,14 @@ static func collect(s: Dictionary, uid: String, now: int) -> Array:
 
 
 ## "While you were away" (replaces Offline.gd): what the Outpost stored since
-## last_seen. {coins, scrap, gems, keys, minutes}; zero under 5 minutes or on
+## last_seen. {coins, scrap, keys, minutes}; zero under 5 minutes or on
 ## a first boot (last_seen 0) — the Outpost accrual itself is the offline pay.
 static func away_report(s: Dictionary, now: int) -> Dictionary:
 	var last: int = int(s.get("last_seen", 0))
 	var out: Dictionary = pending(s, now)
 	out["minutes"] = 0 if last <= 0 or now < last else (now - last) / 60
 	if last <= 0 or now - last < TuneRef.int_of("offline_min", 300):
-		for k in ["coins", "scrap", "gems", "keys"]:
+		for k in ["coins", "scrap", "keys"]:
 			out[k] = 0.0
 	return out
 
@@ -665,12 +651,12 @@ static func away_report(s: Dictionary, now: int) -> Dictionary:
 static func claim_away(s: Dictionary, now: int) -> Array:
 	var ev: Array = collect_all(s, now, true)
 	s["last_seen"] = now
-	var tot: Dictionary = {"coins": 0, "scrap": 0, "gems": 0, "keys": 0}
+	var tot: Dictionary = {"coins": 0, "scrap": 0, "keys": 0}
 	for e in ev:
 		if String((e as Dictionary)["t"]) == "collect":
 			tot[String(e["res"])] = int(tot[String(e["res"])]) + int(e["n"])
-	if int(tot["coins"]) + int(tot["scrap"]) + int(tot["gems"]) + int(tot["keys"]) > 0:
-		ev.append({"t": "offline", "coins": int(tot["coins"]), "scrap": int(tot["scrap"]), "gems": int(tot["gems"]), "keys": int(tot["keys"])})
+	if int(tot["coins"]) + int(tot["scrap"]) + int(tot["keys"]) > 0:
+		ev.append({"t": "offline", "coins": int(tot["coins"]), "scrap": int(tot["scrap"]), "keys": int(tot["keys"])})
 	return ev
 
 
@@ -717,9 +703,9 @@ static func cost(id: String, lvl: int) -> int:
 	return int(round(float(d.get("coins", 0)) * pow(1.6, float(maxi(1, lvl) - 1))))
 
 
-static func build_time(s: Dictionary, id: String, lvl: int) -> int:
-	var d: Dictionary = OutpostDB.get_def(id)
-	return int(round(float(d.get("time", 0)) * pow(1.4, float(maxi(1, lvl) - 1))))
+## Owner feedback #1: every Outpost build / upgrade is instant.
+static func build_time(_s: Dictionary, _id: String, _lvl: int) -> int:
+	return 0
 
 
 ## Spend coins on an Outpost build, Outpost credit (migration) first.
@@ -736,32 +722,26 @@ static func _spend(s: Dictionary, c: int) -> bool:
 	return true
 
 
-static func can_afford(s: Dictionary, c: int, gems: int = 0) -> bool:
-	return int(s.get("coins", 0)) + int(_o(s).get("credit", 0)) >= c and int(s.get("gems", 0)) >= gems
+static func can_afford(s: Dictionary, c: int) -> bool:
+	return int(s.get("coins", 0)) + int(_o(s).get("credit", 0)) >= c
 
 
-## Place a new building (pays L1 cost, starts its build job; Conduits are
-## instant). Refused: invalid spot, limit, no free builder, unaffordable.
+## Place a new building (pays L1 cost; built instantly). Refused: invalid
+## spot, limit, unaffordable.
 static func place(s: Dictionary, id: String, x: int, y: int, rot: int, now: int) -> Array:
 	if not OutpostDB.IDS.has(id) or place_error(s, id, x, y, rot) != "":
 		return []
 	var d: Dictionary = OutpostDB.get_def(id)
-	var t: int = int(d.get("time", 0))
-	if t > 0 and busy(s) >= builders(s):
-		return []
 	var c: int = int(d.get("coins", 0))
-	var g: int = int(d.get("gems", 0))
-	if not can_afford(s, c, g):
+	if not can_afford(s, c):
 		return []
 	var ev: Array = tick(s, now)
 	_spend(s, c)
-	s["gems"] = int(s.get("gems", 0)) - g
 	var o: Dictionary = _o(s)
-	var uid: String = _add_building(o, id, x, y, rot % 2, t <= 0)
-	(o["buildings"][uid] as Dictionary)["last_tick"] = now if t <= 0 else 0
-	if t > 0:
-		(o["queue"] as Array).append({"uid": uid, "kind": "build", "ends_at": now + t})
-	ev.append({"t": "op_placed", "uid": uid, "id": id, "x": x, "y": y, "rot": rot % 2, "ends_at": now + t, "coins": c, "gems": g})
+	var uid: String = _add_building(o, id, x, y, rot % 2, true)
+	(o["buildings"][uid] as Dictionary)["last_tick"] = now
+	ev.append({"t": "op_placed", "uid": uid, "id": id, "x": x, "y": y, "rot": rot % 2, "ends_at": now, "coins": c})
+	ev.append({"t": "build_done", "uid": uid, "id": id})
 	return ev
 
 
@@ -803,12 +783,12 @@ static func demolish(s: Dictionary, uid: String, now: int) -> Array:
 static func can_upgrade(s: Dictionary, uid: String) -> bool:
 	var o: Dictionary = _o(s)
 	if uid == "relay":
-		return int(o["relay_lvl"]) < 10 and not has_job(s, "relay") and busy(s) < builders(s) and can_afford(s, relay_cost(int(o["relay_lvl"])))
+		return int(o["relay_lvl"]) < 10 and can_afford(s, relay_cost(int(o["relay_lvl"])))
 	if not (o["buildings"] as Dictionary).has(uid):
 		return false
 	var b: Dictionary = o["buildings"][uid]
 	var id: String = String(b["id"])
-	return bool(b["built"]) and int(b["lvl"]) < max_lvl(s, id) and not has_job(s, uid) and busy(s) < builders(s) and can_afford(s, cost(id, int(b["lvl"])))
+	return bool(b["built"]) and int(b["lvl"]) < max_lvl(s, id) and can_afford(s, cost(id, int(b["lvl"])))
 
 
 static func relay_cost(lvl: int) -> int:
@@ -823,50 +803,25 @@ static func upgrade(s: Dictionary, uid: String, now: int) -> Array:
 	if uid == "relay":
 		var rc: int = relay_cost(int(o["relay_lvl"]))
 		_spend(s, rc)
-		var rt: int = build_time(s, "relay", int(o["relay_lvl"]))
-		(o["queue"] as Array).append({"uid": "relay", "kind": "upgrade", "ends_at": now + rt})
-		ev.append({"t": "op_upgrade", "uid": "relay", "to": int(o["relay_lvl"]) + 1, "ends_at": now + rt, "coins": rc})
+		ev.append({"t": "op_upgrade", "uid": "relay", "to": int(o["relay_lvl"]) + 1, "ends_at": now, "coins": rc})
+		ev.append_array(_complete(s, {"uid": "relay", "kind": "upgrade", "ends_at": now}))
 		return ev
 	var b: Dictionary = o["buildings"][uid]
 	var c: int = cost(String(b["id"]), int(b["lvl"]))
 	_spend(s, c)
 	b["spent"] = int(b["spent"]) + c
-	var t: int = build_time(s, String(b["id"]), int(b["lvl"]))
-	(o["queue"] as Array).append({"uid": uid, "kind": "upgrade", "ends_at": now + t})
-	ev.append({"t": "op_upgrade", "uid": uid, "to": int(b["lvl"]) + 1, "ends_at": now + t, "coins": c})
-	return ev
-
-
-## Skip a running job: 1 gem per 3 minutes remaining (rounded up).
-static func skip_cost(s: Dictionary, idx: int, now: int) -> int:
-	var q: Array = _o(s)["queue"]
-	if idx < 0 or idx >= q.size():
-		return 0
-	var rem: int = maxi(0, int((q[idx] as Dictionary)["ends_at"]) - now)
-	return int(ceil(float(rem) / 180.0))
-
-
-static func skip(s: Dictionary, idx: int, now: int) -> Array:
-	var q: Array = _o(s)["queue"]
-	if idx < 0 or idx >= q.size():
-		return []
-	var g: int = skip_cost(s, idx, now)
-	if int(s.get("gems", 0)) < g:
-		return []
-	s["gems"] = int(s["gems"]) - g
-	(q[idx] as Dictionary)["ends_at"] = now
-	var ev: Array = [{"t": "op_skip", "gems": g}]
-	ev.append_array(tick(s, now))
+	ev.append({"t": "op_upgrade", "uid": uid, "to": int(b["lvl"]) + 1, "ends_at": now, "coins": c})
+	ev.append_array(_complete(s, {"uid": uid, "kind": "upgrade", "ends_at": now}))
 	return ev
 
 
 # ----------------------------------------------------------------- plots
-## Plot unlock price for the n-th plot opened: 5,000 x 2.2^n coins (+20 n gems
-## for n >= 4, or the coin price x3 instead so gems never gate).
+## Plot unlock price for the n-th plot opened: 5,000 x 2.2^n coins (coins
+## only; gems are gone).
 static func plot_cost(s: Dictionary) -> Dictionary:
 	var n: int = (_o(s)["plots"] as Array).size()
 	var c: int = int(round(5000.0 * pow(2.2, float(n))))
-	return {"coins": c, "gems": 20 * n if n >= 4 else 0, "coins_alt": c * 3 if n >= 4 else c}
+	return {"coins": c, "coins_alt": c}
 
 
 static func plot_adjacent(o: Dictionary, k: int) -> bool:
@@ -880,21 +835,19 @@ static func plot_adjacent(o: Dictionary, k: int) -> bool:
 	return false
 
 
-## pay: "gems" (coins + gems) or "coins" (coins only; x3 from the 5th plot).
-static func unlock_plot(s: Dictionary, k: int, pay: String = "coins") -> Array:
+## `_pay` is kept for old callers (coins only now).
+static func unlock_plot(s: Dictionary, k: int, _pay: String = "coins") -> Array:
 	var o: Dictionary = _o(s)
 	if k < 0 or k >= OutpostDB.PLOTS.size() or (o["plots"] as Array).has(k) or not plot_adjacent(o, k):
 		return []
 	var pc: Dictionary = plot_cost(s)
-	var c: int = int(pc["coins"]) if pay == "gems" else int(pc["coins_alt"])
-	var g: int = int(pc["gems"]) if pay == "gems" else 0
-	if int(s.get("coins", 0)) < c or int(s.get("gems", 0)) < g:
+	var c: int = int(pc["coins"])
+	if int(s.get("coins", 0)) < c:
 		return []
 	s["coins"] = int(s["coins"]) - c
-	s["gems"] = int(s.get("gems", 0)) - g
 	Stats.on_event(s, {"t": "coins_spent", "n": c})
 	(o["plots"] as Array).append(k)
-	return [{"t": "plot_open", "plot": k, "coins": c, "gems": g}]
+	return [{"t": "plot_open", "plot": k, "coins": c}]
 
 
 # ----------------------------------------------------------------- decor
@@ -902,10 +855,9 @@ static func place_decor(s: Dictionary, id: String, x: int, y: int, rot: int) -> 
 	if not OutpostDB.DECOR.has(id) or place_error(s, id, x, y, rot) != "":
 		return []
 	var d: Dictionary = OutpostDB.DECOR[id]
-	if int(s.get("coins", 0)) < int(d["coins"]) or int(s.get("gems", 0)) < int(d["gems"]):
+	if int(s.get("coins", 0)) < int(d["coins"]):
 		return []
 	s["coins"] = int(s["coins"]) - int(d["coins"])
-	s["gems"] = int(s.get("gems", 0)) - int(d["gems"])
 	var o: Dictionary = _o(s)
 	var uid: String = str(int(o["next_uid"]))
 	o["next_uid"] = int(o["next_uid"]) + 1

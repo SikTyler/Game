@@ -1,6 +1,6 @@
 extends RefCounted
 ## Bottom hotbar of the run screen (REDESIGN_SPEC §5): specials 1-4 with the
-## cooldown sweep, copies and key label, flanked by the lane focus / field
+## cooldown sweep, copies and key label, flanked by the field
 ## count (left) and the draft cadence (right). Cast = key or click; a targeted
 ## special (Orbital) arms the aim cursor first.
 
@@ -11,7 +11,6 @@ const TuneRef := preload("res://Tune.gd")
 
 const SLOT: float = 76.0
 const GAP: float = 14.0
-const QUAD_NAMES: Array = ["North-east", "South-east", "South-west", "North-west"]
 
 
 static func slot_rect(m, k: int) -> Rect2:
@@ -67,13 +66,11 @@ static func draw(m) -> void:
 			Kit.t(m, "empty", r.get_center() + Vector2(0, 6), 14, Color(Kit.DIM, 0.6), HORIZONTAL_ALIGNMENT_CENTER, SLOT)
 		Kit.panel(m, Rect2(r.position.x - 6, r.position.y - 8, 24, 22), Kit.EDGE, Color("0d1013"), 1)
 		Kit.t(m, Kit.hint(m, "hotbar_%d" % (k + 1)), Vector2(r.position.x + 6, r.position.y + 9), 14, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, 24.0)
-	# left: lane focus + field
+	# left: field
 	var lx: float = hr.position.x + 20.0
 	var lw: float = slot_rect(m, 0).position.x - lx - 30.0
-	Kit.t(m, "LANE FOCUS", Vector2(lx, hr.position.y + 30), 14, Kit.RUST, HORIZONTAL_ALIGNMENT_LEFT, lw)
-	Kit.t(m, "%s   [%s / %s]" % [String(QUAD_NAMES[int(S.focus_quad)]), Kit.hint(m, "lane_prev"), Kit.hint(m, "lane_next")], Vector2(lx, hr.position.y + 54), 17, Kit.GEM, HORIZONTAL_ALIGNMENT_LEFT, lw)
+	Kit.t(m, "FIELD", Vector2(lx, hr.position.y + 30), 14, Kit.RUST, HORIZONTAL_ALIGNMENT_LEFT, lw)
 	Kit.t(m, "%d enemies on the field  ·  %d kills" % [S.enemy_count(), int(S.kills)], Vector2(lx, hr.position.y + 78), 15, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, lw)
-	m.stat_tips.append([Rect2(lx, hr.position.y + 10, lw, 76), "Lane focus steers auto-targeted specials (Orbital) and lane buffs."])
 	# right: draft cadence
 	var rx: float = slot_rect(m, 3).end.x + 30.0
 	var rw: float = hr.end.x - rx - 20.0
