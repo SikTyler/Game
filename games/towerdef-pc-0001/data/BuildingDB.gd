@@ -19,13 +19,13 @@ const DEFS: Dictionary = {
 	# PC roster (PC_SPEC §2.2).
 	"railgun":   {"name": "Railgun",       "cat": "weapon",  "coin": 28, "desc": "Piercing line shot every 2.5 s; outer rings only (ring 2+). Adj Tesla: +20% dmg per 5 Tesla lv (max +60%)"},
 	"flak":      {"name": "Flak Battery",  "cat": "weapon",  "coin": 22, "desc": "Fast splash, x1.5 vs skitter/mite/drone. Adj Gun: both +10% crit"},
-	"beacon":    {"name": "Lane Beacon",   "cat": "support", "coin": 20, "desc": "+15%/lv weapon dmg vs the focused lane. Adj Mortar: +25% range"},
+	"beacon":    {"name": "Signal Beacon", "cat": "support", "coin": 20, "desc": "+10%/lv rate & +0.3/lv range to buildings within 2 cells, every direction"},
 	"refinery":  {"name": "Refinery",      "cat": "eco",     "coin": 24, "desc": "Wave end: 10% of the wave's cash income -> coins (cap 2.5/lv). Adj Mine: +20% output"},
-	"barricade": {"name": "Barricade",     "cat": "support", "coin": 16, "desc": "Wall on its lane: -30% enemy speed, 60 HP/lv, rebuilt each wave"},
+	"barricade": {"name": "Barricade",     "cat": "support", "coin": 16, "desc": "High-HP wall; enemies within 1.5 cells on any side -30% speed"},
 	# Redesign run-only picks (PickDB holds draft text; these give the view a name + colour).
 	"frost":        {"name": "Cryo Spire",     "cat": "weapon",  "coin": 0, "desc": "Slows 30% within 2.5 cells, 3 dmg/s"},
 	"obelisk":      {"name": "Siphon Obelisk", "cat": "support", "coin": 0, "desc": "1% of all damage dealt heals the Core"},
-	"hut_infantry": {"name": "Rifle Barracks", "cat": "support", "coin": 0, "desc": "3 Riflemen roam the lane and taunt"},
+	"hut_infantry": {"name": "Rifle Barracks", "cat": "support", "coin": 0, "desc": "3 Riflemen guard the whole perimeter and taunt"},
 	"hut_sapper":   {"name": "Sapper Den",     "cat": "support", "coin": 0, "desc": "2 Sappers charge elites and bosses and explode"},
 	"hut_drone":    {"name": "Drone Nest",     "cat": "support", "coin": 0, "desc": "4 Drones fly out and hunt flyers first"},
 }

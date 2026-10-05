@@ -152,7 +152,9 @@ var horde_loot_wave_val: float = 0.0
 var horde_loot_total: float = 0.0
 const HORDE_LOOT_P := 0.08        # common: ~1 in 12 bodies
 const HORDE_LOOT_COIN := 0.25     # low value per drop
-const HORDE_LOOT_CAP_PER_WAVE := 3.0   # coins per wave cap = this x wave
+const HORDE_LOOT_CAP_PER_WAVE := 3.0   # legacy (pre-FB2 cap); the pool now bounds drops
+const HORDE_LOOT_FUND := 0.35     # FB2: share of each horde body's kill coins moved into the loot pool
+var horde_loot_pool: float = 0.0  # FB2: coins owed by killed bodies, paid as drops / swept at wave end
 # Separate streams keep the wave sequence identical whatever the player picks
 # or shoots, so two policies on one seed face the same waves.
 var save: Dictionary = {}
@@ -531,6 +533,15 @@ func grid_half_px() -> float:
 ## Spawn radius: the grid edge plus a fixed approach (shorter on small grids,
 ## so the view can zoom in and keep the same travel time).
 func spawn_r() -> float:
+	var gap: float = TuneRef.num("pc_spawn_gap", 260.0)
+	if horde_mult > 1:
+		gap *= TuneRef.num("pc_horde_map", 1.8)   # FB2: bigger battlefield for the x4 horde
+	return grid_half_px() * 1.42 + gap
+
+
+## Radius the view frames (FB2): the pre-horde spawn ring, so enlarging the
+## horde battlefield never shrinks the base grid on screen.
+func view_r() -> float:
 	return grid_half_px() * 1.42 + TuneRef.num("pc_spawn_gap", 260.0)
 
 
@@ -769,7 +780,17 @@ func compute_stats() -> Dictionary:
 				st["lifesteal"] = float(st["lifesteal"]) + 0.01 * m2
 			"hut_infantry", "hut_sapper", "hut_drone":
 				var dir: Vector2 = (slot_pos(i) - CENTER).normalized()
-				(st["huts"] as Array).append({"slot": i, "id": id, "lvl": lvl_at(i), "home": slot_pos(i), "anchor": CENTER + dir * (grid_half_px() + 0.6 * px)})
+				var post: Vector2 = CENTER + dir * (grid_half_px() + 0.6 * px)
+				var hut: Dictionary = {"slot": i, "id": id, "lvl": lvl_at(i), "home": slot_pos(i), "anchor": post}
+				if id == "hut_infantry" and horde_mult > 1:
+					# FB2 Rifle Barracks (omnidirectional): riflemen guard the whole
+					# perimeter - seek/leash around the Core, idle at their post.
+					var gh: float = grid_half_px() / px
+					hut["anchor"] = CENTER
+					hut["post"] = post
+					hut["seek"] = gh + TuneRef.num("pc_rifle_seek", 3.0)
+					hut["leash"] = gh + TuneRef.num("pc_rifle_leash", 4.5)
+				(st["huts"] as Array).append(hut)
 	# Building HP (owner feedback #1): enemies attack buildings in their way.
 	# L1 HP x1.35/level, x enemy dmg growth so a building holds the same number
 	# of hits at any wave; Barricade is the dedicated blocker.
@@ -1121,6 +1142,7 @@ func _step(sub: float, ev: Array) -> void:
 	_tick_buffs(dt, ev)
 	_move_enemies(dt, ev)
 	_fire(dt, ev)
+	_wall_auras()
 	_kb_k = 0.0
 	_troops_step(dt, ev)
 	_reap(ev)
@@ -1171,6 +1193,7 @@ func _tick_buffs(dt: float, ev: Array) -> void:
 ## Interest on banked cash (Core + Vaults), paid before the next wave starts.
 func _wave_end(ev: Array) -> void:
 	last_stand_used = false
+	_sweep_horde_loot()
 	if pf("interest_fast") > 0.0:
 		return   # Mint 4-piece pays interest every 15 s instead (see _step)
 	_pay_interest(ev)
@@ -1249,6 +1272,7 @@ func _on_death(ev: Array) -> void:
 		return
 	hp = 0.0
 	over = true
+	_sweep_horde_loot()
 	var cashout: int = int(floor(TuneRef.num("cashout_frac", 0.12) * cash_earned / maxf(1.0, cash_index()) * tier_coin_mult * mod_coin * mode_coin))
 	var coins: int = int(coins_run) + cashout
 	var bd: Dictionary = {
@@ -1465,6 +1489,8 @@ func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF, marked: bool = f
 		en.cash[e] = en.cash[e] * share
 		en.xp[e] = en.xp[e] * share
 		en.coin[e] = en.coin[e] * share
+		# FB2: art + hit box + separation scale back with the body count (area-conserving)
+		en.set_size(e, en.size[e] * maxf(sqrt(share), TuneRef.num("pc_horde_size_floor", 0.45)))
 	if kind == "boss":
 		ev.append({"t": "boss", "pos": en.pos[e]})
 	if marked:
@@ -1719,7 +1745,9 @@ func _hit_carry(e0: int, dmg: float, ev: Array, crit: bool, from: Vector2, rng_l
 	var done: Dictionary = {}
 	var cands: PackedInt32Array = PackedInt32Array()
 	var have_cands: bool = false
-	for hop in TuneRef.int_of("pc_carry_hops", 2) + 1:
+	# FB2 crowd tool: the Gun's overkill carry hops further through a horde
+	var hops: int = TuneRef.int_of("pc_carry_hops", 2) + (TuneRef.int_of("pc_horde_carry_hops", 2) if horde_mult > 1 else 0)
+	for hop in hops + 1:
 		var before: float = en.hp[cur]
 		var sh: int = en.shield[cur]
 		_hit(cur, left, ev, crit)
@@ -1752,6 +1780,24 @@ func _hit_carry(e0: int, dmg: float, ev: Array, crit: bool, from: Vector2, rng_l
 func _roll_crit(wd: Dictionary) -> bool:
 	var c: float = float(stats.get("crit", 0.0)) + float(wd.get("crit", 0.0))
 	return c > 0.0 and combat_rng.randf() < c
+
+
+## FB2 Barricade (omnidirectional): with spawns from every side there is no
+## lane to wall off, so each Barricade drags every body within its radius
+## (-30% speed) on top of being the high-HP blocker. Horde ruleset only.
+func _wall_auras() -> void:
+	if horde_mult <= 1:
+		return
+	var r: float = TuneRef.num("pc_wall_aura", 1.5) * cpx()
+	var sm: float = 1.0 - TuneRef.num("pc_wall_slow", 0.30)
+	for i in slots.size():
+		if id_at(i) != "barricade":
+			continue
+		var c: Vector2 = slot_pos(i)
+		for fe in eh.candidates(c, r):
+			if en.hp[fe] > 0.0 and c.distance_to(en.pos[fe]) <= r:
+				en.slow_t[fe] = maxf(en.slow_t[fe], 0.2)
+				en.slow_m[fe] = minf(en.slow_m[fe] if en.slow_t[fe] > 0.0 else 1.0, sm)
 
 
 func _fire(dt: float, ev: Array) -> void:
@@ -1835,6 +1881,13 @@ func _fire(dt: float, ev: Array) -> void:
 				ev.append({"t": "shot", "kind": kind, "from": from, "to": from + dir * reach})
 			"flak":
 				_hit(te, dmg * float(wd.get("prey", 2.5)), ev, crit)
+				if horde_mult > 1:
+					# FB2 crowd tool: flak bursts clip the bodies packed around the target
+					var fr: float = TuneRef.num("pc_horde_flak_r", 0.45) * cpx()
+					var fk: float = TuneRef.num("pc_horde_flak_frac", 0.5)
+					for ed in eh.candidates(tpos, fr):
+						if ed != te and en.hp[ed] > 0.0 and FLYERS.has(en.kind[ed]) and en.pos[ed].distance_to(tpos) <= fr:
+							_hit(ed, dmg * fk, ev, crit)
 				ev.append({"t": "shot", "kind": kind, "from": from, "to": tpos, "radius": 20.0})
 			"mortar":
 				var rad: float = float(wd["splash"])
@@ -1849,7 +1902,7 @@ func _fire(dt: float, ev: Array) -> void:
 				var hit: Dictionary = {}
 				var prev: Vector2 = from
 				var cur: int = tgt
-				var n: int = int(wd["chains"])
+				var n: int = int(wd["chains"]) + (TuneRef.int_of("pc_horde_chains", 2) if horde_mult > 1 else 0)   # FB2 crowd tool
 				var d2: float = dmg
 				while cur >= 0 and hit.size() < n:
 					hit[cur] = true
@@ -2062,13 +2115,22 @@ func _horde_loot() -> void:
 	if horde_loot_wave != wave:
 		horde_loot_wave = wave
 		horde_loot_wave_val = 0.0
-	var cap: float = HORDE_LOOT_CAP_PER_WAVE * float(maxi(1, wave))
-	if horde_loot_wave_val >= cap or horde_rng.randf() >= HORDE_LOOT_P:
+	if horde_loot_pool <= 0.0 or horde_rng.randf() >= HORDE_LOOT_P:
 		return
-	var g: float = minf(HORDE_LOOT_COIN, cap - horde_loot_wave_val)
+	var g: float = minf(HORDE_LOOT_COIN, horde_loot_pool)
+	horde_loot_pool -= g
 	horde_loot_wave_val += g
 	horde_loot_total += g
 	coins_run += g
+
+
+## FB2: wave end sweeps the undropped pool, so a wave's loot value is exactly
+## what its kills were worth (drops only change how it arrives).
+func _sweep_horde_loot() -> void:
+	if horde_loot_pool > 0.0:
+		coins_run += horde_loot_pool
+		horde_loot_total += horde_loot_pool
+		horde_loot_pool = 0.0
 
 
 func _reap(ev: Array) -> void:
@@ -2093,6 +2155,11 @@ func _reap(ev: Array) -> void:
 		cash_earned += gain
 		xp += en.xp[ed] * float(stats["xp_mult"])
 		var cg: float = en.coin[ed] * cm
+		if horde_mult > 1 and en.share[ed] < 1.0:
+			# FB2: per-wave loot conserved - part of the body's coins funds common drops
+			var fund: float = cg * HORDE_LOOT_FUND
+			horde_loot_pool += fund
+			cg -= fund
 		coins_run += cg
 		coins_kill += cg
 		kills += 1

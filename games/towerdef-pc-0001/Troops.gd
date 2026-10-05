@@ -77,6 +77,9 @@ static func sync(troops: Array, huts: Array, mods: Dictionary, counter: Dictiona
 					td[k] = st[k]
 			td["hp"] = float(td["max_hp"]) * frac if String(td["state"]) != "dead" else 0.0
 			td["anchor"] = hd["anchor"]
+			td["post"] = hd.get("post", hd["anchor"])
+			td["seek"] = float(hd.get("seek", SEEK))
+			td["leash"] = float(hd.get("leash", LEASH))
 			td["home"] = hd["home"]
 			keep.append(td)
 		while have < want:
@@ -93,6 +96,9 @@ static func sync(troops: Array, huts: Array, mods: Dictionary, counter: Dictiona
 			nt["respawn_t"] = 0.0
 			nt["tgt"] = -1
 			nt["anchor"] = hd["anchor"]
+			nt["post"] = hd.get("post", hd["anchor"])
+			nt["seek"] = float(hd.get("seek", SEEK))
+			nt["leash"] = float(hd.get("leash", LEASH))
 			nt["home"] = hd["home"]
 			nt["retreat"] = bool((DEFS[hid] as Dictionary)["retreat"])
 			nt["taunt"] = bool((DEFS[hid] as Dictionary)["taunt"])
@@ -127,7 +133,7 @@ static func _eid_index(en, eid: int) -> int:
 static func _seek(td: Dictionary, en, eh, px: float) -> int:
 	var anchor: Vector2 = td["anchor"]
 	var pos: Vector2 = td["pos"]
-	var lim: float = SEEK * px
+	var lim: float = float(td.get("seek", SEEK)) * px
 	var best: int = -1
 	var best_key: float = INF
 	for k in eh.candidates(anchor, lim):
@@ -211,7 +217,8 @@ static func step(troops: Array, en, eh, dt: float, ctx: Dictionary) -> Dictionar
 			continue
 		var k: int = _eid_index(en, int(td["tgt"]))
 		var anchor: Vector2 = td["anchor"]
-		if k >= 0 and anchor.distance_to(en.pos[k]) > LEASH * px:
+		var leash: float = float(td.get("leash", LEASH)) * px
+		if k >= 0 and anchor.distance_to(en.pos[k]) > leash:
 			k = -1
 		if k < 0:
 			k = _seek(td, en, eh, px)
@@ -221,7 +228,7 @@ static func step(troops: Array, en, eh, dt: float, ctx: Dictionary) -> Dictionar
 				ev.append({"t": "troop_move", "tid": int(td["tid"]), "to": en.pos[k] if k >= 0 else anchor, "state": "engage" if k >= 0 else "seek"})
 		if k < 0:
 			td["state"] = "seek"
-			_move(td, anchor, dt)
+			_move(td, td.get("post", anchor), dt)
 			continue
 		td["state"] = "engage"
 		var e2: int = k
@@ -231,8 +238,8 @@ static func step(troops: Array, en, eh, dt: float, ctx: Dictionary) -> Dictionar
 		if dist > reach:
 			# chase, but never past the leash
 			var to: Vector2 = ep
-			if anchor.distance_to(to) > LEASH * px:
-				to = anchor + (to - anchor).normalized() * LEASH * px
+			if anchor.distance_to(to) > leash:
+				to = anchor + (to - anchor).normalized() * leash
 			_move(td, to, dt)
 			continue
 		if String(td["kind"]) == "sapper":

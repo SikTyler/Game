@@ -27,7 +27,7 @@ const DEFS: Dictionary = {
 	"beacon":    {"fam": "building", "name": "Beacon", "rarity": "rare", "tags": ["dps"], "max": 5, "desc": "Radius 2: +10% rate, +0.3 range"},
 	"bulwark":   {"fam": "building", "name": "Bulwark", "rarity": "common", "tags": ["sustain"], "max": 5, "desc": "Core +40 HP"},
 	"aegis":     {"fam": "building", "name": "Aegis", "rarity": "epic", "tags": ["sustain"], "max": 5, "desc": "60-pt Core shield; regen 6/s after 4 s without damage"},
-	"barricade": {"fam": "building", "name": "Barricade", "rarity": "common", "tags": ["control"], "max": 5, "desc": "Wall on its lane: slows ground enemies, 200 HP, rebuilt each wave"},
+	"barricade": {"fam": "building", "name": "Barricade", "rarity": "common", "tags": ["control"], "max": 5, "desc": "High-HP wall; every enemy within 1.5 cells (any side) is slowed 30%"},
 	"mine":      {"fam": "building", "name": "Gold Mine", "rarity": "common", "tags": ["eco"], "max": 5, "desc": "+0.8 cash/s"},
 	"oilmill":   {"fam": "building", "name": "Oil Mill", "rarity": "rare", "tags": ["eco"], "max": 5, "desc": "+2.0 cash/s; adjacent buildings -10% rate"},
 	"bounty":    {"fam": "building", "name": "Bounty Post", "rarity": "rare", "tags": ["eco"], "max": 5, "desc": "+20% kill cash within 3 cells"},
@@ -36,7 +36,7 @@ const DEFS: Dictionary = {
 	"frost":     {"fam": "building", "name": "Cryo Spire", "rarity": "rare", "tags": ["control"], "max": 5, "desc": "Slows 30% within 2.5 cells, 3 dmg/s"},
 	"obelisk":   {"fam": "building", "name": "Siphon Obelisk", "rarity": "legendary", "tags": ["sustain"], "max": 5, "desc": "1% of all damage dealt heals the Core"},
 	# ---- troop huts (3) ------------------------------------------------------
-	"hut_infantry": {"fam": "hut", "name": "Rifle Barracks", "rarity": "common", "tags": ["troop"], "max": 5, "desc": "3 Riflemen roam the lane; they taunt nearby enemies"},
+	"hut_infantry": {"fam": "hut", "name": "Rifle Barracks", "rarity": "common", "tags": ["troop"], "max": 5, "desc": "3 Riflemen guard the whole perimeter from their post; they taunt nearby enemies"},
 	"hut_sapper":   {"fam": "hut", "name": "Sapper Den", "rarity": "rare", "tags": ["troop", "aoe"], "max": 5, "desc": "2 Sappers charge elites and bosses first and explode (x2 vs armored)"},
 	"hut_drone":    {"fam": "hut", "name": "Drone Nest", "rarity": "epic", "tags": ["troop"], "max": 5, "desc": "4 Drones fly out and hunt flyers first"},
 	# ---- upgrade packs (10; one-shot, last the run) --------------------------

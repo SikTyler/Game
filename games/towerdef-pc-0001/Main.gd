@@ -271,7 +271,7 @@ func world_xform() -> Transform2D:
 	var fr: Rect2 = field_rect()
 	# Owner feedback #1: the field zooms to the run grid (bigger grid -> smaller
 	# scale), framing the spawn ring of this run.
-	var span: float = WORLD_SPAN if S == null else 2.0 * float(S.spawn_r()) * 0.78
+	var span: float = WORLD_SPAN if S == null else 2.0 * float(S.view_r()) * 0.78
 	var k: float = minf(fr.size.x, fr.size.y) / span * zoom
 	return Transform2D(0.0, Vector2(k, k), 0.0, fr.get_center() - TowerState.CENTER * k)
 

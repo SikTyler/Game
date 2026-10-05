@@ -703,9 +703,39 @@ func _horde_stages() -> void:
 	SL.horde_mult = 4
 	SL.wave = 2
 	var c0: float = SL.coins_run
+	# FB2 (deliberate): drops are now paid from a pool funded by the killed
+	# bodies' own coins (per-wave loot conserved), not on top up to 3 x wave.
+	SL.horde_loot_pool = 6.0
+	for _i in range(20):
+		SL._horde_loot()
+	var dropped: float = SL.coins_run - c0
 	for _i in range(2000):
 		SL._horde_loot()
 	_check("FB1 horde loot: drops happen and cap at 3 x wave per wave", SL.horde_loot_total > 0.0 and is_equal_approx(SL.coins_run - c0, 6.0))
+	_check("FB2 horde loot: common low-value drops (<= 0.25 each) never exceed the pool", dropped <= 20.0 * 0.25 + 0.001 and SL.horde_loot_pool >= 0.0)
+	SL.horde_loot_pool = 1.3
+	var c1: float = SL.coins_run
+	SL._sweep_horde_loot()
+	_check("FB2 horde loot: wave end sweeps the pool (value conserved)", is_equal_approx(SL.coins_run - c1, 1.3) and SL.horde_loot_pool == 0.0)
+	var SZ = _fresh()
+	SZ.spawn_hold = true
+	SZ.horde_mult = 4
+	SZ._spawn("drone", [], TowerState.CENTER + Vector2(0, -400), false, 0.25)
+	_check("FB2 horde bodies: art/hit box scaled back (x4 bodies -> half size)", is_equal_approx(SZ.en.size[SZ.en.order[0]], 8.0))
+	var SW = _fresh()
+	SW.spawn_hold = true
+	SW.horde_mult = 4
+	var wi: int = _rc(1, 2)
+	SW.slots[wi] = {"id": "barricade", "perm": 0, "run": 1}
+	SW.unlocked[wi] = true
+	SW.recompute()
+	SW._spawn("drone", [], SW.slot_pos(wi) + Vector2(0, -20), false, 0.25)
+	SW._spawn("drone", [], SW.slot_pos(wi) + Vector2(0, -900), false, 0.25)
+	SW.eh.rebuild()
+	SW._wall_auras()
+	_check("FB2 Barricade aura slows bodies on any side, not far ones", SW.en.slow_t[SW.en.order[0]] > 0.0 and SW.en.slow_t[SW.en.order[1]] == 0.0)
+	var SC = _fresh()
+	_check("FB2 map: horde spawn ring larger, view ring unchanged", SZ.spawn_r() > SC.spawn_r() and is_equal_approx(SZ.view_r(), SC.spawn_r()))
 	# ---- Phase 2: horde_mult conservation + event aggregation
 	var S1 = _fresh()
 	S1.spawn_hold = true
