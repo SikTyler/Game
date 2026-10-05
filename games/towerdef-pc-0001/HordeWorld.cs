@@ -135,6 +135,7 @@ public partial class HordeWorld : RefCounted
 		ox = new double[c]; oy = new double[c]; pushX = new double[c]; pushY = new double[c];
 		front = new double[c]; dirX = new double[c]; dirY = new double[c]; want = new double[c];
 		mode = new byte[c]; qlink = new int[c];
+		Array.Resize(ref vk, c); Array.Resize(ref vspec, c); Array.Resize(ref vr, c); Array.Resize(ref vg, c); Array.Resize(ref vb, c);
 		cap = c;
 	}
 
@@ -163,7 +164,18 @@ public partial class HordeWorld : RefCounted
 	// A kill does not invalidate the query hash (positions are unchanged): every
 	// query skips dead slots, so a kill-heavy step (overkill smash: one nearest
 	// query per kill) never rebuilds the hash per kill.
-	public void MarkDead(int s) { if (s < cap && live[s] != 0) { live[s] = 0; } }
+	public void MarkDead(int s)
+	{
+		if (s < cap && live[s] != 0)
+		{
+			live[s] = 0;
+			// view corpse ring (A9): exact death position + radius, drained by the ground layer
+			int o = (corpHead % CORPSE_CAP) * 3;
+			corp[o] = (float)px[s]; corp[o + 1] = (float)py[s]; corp[o + 2] = (float)rad[s];
+			corpHead++;
+			if (corpHead - corpTail > CORPSE_CAP) corpTail = corpHead - CORPSE_CAP;
+		}
+	}
 	public bool IsLive(int s) { return s >= 0 && s < cap && live[s] != 0; }
 	public void SetSlow(int s, double t, double m) { slowT[s] = t; slowM[s] = m; }
 	public void SetHit(int s, double t) { hitT[s] = t; }
@@ -1117,4 +1129,141 @@ public partial class HordeWorld : RefCounted
 		for (int s = 0; s < cap; s++) if (live[s] != 0) l.Add(s);
 		return l.ToArray();
 	}
+
+	// ================================================================ view (A9)
+	// Render-side state only: the sim never reads these. GDScript tags each body
+	// once at commit (SetVis: visual kind index, special flag, base tint);
+	// RenderPrep writes every live body into one reused float buffer per visual
+	// kind (2D transform + colour, 12 floats) in one pass; Upload pushes a kind's
+	// buffer with a single RenderingServer.MultimeshSetBuffer call.
+	int[] vk = new int[0];
+	byte[] vspec = new byte[0];
+	float[] vr = new float[0], vg = new float[0], vb = new float[0];
+	float[][] vbuf = new float[0][];
+	int[] vcnt = new int[0];
+	const int DGRID = 24;                 // density shading cell (px)
+	int[] dens = new int[0];
+	int dW = 0, dH = 0;
+	double dX0 = 0, dY0 = 0;
+	public int LastDenseMax = 0;
+	const int CORPSE_CAP = 8192;
+	readonly float[] corp = new float[CORPSE_CAP * 3];
+	int corpHead = 0, corpTail = 0;
+
+	public void SetVis(int s, int kind, int special, float r, float g, float b)
+	{
+		if (s >= cap) return;
+		vk[s] = kind; vspec[s] = (byte)special; vr[s] = r; vg[s] = g; vb[s] = b;
+	}
+
+	// Fills the per-kind buffers. lead = unconsumed sim time (render
+	// interpolation toward the goal at the current seek speed), flashT = the
+	// hit-flash duration. Returns [count, instanceCapacity] per visual kind.
+	public int[] RenderPrep(int nvk, double lead, double flashT, double cx, double cy, double half)
+	{
+		if (vbuf.Length < nvk) { Array.Resize(ref vbuf, nvk); Array.Resize(ref vcnt, nvk); }
+		for (int k = 0; k < nvk; k++) { vcnt[k] = 0; if (vbuf[k] == null) vbuf[k] = new float[64 * 12]; }
+		// density grid over the framed field
+		dX0 = cx - half; dY0 = cy - half;
+		int w = (int)(2.0 * half / DGRID) + 1;
+		if (w != dW) { dW = w; dH = w; dens = new int[w * w]; } else Array.Clear(dens, 0, dens.Length);
+		for (int s = 0; s < cap; s++)
+		{
+			if (live[s] == 0) continue;
+			int gx = (int)((px[s] - dX0) / DGRID), gy = (int)((py[s] - dY0) / DGRID);
+			if (gx >= 0 && gy >= 0 && gx < dW && gy < dH) dens[gy * dW + gx]++;
+		}
+		int dmax = 0;
+		for (int s = 0; s < cap; s++)
+		{
+			if (live[s] == 0) continue;
+			int k = vk[s];
+			if (k < 0 || k >= nvk) continue;
+			double x = px[s], y = py[s];
+			double cs = curS[s];
+			if (cs > 0.0 && lead > 0.0)
+			{
+				double gx0 = (flg[s] & F_EXIT) != 0 ? exX[s] : cx, gy0 = (flg[s] & F_EXIT) != 0 ? exY[s] : cy;
+				double dx = gx0 - x, dy = gy0 - y, dist = Math.Sqrt(dx * dx + dy * dy);
+				if (dist >= 1.0) { double m = Math.Min(dist * 0.5, cs * lead) / dist; x += dx * m; y += dy * m; }
+			}
+			float r = vr[s], g = vg[s], b = vb[s];
+			if (hitT[s] > 0.0)
+			{
+				float f = (float)(1.0 + 1.6 * hitT[s] / flashT);
+				r *= f; g *= f; b *= f;
+			}
+			else if (slowT[s] > 0.0) { r *= 0.7f; g *= 0.92f; b *= 1.25f; }
+			else
+			{
+				// crowd readability: the interior of a dense pile shades darker so
+				// the mass reads as a body with a bright, legible rim
+				int gx = (int)((px[s] - dX0) / DGRID), gy = (int)((py[s] - dY0) / DGRID);
+				if (gx >= 0 && gy >= 0 && gx < dW && gy < dH && vspec[s] == 0)
+				{
+					int d = dens[gy * dW + gx];
+					if (d > dmax) dmax = d;
+					float sh = 1.0f - 0.38f * (float)Math.Clamp((d - 3) / 9.0, 0.0, 1.0);
+					r *= sh; g *= sh; b *= sh;
+				}
+				// surge / splash: bodies thrown by knockback flare hot
+				double kv = vx[s] * vx[s] + vy[s] * vy[s];
+				if (kv > 3600.0)
+				{
+					float h = (float)Math.Clamp((Math.Sqrt(kv) - 60.0) / 140.0, 0.0, 1.0);
+					r += (1.45f - r) * h; g += (1.05f - g) * h * 0.8f; b += (0.7f - b) * h * 0.5f;
+				}
+			}
+			int n = vcnt[k];
+			float[] buf = vbuf[k];
+			if ((n + 1) * 12 > buf.Length) { Array.Resize(ref buf, buf.Length * 2); vbuf[k] = buf; }
+			int o = n * 12;
+			float s2 = (float)(rad[s] * 4.0);
+			buf[o] = s2; buf[o + 1] = 0f; buf[o + 2] = 0f; buf[o + 3] = (float)x;
+			buf[o + 4] = 0f; buf[o + 5] = s2; buf[o + 6] = 0f; buf[o + 7] = (float)y;
+			buf[o + 8] = r; buf[o + 9] = g; buf[o + 10] = b; buf[o + 11] = 1f;
+			vcnt[k] = n + 1;
+		}
+		LastDenseMax = dmax;
+		var res = new int[nvk * 2];
+		for (int k = 0; k < nvk; k++) { res[k * 2] = vcnt[k]; res[k * 2 + 1] = vbuf[k].Length / 12; }
+		return res;
+	}
+
+	// One bulk upload: the MultiMesh's instance_count must equal the capacity
+	// RenderPrep reported for this kind.
+	public int Upload(Rid mm, int k)
+	{
+		if (k < 0 || k >= vcnt.Length) return 0;
+		RenderingServer.MultimeshSetBuffer(mm, vbuf[k]);
+		RenderingServer.MultimeshSetVisibleInstances(mm, vcnt[k]);
+		return vcnt[k];
+	}
+
+	// Live bodies that need a per-body overlay (elite / boss / courier / marked).
+	public int[] Specials()
+	{
+		var l = new System.Collections.Generic.List<int>();
+		for (int s = 0; s < cap; s++) if (live[s] != 0 && vspec[s] != 0) l.Add(s);
+		return l.ToArray();
+	}
+
+	// Up to max new corpses since the last drain, packed [x, y, radius]*n.
+	// Older ones beyond the ring are dropped (the ground already holds plenty).
+	public float[] DrainCorpses(int max)
+	{
+		int n = Math.Min(max, corpHead - corpTail);
+		if (n <= 0) return new float[0];
+		// newest first matters less than coverage: take the oldest pending
+		var o = new float[n * 3];
+		for (int i = 0; i < n; i++)
+		{
+			int j = ((corpTail + i) % CORPSE_CAP) * 3;
+			o[i * 3] = corp[j]; o[i * 3 + 1] = corp[j + 1]; o[i * 3 + 2] = corp[j + 2];
+		}
+		corpTail += n;
+		return o;
+	}
+
+	public int PendingCorpses() { return corpHead - corpTail; }
 }

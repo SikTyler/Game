@@ -395,6 +395,26 @@ static var _mm: Dictionary = {}
 static var _quad: ArrayMesh = null
 static var _buf: Dictionary = {}   # kind -> PackedFloat32Array
 static var _cnt: Dictionary = {}   # kind -> int
+static var _fb_tex: Texture2D = null
+const EnemyStoreRef := preload("res://EnemyStore.gd")
+
+
+## Kinds without art draw as a soft enemy-red disc (one shared texture).
+static func _fallback_tex() -> Texture2D:
+	if _fb_tex == null:
+		var g := Gradient.new()
+		g.set_color(0, Color(Kit.ENEMY, 1.0))
+		g.set_color(1, Color(Kit.ENEMY, 0.0))
+		g.add_point(0.55, Kit.ENEMY)
+		var gt := GradientTexture2D.new()
+		gt.gradient = g
+		gt.fill = GradientTexture2D.FILL_RADIAL
+		gt.fill_from = Vector2(0.5, 0.5)
+		gt.fill_to = Vector2(0.5, 0.0)
+		gt.width = 32
+		gt.height = 32
+		_fb_tex = gt
+	return _fb_tex
 
 
 static func _unit_quad() -> ArrayMesh:
@@ -431,47 +451,23 @@ static func rpos(m, en, es: int) -> Vector2:
 
 
 static func _draw_enemies(m, en) -> void:
-	for k in _cnt.keys():
-		_cnt[k] = 0
-	var special: PackedInt32Array = PackedInt32Array()
-	for es in en.order:
-		var kind: String = en.kind[es]
-		var p: Vector2 = rpos(m, en, es)
-		var s2: float = en.size[es] * 2.0
-		var c: Color = Color(1, 1, 1, 1)
-		var ht: float = en.hit_t[es]
-		if ht > 0.0:
-			var f: float = 1.0 + 1.6 * ht / TowerState.HIT_FLASH
-			c = Color(f, f, f, 1.0)
-		elif en.slow_t[es] > 0.0:
-			c = Color(0.7, 0.92, 1.25, 1.0)
-		if not _buf.has(kind):
-			_buf[kind] = PackedFloat32Array()
-			_cnt[kind] = 0
-		var b: PackedFloat32Array = _buf[kind]
-		var n: int = int(_cnt[kind])
-		if b.size() < (n + 1) * 12:
-			b.resize(maxi(64 * 12, b.size() * 2))
-		var o: int = n * 12
-		b[o] = s2; b[o + 1] = 0.0; b[o + 2] = 0.0; b[o + 3] = p.x
-		b[o + 4] = 0.0; b[o + 5] = s2; b[o + 6] = 0.0; b[o + 7] = p.y
-		b[o + 8] = c.r; b[o + 9] = c.g; b[o + 10] = c.b; b[o + 11] = c.a
-		_buf[kind] = b
-		_cnt[kind] = n + 1
-		if kind == "boss" or kind == "elite" or kind == "courier" or en.is_marked(es) or en.shield[es] > 0:
-			special.append(es)
-	for kind in _cnt.keys():
-		var n2: int = int(_cnt[kind])
+	# MASS_HORDE §View: C# writes every live body into one buffer per visual
+	# kind (transform + colour: hit flash, slow, elite / marked tint, density
+	# shading, surge flare) and uploads each with one MultimeshSetBuffer call.
+	# GDScript never iterates bodies here.
+	var t0: int = Time.get_ticks_usec()
+	var S = m.S
+	var w: Object = en.world
+	var nvk: int = EnemyStoreRef.VIS_KINDS.size()
+	var lead: float = clampf(float(S.step_acc), 0.0, TowerState.SUBSTEP) if S != null else 0.0
+	var half: float = float(S.spawn_r()) + 200.0 if S != null else 1300.0
+	var info: PackedInt32Array = w.call("RenderPrep", nvk, lead, TowerState.HIT_FLASH, TowerState.CENTER.x, TowerState.CENTER.y, half)
+	for vk in nvk:
+		var n2: int = info[vk * 2]
 		if n2 <= 0:
 			continue
-		var tx: Texture2D = Kit.Art.tex(String(kind))
-		if tx == null:
-			var col: Color = ENEMY2 if String(kind) in ["skitter", "boss", "mite", "splitter"] else Kit.ENEMY
-			var bb: PackedFloat32Array = _buf[kind]
-			for i in n2:
-				var hs: float = bb[i * 12] * 0.25
-				m.draw_rect(Rect2(Vector2(bb[i * 12 + 3], bb[i * 12 + 7]) - Vector2(hs, hs), Vector2(hs, hs) * 2.0), col)
-			continue
+		var kind: String = EnemyStoreRef.VIS_KINDS[vk]
+		var tx: Texture2D = Kit.Art.tex(kind)
 		var mm: MultiMesh = _mm.get(kind, null)
 		if mm == null:
 			mm = MultiMesh.new()
@@ -479,12 +475,15 @@ static func _draw_enemies(m, en) -> void:
 			mm.use_colors = true
 			mm.mesh = _unit_quad()
 			_mm[kind] = mm
-		var need: int = (_buf[kind] as PackedFloat32Array).size() / 12
-		if mm.instance_count != need:
-			mm.instance_count = need
-		mm.visible_instance_count = n2
-		mm.buffer = _buf[kind]
+		var capi: int = info[vk * 2 + 1]
+		if mm.instance_count != capi:
+			mm.instance_count = capi
+		w.call("Upload", mm.get_rid(), vk)
+		if tx == null:
+			tx = _fallback_tex()
 		m.draw_multimesh(mm, tx)
+	var special: PackedInt32Array = w.call("Specials")
+	m.dbg_render_ms = lerpf(float(m.dbg_render_ms), float(Time.get_ticks_usec() - t0) / 1000.0, 0.2)
 	for es in special:
 		var p: Vector2 = rpos(m, en, es)
 		var s: float = en.size[es]

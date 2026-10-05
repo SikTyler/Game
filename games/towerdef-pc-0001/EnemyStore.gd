@@ -215,7 +215,25 @@ func commit(s: int) -> void:
 	var v: Vector2 = vel[s]
 	var x: Vector2 = exit[s]
 	world.call("Put", s, kc[s], flags[s], PackedFloat64Array([p.x, p.y, size[s], spd[s], dmg[s], x.x, x.y, atk_cd[s], fire_cd[s], slow_t[s], slow_m[s], shock_t[s], hit_t[s], taunt_t[s], cur_s[s], v.x, v.y, hp[s]]))
+	# view tag (MASS_HORDE §View): visual kind index, overlay flag, base tint
+	var k: String = kind[s]
+	var mk: bool = (flags[s] & F_MARKED) != 0
+	var sp: int = 1 if (mk or k == "boss" or k == "elite" or k == "courier" or shield[s] > 0) else 0
+	var tn: Color = Color(1.25, 1.08, 0.62) if mk else (Color(1.15, 1.0, 1.15) if k == "elite" else Color(1, 1, 1))
+	world.call("SetVis", s, vis_id(k), sp, tn.r, tn.g, tn.b)
 	dirty = true
+
+
+## Visual kind index (one MultiMesh per index; stable for the process).
+static var VIS: Dictionary = {}
+static var VIS_KINDS: PackedStringArray = PackedStringArray()
+
+
+static func vis_id(k: String) -> int:
+	if not VIS.has(k):
+		VIS[k] = VIS_KINDS.size()
+		VIS_KINDS.append(k)
+	return int(VIS[k])
 
 
 ## hp crossed 0 (rules killed it): C# stops moving / querying it; _reap frees it.

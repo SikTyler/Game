@@ -91,7 +91,7 @@ func _make_emitter(full: bool) -> GPUParticles2D:
 
 
 ## One kill: spray (if an emitter is free in the ring) + queue a ground stamp.
-func kill(pos: Vector2, col: Color, big: bool = false) -> void:
+func kill(pos: Vector2, col: Color, big: bool = false, stamp_too: bool = true) -> void:
 	if level == "off":
 		return
 	if not _emitters.is_empty():
@@ -102,7 +102,8 @@ func kill(pos: Vector2, col: Color, big: bool = false) -> void:
 		p.restart()
 		p.emitting = true
 		bursts_fired += 1
-	stamp(pos, (22.0 if big else 9.0) * (1.3 if level == "full" else 1.0), col)   # FB2: larger, readable pools
+	if stamp_too:
+		stamp(pos, (22.0 if big else 9.0) * (1.3 if level == "full" else 1.0), col)   # FB2: larger, readable pools
 
 
 func stamp(pos: Vector2, r: float, col: Color) -> void:
@@ -111,6 +112,17 @@ func stamp(pos: Vector2, r: float, col: Color) -> void:
 	if _ring.size() >= RING_CAP:
 		_ring.pop_front()
 	_ring.append({"p": pos, "r": r, "c": col, "s": int(pos.x * 13.0 + pos.y * 7.0)})
+
+
+## MASS_HORDE §View: corpses from the C# death ring, packed [x, y, radius]*n
+## (already capped by the caller to this frame's stamp budget).
+func stamp_packed(c: PackedFloat32Array) -> void:
+	if level == "off":
+		return
+	var col: Color = Color(0.85, 0.12, 0.1)
+	var k: float = 1.3 if level == "full" else 1.0
+	for i in c.size() / 3:
+		stamp(Vector2(c[i * 3], c[i * 3 + 1]), maxf(5.0, c[i * 3 + 2] * 1.6) * k, col)
 
 
 func pending() -> int:

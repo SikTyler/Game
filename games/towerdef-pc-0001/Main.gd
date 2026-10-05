@@ -105,6 +105,8 @@ var bursts: Node2D = null
 var gore: Node2D = null                 # HORDE P5: blood bursts + never-cleared ground layer
 var dbg_overlay: bool = false           # HORDE P6: F3 debug overlay
 var dbg_sim_ms: float = 0.0
+var dbg_render_ms: float = 0.0       # MASS_HORDE §View: C# fill + upload of the horde MultiMeshes
+var frame_k: float = 0.0              # MASS_HORDE §View: 0 = frame the base, 1 = frame the horde spawn ring
 var dbg_fps: float = 0.0
 var fclip: Control                   # clips kill particles to the battlefield
 var slot_pop: Dictionary = {}
@@ -283,7 +285,7 @@ func world_xform() -> Transform2D:
 	var fr: Rect2 = field_rect()
 	# Owner feedback #1: the field zooms to the run grid (bigger grid -> smaller
 	# scale), framing the spawn ring of this run.
-	var span: float = WORLD_SPAN if S == null else 2.0 * float(S.view_r()) * 0.78
+	var span: float = WORLD_SPAN if S == null else 2.0 * lerpf(float(S.view_r()) * 0.78, float(S.spawn_r()) * 0.86, frame_k * 0.55)
 	var k: float = minf(fr.size.x, fr.size.y) / span * zoom
 	return Transform2D(0.0, Vector2(k, k), 0.0, fr.get_center() - TowerState.CENTER * k)
 
@@ -911,7 +913,7 @@ func _handle(events: Array) -> void:
 				if bursts != null:
 					bursts.call("burst", ev["pos"], kill_color(kk), kk == "boss")
 				if gore != null:
-					gore.call("kill", ev["pos"], kill_color(kk), kk == "boss")
+					gore.call("kill", ev["pos"], kill_color(kk), kk == "boss", false)   # ground stamp comes from the C# corpse ring
 				if kk == "boss":
 					juice.hit_pause(0.06)
 					juice.add_trauma(0.5)
@@ -932,15 +934,9 @@ func _handle(events: Array) -> void:
 					if bursts != null:
 						bursts.call("burst", kp, ENEMY, false)
 					_ring(kp, 14.0, 0.2, ENEMY)
-				if gore != null and not ks.is_empty():
-					# every body gets a corpse stamp (capped by Gore's ring buffer)
-					var kn: int = int(ev["n"])
-					for j in kn:
-						var kp2: Vector2 = ks[j % ks.size()]
-						if j < ks.size():
-							gore.call("kill", kp2, ENEMY, false)
-						else:
-							gore.call("stamp", kp2 + Vector2.from_angle(float(j) * 2.39996) * (6.0 + float(j % 5) * 4.0), 6.0, ENEMY)
+				if int(ev["n"]) >= 25 and not ks.is_empty():
+					# aggregated damage feedback: one kill-count callout per mass kill
+					_pop((ks[0] as Vector2) + Vector2(0, -20), "x%d" % int(ev["n"]), 0.7, Color("ffb36b"), mini(34, 16 + int(ev["n"]) / 20))
 				if int(ev["n"]) >= 40:
 					juice.hit_pause(0.03)   # mass-kill hit-stop (Juice caps + cools it down)
 			"core_hits":
@@ -1295,7 +1291,19 @@ func _process(delta: float) -> void:
 	if gore != null:
 		if String(gore.get("level")) != gore_level():
 			gore.call("set_level", gore_level())
+		if S != null and screen == "run":
+			# MASS_HORDE §View: exact corpse positions from the C# death ring,
+			# drained under the ground layer's per-frame stamp budget
+			var cp: PackedFloat32Array = S.en.world.call("DrainCorpses", int(gore.call("stamps_per_frame")))
+			gore.call("stamp_packed", cp)
 		gore.call("flush")
+	if S != null and screen == "run":
+		# camera framing: a big horde pulls the view out toward its spawn ring
+		var nb: int = S.en.order.size()
+		var want: float = clampf(float(nb - 600) / 5000.0, 0.0, 1.0)
+		frame_k = move_toward(frame_k, want, delta * (0.35 if want > frame_k else 0.12))
+	else:
+		frame_k = 0.0
 	dbg_fps = Engine.get_frames_per_second()
 	flash = maxf(0.0, flash - 1.5 * delta)
 	flash_cd = maxf(0.0, flash_cd - delta)
@@ -1364,7 +1372,7 @@ func shake_on() -> bool:
 
 ## HORDE P6 debug overlay (F3): bodies, FPS, sim ms, hash ms, hash cells.
 func debug_stats() -> Dictionary:
-	var out: Dictionary = {"bodies": 0, "fps": dbg_fps, "sim_ms": dbg_sim_ms, "hash_ms": 0.0, "hash_cells": 0}
+	var out: Dictionary = {"bodies": 0, "fps": dbg_fps, "sim_ms": dbg_sim_ms, "render_ms": dbg_render_ms, "frame_ms": 1000.0 / maxf(1.0, dbg_fps), "hash_ms": 0.0, "hash_cells": 0}
 	if S != null:
 		out["bodies"] = S.en.order.size()
 		out["hash_ms"] = float(S.eh.last_us) / 1000.0
@@ -1374,7 +1382,7 @@ func debug_stats() -> Dictionary:
 
 func _draw_debug_overlay() -> void:
 	var d: Dictionary = debug_stats()
-	var lines: Array = ["Bodies  %d" % int(d["bodies"]), "FPS  %d" % int(d["fps"]), "Sim  %.2f ms" % float(d["sim_ms"]),
+	var lines: Array = ["Bodies  %d" % int(d["bodies"]), "FPS  %d" % int(d["fps"]), "Sim  %.2f ms" % float(d["sim_ms"]), "Render  %.2f ms" % float(d["render_ms"]), "Frame  %.1f ms" % float(d["frame_ms"]),
 		"Hash  %.2f ms" % float(d["hash_ms"]), "Hash cells  %d" % int(d["hash_cells"])]
 	if gore != null:
 		lines.append("Gore  %s  (%d queued)" % [String(gore.get("level")), int(gore.call("pending"))])
