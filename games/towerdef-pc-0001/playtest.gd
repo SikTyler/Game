@@ -1070,8 +1070,29 @@ const FACTORY_PLAN: Array = [
 	["fac", "barracks"], ["fac", "archive"],
 	["tech", "coal_power"],
 	["mod", [["miner", 40, 27, 0], ["coal_gen", 42, 26, 0]]],
-	["mod", [["chest", 39, 23, 0], ["vault", 36, 22, 0]]],
-	["fac", "research"], ["fac", "barracks"], ["fac", "archive"], ["fac", "barracks"], ["fac", "archive"], ["fac", "research"], ["fac", "barracks"],
+	["mod", [["chest", 39, 23, 0]]],
+	["fac", "research"], ["fac", "barracks"],
+	# Meta-economy pass: buy the land south of the start (chunk 14: iron,
+	# crystal, copper) and build the circuit -> data-card chain there; the
+	# products ride one belt up into the Relay's bottom face (46,24).
+	["land", 14],
+	["mod", [["windmill", 32, 36, 0], ["windmill", 34, 36, 0], ["windmill", 32, 38, 0], ["windmill", 34, 38, 0], ["windmill", 32, 40, 0], ["windmill", 34, 40, 0],
+		["windmill", 32, 42, 0], ["windmill", 34, 42, 0], ["windmill", 32, 44, 0], ["windmill", 34, 44, 0], ["windmill", 32, 46, 0], ["windmill", 34, 46, 0],
+		["pole", 36, 37, 0], ["pole", 42, 38, 0], ["pole", 40, 44, 0], ["pole", 46, 35, 0], ["pole", 42, 34, 0]]],
+	["tech", "electronics"],
+	["mod", [["miner", 38, 35, 0], ["smelter", 40, 35, 0], ["inserter", 42, 36, 0], ["assembler", 43, 36, 0, "circuit"],
+		["miner", 38, 44, 3], ["smelter", 38, 42, 0], ["inserter", 40, 42, 0], ["assembler", 41, 40, 0, "wire"], ["inserter", 43, 39, 3],
+		["belt", 47, 33, 3], ["belt", 47, 32, 3],
+		["belt", 47, 31, 3], ["belt", 47, 30, 3], ["belt", 47, 29, 2], ["belt", 46, 29, 2], ["belt", 45, 29, 3], ["belt", 45, 28, 3], ["belt", 45, 27, 3],
+		["belt", 45, 26, 3], ["belt", 45, 25, 0], ["belt", 46, 25, 3]]],
+	["tech", "data"],
+	["mod", [["miner", 39, 37, 2], ["smelter", 37, 38, 0], ["inserter", 37, 37, 3], ["belt", 37, 36, 3], ["belt", 37, 35, 3], ["belt", 37, 34, 3],
+		["belt", 37, 33, 0], ["belt", 38, 33, 0], ["belt", 39, 33, 0], ["belt", 40, 33, 0], ["belt", 41, 33, 0], ["inserter", 42, 33, 0],
+		["assembler", 43, 32, 0, "data_card"], ["inserter", 44, 35, 3], ["inserter", 46, 33, 0]]],
+	# The Vault needs Vaults research (20 data): it waits for the data chain
+	# (it used to sit in the chest step and stall every later plan step).
+	["tech", "storage2"], ["mod", [["vault", 36, 22, 0]]],
+	["fac", "archive"], ["fac", "barracks"], ["fac", "archive"], ["fac", "research"], ["fac", "barracks"],
 ]
 
 
@@ -1120,7 +1141,15 @@ static func factory_spend(save: Dictionary, now: int) -> void:
 						break
 					for p in a[1]:
 						Factory.place(save, String(p[0]), int(p[1]), int(p[2]), int(p[3]))
+						if (p as Array).size() > 4:
+							Factory.set_recipe(save, Factory.uid_at(save, Vector2i(int(p[1]), int(p[2]))), String(p[4]))
 					did = true
+				"land":
+					if Factory._f(save)["chunks"].has(int(a[1])):
+						continue
+					if Factory.chunk_cost(save) > budget:
+						break
+					did = not Factory.unlock_chunk(save, int(a[1])).is_empty()
 				"tech":
 					if Factory.has_tech(save, String(a[1])):
 						continue

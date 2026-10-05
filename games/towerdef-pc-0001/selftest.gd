@@ -45,6 +45,7 @@ const Reforge := preload("res://Reforge.gd")
 const ReforgeDB := preload("res://data/ReforgeDB.gd")
 const Factory := preload("res://Factory.gd")
 const FactoryDB := preload("res://data/FactoryDB.gd")
+const PlaytestBot := preload("res://playtest.gd")
 
 var fails: Array = []
 
@@ -349,8 +350,8 @@ func _meta_stages() -> void:
 	_check("AC-4 first v2 boot pays no offline (Outpost away report)", int(Outpost.away_report(m, NOW)["coins"]) == 0)
 	# bank + perm cap
 	var b: Dictionary = BaseMeta.default_save()
-	var bev: Array = BaseMeta.bank(b, 100, 35, 1, 10.0, NOW)
-	_check("bank records tier best, rate, last_seen, coins (no gems)", int(b["best_wave_by_tier"]["1"]) == 35 and is_equal_approx(float(b["best_coin_rate"]), 10.0) and int(b["last_seen"]) == NOW and int(b["coins"]) == 100 and not b.has("gems") and bev.is_empty())
+	var bev: Array = BaseMeta.bank(b, 100, 25, 1, 10.0, NOW)   # meta-economy: w25 (T2 now opens at w30)
+	_check("bank records tier best, rate, last_seen, coins (no gems)", int(b["best_wave_by_tier"]["1"]) == 25 and is_equal_approx(float(b["best_coin_rate"]), 10.0) and int(b["last_seen"]) == NOW and int(b["coins"]) == 100 and not b.has("gems") and bev.is_empty())
 	_check("perm lvl cap 10 at T1", BaseMeta.perm_lvl_cap(b) == 10)
 	b["coins"] = 1_000_000
 	BaseMeta.try_place(b, _c(7), "gun")
@@ -358,18 +359,18 @@ func _meta_stages() -> void:
 	_check("try_upgrade refuses past perm cap", not BaseMeta.try_upgrade(b, _c(7)))
 
 	# --- Stage 13: tiers (AC-5..7) ------------------------------------------
-	_check("unlock waves 40/50/60", Tiers.unlock_wave(2) == 40 and Tiers.unlock_wave(3) == 50 and Tiers.unlock_wave(4) == 60)
+	_check("unlock waves 30/40/50 (meta-economy: was 40/50/60)", Tiers.unlock_wave(2) == 30 and Tiers.unlock_wave(3) == 40 and Tiers.unlock_wave(4) == 50)
 	_check("T1 only at start", Tiers.highest(b) == 1 and Tiers.is_unlocked(b, 1) and not Tiers.is_unlocked(b, 2))
-	bev = BaseMeta.bank(b, 10, 39, 1, 1.0, NOW)
-	_check("w39 in T1 does not unlock T2", Tiers.highest(b) == 1 and bev.is_empty())
+	bev = BaseMeta.bank(b, 10, 29, 1, 1.0, NOW)
+	_check("w29 in T1 does not unlock T2", Tiers.highest(b) == 1 and bev.is_empty())
 	var g0: int = int(b["coins"])
-	bev = BaseMeta.bank(b, 10, 40, 1, 1.0, NOW)
-	_check("AC-5 w40 in T1 unlocks T2 with +500 coins (FB1: was 10 gems)", Tiers.highest(b) == 2 and _evts(bev, "tier_unlocked").size() == 1 and int(b["coins"]) == g0 + 10 + 500)
-	bev = BaseMeta.bank(b, 10, 45, 1, 1.0, NOW)
+	bev = BaseMeta.bank(b, 10, 30, 1, 1.0, NOW)
+	_check("AC-5 w30 in T1 unlocks T2 with +500 coins (FB1: was 10 gems)", Tiers.highest(b) == 2 and _evts(bev, "tier_unlocked").size() == 1 and int(b["coins"]) == g0 + 10 + 500)
+	bev = BaseMeta.bank(b, 10, 35, 1, 1.0, NOW)
 	_check("AC-5 tier unlock rewarded once", bev.is_empty() and int(b["coins"]) == g0 + 10 + 500 + 10)
 	_check("perm cap +5 per tier", BaseMeta.perm_lvl_cap(b) == 15)
-	bev = BaseMeta.bank(b, 10, 49, 2, 1.0, NOW)
-	_check("w49 in T2 does not unlock T3", Tiers.highest(b) == 2)
+	bev = BaseMeta.bank(b, 10, 39, 2, 1.0, NOW)
+	_check("w39 in T2 does not unlock T3", Tiers.highest(b) == 2)
 	var big: Dictionary = BaseMeta.default_save()
 	big["best_wave_by_tier"] = {"1": 999, "2": 999, "3": 999, "4": 999, "5": 999, "6": 999, "7": 999, "8": 999}
 	_check("AC-5 max tier 8", Tiers.highest(big) == 8 and not Tiers.is_unlocked(big, 9))
@@ -2638,18 +2639,18 @@ func _core_stages() -> void:
 	_check("CORE 4 Cores ship (Hive deferred, R8)", CoreDB.IDS == ["bastion", "foundry", "lance", "tempest"] and not CoreDB.has("hive"))
 	var sv: Dictionary = BaseMeta.default_save()
 	_check("CORE default save: Bastion active, owned, L1", Cores.active(sv) == "bastion" and Cores.owned(sv) == ["bastion"] and Cores.level(sv) == 1)
-	_check("CORE level cost round(250*1.18^(L-1)) + floor(L/5) Core Cores", int(Cores.level_cost(1)["coins"]) == 250 and int(Cores.level_cost(2)["coins"]) == 295 and int(Cores.level_cost(4)["core_cores"]) == 0 and int(Cores.level_cost(5)["core_cores"]) == 1 and int(Cores.level_cost(10)["coins"]) == int(round(250.0 * pow(1.18, 9.0))))
+	_check("CORE level cost round(250*1.18^(L-1)); coins only below L15, then floor(L/5) Core Cores (meta-economy: was from L5)", int(Cores.level_cost(1)["coins"]) == 250 and int(Cores.level_cost(2)["coins"]) == 295 and int(Cores.level_cost(4)["core_cores"]) == 0 and int(Cores.level_cost(5)["core_cores"]) == 0 and int(Cores.level_cost(14)["core_cores"]) == 0 and int(Cores.level_cost(15)["core_cores"]) == 3 and int(Cores.level_cost(30)["core_cores"]) == 6 and int(Cores.level_cost(10)["coins"]) == int(round(250.0 * pow(1.18, 9.0))))
 	var snap: String = JSON.stringify(sv)
 	_check("CORE try_level refuses when broke (no mutation)", Cores.try_level(sv, "bastion").is_empty() and JSON.stringify(sv) == snap)
 	sv["coins"] = 1000
 	var ev: Array = Cores.try_level(sv, "bastion")
 	_check("CORE try_level spends coins, +1 level, event", ev.size() == 1 and Cores.level(sv, "bastion") == 2 and int(sv["coins"]) == 750)
 	sv["coins"] = 1 << 30
-	for k in 3:
+	for k in 13:
 		Cores.try_level(sv, "bastion")
-	_check("CORE L5 needs a Core Core", Cores.level(sv, "bastion") == 5 and Cores.try_level(sv, "bastion").is_empty())
-	sv["core_cores"] = 1
-	_check("CORE Core Core spent at L5 -> L6", not Cores.try_level(sv, "bastion").is_empty() and int(sv["core_cores"]) == 0 and Cores.level(sv, "bastion") == 6)
+	_check("CORE early levels coin-only: L2 -> L15 with 0 Core Cores; L15 needs Core Cores", Cores.level(sv, "bastion") == 15 and int(sv.get("core_cores", 0)) == 0 and Cores.try_level(sv, "bastion").is_empty())
+	sv["core_cores"] = 3
+	_check("CORE 3 Core Cores spent at L15 -> L16", not Cores.try_level(sv, "bastion").is_empty() and int(sv["core_cores"]) == 0 and Cores.level(sv, "bastion") == 16)
 	_check("CORE cannot level / select an unowned Core", Cores.try_level(sv, "lance").is_empty() and Cores.select(sv, "lance").is_empty())
 	var u: Dictionary = BaseMeta.default_save()
 	_check("CORE Foundry locked until T2 wave 30", not Cores.unlock_met(u, "foundry") and Cores.check_unlocks(u).is_empty())
@@ -4361,7 +4362,7 @@ func _factory_stages() -> void:
 	_ffeed(st, sb, "iron_ore", 60, 400)
 	Factory.simulate(st, 5.0)
 	_check("FACTORY storage caps: a chest stops at 48 and the belt backs up", Factory.items_on(Factory.ent(st, sc)) == 48 and String(Factory.ent(st, sb)["st"]) == "blocked")
-	_check("FACTORY storage extends away time (base 4 h + 0.02 h per slot, max 36 h)", is_equal_approx(Factory.away_cap_s(st), (4.0 + 0.02 * 48.0) * 3600.0) and is_equal_approx(Factory.away_cap_s(_fsave()), 4.0 * 3600.0))
+	_check("FACTORY storage extends away time (meta-economy: base 6 h + 0.015 h per slot, max 36 h)", is_equal_approx(Factory.away_cap_s(st), (6.0 + 0.015 * 48.0) * 3600.0) and is_equal_approx(Factory.away_cap_s(_fsave()), 6.0 * 3600.0))
 	# Relay converts goods into currencies
 	var rs: Dictionary = _fsave()
 	var rc0: int = int(rs["coins"])
@@ -4398,6 +4399,19 @@ func _factory_stages() -> void:
 	var cc0: int = int(aw["coins"])
 	var cev: Array = Factory.claim_bank(aw)
 	_check("FACTORY collecting the bank pays whole coins and empties it", cev.size() == 1 and int(aw["coins"]) - cc0 == int(cev[0]["coins"]) and int(cev[0]["coins"]) > 0 and float(aw["factory"]["bank"]["coins"]) == 0.0)
+	# Meta-economy pass: the playtest bot's plan buys chunk 14 and builds the
+	# circuit -> data-card chain into the Relay; storage fill stays in AC-27.
+	var bot: Dictionary = BaseMeta.normalize(BaseMeta.default_save())
+	bot["coins"] = 10000000
+	var fill0: float = Factory.away_cap_s(bot) / 3600.0
+	for k in 8:
+		PlaytestBot.factory_spend(bot, OT0)
+	Factory.simulate(bot, 600.0)
+	var botd: int = int(bot["factory"]["data"])
+	_check("META bot plan buys land 14 + Electronics/Data and the chain makes data cards", (bot["factory"]["chunks"] as Array).has(14) and Factory.has_tech(bot, "data") and botd > 50)
+	var fill1: float = Factory.away_cap_s(bot) / 3600.0
+	_check("META storage fill hours in AC-27 band [6, 16] bare and built", fill0 >= 6.0 and fill0 <= 16.0 and fill1 >= 6.0 and fill1 <= 16.0 and fill1 > fill0)
+	_check("META Lancer 2-piece trimmed to +2% Core dmg (4-piece pierce kept)", is_equal_approx(float(SetDB.get_def("lancer")["two"]["core_dmg"]), 0.02) and int(SetDB.get_def("lancer")["four"]["pierce"]) == 1)
 	# determinism + save round-trip
 	var d1: Dictionary = os.duplicate(true)
 	var d2: Dictionary = os.duplicate(true)

@@ -64,7 +64,7 @@ Both are pure and static, with no autoloads, and are typed throughout. Callers i
 
 **Storage**
 - Chests and Vaults hold capped amounts. A full chest backs up its belt.
-- Every storage slot extends away production: 4 h + 0.02 h per slot, at most 36 h. Storage Tech research adds a further +4% per level.
+- Every storage slot extends away production: 6 h + 0.015 h per slot, at most 36 h (meta-economy pass; was 4 h + 0.02 h). Storage Tech research adds a further +4% per level.
 
 **Fixed-step tick**
 - `step()` advances the factory by DT = 0.2 s, processing entities in ascending uid order. It is deterministic, and a selftest checks this.

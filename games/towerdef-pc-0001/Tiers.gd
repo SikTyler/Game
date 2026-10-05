@@ -11,7 +11,9 @@ static func tier_max() -> int:
 
 
 static func unlock_wave(n: int) -> int:
-	return TuneRef.int_of("tier_unlock_base", 20) + TuneRef.int_of("tier_unlock_step", 10) * n
+	# Meta-economy pass (mass-horde short runs): base 10 -> T2 @ w30, T3 @ w40
+	# (was base 20: w40 / w50, tuned before the horde made runs shorter).
+	return TuneRef.int_of("tier_unlock_base", 10) + TuneRef.int_of("tier_unlock_step", 10) * n
 
 
 static func best_in(s: Dictionary, t: int) -> int:

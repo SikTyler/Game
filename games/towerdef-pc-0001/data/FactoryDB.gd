@@ -26,9 +26,11 @@ const DT: float = 0.2
 ## Measured-throughput window (sim seconds) behind the away estimate.
 const METER_WINDOW: float = 60.0
 ## Away/in-run production is capped by storage: base hours + hours per
-## storage item slot (chest 48 -> +0.96 h, vault 320 -> +6.4 h), at most MAX.
-const AWAY_BASE_H: float = 4.0
-const AWAY_PER_SLOT_H: float = 0.02
+## storage item slot (chest 48 -> +0.72 h, vault 320 -> +4.8 h), at most MAX.
+## Meta-economy pass: 6 h base / 0.015 h per slot puts every bot snapshot in
+## the AC-27 fill band [6, 16] h (bare start 6 h, 4 chests + vault 13.7 h).
+const AWAY_BASE_H: float = 6.0
+const AWAY_PER_SLOT_H: float = 0.015
 const AWAY_MAX_H: float = 36.0
 
 ## Belts: item spacing (fraction of a tile) and speed (tiles / s) per tier.
@@ -136,7 +138,7 @@ const TECH: Dictionary = {
 	"coal_power": {"name": "Coal Power", "coins": 3000, "data": 0, "req": "", "desc": "Coal Generator: 12 power while burning coal."},
 	"data": {"name": "Data Science", "coins": 5000, "data": 0, "req": "electronics", "desc": "Assembler recipe: Data Card (circuit + shard) -> research data."},
 	"logistics2": {"name": "Fast Logistics", "coins": 6000, "data": 20, "req": "underground", "desc": "Fast Belt: 4 tiles/s."},
-	"storage2": {"name": "Vaults", "coins": 6000, "data": 20, "req": "", "desc": "Vault: 320 storage, +6.4 h away production."},
+	"storage2": {"name": "Vaults", "coins": 6000, "data": 20, "req": "", "desc": "Vault: 320 storage, +4.8 h away production."},
 	"parts": {"name": "Part Fabrication", "coins": 9000, "data": 40, "req": "data", "desc": "Assembler recipe: Part Kit -> scrap for part levels."},
 	"keys": {"name": "Key Forging", "coins": 12000, "data": 60, "req": "data", "desc": "Assembler recipe: Key Blank -> crate keys."},
 	"mining2": {"name": "Deep Mining", "coins": 15000, "data": 80, "req": "coal_power", "desc": "Deep Miner: 1 item/s."},

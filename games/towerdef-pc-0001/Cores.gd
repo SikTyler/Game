@@ -90,7 +90,10 @@ static func max_level(s: Dictionary) -> int:
 static func level_cost(lvl: int) -> Dictionary:
 	return {
 		"coins": int(round(TuneRef.num("pc_core_cost_base", 250.0) * pow(TuneRef.num("pc_core_cost_growth", 1.18), float(maxi(1, lvl) - 1)))),
-		"core_cores": maxi(1, lvl) / 5,
+		# Meta-economy pass (fresh-save stall): levels below pc_core_cc_from
+		# (default 15) cost coins only so a new player can spend the coins a
+		# T1 run banks; from there on floor(L/5) Core Cores gate each level.
+		"core_cores": 0 if maxi(1, lvl) < TuneRef.int_of("pc_core_cc_from", 15) else maxi(1, lvl) / 5,
 	}
 
 
