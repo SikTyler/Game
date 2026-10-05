@@ -785,6 +785,12 @@ func _run_screen() -> void:
 	await _frames()
 	_check("RUN: free reroll re-rolls the hand", not S.free_reroll and S.draft.size() >= 3)
 	_check("RUN: reroll now shows its cash cost", _find("Reroll") != null and _find("Reroll").text.contains("$"))
+	# Force a known banishable card into slot 2: the rerolled hand is random, and
+	# could put an insight card there (unbanishable) or "gun"/"mortar" (banishing
+	# those empties the later forced card_for("gun"/"mortar") cards below).
+	S.draft[2] = load("res://Draft.gd").card_for("mine", S._draft_ctx(""))
+	main._rebuild_ui()
+	await _frames()
 	var bid: String = String((S.draft[2] as Dictionary)["id"])
 	_press("Banish")
 	await _frames()
