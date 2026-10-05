@@ -21,6 +21,7 @@ const Tiers := preload("res://Tiers.gd")
 const Missions := preload("res://Missions.gd")
 const Stats := preload("res://Stats.gd")
 const TuneRef := preload("res://Tune.gd")
+const Factory := preload("res://Factory.gd")
 
 const HALL_POS: Vector2i = Vector2i(0, 2)
 const DIRS: Array = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
@@ -986,6 +987,9 @@ static func level_of(s: Dictionary, id: String) -> int:
 		var b: Dictionary = o["buildings"][k]
 		if String(b["id"]) == id and bool(b["built"]) and int(b["x"]) >= 0:
 			best = maxi(best, int(b["lvl"]))
+	# FB2 / WP3: facility levels now live on the Factory (Research Lab, Barracks, Archive, Salvage Yard)
+	if (Factory.DB.FAC_IDS as Array).has(id):
+		best = maxi(best, Factory.fac_level(s, id))
 	return best
 
 

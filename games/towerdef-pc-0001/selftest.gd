@@ -43,6 +43,8 @@ const Outpost := preload("res://Outpost.gd")
 const OutpostDB := preload("res://data/OutpostDB.gd")
 const Reforge := preload("res://Reforge.gd")
 const ReforgeDB := preload("res://data/ReforgeDB.gd")
+const Factory := preload("res://Factory.gd")
+const FactoryDB := preload("res://data/FactoryDB.gd")
 
 var fails: Array = []
 
@@ -291,6 +293,7 @@ func _initialize() -> void:
 	_pc_engine_stages()
 	_redesign_run_stages()
 	_horde_stages()
+	_factory_stages()
 
 	if fails.is_empty():
 		print("SELFTEST OK")
@@ -3765,3 +3768,267 @@ func _save_v4_stages() -> void:
 	var bn: Dictionary = BaseMeta.normalize(bad)
 	_check("AC-22 sanitize: clamps, unknown parts dropped, one item per id, uids unique", int(bn["coins"]) == 0 and int(bn["scrap"]) == 0 and Parts.count(bn) == 2 and int(Parts.item(bn, "1")["lvl"]) == 20 and int(Parts.item(bn, "4")["stars"]) == 2 and int(bn["parts"]["next_uid"]) == 5)
 	_check("AC-22 v4 schema keys", int(m["version"]) == 4 and m.has("parts") and m.has("crates") and m.has("outpost") and m.has("research") and m.has("reforge") and m.has("shards") and m.has("cores") and m.has("insight"))
+
+
+# ================================================================ FACTORY (FB2 / WP3)
+## A save with an empty factory (hubs only), every tech, plenty of coins.
+func _fsave(all_tech: bool = true) -> Dictionary:
+	var sv: Dictionary = BaseMeta.normalize(BaseMeta.default_save())
+	sv["coins"] = 10000000
+	if all_tech:
+		sv["factory"]["tech"] = FactoryDB.TECH_IDS.duplicate()
+	return sv
+
+
+func _fput(sv: Dictionary, id: String, x: int, y: int, rot: int = 0) -> String:
+	var ev: Array = Factory.place(sv, id, x, y, rot)
+	return "" if ev.is_empty() else String(ev[0]["uid"])
+
+
+## Feed `n` items into a belt as fast as it takes them, stepping the sim.
+func _ffeed(sv: Dictionary, uid: String, item: String, n: int, max_steps: int = 2000) -> int:
+	var fed: int = 0
+	var steps: int = 0
+	while fed < n and steps < max_steps:
+		var e: Dictionary = Factory.ent(sv, uid)
+		if Factory._accepts(sv["factory"], e, item, 0.0):
+			Factory._insert(sv, sv["factory"], e, item, 0.0)
+			fed += 1
+		Factory.step(sv)
+		steps += 1
+	return fed
+
+
+func _finv(sv: Dictionary, uid: String, item: String) -> int:
+	return int((Factory.ent(sv, uid).get("inv", {}) as Dictionary).get(item, 0))
+
+
+func _factory_stages() -> void:
+	# map + blocks
+	var sv: Dictionary = _fsave(false)
+	var f: Dictionary = sv["factory"]
+	var hubs_ok: bool = true
+	for h in FactoryDB.HUBS:
+		var u: String = Factory.uid_at(sv, FactoryDB.HUB_POS[h])
+		hubs_ok = hubs_ok and u != "" and String(Factory.ent(sv, u)["id"]) == String(h)
+	_check("FACTORY map >= 96x64 in 16x16 chunks, 2 open, 5 hub buildings (Relay, Core Bay, Crates, Research, Cards)", FactoryDB.W >= 96 and FactoryDB.H >= 64 and FactoryDB.CW * FactoryDB.CH == 24 and (f["chunks"] as Array).size() == 2 and hubs_ok)
+	_check("FACTORY small buildings: every placeable piece is 1x1..3x3", FactoryDB.DEFS.values().all(func(d: Dictionary) -> bool: return int(d["size"][0]) <= 3 and int(d["size"][1]) <= 3))
+	# hidden deposits revealed on unlock
+	var k_new: int = 7   # chunk west of the start (x 16..31, y 16..31)
+	var deps: Dictionary = Factory.chunk_deposits(k_new)
+	var hid: bool = true
+	var dep_cell: Vector2i = Vector2i(-1, -1)
+	var r: Rect2i = FactoryDB.chunk_rect(k_new)
+	for yy in range(r.position.y, r.end.y):
+		for xx in range(r.position.x, r.end.x):
+			if Factory.deposit_at(Vector2i(xx, yy)) != "":
+				hid = hid and not Factory.deposit_visible(sv, Vector2i(xx, yy))
+				if dep_cell.x < 0:
+					dep_cell = Vector2i(xx, yy)
+	var c0: int = int(sv["coins"])
+	var cost0: int = Factory.chunk_cost(sv)
+	var uev: Array = Factory.unlock_chunk(sv, k_new)
+	_check("FACTORY locked chunk hides its deposits; unlocking reveals them and costs coins", not deps.is_empty() and hid and uev.size() == 1 and Factory.deposit_visible(sv, dep_cell) and int(sv["coins"]) == c0 - cost0 and Factory.chunk_cost(sv) > cost0)
+	_check("FACTORY a non-adjacent chunk cannot be bought", Factory.unlock_chunk(sv, 0).is_empty())
+	_check("FACTORY placement rules: locked land / occupied hub / miner off-deposit / missing tech refused", Factory.place_error(sv, "belt", 2, 2, 0) == "locked" and Factory.place_error(sv, "belt", 47, 23, 0) == "occupied" and Factory.place_error(sv, "miner", 50, 20, 0) == "no_deposit" and Factory.place_error(_fsave(false), "belt2", 50, 20, 0) == "tech")
+	# belts move items
+	sv = _fsave()
+	var b0: String = _fput(sv, "belt", 50, 20, 0)
+	for x in range(51, 54):
+		_fput(sv, "belt", x, 20, 0)
+	var ch: String = _fput(sv, "chest", 54, 20, 0)
+	Factory._insert(sv, sv["factory"], Factory.ent(sv, b0), "iron_ore", 0.0)
+	Factory.step(sv)
+	var p1: float = float((Factory.ent(sv, b0)["it"] as Array)[0][1])
+	Factory.simulate(sv, 2.6)
+	_check("FACTORY belts move items (2 tiles/s) into a chest 4 tiles down the line", is_equal_approx(p1, 0.4) and _finv(sv, ch, "iron_ore") == 1 and (Factory.ent(sv, b0)["it"] as Array).is_empty())
+	# drag-laid L-shaped belt: each piece faces the next cell
+	sv = _fsave()
+	var lev: Array = Factory.place_line(sv, "belt", Vector2i(50, 18), Vector2i(53, 20))
+	var corner: Dictionary = Factory.ent(sv, Factory.uid_at(sv, Vector2i(53, 18)))
+	var last: Dictionary = Factory.ent(sv, Factory.uid_at(sv, Vector2i(53, 20)))
+	_check("FACTORY drag-to-lay: an L run of 6 belts, corner turns south", lev.size() == 6 and int(Factory.ent(sv, Factory.uid_at(sv, Vector2i(50, 18)))["rot"]) == 0 and int(corner["rot"]) == 1 and int(last["rot"]) == 1)
+	# side-loading + head-on refusal
+	sv = _fsave()
+	var main_b: String = _fput(sv, "belt", 52, 20, 0)
+	var side_b: String = _fput(sv, "belt", 52, 19, 1)
+	_check("FACTORY side-load enters mid-belt; head-on belts do not connect", Factory._compile(sv["factory"])["tgt"][side_b] == [main_b, 0.5])
+	# splitters alternate
+	sv = _fsave()
+	var feed: String = _fput(sv, "belt", 49, 20, 0)
+	var sp: String = _fput(sv, "splitter", 50, 20, 0)   # cells (50,20),(50,21)
+	var ca: String = _fput(sv, "chest", 51, 20, 0)
+	var cb: String = _fput(sv, "chest", 51, 21, 0)
+	var fed: int = _ffeed(sv, feed, "copper_ore", 20)
+	Factory.simulate(sv, 3.0)
+	var na: int = _finv(sv, ca, "copper_ore")
+	var nb: int = _finv(sv, cb, "copper_ore")
+	_check("FACTORY splitter alternates one input between its two outputs", sp != "" and fed == 20 and na + nb == 20 and absi(na - nb) <= 1, "%d / %d" % [na, nb])
+	# a blocked lane sends everything to the other
+	Factory.ent(sv, ca)["inv"] = {"copper_ore": 48}
+	_ffeed(sv, feed, "copper_ore", 6)
+	Factory.simulate(sv, 3.0)
+	_check("FACTORY splitter: a full output sends everything to the other lane", _finv(sv, cb, "copper_ore") == nb + 6)
+	# undergrounds
+	sv = _fsave()
+	var ui0: String = _fput(sv, "belt", 49, 22, 0)
+	var ug_a: String = _fput(sv, "ug_in", 50, 22, 0)
+	_fput(sv, "chest", 52, 22, 0)                         # something in the way
+	var ug_b: String = _fput(sv, "ug_out", 54, 22, 0)
+	var uc: String = _fput(sv, "chest", 55, 22, 0)
+	_ffeed(sv, ui0, "coal", 3)
+	Factory.simulate(sv, 6.0)
+	_check("FACTORY underground belt tunnels 4 cells under a chest", ug_a != "" and ug_b != "" and Factory._compile(sv["factory"])["tgt"][ug_a][0] == ug_b and _finv(sv, uc, "coal") == 3)
+	# smelter + assembler recipe chain via inserters (powered by a turbine)
+	sv = _fsave()
+	_fput(sv, "windmill", 50, 20, 0)                      # covers cells within 2 of its footprint
+	_fput(sv, "pole", 54, 20, 0)
+	var src: String = _fput(sv, "chest", 50, 18, 0)
+	Factory.ent(sv, src)["inv"] = {"iron_ore": 12}
+	_fput(sv, "inserter", 51, 18, 0)
+	var sm: String = _fput(sv, "smelter", 52, 18, 0)      # 52..53 x 18..19
+	_fput(sv, "inserter", 54, 18, 0)
+	var mid: String = _fput(sv, "chest", 55, 18, 0)
+	Factory.simulate(sv, 40.0)
+	_check("FACTORY smelter picks the plate recipe from its ore; inserters move 12 ore -> 12 plates", String(Factory.ent(sv, sm)["rec"]) == "iron_plate" and _finv(sv, mid, "iron_plate") == 12 and _finv(sv, src, "iron_ore") == 0)
+	sv = _fsave()
+	_fput(sv, "windmill", 52, 21, 0)
+	_fput(sv, "windmill", 54, 21, 0)
+	var src2: String = _fput(sv, "chest", 50, 19, 0)
+	Factory.ent(sv, src2)["inv"] = {"iron_plate": 10}
+	_fput(sv, "inserter", 51, 19, 0)
+	var asm: String = _fput(sv, "assembler", 52, 18, 0)   # 52..54 x 18..20
+	_fput(sv, "inserter", 55, 19, 0)
+	var dst: String = _fput(sv, "chest", 56, 19, 0)
+	var nore: Array = Factory.set_recipe(sv, asm, "iron_plate")
+	Factory.set_recipe(sv, asm, "gear")
+	Factory.simulate(sv, 30.0)
+	_check("FACTORY assembler recipe: 10 iron plates -> 5 gears (2:1); a smelter recipe is refused", nore.is_empty() and _finv(sv, dst, "gear") == 5 and _finv(sv, src2, "iron_plate") == 0)
+	var lock: Dictionary = _fsave(false)
+	var la: String = _fput(lock, "assembler", 52, 18, 0)
+	_check("FACTORY circuit recipe needs Electronics research", Factory.set_recipe(lock, la, "circuit").is_empty() and not Factory.set_recipe(lock, la, "wire").is_empty())
+	lock["factory"]["data"] = 0
+	var rc: int = int(lock["coins"])
+	_check("FACTORY research spends coins (+ data) and unlocks the recipe", not Factory.research(lock, "electronics").is_empty() and int(lock["coins"]) == rc - int(FactoryDB.TECH["electronics"]["coins"]) and not Factory.set_recipe(lock, la, "circuit").is_empty() and Factory.research(lock, "logistics2").is_empty())
+	# power shortage slows machines
+	var gears: Array = []
+	var sats: Array = []
+	for extra in [0, 3]:
+		var ps: Dictionary = _fsave()
+		_fput(ps, "windmill", 52, 30, 0)
+		_fput(ps, "windmill", 54, 30, 0)                  # 6 power: one assembler (4) + 2 inserters (2), off the Relay's net
+		if extra > 0:
+			_fput(ps, "pole", 58, 29, 0)
+			for i in extra:
+				_fput(ps, "smelter", 56 + i * 2, 30, 0)     # idle smelters still draw 3 each
+		var s2: String = _fput(ps, "chest", 50, 28, 0)
+		Factory.ent(ps, s2)["inv"] = {"iron_plate": 40}
+		_fput(ps, "inserter", 51, 28, 0)
+		var a2: String = _fput(ps, "assembler", 52, 27, 0)
+		_fput(ps, "inserter", 55, 28, 0)
+		var d2: String = _fput(ps, "chest", 56, 28, 0)
+		Factory.set_recipe(ps, a2, "gear")
+		Factory.simulate(ps, 12.0)
+		gears.append(_finv(ps, d2, "gear"))
+		sats.append(Factory.sat_of(ps, a2))
+	_check("FACTORY power shortage slows machines (satisfaction < 1 -> fewer gears)", is_equal_approx(float(sats[0]), 1.0) and float(sats[1]) < 0.5 and int(gears[1]) < int(gears[0]) and int(gears[1]) > 0, "%s %s" % [str(gears), str(sats)])
+	var np: Dictionary = _fsave()
+	var lone: String = _fput(np, "miner", 40, 27, 0)       # coal patch, no generator in reach
+	Factory.simulate(np, 5.0)
+	_check("FACTORY an unpowered miner does not run", Factory.sat_of(np, lone) == 0.0 and String(Factory.ent(np, lone)["out"]) == "")
+	# coal generator burns fuel
+	var cg: Dictionary = _fsave()
+	var gen: String = _fput(cg, "coal_gen", 50, 20, 0)
+	var off_sup: float = float(Factory.power_report(cg)[0]["supply"])
+	Factory.ent(cg, gen)["fuel"] = 1
+	Factory.step(cg)
+	_check("FACTORY coal generator supplies power only while it burns coal", is_equal_approx(float(Factory.power_report(cg)[0]["supply"]), 4.0 + 12.0) and int(Factory.ent(cg, gen)["fuel"]) == 0 and is_equal_approx(off_sup, 4.0))
+	# storage caps
+	var st: Dictionary = _fsave()
+	var sb: String = _fput(st, "belt", 50, 20, 0)
+	var sc: String = _fput(st, "chest", 51, 20, 0)
+	_ffeed(st, sb, "iron_ore", 60, 400)
+	Factory.simulate(st, 5.0)
+	_check("FACTORY storage caps: a chest stops at 48 and the belt backs up", Factory.items_on(Factory.ent(st, sc)) == 48 and String(Factory.ent(st, sb)["st"]) == "blocked")
+	_check("FACTORY storage extends away time (base 4 h + 0.02 h per slot, max 36 h)", is_equal_approx(Factory.away_cap_s(st), (4.0 + 0.02 * 48.0) * 3600.0) and is_equal_approx(Factory.away_cap_s(_fsave()), 4.0 * 3600.0))
+	# Relay converts goods into currencies
+	var rs: Dictionary = _fsave()
+	var rc0: int = int(rs["coins"])
+	var rk0: int = int(rs.get("keys", 0))
+	var relay_uid: String = Factory.uid_at(rs, FactoryDB.HUB_POS["relay"])
+	for i in 8:
+		Factory._insert(rs, rs["factory"], Factory.ent(rs, relay_uid), "key_blank", 0.0)
+		Factory._insert(rs, rs["factory"], Factory.ent(rs, relay_uid), "data_card", 0.0)
+		Factory._insert(rs, rs["factory"], Factory.ent(rs, relay_uid), "circuit", 0.0)
+	_check("FACTORY Core Relay converts goods: 8 key blanks -> 2 keys, 8 data cards -> 8 data, circuits -> coins", int(rs["keys"]) == rk0 + 2 and int(rs["factory"]["data"]) == 8 and int(rs["coins"]) == rc0 + 80)
+	# offline estimate ~= simulated steady state
+	var os: Dictionary = _fsave()
+	Factory.add_starter(os["factory"])
+	_fput(os, "miner", 40, 27, 0)                          # coal, belted into the Relay
+	for x in range(42, 45):
+		_fput(os, "belt", x, 27, 0)
+	for y in [27, 26, 25]:
+		_fput(os, "belt", 45, int(y), 3)
+	_fput(os, "belt", 45, 24, 0)                           # into the Relay at (46, 24)
+	_fput(os, "pole", 43, 26, 0)
+	var est: Dictionary = Factory.ensure_rate(os)
+	var live: Dictionary = os.duplicate(true)
+	Factory.simulate(live, 60.0)                           # warm-up
+	var lc0: int = int(live["coins"])
+	Factory.simulate(live, 600.0)
+	var sim_rate: float = float(int(live["coins"]) - lc0) / 600.0
+	_check("FACTORY offline estimate ~= simulated steady state (within 5%)", float(est["coins"]) > 0.0 and absf(float(est["coins"]) - sim_rate) <= 0.05 * sim_rate + 0.01, "%f vs %f" % [float(est["coins"]), sim_rate])
+	var aw: Dictionary = os.duplicate(true)
+	aw["factory"]["t"] = OT0
+	Factory.settle(aw, OT0 + 3600)
+	var bank1: float = float(aw["factory"]["bank"]["coins"])
+	Factory.settle(aw, OT0 + 3600 + 100 * 3600)
+	_check("FACTORY away production = rate x time, capped by storage", absf(bank1 - float(est["coins"]) * 3600.0) < 1.0 and absf(float(aw["factory"]["bank"]["coins"]) - float(est["coins"]) * Factory.away_cap_s(aw)) < 1.0)
+	var cc0: int = int(aw["coins"])
+	var cev: Array = Factory.claim_bank(aw)
+	_check("FACTORY collecting the bank pays whole coins and empties it", cev.size() == 1 and int(aw["coins"]) - cc0 == int(cev[0]["coins"]) and int(cev[0]["coins"]) > 0 and float(aw["factory"]["bank"]["coins"]) == 0.0)
+	# determinism + save round-trip
+	var d1: Dictionary = os.duplicate(true)
+	var d2: Dictionary = os.duplicate(true)
+	Factory.simulate(d1, 90.0)
+	Factory.simulate(d2, 90.0)
+	_check("FACTORY tick is deterministic (same layout + steps -> same state)", JSON.stringify(d1["factory"]["ents"]) == JSON.stringify(d2["factory"]["ents"]) and int(d1["coins"]) == int(d2["coins"]))
+	var rt: Dictionary = BaseMeta.normalize(JSON.parse_string(JSON.stringify(d1)))
+	_check("FACTORY survives JSON + normalize (layout, items on belts, tech)", _ents_close(rt["factory"]["ents"], d1["factory"]["ents"]) and (rt["factory"]["tech"] as Array).size() == FactoryDB.TECH_IDS.size())
+	# deconstruct + rotate
+	var dsv: Dictionary = _fsave()
+	var du: String = _fput(dsv, "assembler", 52, 18, 0)
+	var dc: int = int(dsv["coins"])
+	_check("FACTORY deconstruct refunds the build cost; hubs cannot be removed", not Factory.remove(dsv, du).is_empty() and int(dsv["coins"]) == dc + Factory.cost("assembler") and Factory.remove(dsv, Factory.uid_at(dsv, FactoryDB.HUB_POS["relay"])).is_empty())
+	var ru: String = _fput(dsv, "splitter", 52, 18, 0)
+	Factory.rotate(dsv, ru, 1)
+	_check("FACTORY rotate turns a splitter (1x2 -> 2x1 footprint)", int(Factory.ent(dsv, ru)["rot"]) == 1 and Factory.uid_at(dsv, Vector2i(53, 18)) == ru and Factory.uid_at(dsv, Vector2i(52, 19)) == "")
+	# save migration from the plot/generator Outpost
+	var ms: Dictionary = BaseMeta.normalize(BaseMeta.default_save())
+	ms["coins"] = 100000
+	Outpost.place(ms, "mill", 4, 4, 0, OT0)
+	var mill_uid: String = ""
+	for k in ms["outpost"]["buildings"].keys():
+		if String(ms["outpost"]["buildings"][k]["id"]) == "mill":
+			mill_uid = String(k)
+	ms["coins"] = 0
+	ms["outpost"]["buildings"][mill_uid]["stored"] = 37.5
+	_hall(ms, 4)
+	var spent: int = int(ms["outpost"]["buildings"][mill_uid]["spent"])
+	var ref: Dictionary = Factory.migrate_outpost(ms)
+	var again: Dictionary = Factory.migrate_outpost(ms)
+	_check("FACTORY migration refunds Outpost generators (spent + stored), keeps facility levels, adds a starter line; idempotent", int(ref["coins"]) == spent + 37 and int(ms["coins"]) == spent + 37 and Outpost.count_of(ms["outpost"], "mill") == 0 and Factory.fac_level(ms, "research") == 4 and Labs.slots(ms) == 2 and Factory.count_of(ms, "miner") == 1 and int(again["coins"]) == 0)
+	var fb: Dictionary = _fsave()
+	Factory.fac_upgrade(fb, "barracks")
+	_check("FACTORY Barracks facility sets barracks_tier in run mods", int(BaseMeta.run_mods(fb)["barracks_tier"]) == 1)
+
+
+func _ents_close(a: Dictionary, b: Dictionary) -> bool:
+	if a.size() != b.size():
+		return false
+	for k in a.keys():
+		if not b.has(k) or String((a[k] as Dictionary)["id"]) != String((b[k] as Dictionary)["id"]) or int((a[k] as Dictionary)["x"]) != int((b[k] as Dictionary)["x"]):
+			return false
+		if (a[k] as Dictionary).has("it") and ((a[k] as Dictionary)["it"] as Array).size() != ((b[k] as Dictionary)["it"] as Array).size():
+			return false
+	return true

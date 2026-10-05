@@ -30,6 +30,7 @@ const PickDB := preload("res://data/PickDB.gd")
 const Parts := preload("res://Parts.gd")
 const Crates := preload("res://Crates.gd")
 const Outpost := preload("res://Outpost.gd")
+const Factory := preload("res://Factory.gd")
 const Reforge := preload("res://Reforge.gd")
 
 const VERSION: int = 4
@@ -267,6 +268,7 @@ static func normalize(s_in: Dictionary) -> Dictionary:
 	d["unlocked"] = un
 	# research (Research Hall projects; v3 "labs" is read when present)
 	d["outpost"] = Outpost.normalize_block(s.get("outpost", null))
+	d["factory"] = Factory.normalize_block(s.get("factory", null))
 	var labs_in: Dictionary = {}
 	if s.get("research", null) is Dictionary:
 		labs_in = s["research"]

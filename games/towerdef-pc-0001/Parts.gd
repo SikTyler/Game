@@ -12,6 +12,7 @@ extends RefCounted
 ## part's plus (x level/star mult) and minus (never scaled), plus 2/4-piece
 ## set bonuses, summed per key (additive inside (1 + sum)).
 
+const FactoryRef := preload("res://Factory.gd")
 const PartDB := preload("res://data/PartDB.gd")
 const SetDB := preload("res://data/SetDB.gd")
 const Cores := preload("res://Cores.gd")
@@ -149,6 +150,9 @@ static func salvage_mult(s: Dictionary) -> float:
 				var b: Dictionary = (bl as Dictionary)[k]
 				if String(b.get("id", "")) == "scrapyard" and bool(b.get("built", true)):
 					m += 0.10 + 0.02 * float(maxi(1, int(b.get("lvl", 1))) - 1)
+	# FB2 / WP3: a Salvage Yard facility on the Factory counts when no legacy yard did
+	if is_equal_approx(m, 1.0) and FactoryRef.fac_level(s, "scrapyard") > 0:
+		m += 0.10
 	var rs: Variant = s.get("research", null)
 	if rs is Dictionary and (rs as Dictionary).get("lvls", null) is Dictionary:
 		m += 0.02 * float(int(((rs as Dictionary)["lvls"] as Dictionary).get("part_analysis", 0)))
