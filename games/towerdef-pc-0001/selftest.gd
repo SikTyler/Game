@@ -412,7 +412,7 @@ func _meta_stages() -> void:
 	_check("AC-20 queues 1/2/3 at Hall L1/L4/L8, 0 without a Hall", qok == [1, 1, 2, 2, 3, 3] and Labs.slots(nohall) == 0 and Labs.start(nohall, "dmg", NOW).is_empty())
 	# FEEDBACK-1: +Grid Expansion, -Lab Speed (research time is gone) -> still 12.
 	_check("AC-20 every LabDB project + Part Analysis + Crate Theory + Grid", LabDB.IDS.size() == 12 and LabDB.DEFS.has("grid") and not LabDB.DEFS.has("labspeed") and LabDB.DEFS.has("part_analysis") and LabDB.DEFS.has("crate_theory") and String(LabDB.DEFS["offcap"]["name"]) == "Storage Tech" and String(LabDB.DEFS["offrate"]["name"]) == "Logistics Tech")
-	_check("FB1 grid research 3/5/7/8/10, cost 150 x3^L", LabDB.max_of("grid") == 4 and Labs.cost("grid", 0) == 150 and Labs.cost("grid", 3) == 4050 and TowerState.grid_for_level(0) == 3 and TowerState.grid_for_level(1) == 5 and TowerState.grid_for_level(2) == 7 and TowerState.grid_for_level(3) == 8 and TowerState.grid_for_level(4) == 10)
+	_check("FB1 grid research 3/5/7/8/10, cost 60 x3^L", LabDB.max_of("grid") == 4 and Labs.cost("grid", 0) == 60 and Labs.cost("grid", 3) == 1620 and TowerState.grid_for_level(0) == 3 and TowerState.grid_for_level(1) == 5 and TowerState.grid_for_level(2) == 7 and TowerState.grid_for_level(3) == 8 and TowerState.grid_for_level(4) == 10)
 	L["research"]["lvls"]["dmg"] = 30
 	_check("maxed track cannot start", Labs.start(L, "dmg", NOW).is_empty())
 	var lm: Dictionary = Labs.modifiers(L)

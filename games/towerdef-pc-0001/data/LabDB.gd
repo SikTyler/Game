@@ -6,7 +6,7 @@ extends RefCounted
 ## 3x3 -> 5x5 -> 7x7 -> 8x8 -> 10x10 (TowerState.GRID_SIZES).
 
 const DEFS: Dictionary = {
-	"grid":      {"name": "Grid Expansion", "max": 4, "base": 150.0, "growth": 3.0, "effect": "Bigger run grid: 3x3 -> 5x5 -> 7x7 -> 8x8 -> 10x10"},
+	"grid":      {"name": "Grid Expansion", "max": 4, "base": 60.0, "growth": 3.0, "effect": "Bigger run grid: 3x3 -> 5x5 -> 7x7 -> 8x8 -> 10x10"},
 	"speed":     {"name": "Game Speed",    "max": 3,  "base": 400.0, "growth": 4.0,  "effect": "Unlocks a faster game speed"},
 	"dmg":       {"name": "Damage",        "max": 30, "base": 80.0,  "growth": 1.8, "effect": "+5% damage (core & weapons)"},
 	"hp":        {"name": "Health",        "max": 30, "base": 80.0,  "growth": 1.8, "effect": "+5% core max HP"},
