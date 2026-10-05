@@ -195,7 +195,7 @@ static func step(troops: Array, en, eh, dt: float, ctx: Dictionary) -> Dictionar
 			if pos.distance_to(en.pos[ed]) <= contact + en.size[ed] * 0.5:
 				td["hp"] = float(td["hp"]) - 0.5 * en.dmg[ed] * dt
 				if bool(td.get("taunt", false)):
-					en.taunt_t[ed] = 0.15
+					en.set_taunt(ed, 0.15)
 		if float(td["hp"]) <= 0.0:
 			td["state"] = "dead"
 			td["hp"] = 0.0

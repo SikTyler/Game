@@ -660,6 +660,202 @@ func _horde_p34() -> void:
 	_check("P4 knock moves the body and friction decays it", S.en.pos[0].y < y0 and S.en.vel[0].length() < 100.0)
 
 
+## MASS_HORDE §Architecture gates: the C#-resident HordeWorld (flow field,
+## liquid pressure, knockback, aggregated contact, query API, determinism).
+func _mh_field(S, kind: String, n: int, c: Vector2, r0: float, r1: float, spd: float = -1.0) -> void:
+	for i in n:
+		var a: float = TAU * float(i) / 97.0 + float(i) * 0.013
+		var r: float = r0 + (r1 - r0) * float((i * 37) % 101) / 100.0
+		var d: Dictionary = _enemy(kind, c + Vector2.from_angle(a) * r, 999.0)
+		if spd >= 0.0:
+			d["spd"] = spd
+		S.add_enemy(d)
+
+
+func _mh_steps(S, n: int, ev: Array = []) -> void:
+	for k in n:
+		S._move_enemies(0.05, ev)
+
+
+func _mass_horde_world() -> void:
+	var C: Vector2 = TowerState.CENTER
+	# ---- determinism: two fresh worlds, same inputs -> same C# checksum
+	var sums: Array = []
+	for run in 2:
+		var D = _fresh()
+		D.spawn_hold = true
+		_mh_field(D, "mite", 1500, C, 220.0, 520.0)
+		_mh_field(D, "hauler", 40, C, 300.0, 500.0)
+		_mh_steps(D, 120)
+		sums.append(int(D.en.world.call("Checksum")))
+	_check("MASS_HORDE HordeWorld checksum is deterministic (1540 bodies x 120 steps, two worlds)", sums[0] == sums[1] and sums[0] != 0)
+	# ---- flow field routes around a wall; nobody passes through a building
+	var W = _fresh()
+	W.spawn_hold = true
+	W.stats["weapons"] = []
+	var wall: Array = []
+	for c in range(0, 7):
+		var wi: int = _rc(-1, c)
+		W.slots[wi] = {"id": "barricade", "perm": 0, "run": 2}
+		wall.append(wi)
+	W.recompute()
+	W.stats["weapons"] = []
+	var above: Vector2 = TowerState.slot_pos(_rc(-1, 3)) + Vector2(0, -40)
+	_mh_steps(W, 1)   # first step builds the flow field from the building set
+	var fd: Vector2 = W.en.world.call("FlowDir", above.x + 30.0, above.y)
+	_check("MASS_HORDE flow field steers sideways around a wall (not into it)", absf(fd.x) > 0.6)
+	_check("MASS_HORDE flow field rebuilds only when buildings change", int((W.en.world.call("Stats") as Dictionary)["flow_rebuilds"]) >= 1)
+	var fr0: int = int((W.en.world.call("Stats") as Dictionary)["flow_rebuilds"])
+	_mh_field(W, "mite", 300, above + Vector2(0, -160), 0.0, 90.0)
+	var inside: int = 0
+	for k in 800:   # 40 s: the crowd piles on the wall and drains round its ends
+		W._move_enemies(0.05, [])
+		if k % 4 == 0:
+			for es in W.en.order:
+				var p: Vector2 = W.en.pos[es]
+				for wi in wall:
+					var q: Vector2 = p - TowerState.slot_pos(int(wi))
+					if absf(q.x) < TowerState.CELL * 0.5 - 2.0 and absf(q.y) < TowerState.CELL * 0.5 - 2.0:
+						inside += 1
+	var near: int = 0
+	for es in W.en.order:
+		if W.en.pos[es].distance_to(C) <= 140.0:
+			near += 1
+	_check("MASS_HORDE H9 >=70%% of bodies path around the wall to the Core (%d/300), none through it (%d)" % [near, inside], near >= 210 and inside == 0)
+	_check("MASS_HORDE flow field not rebuilt while the building set is unchanged", int((W.en.world.call("Stats") as Dictionary)["flow_rebuilds"]) == fr0)
+	# ---- pressure: a dense crowd piles on the Core without collapsing into itself
+	var P = _fresh()
+	P.spawn_hold = true
+	_mh_field(P, "mite", 2000, C, 260.0, 520.0)
+	_mh_steps(P, 360)
+	var ov: PackedFloat64Array = P.en.world.call("OverlapStats")
+	var far: float = 0.0
+	var touching: int = 0
+	for es in P.en.order:
+		var dd: float = P.en.pos[es].distance_to(C)
+		far = maxf(far, dd)
+		if dd <= TowerState.STOP_R + 6.0:
+			touching += 1
+	_check("MASS_HORDE pressure: 2000 piled bodies keep their volume (mean overlap %.2f, max %.2f)" % [ov[1], ov[2]], ov[1] < 0.25 and ov[2] < 0.7)
+	_check("MASS_HORDE pressure: the pile backs up away from the Core (%d px) while the front rank presses it (%d)" % [int(far), touching], far > 150.0 and touching >= 8)
+	# ---- knockback parts the crowd (H9: mean radial distance grows within 0.3 s)
+	var spread: Array = []
+	for with_kick in [false, true]:
+		var K = _fresh()
+		K.spawn_hold = true
+		var kc: Vector2 = C + Vector2(0, -320)
+		for i in 400:
+			var d: Dictionary = _enemy("mite", kc + Vector2(float(i % 20) - 9.5, float(i / 20) - 9.5) * 10.0, 999.0)
+			d["spd"] = 0.0
+			K.add_enemy(d)
+		_mh_steps(K, 1)
+		if with_kick:
+			K.en.radial_knock(kc, 120.0, 400.0)
+		_mh_steps(K, 6)
+		var md: float = 0.0
+		for es in K.en.order:
+			md += K.en.pos[es].distance_to(kc)
+		spread.append(md / float(K.en.count()))
+	_check("MASS_HORDE knockback parts the crowd within 0.3 s (mean radius %.1f -> %.1f)" % [spread[0], spread[1]], float(spread[1]) > float(spread[0]) + 10.0)
+	# ---- queries match brute force (C# hash vs the GDScript mirror)
+	var qok: bool = true
+	var qmsg: String = ""
+	for t in 12:
+		var qc: Vector2 = C + Vector2.from_angle(float(t) * 0.7) * (40.0 + 25.0 * float(t))
+		var qr: float = 20.0 + 9.0 * float(t)
+		var got: PackedInt32Array = P.eh.in_radius(qc, qr)
+		var lo: Array = []
+		var hi: Array = []
+		var best: float = INF
+		for es in P.en.order:
+			var dd2: float = P.en.pos[es].distance_to(qc)
+			if dd2 <= qr - 0.01:
+				lo.append(es)
+			if dd2 <= qr + 0.01:
+				hi.append(es)
+				best = minf(best, dd2)
+		for x in lo:
+			if not got.has(int(x)):
+				qok = false
+		for x in got:
+			if not hi.has(int(x)):
+				qok = false
+		var nn: int = P.eh.nearest(qc, qr, {})
+		if hi.is_empty() != (nn < 0) or (nn >= 0 and absf(P.en.pos[nn].distance_to(qc) - best) > 0.01):
+			qok = false
+		var dn: int = P.eh.density(qc, qr)
+		if dn < lo.size() or dn > hi.size():
+			qok = false
+		if not qok and qmsg == "":
+			qmsg = "pt %d: got %d lo %d hi %d" % [t, got.size(), lo.size(), hi.size()]
+	var la: Vector2 = C + Vector2(-300, -200)
+	var lb: Vector2 = C + Vector2(300, 150)
+	var lg: PackedInt32Array = P.eh.line(la, lb, 6.0)
+	var lbf: int = 0
+	var seg: Vector2 = lb - la
+	for es in P.en.order:
+		var q: Vector2 = P.en.pos[es]
+		var t2: float = clampf((q - la).dot(seg) / seg.length_squared(), 0.0, 1.0)
+		var tr: float = (q - la).dot(seg) / seg.length_squared()
+		if tr >= 0.0 and tr <= 1.0 and q.distance_to(la + seg * t2) <= 6.0 + P.en.size[es] * 0.5 - 0.01:
+			lbf += 1
+	_check("MASS_HORDE queries match brute force (radius / nearest / density) %s" % qmsg, qok)
+	_check("MASS_HORDE line query matches brute force (%d vs %d)" % [lg.size(), lbf], lg.size() >= lbf and lg.size() <= lbf + 2 and lbf > 0)
+	var nn3: PackedInt32Array = P.eh.nearest_n(C, 8, 200.0)
+	var mono: bool = nn3.size() == 8
+	for i in range(1, nn3.size()):
+		mono = mono and P.en.pos[nn3[i]].distance_to(C) >= P.en.pos[nn3[i - 1]].distance_to(C) - 0.001
+	_check("MASS_HORDE nearest_n: 8 bodies nearest-first", mono)
+	var dz: Vector2 = P._densest(40.0)
+	_check("MASS_HORDE densest point lies in the pile", dz != Vector2.INF and dz.distance_to(C) < far)
+	# ---- dead bodies leave the world at once (no query / move until reaped)
+	var dead_s: int = P.en.order[0]
+	P._hit(dead_s, 1e9, [])
+	_check("MASS_HORDE a killed body drops out of queries before the reap", not P.eh.in_radius(P.en.pos[dead_s], 0.5).has(dead_s))
+	# ---- sealed Core: contact attacks aggregate per building; the wall falls -> surge
+	var G = _fresh()
+	G.spawn_hold = true
+	G.stats["weapons"] = []
+	var rn: int = _rc(2, 3)
+	for dr in [-1, 0, 1]:
+		for dc in [-1, 0, 1]:
+			if dr != 0 or dc != 0:
+				G.slots[_rc(3 + dr, 3 + dc)] = {"id": "barricade", "perm": 0, "run": 3}
+	G.recompute()
+	G.stats["weapons"] = []
+	for k2 in G.bld_hp.size():
+		if float(G.bld_hp[k2]) > 0.0:
+			G.bld_hp[k2] = 1e9
+	_mh_field(G, "mite", 600, TowerState.slot_pos(rn) + Vector2(0, -150), 0.0, 120.0)
+	var agg_ok: bool = true
+	var hits_n: int = 0
+	for k in 160:
+		var gev: Array = []
+		G._move_enemies(0.05, gev)
+		var seen_b: Dictionary = {}
+		for e in _evts(gev, "bld_hit"):
+			var bs: int = int((e as Dictionary)["slot"])
+			if seen_b.has(bs):
+				agg_ok = false
+			seen_b[bs] = true
+			hits_n += int((e as Dictionary)["n"])
+	var at_core: int = 0
+	for es in G.en.order:
+		if G.en.pos[es].distance_to(C) <= TowerState.STOP_R + 10.0:
+			at_core += 1
+	_check("MASS_HORDE sealed Core: the crowd presses the wall (%d hits), one aggregated bld_hit row per building per step, none reach the Core" % hits_n, agg_ok and hits_n >= 50 and at_core == 0)
+	G.bld_hp[rn] = 1.0
+	G._destroy_building(rn, [])
+	G.recompute()
+	for k in 60:
+		G._move_enemies(0.05, [])
+	at_core = 0
+	for es in G.en.order:
+		if G.en.pos[es].distance_to(C) <= TowerState.STOP_R + 10.0:
+			at_core += 1
+	_check("MASS_HORDE the wall falls -> the dammed crowd surges through to the Core (%d)" % at_core, at_core >= 5)
+
+
 ## HORDE Phase 1 gates: the 120 s seeded golden (recorded from the Dict
 ## implementation before the SoA port) and the store/hash invariants.
 ## FEEDBACK-1 (deliberate): no lanes, building blocking, live drafts, new
@@ -667,22 +863,21 @@ func _horde_p34() -> void:
 ## this build (bit-identity to the Dict impl only held while rules matched).
 ## HORDE P3+P4 (deliberate): fixed substeps + separation + contact rule +
 ## knockback change the motion, so the golden was re-recorded again.
-const HORDE_FP_GOLDEN: String = "9376f2623b5decc493ff065eddff9f3daab94f977e75df9a8d93e0428a6a1fbd"
+## MASS_HORDE (deliberate, FEEDBACK_3): the move step is now the C# HordeWorld
+## (flow field around buildings, liquid pressure, aggregated building contact,
+## C# queries in slot order), so the golden was re-recorded from this build.
+const HORDE_FP_GOLDEN: String = "c21bb5667802945c564e73d073a63130ec2008225f1aed81091afc00bfb969a4"
 func _horde_stages() -> void:
 	var FP = load("res://horde_fp.gd")
 	var got: String = FP.run_all()
 	_check("HORDE 120 s seeded fingerprint matches the recorded golden (%s)" % got.left(8), got == HORDE_FP_GOLDEN)
 	_check("HORDE fingerprint is deterministic (two runs)", FP.run_all() == got)
-	# C# hot loop (HordeMove.cs) vs the GDScript reference path: bit-identical.
-	var ES = load("res://EnemyStore.gd")
-	var prev_mode: int = ES.cs_mode
-	ES.cs_mode = 0
-	var got_gd: String = FP.run_all()
-	ES.cs_mode = 1
-	var got_cs: String = FP.run_all() if ES.cs_available() else got_gd
-	ES.cs_mode = prev_mode
-	_check("HORDE C# hot loop available (mono build)", ES.cs_available())
-	_check("HORDE C# and GDScript hot loops give the same 120 s fingerprint", got_gd == HORDE_FP_GOLDEN and got_cs == HORDE_FP_GOLDEN)
+	# MASS_HORDE (deliberate): the C# vs GDScript float32 parity gate is retired
+	# with the GDScript move path (MASS_HORDE §11: HordeMove.cs folded into the
+	# C# HordeWorld, doubles throughout). Determinism moves to the HordeWorld
+	# checksum and the fingerprint above; the world itself is gated below.
+	_check("HORDE C# HordeWorld available (mono build)", load("res://EnemyStore.gd").cs_available())
+	_mass_horde_world()
 	_horde_p34()
 	var S = _fresh()
 	S.spawn_hold = true
@@ -699,7 +894,9 @@ func _horde_stages() -> void:
 	_check("HORDE hash in_radius / nearest", Array(S.eh.in_radius(TowerState.CENTER + Vector2(0, -300), 10.0)) == [0] and S.eh.nearest(TowerState.CENTER + Vector2(290, 0), 50.0, {}) == 2 and S.eh.nearest(TowerState.CENTER, 50.0, {}) == -1)
 	var hits: Array = []
 	S.eh.damage(TowerState.CENTER, 310.0, 1.0, func(sl: int, amt: float) -> void: hits.append(sl))
-	_check("HORDE hash damage(): every live body in radius, spawn order", hits == [0, 2, 1])
+	# MASS_HORDE (deliberate): queries come from the C# hash in ascending SLOT
+	# order (was spawn order from the retired GDScript hash); still every body.
+	_check("HORDE hash damage(): every live body in radius, slot order", hits == [0, 1, 2])
 	_check("HORDE density counts exact neighbours", S.eh.density(TowerState.CENTER + Vector2(0, -300), 1.0) == 1)
 	# ---- FB1: per-body horde loot is common, low value and capped per wave
 	var SL = _fresh()
@@ -1626,6 +1823,11 @@ func _pc_building_stages() -> void:
 	# enemies attack buildings standing in their way before the Core; the
 	# Barricade is the dedicated high-HP blocker (200 HP x1.35^(L-1) x enemy
 	# dmg growth; others 40 HP). Destroyed = lost for the run.
+	# MASS_HORDE (deliberate, FEEDBACK_3 + MASS_HORDE D4/H9): the crowd is a
+	# fluid on a flow field. A building with open ground around it is flowed
+	# AROUND (not chewed through); a building that seals the path is pressed
+	# against and attacked. The FB1 "stops at the building in its way" gate is
+	# re-aimed at a sealed path (the Core's 8 neighbours all walled).
 	S = _open_run()
 	S.slots[r2] = {"id": "barricade", "perm": 0, "run": 2}
 	S.slots[_rc(3, 1)] = {"id": "mine", "perm": 0, "run": 1}
@@ -1633,22 +1835,36 @@ func _pc_building_stages() -> void:
 	S.stats["weapons"] = []
 	var whp: float = 200.0 * 1.35
 	_check("FB1 barricade HP 200 x1.35/lv, other buildings 40", is_equal_approx(S.bld_max(r2), whp) and is_equal_approx(float(S.bld_hp[r2]), whp) and is_equal_approx(S.bld_max(_rc(3, 1)), 40.0) and S.bld_max(_rc(3, 3)) == 0.0)
-	var wn: Dictionary = _enemy("drone", TowerState.slot_pos(r2) + Vector2(0, -60))
+	var wa: Dictionary = _enemy("drone", TowerState.slot_pos(r2) + Vector2(0, -60))
+	S.set_enemies([wa])
+	var aev: Array = []
+	for k in 40:
+		S._move_enemies(0.1, aev)
+	_sync(S, [wa])
+	_check("MASS_HORDE an open-ground building is flowed around: the body reaches the Core, the building is untouched", (wa["pos"] as Vector2).distance_to(TowerState.CENTER) <= TowerState.STOP_R + 8.5 and _evts(aev, "bld_hit").is_empty() and is_equal_approx(float(S.bld_hp[r2]), whp))
+	S = _open_run()
+	var rn: int = _rc(2, 3)   # the Core's north neighbour
+	for dr in [-1, 0, 1]:
+		for dc in [-1, 0, 1]:
+			if dr != 0 or dc != 0:
+				S.slots[_rc(3 + dr, 3 + dc)] = {"id": "barricade", "perm": 0, "run": 2}
+	S.slots[_rc(3, 1)] = {"id": "mine", "perm": 0, "run": 1}
+	S.recompute()
+	S.stats["weapons"] = []
+	var wn: Dictionary = _enemy("drone", TowerState.slot_pos(rn) + Vector2(0, -60))
 	wn["dmg"] = 10.0
-	var ws: Dictionary = _enemy("drone", TowerState.CENTER + Vector2(0, 150))
-	S.set_enemies([wn, ws])
+	S.set_enemies([wn])
 	var bev: Array = []
 	for k in 40:
 		S._move_enemies(0.1, bev)
-	_sync(S, [wn, ws])
-	_check("FB1 enemy stops at a building in its way and attacks it", (wn["pos"] as Vector2).distance_to(TowerState.slot_pos(r2)) > TowerState.CELL * 0.5 and _evts(bev, "bld_hit").size() >= 3 and float(S.bld_hp[r2]) < whp and float(S.bld_hp[r2]) > 0.0)
-	_check("FB1 an unblocked enemy walks on to the Core", (ws["pos"] as Vector2).distance_to(TowerState.CENTER) <= TowerState.STOP_R + 0.01)
+	_sync(S, [wn])
+	_check("FB1 enemy stops at a building sealing its path and attacks it", (wn["pos"] as Vector2).distance_to(TowerState.slot_pos(rn)) > TowerState.CELL * 0.5 and _evts(bev, "bld_hit").size() >= 3 and float(S.bld_hp[rn]) < whp and float(S.bld_hp[rn]) > 0.0)
 	wn["dmg"] = 5000.0
 	_push(S, wn)
 	bev = []
 	for k in 12:
 		S._move_enemies(0.1, bev)
-	_check("FB1 a building at 0 HP is destroyed and lost for the run", _evts(bev, "building_destroyed").size() == 1 and S.id_at(r2) == "" and S.bld_lost == ["barricade"] and float(S.bld_hp[r2]) == 0.0)
+	_check("FB1 a building at 0 HP is destroyed and lost for the run", _evts(bev, "building_destroyed").size() == 1 and S.id_at(rn) == "" and S.bld_lost == ["barricade"] and float(S.bld_hp[rn]) == 0.0)
 	_sync(S, [wn])
 	var p0: Vector2 = wn["pos"]
 	S._move_enemies(0.5, [])

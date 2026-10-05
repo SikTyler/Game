@@ -1,173 +1,94 @@
 extends RefCounted
-## HORDE Phase 1: uniform spatial hash over EnemyStore (pure, no Nodes).
-## 32 px cells over CENTER +- 512 (bodies outside clamp into the edge cells,
-## so no body is ever missed). Rebuilt lazily (native sort of (cell, rank)
-## keys) whenever the store is dirty (moves, knock, spawn, reap) -> queries always see current
-## positions. Keys carry spawn-order RANKS, so a query's candidates come back
-## in `order` (spawn) order and callers that keep the Dict code's exact
-## predicate and tie operators reproduce the linear scan's result bit-for-bit.
-## Candidates are a superset (AABB of the query); callers apply the exact test.
-
-const CS: float = 32.0
-const HALF: float = 512.0
+## MASS_HORDE §5: thin GDScript facade over the C# HordeWorld query API
+## (HordeWorld.cs keeps its own uniform hash, rebuilt lazily after a step,
+## spawn or death). Results hold LIVING bodies only (hp > 0: the rules mark a
+## death with EnemyStore.kill), in ascending SLOT order. The old GDScript
+## (cell, spawn-rank) sorted-key hash is retired: candidates come back in slot
+## order instead of spawn order (deterministic either way; the determinism
+## golden was re-recorded, see selftest HORDE_FP_GOLDEN).
 
 var st = null                     # EnemyStore
-var ox: float = 0.0
-var oy: float = 0.0
-var gw: int = 32
-var keys: PackedInt64Array = PackedInt64Array()        # (cell << 20) | rank, sorted
 var rebuilds: int = 0
-var last_us: int = 0      # view-only profile of the last rebuild (debug overlay)
-## Below this many stored bodies the whole `order` is the candidate set (no
-## rebuild, no gather): the hash only pays for itself in a crowd.
-const SMALL_N: int = 64
+var last_us: int = 0              # view-only profile (debug overlay): last C# step
 
 
-func _init(store, center: Vector2) -> void:
+func _init(store, _center: Vector2 = Vector2.ZERO) -> void:
 	st = store
-	ox = center.x - HALF
-	oy = center.y - HALF
-	gw = int(ceil(2.0 * HALF / CS))
 
 
-func _cx(x: float) -> int:
-	return clampi(int(floor((x - ox) / CS)), 0, gw - 1)
+func _w() -> Object:
+	return st.world
 
 
-func _cy(y: float) -> int:
-	return clampi(int(floor((y - oy) / CS)), 0, gw - 1)
-
-
+## Kept for callers/tests that forced a rebuild: the C# hash is always current.
 func ensure() -> void:
-	if st.dirty:
-		rebuild()
+	pass
 
 
-## Key every stored body by (cell, spawn rank) and sort natively: one cell
-## row is then one contiguous, rank-ordered run found by bsearch.
 func rebuild() -> void:
 	rebuilds += 1
-	var t0: int = Time.get_ticks_usec()
-	var order: PackedInt32Array = st.order
-	var pos: PackedVector2Array = st.pos
-	var n: int = order.size()
-	keys.resize(n)
-	for r in n:
-		var p: Vector2 = pos[order[r]]
-		keys[r] = ((_cy(p.y) * gw + _cx(p.x)) << 20) | r
-	keys.sort()
-	st.dirty = false
-	last_us = Time.get_ticks_usec() - t0
+	last_us = int((_w().call("Stats") as Dictionary).get("step_us", 0))
 
 
-## Distinct occupied cells (debug overlay only; O(n) over the sorted keys).
+## Debug overlay: living bodies (the C# hash has no cheap occupied-cell count).
 func cell_count() -> int:
-	var c: int = 0
-	var prev: int = -1
-	for k in keys:
-		var cell: int = k >> 20
-		if cell != prev:
-			c += 1
-			prev = cell
-	return c
+	return int(_w().call("Alive"))
 
 
-## Slots of every body whose position lies in the AABB [a, b] (spawn order).
+## Living bodies whose position lies in the AABB [a, b].
 func rect(a: Vector2, b: Vector2) -> PackedInt32Array:
-	var order: PackedInt32Array = st.order
-	if order.size() <= SMALL_N:
-		return order
-	var x0: int = _cx(minf(a.x, b.x))
-	var x1: int = _cx(maxf(a.x, b.x))
-	var y0: int = _cy(minf(a.y, b.y))
-	var y1: int = _cy(maxf(a.y, b.y))
-	if (x1 - x0 + 1) * (y1 - y0 + 1) * 2 >= gw * gw:
-		return order   # most of the field: the whole order is the superset
-	ensure()
-	var ranks: PackedInt32Array = PackedInt32Array()
-	var runs: int = 0
-	for cy in range(y0, y1 + 1):
-		var row: int = cy * gw
-		var lo: int = keys.bsearch((row + x0) << 20)
-		var hi: int = keys.bsearch((row + x1 + 1) << 20)
-		if hi > lo:
-			runs += 1
-			for k in range(lo, hi):
-				ranks.append(keys[k] & 0xFFFFF)
-	if runs > 1 or x1 > x0:
-		ranks.sort()
-	var out: PackedInt32Array = PackedInt32Array()
-	out.resize(ranks.size())
-	for k in ranks.size():
-		out[k] = order[ranks[k]]
-	return out
+	return _w().call("InRect", a.x, a.y, b.x, b.y)
 
 
-## Candidate slots (spawn order) for anything within r of c (+1 px slack).
+## Candidate slots for anything within r of c: centre within r + own radius
+## (a superset of every caller's exact predicate).
 func candidates(c: Vector2, r: float) -> PackedInt32Array:
-	var rr: float = r + 1.0
-	return rect(c - Vector2(rr, rr), c + Vector2(rr, rr))
+	return _w().call("Candidates", c.x, c.y, r)
 
 
-## Living bodies with |pos - c| <= r (+ size/2 when pad_size), spawn order.
+## Living bodies with |pos - c| <= r (+ size/2 when pad_size).
 func in_radius(c: Vector2, r: float, pad_size: bool = false) -> PackedInt32Array:
-	var out: PackedInt32Array = PackedInt32Array()
-	var hp: PackedFloat64Array = st.hp
-	var pos: PackedVector2Array = st.pos
-	var sz: PackedFloat64Array = st.size
-	for s in candidates(c, r + (st.max_size * 0.5 if pad_size else 0.0)):
-		if hp[s] <= 0.0:
-			continue
-		if pos[s].distance_to(c) <= r + (sz[s] * 0.5 if pad_size else 0.0):
-			out.append(s)
-	return out
+	return _w().call("InRadius", c.x, c.y, r, pad_size)
 
 
-## The Dict `_nearest`: living body with the smallest d^2 <= r^2 (ties: the
-## later one in spawn order, `<=`), skipping slots in `exclude`. -1 if none.
+## Living bodies within `width` (+ size/2) of the segment a-b.
+func line(a: Vector2, b: Vector2, width: float) -> PackedInt32Array:
+	return _w().call("InLine", a.x, a.y, b.x, b.y, width)
+
+
+## Living bodies in a cone from `apex` along unit `dir`, half angle (rad), range.
+func cone(apex: Vector2, dir: Vector2, half_angle: float, rng: float) -> PackedInt32Array:
+	return _w().call("InCone", apex.x, apex.y, dir.x, dir.y, cos(half_angle), rng)
+
+
+## Living body with the smallest d^2 <= r^2 (ties: the higher slot, `<=`),
+## skipping slots in `exclude`. -1 if none.
 func nearest(from: Vector2, rng_lim: float, exclude: Dictionary) -> int:
-	var best: int = -1
-	var best_d: float = rng_lim * rng_lim
-	var hp: PackedFloat64Array = st.hp
-	var pos: PackedVector2Array = st.pos
-	for s in candidates(from, rng_lim):
-		if exclude.has(s):
-			continue
-		if hp[s] <= 0.0:
-			continue
-		var d2: float = from.distance_squared_to(pos[s])
-		if d2 <= best_d:
-			best_d = d2
-			best = s
-	return best
+	return int(_w().call("Nearest", from.x, from.y, rng_lim, PackedInt32Array(exclude.keys())))
 
 
-## Number of living bodies within distance r of p (exact; `_densest`).
-## Order-free, so it walks the key runs directly (no candidate sort).
+## Up to n nearest living bodies within r (nearest first).
+func nearest_n(from: Vector2, n: int, r: float) -> PackedInt32Array:
+	return _w().call("NearestN", from.x, from.y, n, r)
+
+
+## Number of living bodies within distance r of p (exact).
 func density(p: Vector2, r: float) -> int:
-	var n: int = 0
-	var hp: PackedFloat64Array = st.hp
-	var pos: PackedVector2Array = st.pos
-	var order: PackedInt32Array = st.order
-	if order.size() <= SMALL_N:
-		for s in order:
-			if hp[s] > 0.0 and p.distance_to(pos[s]) <= r:
-				n += 1
-		return n
-	ensure()
-	var rr: float = r + 1.0
-	var x0: int = _cx(p.x - rr)
-	var x1: int = _cx(p.x + rr)
-	for cy in range(_cy(p.y - rr), _cy(p.y + rr) + 1):
-		var row: int = cy * gw
-		for k in range(keys.bsearch((row + x0) << 20), keys.bsearch((row + x1 + 1) << 20)):
-			var s: int = order[keys[k] & 0xFFFFF]
-			if hp[s] > 0.0 and p.distance_to(pos[s]) <= r:
-				n += 1
-	return n
+	return int(_w().call("Density", p.x, p.y, r))
 
 
-## Apply `hit.call(slot, amt)` to every living body within r of c (spawn
+## Position of the living body with the most neighbours within r (ties: the
+## closest to the Core). Vector2.INF when the field is empty.
+func densest(r: float) -> Vector2:
+	return _w().call("Densest", r)
+
+
+## Tesla-style hop list from slot `start` (nearest unvisited within jump_r).
+func chain(start: int, jumps: int, jump_r: float) -> PackedInt32Array:
+	return _w().call("Chain", start, jumps, jump_r)
+
+
+## Apply `hit.call(slot, amt)` to every living body within r of c (slot
 ## order). Returns the slots hit.
 func damage(c: Vector2, r: float, amt: float, hit: Callable, pad_size: bool = false) -> PackedInt32Array:
 	var got: PackedInt32Array = in_radius(c, r, pad_size)
@@ -176,15 +97,11 @@ func damage(c: Vector2, r: float, amt: float, hit: Callable, pad_size: bool = fa
 	return got
 
 
-## Knockback velocity (Phase 4). Off at horde_mult 1 (nothing calls it yet).
+## Knockback velocity on one body (mass rule in EnemyStore.knock).
 func impulse(s: int, v: Vector2) -> void:
-	st.vel[s] = st.vel[s] + v
+	st.knock(s, v)
 
 
-## Radial impulse with linear falloff from c (Phase 4; unused at horde_mult 1).
-func radial_impulse(c: Vector2, r: float, k: float) -> void:
-	for s in in_radius(c, r):
-		var d: Vector2 = st.pos[s] - c
-		var l: float = d.length()
-		if l > 0.0:
-			impulse(s, d / l * k * (1.0 - l / r))
+## Radial impulse with falloff from c (C#). Returns the bodies pushed.
+func radial_impulse(c: Vector2, r: float, k: float) -> int:
+	return st.radial_knock(c, r, k)

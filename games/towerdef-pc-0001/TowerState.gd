@@ -1493,6 +1493,7 @@ func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF, marked: bool = f
 		en.coin[e] = en.coin[e] * share
 		# FB2: art + hit box + separation scale back with the body count (area-conserving)
 		en.set_size(e, en.size[e] * maxf(sqrt(share), TuneRef.num("pc_horde_size_floor", 0.45)))
+	en.commit(e)
 	if kind == "boss":
 		ev.append({"t": "boss", "pos": en.pos[e]})
 	if marked:
@@ -1555,8 +1556,7 @@ func _spawn_courier(ev: Array) -> void:
 	if not _spawn("courier", ev, from):
 		return
 	var cd: int = en.order[en.order.size() - 1]
-	en.exit[cd] = to
-	en.flags[cd] = en.flags[cd] | EnemyStore.F_EXIT
+	en.set_exit(cd, to)
 	couriers += 1
 	ev.append({"t": "courier_spawn", "eid": en.eid[cd], "pos": from, "to": to})
 
@@ -1590,15 +1590,13 @@ func _move_enemies(dt: float, ev: Array) -> void:
 	# Occupancy of standing buildings (the Core cell is never a blocker).
 	var blk: PackedByteArray = PackedByteArray()
 	blk.resize(N)
-	var any_b: bool = false
 	for i in N:
 		if i != CORE_SLOT and float(bld_hp[i]) > 0.0 and id_at(i) != "":
 			blk[i] = 1
-			any_b = true
-	# The hot pass runs inside EnemyStore (own-member packed access is ~5x
-	# faster than en.x[s] from here). It returns an ordered action log; the
-	# Core / building effects replay in the same order.
-	var acts: PackedInt32Array = en.move(dt, frozen, CENTER, STOP_R, r_stop, r_fire, blk if any_b else PackedByteArray(), SIDE, CELL, PackedFloat64Array([TuneRef.num("horde_accel", 6.0), TuneRef.num("horde_sep", 0.5), TuneRef.num("horde_sep_cap", 0.35), TuneRef.num("horde_friction", 6.0)]))
+	# MASS_HORDE: the step runs in the C# HordeWorld (flow field, pressure,
+	# knockback, contact). It returns an ordered action log; the Core effects
+	# replay in slot order, then one aggregated row per hit building.
+	var acts: PackedInt32Array = en.move(dt, frozen, CENTER, STOP_R, r_stop, r_fire, blk, SIDE, CELL, PackedFloat64Array([TuneRef.num("horde_accel", 6.0), TuneRef.num("horde_sep", 0.5), TuneRef.num("horde_sep_cap", 0.35), TuneRef.num("horde_friction", 6.0), TuneRef.num("horde_kmax", 24.0), TuneRef.num("horde_front", 10.0), TuneRef.num("horde_bld_cost", 40.0)]))
 	var k: int = 0
 	var escaped: Array = []
 	var lost: bool = false
@@ -1608,13 +1606,15 @@ func _move_enemies(dt: float, ev: Array) -> void:
 		k += 2
 		match op:
 			EnemyStore.ACT_BLD:
-				var c: int = acts[k]
+				# MASS_HORDE §4: one row per building per step (hits summed in C#)
+				var c: int = e
+				var nh: int = acts[k]
 				k += 1
 				if float(bld_hp[c]) <= 0.0 or id_at(c) == "":
 					continue
-				var amt: float = en.dmg[e]
+				var amt: float = en.bld_dmg[c]
 				bld_hp[c] = float(bld_hp[c]) - amt
-				ev.append({"t": "bld_hit", "slot": c, "dmg": amt, "pos": en.pos[e]})
+				ev.append({"t": "bld_hit", "slot": c, "dmg": amt, "n": nh, "pos": slot_pos(c)})
 				if float(bld_hp[c]) <= 0.0:
 					_destroy_building(c, ev)
 					lost = true
@@ -1726,7 +1726,9 @@ func _hit(e: int, dmg_in: float, ev: Array, crit: bool = false) -> void:
 		if away != Vector2.ZERO:
 			en.knock(e, away.normalized() * (_kb_k * TuneRef.num("horde_knock", 60.0) * (0.25 + minf(1.0, dmg / en.max_hp[e]))))
 	en.hp[e] = en.hp[e] - dmg
-	en.hit_t[e] = HIT_FLASH
+	if en.hp[e] <= 0.0:
+		en.kill(e)
+	en.flash(e, HIT_FLASH)
 	var ls: float = float(stats.get("lifesteal", 0.0))
 	if ls > 0.0 and real > 0.0:
 		hp = minf(float(stats["max_hp"]), hp + real * ls)
@@ -1798,8 +1800,7 @@ func _wall_auras() -> void:
 		var c: Vector2 = slot_pos(i)
 		for fe in eh.candidates(c, r):
 			if en.hp[fe] > 0.0 and c.distance_to(en.pos[fe]) <= r:
-				en.slow_t[fe] = maxf(en.slow_t[fe], 0.2)
-				en.slow_m[fe] = minf(en.slow_m[fe] if en.slow_t[fe] > 0.0 else 1.0, sm)
+				en.apply_slow(fe, 0.2, sm)
 
 
 func _fire(dt: float, ev: Array) -> void:
@@ -1842,8 +1843,7 @@ func _fire(dt: float, ev: Array) -> void:
 			for fe in eh.candidates(from, frange):
 				if en.hp[fe] > 0.0 and from.distance_to(en.pos[fe]) <= frange:
 					any = true
-					en.slow_t[fe] = maxf(en.slow_t[fe], float(wd["slow_t"]))
-					en.slow_m[fe] = minf(en.slow_m[fe] if en.slow_t[fe] > 0.0 else 1.0, 1.0 - float(wd["slow"]))
+					en.apply_slow(fe, float(wd["slow_t"]), 1.0 - float(wd["slow"]))
 					_hit(fe, float(wd["dmg"]), ev)
 			if any:
 				ev.append({"t": "shot", "kind": "frost", "from": from, "to": from, "radius": float(wd["range"])})
@@ -1910,8 +1910,8 @@ func _fire(dt: float, ev: Array) -> void:
 					hit[cur] = true
 					var ce: int = cur
 					_hit(ce, d2, ev, crit)
-					en.slow_t[ce] = maxf(en.slow_t[ce], 0.6)
-					en.shock_t[ce] = 1.5
+					en.apply_slow(ce, 0.6, en.slow_m[ce] if en.slow_t[ce] > 0.0 else 1.0)
+					en.set_shock(ce, 1.5)
 					en.shock_src[ce] = si
 					var cpos: Vector2 = en.pos[ce]
 					ev.append({"t": "shot", "kind": kind, "from": prev, "to": cpos})
@@ -1984,8 +1984,7 @@ func _core_fire(wd: Dictionary, ev: Array) -> bool:
 			for ed in eh.candidates(tpos2, rad2):
 				if en.hp[ed] > 0.0 and en.pos[ed].distance_to(tpos2) <= rad2:
 					_hit(ed, d2, ev, crit2)
-					en.slow_t[ed] = maxf(en.slow_t[ed], float(wd["slow_t"]))
-					en.slow_m[ed] = minf(en.slow_m[ed] if en.slow_t[ed] > 0.0 else 1.0, 1.0 - float(wd["slow"]))
+					en.apply_slow(ed, float(wd["slow_t"]), 1.0 - float(wd["slow"]))
 					targets.append(en.eid[ed])
 			ev.append({"t": "shot", "kind": "core", "from": CENTER, "to": tpos2, "radius": rad2})
 		"beam":
@@ -2142,10 +2141,12 @@ func _reap(ev: Array) -> void:
 	var cm: float = run_coin_mult()
 	var ci: float = cash_index()
 	var magnet: float = 2.0 if float(buffs.get("magnet_t", 0.0)) > 0.0 else 1.0
-	for ed in en.order:
-		if en.hp[ed] > 0.0:
-			alive.append(ed)
-			continue
+	var split: Array = en.split_order()   # C#: [alive, dead] in spawn order (no 10k GDScript scan)
+	var dead_in: PackedInt32Array = split[1]
+	if dead_in.is_empty():
+		return
+	alive = split[0]
+	for ed in dead_in:
 		var pos: Vector2 = en.pos[ed]
 		var bm: float = 1.0
 		for b in stats.get("bounties", []):
@@ -2626,8 +2627,7 @@ func cast_special(k: int, cell: Variant = -1) -> Dictionary:
 			if live == 0:
 				return {"result": "no_target", "ev": []}
 			for ed in en.order:
-				en.slow_t[ed] = maxf(en.slow_t[ed], float(fx["dur"]))
-				en.slow_m[ed] = minf(en.slow_m[ed], 1.0 - float(fx["slow"]))
+				en.apply_slow(ed, float(fx["dur"]), 1.0 - float(fx["slow"]))
 				en.shield[ed] = 0
 		"sp_timewarp":
 			if live == 0:
@@ -2657,20 +2657,7 @@ func cast_special(k: int, cell: Variant = -1) -> Dictionary:
 ## Centre of the enemy with the most neighbours within r (ties: the closest
 ## to the Core) — deterministic Orbital auto-aim.
 func _densest(r: float) -> Vector2:
-	var best: Vector2 = Vector2.INF
-	var best_n: int = -1
-	var best_d: float = INF
-	for ed in en.order:
-		if en.hp[ed] <= 0.0:
-			continue
-		var p: Vector2 = en.pos[ed]
-		var n: int = eh.density(p, r)   # exact neighbour count via the hash
-		var d: float = CENTER.distance_squared_to(p)
-		if n > best_n or (n == best_n and d < best_d):
-			best_n = n
-			best_d = d
-			best = p
-	return best
+	return eh.densest(r)   # C# HordeWorld.Densest (exact neighbour counts via its hash)
 
 
 ## Theoretical damage per second of the whole board (stats screen "highest DPS").
