@@ -181,3 +181,14 @@ The profile scatters bodies over the board, so they overlap heavily: the crowd i
 **Verdict:** GDScript cannot hold 60 fps at the HORDE_PLAN PC target. At 20 Hz substeps, 5k bodies cost about 420 ms per second of sim at 1× (2× and 3× speed multiply that), and 10k cost about 830 ms/s.
 
 **PROPOSAL (not implemented, owner decision):** move `EnemyStore.move` and the separation grid to a C# (or GDExtension C++) hot loop over the same packed arrays. The expected gain is 20–50× in the inner pair loop, which puts 10k under 2 ms per substep. Alternatively, a compute-shader separation pass with a CPU readback of positions. A cheaper step first: cap separation to every other substep, or use the 12-candidate scan only inside the crowd band near the Core.
+
+## Phases 5 + 6 (view only) — outcome
+
+- **Gore (P5):** `vfx/Gore.gd` — pooled one-shot GPUParticles2D blood emitters (low 6 / full 16, round-robin, no allocation in a kill storm) + a never-cleared 2048² SubViewport ground layer (covers 2600 world units around the Core). Corpses/blood are stamp commands in a capped ring buffer (512); at most 24 (low) / 96 (full) are drawn per frame with UPDATE_ONCE, so cost is per new stamp, not per corpse. Battle draws the ground texture under the grid/world. Horde `kills` aggregates stamp every body (count `n`), not just the 16-position sample. Run reset clears via CLEAR_MODE_ONCE.
+- **Setting:** `video.gore` off/low/full in settings.cfg (default low), Settings > Video row "Gore"; live-applied each frame.
+- **Feedback (P6):** Juice caps — trauma added per frame ≤ 0.35, total ≤ 0.8; hit-stop ≤ 0.08 s with a 0.6 s cooldown; mass-kill (n ≥ 40 per substep) hit-stop 0.03 s. Screen shake now honours the existing "Screen shake" / "Reduce motion" settings (it was ignored before). Damage numbers get a drop shadow (aggregation per 64 px cell unchanged).
+- **Debug overlay (P6):** F3 toggles; shows bodies, FPS, sim ms (smoothed wall time of `S.tick`), hash ms (`EnemyHash.last_us`, last rebuild), hash cells (distinct occupied cells), gore level + queued stamps. Timing fields are view-only and do not affect the sim.
+- **Tests:** uitest +6 checks (gore default low, cycles + persists, view follows, off persists, F3 on/off with all stat keys). No assertions changed.
+- **Gates:** import OK; `--quit-after 120` clean; SELFTEST OK (golden/hash unchanged — sim untouched); UITEST OK; PLAYTEST FAIL on the same 15 gates as after P3+P4 (view-only change, expected).
+- **Shot:** `_shots.gd` adds `21_horde_gore.png` (900 extra bodies at horde_mult 10, gore full, overlay on). Under xvfb software GL: ~420 live bodies, sim 3.8 ms, hash 0.26 ms, 101 cells; FPS figure under xvfb is not representative.
+- **Note:** the ground stamps are subtle at the default zoom; the field-wide red tint in the shot is the existing core-hit flash, not gore.
