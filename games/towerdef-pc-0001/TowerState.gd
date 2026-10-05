@@ -74,26 +74,26 @@ const TRACK_IDS: Array = ["dmg", "rate", "range", "eco", "armor"]
 ## Owner feedback #1: few, BIG, expensive levels, each with a real drawback
 ## (no spam-click increments). Per level: "desc" is the gain, "minus" the cost.
 const TRACKS: Dictionary = {
-	"dmg": {"name": "Damage", "base": 60.0, "growth": 2.1, "cap": 8, "desc": "x1.25 Core + building dmg", "minus": "-8% Core attack rate"},
-	"rate": {"name": "Rate", "base": 70.0, "growth": 2.1, "cap": 8, "desc": "+20% Core attack rate", "minus": "-6% Core dmg"},
-	"range": {"name": "Range", "base": 90.0, "growth": 2.3, "cap": 6, "desc": "+0.5 Core range", "minus": "-5% Core attack rate"},
-	"eco": {"name": "Eco", "base": 50.0, "growth": 2.0, "cap": 8, "desc": "+2 cash/s, interest cap +25", "minus": "-5% Core max HP"},
-	"armor": {"name": "Armor", "base": 60.0, "growth": 2.1, "cap": 8, "desc": "+20% HP, +1 regen, +2 armor", "minus": "-6% Core dmg"},
+	"dmg": {"name": "Damage", "base": 120.0, "growth": 3.0, "cap": 6, "desc": "x1.40 Core + building dmg", "minus": "-12% Core attack rate"},
+	"rate": {"name": "Rate", "base": 140.0, "growth": 3.0, "cap": 6, "desc": "+30% Core attack rate", "minus": "-9% Core dmg"},
+	"range": {"name": "Range", "base": 180.0, "growth": 3.2, "cap": 5, "desc": "+0.75 Core range", "minus": "-8% Core attack rate"},
+	"eco": {"name": "Eco", "base": 100.0, "growth": 2.9, "cap": 6, "desc": "+3 cash/s, interest cap +40", "minus": "-8% Core max HP"},
+	"armor": {"name": "Armor", "base": 120.0, "growth": 3.0, "cap": 6, "desc": "+30% HP, +1 regen, +2 armor", "minus": "-9% Core dmg"},
 }
 ## Per-level track multipliers (gain / drawback).
 const DIFF_HP: float = 2.5
 const DIFF_DMG: float = 1.5
-const TRACK_DMG: float = 1.25
-const TRACK_DMG_RATE: float = 0.92
-const TRACK_RATE: float = 1.20
-const TRACK_RATE_DMG: float = 0.94
-const TRACK_RANGE: float = 0.5
-const TRACK_RANGE_RATE: float = 0.95
-const TRACK_ECO_CASH: float = 2.0
-const TRACK_ECO_ICAP: float = 25.0
-const TRACK_ECO_HP: float = 0.95
-const TRACK_ARMOR_HP: float = 0.20
-const TRACK_ARMOR_DMG: float = 0.94
+const TRACK_DMG: float = 1.40
+const TRACK_DMG_RATE: float = 0.88
+const TRACK_RATE: float = 1.30
+const TRACK_RATE_DMG: float = 0.91
+const TRACK_RANGE: float = 0.75
+const TRACK_RANGE_RATE: float = 0.92
+const TRACK_ECO_CASH: float = 3.0
+const TRACK_ECO_ICAP: float = 40.0
+const TRACK_ECO_HP: float = 0.92
+const TRACK_ARMOR_HP: float = 0.30
+const TRACK_ARMOR_DMG: float = 0.91
 
 
 ## Building / hut level ceiling in a run (duplicate picks, L5).
