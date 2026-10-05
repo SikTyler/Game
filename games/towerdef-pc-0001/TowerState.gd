@@ -1382,61 +1382,27 @@ func _move_enemies(dt: float, ev: Array) -> void:
 	var wall_r: float = TuneRef.num("pc_wall_r", STOP_R + 50.0)
 	var wall_slow: float = 1.0 - TuneRef.num("pc_wall_slow", 0.30)
 	var frozen: bool = float(buffs.get("warp_t", 0.0)) > 0.0
+	# The hot pass runs inside EnemyStore (own-member packed access is ~5x
+	# faster than en.x[s] from here). It returns an ordered action log; the
+	# Core-side effects replay in the same order, so events/results are
+	# identical to the old single loop (nothing replayed feeds back into
+	# another body's movement).
+	var acts: PackedInt32Array = en.move(dt, frozen, CENTER, STOP_R, r_stop, r_fire, wall_r, wall_slow, walls)
+	var k: int = 0
 	var escaped: Array = []
-	for e in en.order:
-		var pos: Vector2 = en.pos[e]
-		var slow_t: float = en.slow_t[e]
-		var mult: float = en.slow_m[e] if slow_t > 0.0 else 1.0
-		en.slow_t[e] = maxf(0.0, slow_t - dt)
-		if en.slow_t[e] <= 0.0:
-			en.slow_m[e] = 1.0
-		en.shock_t[e] = maxf(0.0, en.shock_t[e] - dt)
-		en.hit_t[e] = maxf(0.0, en.hit_t[e] - dt)
-		if frozen:
-			continue
-		var kind: String = en.kind[e]
-		if kind == "courier":
-			var to2: Vector2 = en.exit[e] if en.has_exit(e) else pos
-			var dd: Vector2 = to2 - pos
-			var stp: float = en.spd[e] * mult * dt
-			if dd.length() <= stp:
+	while k < acts.size():
+		var op: int = acts[k]
+		var e: int = acts[k + 1]
+		k += 2
+		match op:
+			EnemyStore.ACT_WALL:
+				ev.append({"t": "wall_broken", "quad": e})
+			EnemyStore.ACT_SHOT:
+				_core_damage(en.dmg[e], ev, "enemy_shot", en.pos[e])
+			EnemyStore.ACT_HIT:
+				_core_damage(en.dmg[e], ev, "core_hit", en.pos[e], e)
+			EnemyStore.ACT_ESCAPE:
 				escaped.append(e)
-			else:
-				en.pos[e] = pos + dd.normalized() * stp
-			continue
-		var taunt: float = en.taunt_t[e]
-		if taunt > 0.0:
-			en.taunt_t[e] = maxf(0.0, taunt - dt)
-			continue   # pinned by a Rifleman (it is hitting the troop instead)
-		var ranged: bool = kind == "ranged"
-		var stop: float = r_stop if ranged else STOP_R
-		var to_c: Vector2 = CENTER - pos
-		var dist: float = to_c.length()
-		if dist > stop + 0.001:
-			# Barricade: a standing wall on this lane slows enemies pressing on
-			# it, and they wear it down with their contact damage.
-			var wq: int = en.quad[e]
-			if not walls.is_empty() and dist <= wall_r + 15.0 and walls.has(wq):
-				var wd: Dictionary = walls[wq]
-				if float(wd["hp"]) > 0.0:
-					mult *= wall_slow
-					wd["hp"] = float(wd["hp"]) - en.dmg[e] * dt
-					if float(wd["hp"]) <= 0.0:
-						wd["hp"] = 0.0
-						ev.append({"t": "wall_broken", "quad": wq})
-			var step: float = minf(dist - stop, en.spd[e] * mult * dt)
-			en.pos[e] = pos + to_c.normalized() * step
-		elif ranged:
-			en.fire_cd[e] = en.fire_cd[e] - dt
-			if en.fire_cd[e] <= 0.0:
-				en.fire_cd[e] = en.fire_cd[e] + r_fire
-				_core_damage(en.dmg[e], ev, "enemy_shot", pos)
-		else:
-			en.atk_cd[e] = en.atk_cd[e] - dt
-			if en.atk_cd[e] <= 0.0:
-				en.atk_cd[e] = 1.0
-				_core_damage(en.dmg[e], ev, "core_hit", pos, e)
-	en.dirty = true
 	for x in escaped:
 		var xs: int = x
 		ev.append({"t": "courier_escape", "eid": en.eid[xs], "pos": en.pos[xs]})

@@ -9,8 +9,8 @@ extends RefCounted
 static func build(max_enemies: int = -1) -> GDScript:
 	var src: String = FileAccess.get_file_as_string("res://TowerState.gd")
 	src = _rep(src, "var next_eid: int = 1\n", "var next_eid: int = 1\nstatic var hpeak: int = 0\nstatic var hpeak_wave: int = 0\nstatic var hrefused: int = 0\nstatic var hspawns: int = 0\nstatic var hcap_ticks: int = 0\n")
-	src = _rep(src, "\tif enemies.size() >= MAX_ENEMIES:\n\t\treturn false\n\tvar d: Dictionary = EnemyDB.get_def(kind)", "\tif enemies.size() >= MAX_ENEMIES:\n\t\threfused += 1\n\t\treturn false\n\tvar d: Dictionary = EnemyDB.get_def(kind)")
-	src = _rep(src, "\te[\"quad\"] = quad_of(pos)\n\tenemies.append(e)\n", "\te[\"quad\"] = quad_of(pos)\n\tenemies.append(e)\n\thspawns += 1\n\tif enemies.size() > hpeak:\n\t\thpeak = enemies.size()\n\t\thpeak_wave = wave\n")
+	src = _rep(src, "\tif en.count() >= MAX_ENEMIES:\n\t\treturn false\n\tvar d: Dictionary = EnemyDB.get_def(kind)", "\tif en.count() >= MAX_ENEMIES:\n\t\threfused += 1\n\t\treturn false\n\tvar d: Dictionary = EnemyDB.get_def(kind)")
+	src = _rep(src, "\ten.quad[e] = quad_of(pos)\n", "\ten.quad[e] = quad_of(pos)\n\thspawns += 1\n\tif en.count() > hpeak:\n\t\thpeak = en.count()\n\t\thpeak_wave = wave\n")
 	if max_enemies > 0:
 		src = _rep(src, "const MAX_ENEMIES: int = 220", "const MAX_ENEMIES: int = %d" % max_enemies)
 	var g := GDScript.new()

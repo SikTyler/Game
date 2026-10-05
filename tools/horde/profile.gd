@@ -1,5 +1,5 @@
 extends SceneTree
-## HORDE Phase-0: TowerState.tick() cost per substep at N live enemies.
+## HORDE Phase-0/1 (Phase 1: SoA EnemyStore + EnemyHash): TowerState.tick() cost per substep at N live enemies.
 ## Instrumented runtime copy of TowerState with MAX_ENEMIES lifted (hlib.gd);
 ## enemies are injected through the engine's own _spawn(kind, ev, at, quad)
 ## (spawn_hold stops the wave plan). Enemy HP is pinned huge so the body count
@@ -59,9 +59,9 @@ func _profile(g: GDScript, n: int, steps: int, board: String, do_densest: bool) 
 		var d: float = r.randf_range(S.STOP_R, S.SPAWN_R)
 		S._spawn(String(KINDS[k % KINDS.size()]), ev0, S.CENTER + Vector2.from_angle(a) * d, -1)
 	var spawn_us: float = float(Time.get_ticks_usec() - t_sp) / float(maxi(1, n))
-	for e in S.enemies:
-		e["hp"] = 1e15
-		e["max_hp"] = 1e15
+	for e in S.en.order:
+		S.en.hp[e] = 1e15
+		S.en.max_hp[e] = 1e15
 	var ph: Dictionary = {"move": 0, "fire": 0, "troops": 0, "reap": 0, "step": 0}
 	var evn: int = 0
 	var handle_us: int = 0
@@ -92,7 +92,7 @@ func _profile(g: GDScript, n: int, steps: int, board: String, do_densest: bool) 
 		ph["fire"] += t3 - t2
 		ph["troops"] += t4 - t3
 		ph["reap"] += t5 - t4
-	var out: Dictionary = {"n": S.enemies.size(), "spawn_us_each": snappedf(spawn_us, 0.01), "events_per_step": evn / steps,
+	var out: Dictionary = {"n": S.enemy_count(), "hash_rebuilds": S.eh.rebuilds, "spawn_us_each": snappedf(spawn_us, 0.01), "events_per_step": evn / steps,
 		"handle_ms_per_step": snappedf(float(handle_us) / steps / 1000.0, 0.001)}
 	for k in ph.keys():
 		out[k + "_ms"] = snappedf(float(ph[k]) / steps / 1000.0, 0.001)

@@ -138,13 +138,23 @@ func nearest(from: Vector2, rng_lim: float, exclude: Dictionary) -> int:
 
 
 ## Number of living bodies within distance r of p (exact; `_densest`).
+## Order-free, so it walks the cells directly (no candidate sort).
 func density(p: Vector2, r: float) -> int:
+	ensure()
 	var n: int = 0
 	var hp: PackedFloat64Array = st.hp
 	var pos: PackedVector2Array = st.pos
-	for s in candidates(p, r):
-		if hp[s] > 0.0 and p.distance_to(pos[s]) <= r:
-			n += 1
+	var order: PackedInt32Array = st.order
+	var rr: float = r + 1.0
+	var x0: int = _cx(p.x - rr)
+	var x1: int = _cx(p.x + rr)
+	for cy in range(_cy(p.y - rr), _cy(p.y + rr) + 1):
+		var row: int = cy * gw
+		for c in range(row + x0, row + x1 + 1):
+			for k in range(cell_start[c], cell_start[c + 1]):
+				var s: int = order[items[k]]
+				if hp[s] > 0.0 and p.distance_to(pos[s]) <= r:
+					n += 1
 	return n
 
 
