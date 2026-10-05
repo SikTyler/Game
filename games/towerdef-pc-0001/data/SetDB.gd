@@ -14,7 +14,7 @@ const DEFS: Dictionary = {
 	"mint": {"name": "Mint", "members": ["f_ledgerframe", "b_bounty", "c_interest", "e_mintpress"], "special": "golden_ratio",
 		"two": {"cash": 0.10}, "four": {"interest_fast": 1}, "spec": "eco"},
 	"lancer": {"name": "Lancer", "members": ["b_hollow", "b_focuslens", "c_scope", "e_railcore"], "special": "singularity_lens",
-		"two": {"core_dmg": 0.10}, "four": {"pierce": 1}, "spec": "single"},
+		"two": {"core_dmg": 0.05}, "four": {"pierce": 1}, "spec": "single"},
 	"storm": {"name": "Storm", "members": ["b_scatter", "b_ringcaster", "c_battery", "c_capacitor_arc"], "special": "eye_of_storm",
 		"two": {"chain_dmg": 0.10}, "four": {"storm_pulse": 1}, "spec": "area"},
 	"swarm": {"name": "Swarm", "members": ["f_hivecomb", "b_droneport", "c_pheromone", "e_queen"], "special": "brood_mother",

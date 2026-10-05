@@ -135,7 +135,7 @@ These are one-shot instant picks that last for the run.
 | pk_optics | Optics Pack | Rare | +0.5 range all |
 | pk_crit | Precision Pack | Rare | +8% crit chance (crit x2) |
 | pk_logistics | Logistics Pack | Rare | Core cash tracks -12% cost |
-| pk_core | Core Surge | Epic | Core attack +30% dmg, +10% rate |
+| pk_core | Core Surge | Epic | Core attack +15% dmg, +5% rate (Tune `pc_core_surge_dmg` / `pc_core_surge_rate`; was +30% / +10%) |
 | pk_barracks | Drill Sergeant | Rare | troops +25% HP and dmg, -2 s respawn |
 | pk_gambit | Gambit | Legendary | +40% dmg all, enemies +15% HP |
 

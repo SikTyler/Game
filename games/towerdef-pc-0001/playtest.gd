@@ -44,6 +44,7 @@ const Specials := preload("res://Specials.gd")
 const Cores := preload("res://Cores.gd")
 const Parts := preload("res://Parts.gd")
 const PartDB := preload("res://data/PartDB.gd")
+const SetDB := preload("res://data/SetDB.gd")
 const Crates := preload("res://Crates.gd")
 const OutpostDB := preload("res://data/OutpostDB.gd")
 const Reforge := preload("res://Reforge.gd")
@@ -135,7 +136,7 @@ func _initialize() -> void:
 # day-20 snapshots the "main" job writes (var_to_bytes: exact). `-- serial`
 # runs every job in-process (same results; for debugging).
 const JOBS_A: Array = ["main", "forge:balanced", "forge:eco", "forge:single", "forge:damage", "strat", "seed:0", "seed:1", "pol", "fresh"]
-const JOBS_B: Array = ["perks", "mods", "mono", "specs"]
+const JOBS_B: Array = ["perks", "mods", "mono", "specs", "sets"]
 
 
 static func _job_file(job: String) -> String:
@@ -153,7 +154,7 @@ static func run_job(job: String, seed0: int, dir: String) -> Dictionary:
 			return job_strat(seed0)
 		"seed":
 			return job_seed(seed0, int(EXTRA_SEEDS[int(p[1])]))
-		"perks", "mods", "mono", "specs":
+		"perks", "mods", "mono", "specs", "sets":
 			var snaps: Dictionary = {}
 			for d in [7, 20]:
 				var f := FileAccess.open(dir.path_join("snap%d.bin" % d), FileAccess.READ)
@@ -166,6 +167,8 @@ static func run_job(job: String, seed0: int, dir: String) -> Dictionary:
 					return job_mods(seed0, snaps)
 				"specs":
 					return job_specs(seed0, snaps)
+				"sets":
+					return job_sets(seed0, snaps)
 				_:
 					return job_mono(seed0, snaps)
 		"forge":
@@ -698,7 +701,7 @@ static func _part_score(id: String, lvl: int, policy: String, core: String = "ba
 
 ## Install the best owned part in every open slot of the active Core, then
 ## spend Scrap levelling the equipped parts (cheapest level first).
-static func _parts_equip(save: Dictionary, policy: String, spec_first: bool = false) -> void:
+static func _parts_equip(save: Dictionary, policy: String, spec_first: bool = false, pinned: Array = []) -> void:
 	var cid: String = Cores.active(save)
 	var lv: int = Cores.level(save, cid)
 	var used: Dictionary = {}
@@ -720,6 +723,9 @@ static func _parts_equip(save: Dictionary, policy: String, spec_first: bool = fa
 					if (SPEC_KEYS[policy] as Array).has(String(pk)):
 						v += 1000.0
 						break
+			# pinned (4-piece set probe): the set's members go in first.
+			if pinned.has(String(it["id"])):
+				v = maxf(v, 0.0) + 1.0e6
 			if v > 0.0 and v > bv:
 				bv = v
 				best = u
@@ -1143,6 +1149,69 @@ static func _respec(save: Dictionary, spec: String) -> void:
 	_parts_equip(save, String(SPEC_META[spec]), true)
 
 const SPEC_PROBE_N: int = 6
+## 4-piece set probe: the day-20 save (same Scrap pool as the spec probe)
+## with every set's 4 members granted and pinned into the loadout (the other
+## slots and all levels by the balanced install rule) plays SET_PROBE_N
+## seeds with the balanced in-run policy. Fair band (set_checks): every
+## full set is live in the run (its 4-piece fx reaches Parts.run_fx), none
+## is a trap (median wave >= balanced probe - SET_TRAP_W) and none is
+## dominant (median wave <= best spec + 3, the AC-29 spread).
+## REPORT ONLY (not in RD_GATES yet): Swarm is a known trap (~w26 on the
+## day-20 save); see REDESIGN_BALANCE.md open issues.
+const SET_PROBE_N: int = 4
+const SET_TRAP_W: float = 8.0
+static func job_sets(seed0: int, snaps: Dictionary) -> Dictionary:
+	var rows: Dictionary = {}
+	for sid in SetDB.IDS:
+		var members: Array = (SetDB.get_def(String(sid))["members"] as Array)
+		var waves: Array = []
+		var live: bool = false
+		var load: Array = []
+		for i in SET_PROBE_N:
+			var sv: Dictionary = (snaps[20] as Dictionary).duplicate(true)
+			for m in members:
+				if not Parts.owns(sv, String(m)):
+					Parts.grant(sv, String(m))
+			var refund: int = 0
+			for uid in Parts.items(sv).keys():
+				var it: Dictionary = Parts.items(sv)[uid]
+				for l in range(1, int(it["lvl"])):
+					refund += PartDB.level_cost(String(it["id"]), l)
+				it["lvl"] = 1
+			sv["scrap"] = int(sv.get("scrap", 0)) + refund
+			_parts_equip(sv, "balanced", false, members)
+			var cid: String = Cores.active(sv)
+			var four: Dictionary = SetDB.get_def(String(sid))["four"]
+			var fx: Dictionary = Parts.run_fx(sv, cid)
+			live = int(Parts.set_counts(sv, cid).get(String(sid), 0)) >= 4
+			for k in four.keys():
+				live = live and float(fx.get(String(k), 0.0)) >= float(four[k])
+			load.clear()
+			for e in Parts.equipped(sv, cid):
+				load.append(String((e as Dictionary)["id"]))
+			var r: Dictionary = camp_run(sv, "balanced", seed0 + 90000 + i * 509, int(sv["last_seen"]) + 60, "", false)
+			waves.append(int(r["wave"]))
+		rows[sid] = {"waves": waves, "median_wave": _median(waves), "live": live, "load": load}
+		say("SET PROBE d20 %s (4-piece): waves %s live %s load %s" % [sid, str(waves), str(live), str(load)])
+	return rows
+
+
+static func set_checks(P: Dictionary, S: Dictionary) -> Dictionary:
+	if P.size() < SetDB.IDS.size() or S.size() < SPECS.size():
+		return {"set4_probe": {}, "set4_fair": false}
+	var best: float = 0.0
+	for sp in SPECS:
+		best = maxf(best, float((S[sp] as Dictionary)["median_wave"]))
+	var bal: float = float((S["balanced"] as Dictionary)["median_wave"])
+	var ok: bool = true
+	var rep: Dictionary = {"lo": bal - SET_TRAP_W, "hi": best + 3.0}
+	for sid in SetDB.IDS:
+		var row: Dictionary = P[sid]
+		var w: float = float(row["median_wave"])
+		rep[sid] = w
+		ok = ok and bool(row["live"]) and w >= bal - SET_TRAP_W and w <= best + 3.0
+	say("SET 4-piece band: " + JSON.stringify(rep))
+	return {"set4_probe": rep, "set4_fair": ok}
 static func job_specs(seed0: int, snaps: Dictionary) -> Dictionary:
 	var rows: Dictionary = {}
 	for spec in SPECS:
@@ -1399,6 +1468,7 @@ static func combine(R: Dictionary) -> Dictionary:
 	m.merge(redesign_checks(R))
 	m.merge(fresh_checks(R.get("fresh", {})))
 	m.merge(spec_checks(R.get("specs", {})))
+	m.merge(set_checks(R.get("sets", {}), R.get("specs", {})))
 	return m
 
 

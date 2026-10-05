@@ -695,8 +695,8 @@ func compute_stats() -> Dictionary:
 		icap_w1 += 10.0 * float(eco_lv) * tm
 	st["interest_cap"] = icap_w1 * e
 	# The Core's own weapon (always last in `weapons`; the view reads .back()).
-	var core_dmg: float = float(cd["dmg"]) * CoreDB.lvl_mult("dmg", L) * dmg_all * steadfast * float(adj_dmg[CORE_SLOT]) * (1.0 + 0.30 * float(pack_n("pk_core"))) * maxf(0.1, 1.0 + pf("core_dmg"))
-	var core_rate: float = float(cd["rate"]) * (1.0 + 0.03 * float(tracks["rate"])) * rate_all * float(adj_rate[CORE_SLOT]) * (1.0 + 0.10 * float(pack_n("pk_core"))) * maxf(0.1, 1.0 + pf("rate"))
+	var core_dmg: float = float(cd["dmg"]) * CoreDB.lvl_mult("dmg", L) * dmg_all * steadfast * float(adj_dmg[CORE_SLOT]) * (1.0 + TuneRef.num("pc_core_surge_dmg", 0.15) * float(pack_n("pk_core"))) * maxf(0.1, 1.0 + pf("core_dmg"))
+	var core_rate: float = float(cd["rate"]) * (1.0 + 0.03 * float(tracks["rate"])) * rate_all * float(adj_rate[CORE_SLOT]) * (1.0 + TuneRef.num("pc_core_surge_rate", 0.05) * float(pack_n("pk_core"))) * maxf(0.1, 1.0 + pf("rate"))
 	var cw: Dictionary = {"slot": CORE_SLOT, "kind": "core", "attack": String(cd["attack"]), "dmg": core_dmg, "rate": core_rate, "range": core_range, "range_cells": core_range_c}
 	# Parts on the Core attack: primary-target mult, splash, pierce, free pulse.
 	cw["single_mult"] = maxf(0.1, 1.0 + pf("core_single"))

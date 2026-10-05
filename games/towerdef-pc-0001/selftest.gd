@@ -2352,7 +2352,7 @@ func _draft_stages() -> void:
 	S.packs = {"pk_core": 1, "pk_overclock": 1, "pk_fort": 1, "pk_optics": 1}
 	S.recompute()
 	var cw: Dictionary = _weapon(S, "core")
-	_check("DRAFT Core Surge +30% dmg +10% rate; Overclock +8% rate -5% HP; Fortify +20% HP +1 armor; Optics +0.5 range", is_equal_approx(float(cw["dmg"]), dmg0 * 1.3) and is_equal_approx(float(cw["rate"]), 1.25 * 1.1 * 1.08) and is_equal_approx(float(S.stats["max_hp"]), 120.0 * 1.2 * 0.95) and is_equal_approx(float(S.stats["armor"]), 3.0) and is_equal_approx(float(cw["range"]), 4.5 * TowerState.cpx()))
+	_check("DRAFT Core Surge +15% dmg +5% rate; Overclock +8% rate -5% HP; Fortify +20% HP +1 armor; Optics +0.5 range", is_equal_approx(float(cw["dmg"]), dmg0 * 1.15) and is_equal_approx(float(cw["rate"]), 1.25 * 1.05 * 1.08) and is_equal_approx(float(S.stats["max_hp"]), 120.0 * 1.2 * 0.95) and is_equal_approx(float(S.stats["armor"]), 3.0) and is_equal_approx(float(cw["range"]), 4.5 * TowerState.cpx()))
 	S.draft = [Draft.card_for("in_dmg", {"insight_ok": true})]
 	pev = S.choose_card(0)
 	_check("DRAFT Insight pick is recorded for banking", S.insight_found == ["in_dmg"] and _evts(pev, "insight_found").size() == 1)
@@ -2862,7 +2862,7 @@ func _parts_rule_stages() -> void:
 	(Parts.item(st, g) as Dictionary)["lvl"] = 6
 	(Parts.item(st, g) as Dictionary)["stars"] = 1
 	var gx: Dictionary = Parts.run_fx(st, "bastion")
-	_check("PART fx: plus x(1+0.08(L-1))x(1+0.05 stars), minus unscaled", is_equal_approx(float(gx["dmg"]), 0.45 * 1.4 * 1.05) and is_equal_approx(float(gx["core_hp"]), -0.23))
+	_check("PART fx: plus x(1+0.08(L-1))x(1+0.05 stars), minus unscaled", is_equal_approx(float(gx["dmg"]), 0.40 * 1.4 * 1.05) and is_equal_approx(float(gx["core_hp"]), -0.18))
 	# Seeded drop resolution.
 	var r1 := RandomNumberGenerator.new()
 	var r2 := RandomNumberGenerator.new()
@@ -2910,14 +2910,14 @@ func _parts_engine_stages() -> void:
 	var core1: Dictionary = _weapon(P, "core")
 	_check("RUN Plating: +28% Core HP, -4.2% rate", is_equal_approx(float(P.stats["max_hp"]), float(B.stats["max_hp"]) * 1.28) and is_equal_approx(float(core1["rate"]), float(core0["rate"]) * (1.0 - 0.042)) and is_equal_approx(P.hp, float(P.stats["max_hp"])))
 	var G = _parts_run(["f_glass"], "bastion", 1)
-	_check("RUN Glass Cannon: +45% all dmg, -23% HP", is_equal_approx(float(_weapon(G, "core")["dmg"]), float(core0["dmg"]) * 1.45) and is_equal_approx(float(G.stats["max_hp"]), float(B.stats["max_hp"]) * 0.77))
+	_check("RUN Glass Cannon: +40% all dmg, -18% HP", is_equal_approx(float(_weapon(G, "core")["dmg"]), float(core0["dmg"]) * 1.40) and is_equal_approx(float(G.stats["max_hp"]), float(B.stats["max_hp"]) * 0.82))
 	var T = _parts_run(["e_turbine", "f_ledgerframe"], "bastion", 40)
 	var B40 = _parts_run([], "bastion", 40)
 	_check("RUN Turbine + Ledger: flat cash/s, -dmg, -HP", float(T.stats["cash_ps"]) > float(B40.stats["cash_ps"]) and float(_weapon(T, "core")["dmg"]) < float(_weapon(B40, "core")["dmg"]) and float(T.stats["max_hp"]) < float(B40.stats["max_hp"]))
 	var L = _parts_run(["b_longbore"], "bastion", 1)
 	_check("RUN Long Bore: +0.72 range cells, -rate", is_equal_approx(float(_weapon(L, "core")["range_cells"]), float(core0["range_cells"]) + 0.72) and float(_weapon(L, "core")["rate"]) < float(core0["rate"]))
 	var R = _parts_run(["e_railcore"], "bastion", 40)
-	_check("RUN Rail Core: +69% Core dmg, no splash", is_equal_approx(float(_weapon(R, "core")["dmg"]), float(_weapon(B40, "core")["dmg"]) * 1.69) and is_equal_approx(float(_weapon(R, "core")["splash"]), 0.0))
+	_check("RUN Rail Core: +42% Core dmg, no splash", is_equal_approx(float(_weapon(R, "core")["dmg"]), float(_weapon(B40, "core")["dmg"]) * 1.42) and is_equal_approx(float(_weapon(R, "core")["splash"]), 0.0))
 	var C = _parts_run(["c_luckchip"], "bastion", 12)
 	_check("RUN Luck Chip: +3 Luck", C.luck == 3)
 	var Q = _parts_run(["c_quickcap"], "bastion", 12)
@@ -2930,7 +2930,7 @@ func _parts_engine_stages() -> void:
 	var en: Dictionary = _enemy("drone", Vector2(400, 400), 1000.0)
 	S._hit(eb, 100.0, [])
 	S._hit(en, 100.0, [])
-	_check("RUN Hunter Scope: +45% vs boss, -8.7% vs normal", is_equal_approx(float(eb["hp"]), 1000.0 - 145.0) and is_equal_approx(float(en["hp"]), 1000.0 - 91.3))
+	_check("RUN Hunter Scope: +58% vs boss, -25% vs normal", is_equal_approx(float(eb["hp"]), 1000.0 - 158.0) and is_equal_approx(float(en["hp"]), 1000.0 - 75.0))
 	# Mirror Hull: contact damage reflects.
 	var M = _parts_run(["f_mirror"], "bastion", 12)
 	var em: Dictionary = _enemy("drone", Vector2(400, 400), 1000.0)

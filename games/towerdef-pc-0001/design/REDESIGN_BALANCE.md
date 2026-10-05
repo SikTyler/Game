@@ -92,3 +92,71 @@ starting point of this pass). "After" = this commit.
   drawback (HP) is cheap once Bulwark multiplies.
 - A bot that switches Core targeting to whichever mode lands on a low-HP boss changed the
   legacy gates a lot (mix/eco/seeds). The engine has no "boss" target mode; worth adding.
+
+## AC-29 spec-gap pass (single-weapon outscaling)
+
+Same-save spec probe (day-20 save, 6 seeds, medians). "Before" = HEAD `762a81d`; "After" = this commit.
+
+| Metric | Before | After |
+|---|---|---|
+| Median wave balanced / eco / single / damage | 80 / 79 / **92** / 82.5 | 80 / 76.5 / 80.5 / 80 |
+| Wave gap to best (≤ 3) | 12 / 13 / 0 / 9.5 — **FAIL** | 0.5 / **4.0** / 0 / 0.5 — **still FAILS (eco)** |
+| Eco coins per run vs balanced (≥ 1.20) | 1.62 | 1.48 |
+| Single boss DPS vs balanced (≥ 1.25) | 7.39 | 3.55 |
+| Top part pick-rate (≤ 0.75) | f_glass 0.71 | f_glass 0.69 |
+| AC-28 loop speed median, loops 1/2/3 | 0.08 / 0.27 / 0.65 | 0.04 / 0.51 / 0.45 |
+| AC-28 per-spec max, loops 1/2/3 | 0.13 / 0.60 / 0.80 | 0.07 / 0.67 / **4.0** (balanced loop 3) |
+| Playtest | FAIL: ac29_wave_gap | FAIL: ac29_wave_gap (all other gates green) |
+
+**Diagnosis.** At day 20 the run is decided by the boss waves (every 8th wave at this tier:
+72 / 80 / 88). The Core's single-target multipliers stack multiplicatively: Rail Core and
+Hollow Point (`core_dmg`), Keen Rifling (`crit`, ×2 hits), Hunter Scope (`boss`), the Lancer
+2-piece and the in-run Core Surge pack (×1.3 per stack, two stacks). Because benefits scale
+with level and drawbacks do not, the single build cleared the w80 boss on every seed and
+died at w88+. Bosses were not what killed it: traces show the Core going from full HP to 0
+in one tick at w88 as the escort horde arrives. Taking any single one of hollow, crit or
+scope away cost about 4 waves; together they were worth about 9.5. The old VAL weights
+undervalued exactly these keys (core_dmg 0.7, boss 0.7, crit 1.0, where a crit is a ×2 hit).
+
+**Changes (data / Tune only)**
+- `PartDB.VAL`: `core_dmg` 0.7 → 1.0, `boss` 0.7 → 1.0, `crit` 1.0 → 1.7. The AC-12
+  budget then forces: Rail Core +69% → **+42%** Core dmg; Hollow Point +30% → **+20%** Core
+  dmg, drawback −12.1% building dmg → **−3% crit**; Keen Rifling +20% → **+10%** crit,
+  −6.3% → −4.5% dmg; Hunter Scope +45% → **+58%** vs boss, −8.7% → **−25%** vs non-boss (it is
+  now a boss specialist that costs horde clear). Drone Port and Pheromone Cell `core_dmg`
+  drawbacks −11.1% → −8% and −8.8% → −6.5%, which keeps them inside budget under the new weight.
+- `SetDB` Lancer 2-piece: +10% → +5% Core dmg.
+- Core Surge pack (`pk_core`): +30% dmg / +10% rate per stack → **+15% / +5%**. This is now
+  a Tune knob (`pc_core_surge_dmg`, `pc_core_surge_rate`). It was the biggest single-only
+  in-run multiplier, worth about 4 waves to the single bot. Capping it at `max 1` instead
+  broke seeds_ok and pc_endless_runs.
+- Glass Cannon +45% / −23% HP → **+40% / −18%**. Glass reached 0.77 pick-rate after the Core
+  nerfs and failed `rd_no_dominant_part`.
+- Mint parts, with a smaller damage tax and the slack taken from their cash: Bounty Sight
+  +31% / −6.3% → +27% / −4.4%; Interest Chip 3% / −6.3% → 2.6% / −4.35%; Mint Press
+  +46% / −8.7% → +40% / −6.1%.
+
+**Tried and rejected (evidence in the session log):** Arc Capacitor drawback
+range → rate (−1.5 waves for balanced/damage); Scatter drawback → bld_rate (no effect);
+Glass Cannon 0.49/−0.28 from the earlier WIP, which broke seeds_ok and no_dominant_perk;
+a bigger Splash / Chain value (≤ +0.5 wave); a lower overkill carry (`pc_carry_*`, which did not
+change the single gap); a lower eco install weight (its loadout is pinned by spec-first);
+mint drawbacks moved to building stats plus a Ringcaster buff (the probe gained +2.5 for eco,
+but on the regenerated save it gained nothing and broke `rd_wall_exists`).
+
+**Tests changed on purpose:** the selftest literals for Rail Core (+42%), Hunter Scope (+58% / −25%),
+Glass Cannon (+40% / −18%, in both checks) and Core Surge (+15% / +5%) mirror the data changes above.
+No assertion was loosened.
+
+**Open (not fixed here)**
+- **AC-29 eco gap 4.0.** Eco dies after the w72 boss on 4 of 6 seeds, while the other
+  specs reach the w80 wall. The cause is eco's in-run policy (cash tracks), not its parts:
+  with zero drawback on every Mint part it gains about 0.5 waves. Closing the gap needs an eco
+  power source that does not cost coins per run, or a change to the eco in-run policy. Both
+  are design calls.
+- **AC-28 per-spec loop 3:** balanced took 4.0× its loop-2 time. Every other spec stays
+  ≤ 0.61, and the median of 0.45 passes the gate. Eco loop 3 improved from 0.71 to 0.08 and
+  single from 0.80 to 0.29.
+- **4-piece set probe** (`job_sets`, report only, not in RD_GATES): every set's 4-piece fx
+  goes live. Band: bulwark 72, mint 78, lancer 83, storm 76.5. **Swarm is a trap at ~w25**
+  (troop parts only).
