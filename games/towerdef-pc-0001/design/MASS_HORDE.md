@@ -281,3 +281,187 @@ re-aimed at the owner's intent:
   written in bulk from C#. Corpses go into a decal accumulation texture.
 - **balance/playtest:** implement H1–H12. Re-derive D2 and D5 numbers from bot runs and log
   any changes in a dated note under this section.
+
+---
+
+## §Architecture (sim-engine)
+
+> Restored verbatim from 6c0b627: the §Design commit (2af198d) rewrote the file and dropped this
+> section. The as-built implementation and its deliberate deviations are in §Sim engine below.
+
+
+### A1. HordeWorld — C#-resident body store
+- `HordeWorld` is a plain C# class (no `Node`) owning every body array as SoA `double[]`/`int[]`/`byte[]`: `px, py, vx, vy, hp, maxHp, radius, mass, speed, dmg, atkCd, slowT, slowM, shockT, hitT, kind, flags, gen`, plus a free list. The arrays stay on the C# side for the whole run. **No arrays are copied across the boundary on a tick.**
+- GDScript gets a thin `[GlobalClass] HordeWorldHandle : RefCounted` that wraps one `HordeWorld`. Its methods take and return scalars or small packed results only: `Spawn(kind, x, y, count, seed)`, `Step(dt)`, `Count()`, the query API (§5), `DrainEvents()`, `FillMultiMesh(rid)`, `Save()/Load()`.
+- Body identity is `(slot, gen)` packed into an `int` (a 20-bit slot and a 12-bit generation), so stale handles can be detected. Kind stats come from a `KindTable` that GDScript pushes once at boot from `Tune.gd`/the enemy defs. Rules data stays authored in GDScript; C# executes it.
+- Capacity: grow-only, with power-of-two doubling and a hard cap of 65,536. A spawn past the cap is queued (the queue is a ring buffer in C#) and emerges as bodies die. That turns the hard cap into "the gate is full" pressure instead of dropped units.
+
+### A2. Flow field toward the core
+- Coarse grid of 32 px cells (128×128 for the 4096 px arena). Every cell stores an integrated-cost distance and a unit flow vector.
+- Recomputed **only when the building set changes** (place, sell, destroy, or Core upgrade). TowerState bumps `buildings_version` and the handle calls `RebuildFlow(blockedCells, targetCells)` with packed int arrays. The recompute is a Dijkstra from the core cells, with 8-neighbour moves, weights 1/√2, and no corner cutting. Building cells are **obstacles with a high cost (e.g. 40)** rather than walls. A walled-in core still has a finite path, so the horde flows *into* the wall and chews through it. This is the Orc-Problem siege behaviour.
+- Cost: about 16k cells, under 1 ms in C#. It runs on build events, not per tick. Each body samples its cell's vector with a bilinear blend of 4 cells to avoid lane banding.
+
+### A3. Fluid crowd model (fixed step 1/60 s)
+Per body, in ascending slot order:
+1. **Seek:** `a = (flow·speed·slowMul − v) · k_accel`.
+2. **Pressure/separation:** a uniform hash with a cell equal to 2× the max swarm radius (16 px). It is rebuilt each step with a counting sort (`head/link`, no allocation). Over the 3×3 neighbourhood, overlapping pairs push apart with `k_p · overlap/(r_i+r_j)`, weighted by `mass_j/(mass_i+mass_j)`. Heavies plough through swarmers, and swarmers pile against heavies and walls.
+3. **Damping and limit:** `v *= (1 − k_damp·dt)`, then clamp `|v| ≤ vmax`. `vmax` is above the seek speed, so impulses can briefly overshoot. That gives the splash.
+4. **Integrate:** `p += v·dt`. Then resolve against building discs and the core disc by projecting out and zeroing the inward normal velocity. The crowd **piles up** at a wall, and back-pressure propagates through the separation term. Gaps fill naturally, and when a wall dies the dammed mass **surges** through.
+5. **Impulses:** `ApplyImpulse(x, y, r, strength, falloff)` adds `Δv = strength·(1−d/r)/mass` radially. Explosions part the sea, and the sea refills it.
+
+### A4. Contact rule
+A body whose disc touches a building disc (or the core) with `atkCd ≤ 0` emits an `ATTACK(target, dmg)` event and resets its cooldown. Ranged kinds emit `SHOT` within `r_fire`. Couriers emit `ESCAPE` at their exit. Events go into a C# ring buffer. GDScript calls `DrainEvents()` once per tick and gets one `PackedInt32Array` plus one `PackedFloat64Array`, **aggregated per target**: (target, hits, dmgSum). There are no per-body events, so 10k bodies on a wall give one row per building.
+
+### A5. Combat query API (for GDScript weapons)
+Every query runs against the same spatial hash. It returns aggregates, never per-body arrays, unless a small N is requested:
+- `DamageRadius(x, y, r, dmg, impulse, flagsMask) -> [kills, hits, dmgDealt, cashSum, xpSum, coinSum]`
+- `DamageCone(x, y, dirX, dirY, halfAngle, range, dmg, impulse)` and `DamageLine(x0, y0, x1, y1, width, dmg, pierceMax)`, both returning the same aggregate.
+- `NearestN(x, y, n, maxR) -> PackedInt32Array ids` (targeting; n is at most 64). `DensestCell(x, y, range)` for splash towers aiming at the thickest knot.
+- `Chain(startId, jumps, jumpR, dmg, falloff) -> aggregate + PackedVector2Array hop positions` (for the VFX).
+- `ApplyImpulse` (§3), `ApplyStatus(x, y, r, slow, shock, dur)`.
+- Death pass: a killed body credits `cash/xp/coin` into the aggregate, pushes a corpse decal `(x, y, kind)` into a capped ring (for example 4,096) for the view, and frees the slot at the end of the step. Kill counts, missions and achievements read the aggregates. The economy is designed per kill at swarm scale (see the balance section later), not scaled-down single-enemy values.
+- Sample positions: each damage query also returns up to 8 hit positions for VFX. The view never iterates bodies.
+
+### A6. Elites and bosses
+These are the same world and the same arrays, with `flags` bits `ELITE` and `BOSS` and high `mass/radius/hp`. They take part in pressure, so a boss shoves the swarm aside. Their special abilities (aura, summon, charge) are C# switch cases keyed by kind code and run after the move pass. Summons call the internal `Spawn`. GDScript can ask `Bosses() -> PackedInt32Array` (fewer than 16) for health bars and the Intel panel.
+
+### A7. Determinism
+- All sim state is `double`, and Godot `Vector2` (float32) is never used in HordeWorld. Iteration always runs in ascending slot order. The hash is built deterministically, so bucket order follows slot order. There is no `Parallel.For` in the step: any future threading must be partitioned so the results do not depend on order (two-phase compute and apply).
+- RNG: a per-world `xorshift64*` seeded from the run seed and the wave index. It is consumed only on the sim thread. `Math.Sqrt` is IEEE-exact. Avoid `Math.Sin/Cos` in the step, or table them, because cross-platform libm can differ.
+- Bench verified: two fresh worlds stepped 60 times are bit-identical (below).
+
+### A8. Budgets (60 fps = 16.7 ms frame)
+| Item | 10k | 20k |
+|---|---|---|
+| Sim step (move + hash + pressure) | ≤ 2 ms | ≤ 4 ms |
+| Weapon queries (all towers) | ≤ 1 ms | ≤ 1.5 ms |
+| MultiMesh fill + upload | ≤ 0.5 ms | ≤ 1 ms |
+| Flow rebuild (event only) | < 1 ms | < 1 ms |
+At 40k the dense core pile is roughly 4× the 20k cost, from neighbour counts. **Shipping caps live bodies at 20k**, with the excess queued at the gates (§1). "10,000s" waves are sustained streams of 10–30k total across the wave, with no more than 20k alive.
+
+### A9. Rendering
+- One `MultiMeshInstance2D` per visual class (swarm, heavy, elite/boss) with `use_custom_data` for tint and flash. `HordeWorldHandle.FillMultiMesh(rid, class)` writes a reused `float[]` (12 floats per instance for a 2D transform, plus colour and custom) and calls `RenderingServer.MultimeshSetBuffer` once per class per frame. `visible_instance_count` is set to the live count. The interpolation alpha is applied in C# from the previous and current positions.
+- Corpses are drawn as a second MultiMesh from the corpse ring (blood decals). There is no per-body Node, and there are no `_draw` loops over bodies.
+- Fallback: if the C# runtime is unavailable, there is no horde. Mass horde is C#-only; the mono build is the shipping target. GPU compute is not needed at 20k (bench). We will propose it only if the 50k+ ambition comes back.
+
+### A10. Save and test hooks
+- `Save()` returns a `PackedByteArray` (live bodies + RNG + queue + flow version). `Load(bytes)` restores it. Wave-boundary saves remain the default.
+- `Checksum() -> int64` (FNV over px/py/hp bits) for determinism assertions in selftest: the same seed and inputs must give the same checksum after N steps.
+- `Stats() -> Dictionary` (alive, queued, kills, max pile density, step µs) for the Intel panel and playtest metrics.
+- selftest cases: spawn → flow reaches core; wall blocks → pile → surge on destroy; impulse parts the crowd; radius damage aggregates are correct; save/load round-trip checksum.
+
+### A11. Migration
+- **EnemyStore.gd** becomes a facade over `HordeWorldHandle`. Its public query/damage methods keep their signatures where weapons rely on them, but delegate. The GDScript SoA path is retired. The per-body fields (`share`, the `horde_mult` split) are removed. `horde_mult` stays a legacy test knob that defaults to 1 and is not exposed in shipping UI.
+- **EnemyHash.gd** is replaced by the C# hash. Its tests are re-aimed at the C# queries (assertions updated deliberately and documented, not deleted).
+- **HordeMove.cs** is folded into `HordeWorld.Step`. Its float32 bit-parity contract with GDScript is dropped deliberately: it existed only to mirror the GDScript path, which goes away. The determinism contract moves to the double-precision C# checksum.
+- **TowerState** keeps rules, economy and waves. It owns `buildings_version`, drives `RebuildFlow`, consumes `DrainEvents` for building/core damage, and consumes query aggregates for the economy. Wave defs move from enemy counts × mult to **designed swarm compositions**: an early tier in the hundreds, mid tiers in the thousands, late tiers at 10k+.
+
+### A12. Feasibility microbenchmark (measured 2026-10-05)
+Standalone .NET 8 console (Release), 4-core Xeon @ 2.1 GHz (cloud container, much slower than the owner's desktop). Bodies were ring-spawned and converging on the core through the flow field + 16 px uniform-hash pressure + damping + vmax + core-disc projection. Timing covers 600 steps after a 120-step warmup, by which point a dense pile has formed at the core.
+
+| Bodies | step ms | MultiMesh fill ms | deterministic |
+|---|---|---|---|
+| 10,000 | 1.09 | 0.03 | yes |
+| 20,000 | 3.08 | 0.04 | yes |
+| 40,000 | 11.77 | 0.12 | yes |
+
+Verdict: 10k and 20k fit the 60 fps budget comfortably on single-threaded C# with doubles, even on this weak CPU. The super-linear 40k figure comes from pile density, which the per-pair cap and the 20k live cap address. Bench source: the scratchpad `hbench/Program.cs`. It is deliberately kept out of the Godot project so it is not compiled into the game assembly.
+
+
+---
+
+## §Sim engine — as built (sim-engine, 2026-10-05)
+
+Code: `HordeWorld.cs` (C#, `[GlobalClass] RefCounted`), `EnemyStore.gd` (rules facade),
+`EnemyHash.gd` (query facade), `TowerState._move_enemies / _hit / _reap / _densest`,
+`Troops.gd` (taunt setter). `HordeMove.cs` deleted.
+
+### S1. Ownership split (deviation from A1/A5, deliberate)
+- **C# owns** every body's kinematics and status timers as `double[]` SoA: position, knockback
+  velocity, seek speed, radius, speed, contact dmg, slow/shock/hit-flash/taunt timers, attack and
+  fire cooldowns, courier exit, kind code, flags, alive flag. Nothing is copied INTO C# per step.
+- **GDScript keeps** slot allocation (free list, eid map, spawn `order`) and the **rules data**
+  (hp, shields, cash/xp/coin, kind strings, marks, shred). Reason: `_hit` carries shields, crits,
+  Ironclad, Hunter Scope, shred, lifesteal and knockback-by-damage; moving those to C# would
+  duplicate the rules engine. "Rules authored in GDScript, C# executes motion" (A1) is kept.
+- Boundary traffic: `commit(s)` once per spawn (one `Put` with a packed row); small setters for
+  status writes (`apply_slow`, `flash`, `set_shock`, `set_taunt`, `knock`, `kill`); one `Pull(n)`
+  per step returning one packed array per mirrored field (pos, vel, cur_s, slow_t, slow_m,
+  shock_t, hit_t, taunt_t, atk_cd, fire_cd) so every existing rules/view reader keeps working.
+- Death: `_hit` calls `en.kill(s)` when hp crosses 0, so the body leaves C# motion and queries
+  immediately; `_reap` asks C# for the `[alive, dead]` split of `order` (no 10k GDScript scan).
+- `HordeWorldHandle` (A1) is not a separate class: `HordeWorld` itself is the RefCounted handle.
+
+### S2. Flow field (A2, refined)
+- 13 px cells (4 per 52 px building cell, aligned to the building grid), 13 building cells of
+  open ground beyond the 11x11 grid (148x148 cells). Outside it bodies seek the Core directly.
+- Dijkstra over a **16-neighbourhood** (orthogonal, diagonal, knight moves; no sweeping past a
+  building corner from an open cell). The 8-neighbour octile metric made a wall's whole upwind
+  side flow "down, then sideways"; the knight moves aim the crowd at the wall's ends.
+- A walker pays to **enter** a building cell (`bld_cost` 40 x step length), so buildings are
+  passable at high cost: a sealed Core still has a finite path through its wall.
+- Flow vector = negative central-difference gradient of the cost field (a building neighbour of
+  an open cell reads as the cell itself, so walls never repel the flow), bilinear-sampled.
+- Rebuilt only when the per-slot building occupancy changes (`SetBuildings` compares bytes).
+  Cost ~10–25 ms on the reference container (a hitch on place/sell/destroy, not per frame).
+
+### S3. Liquid crowd step (A3, as built; fixed 0.05 s substep from TowerState)
+1. Timers; courier straight run (top layer, no fluid); taunt pin; desired direction from the flow
+   (direct to the Core within 2 flow cells of the stop ring); seek speed ramps to `spd x slow`.
+2. Counting-sorted uniform hash (16 px cells) over the step-start positions; each bucket is a
+   contiguous run, stable in slot order (cache friendly; Jacobi reads).
+3. Pairs: bodies with radius > 8 px ("big": splitter, elite, hauler, boss) scan a wider reach and
+   push both sides; small–small pairs scan 3x3 cells, at most `kmax` (24) overlapping
+   neighbours. Push = overlap x `m_j/(m_i+m_j)` (m = r^2), capped at `0.35 x size`, scaled 0.5.
+4. **Front blocking:** a body slows by `1 - 10 x (overlap ahead)`, where each body ahead counts
+   only as much as it is NOT already moving away (last-step realised velocity). This is what
+   makes the crowd queue and pile instead of compressing into itself, and lets a stream flow.
+5. Knockback velocity with friction `exp(-6 dt)`; Core stop ring and building squares (inset
+   1 px, so adjacent buildings leave no gap) are hard walls: project out, zero inward velocity.
+6. Contact: pressing a building face whose cheapest route runs **through** a building ->
+   attack it (sealed path). Otherwise slide along the face toward the cheaper side (exact ties
+   split by slot parity): open-ground buildings are flowed around, not chewed. Core contact
+   rule unchanged (front rank only).
+7. Building hits are **summed per building** in C# (one `bld_hit` row per building per step,
+   with `n` and `dmg`); Core hits/shots/escapes stay per body (bounded by the ring perimeter).
+
+### S4. Query API (A5, as built)
+`InRadius, Candidates, InRect, InLine, InCone, Nearest(exclude), NearestN, Density, Densest,
+Chain, RadialImpulse, Impulse, SlowRadius`, all over living bodies in ascending slot order,
+through a lazily rebuilt query hash. Damage application stays in GDScript (`_hit`), see S1.
+`DamageRadius`-style aggregate damage calls were not added: weapons already aggregate events at
+`horde_mult > 1`, and per-kill economy moves to the D5 pool (balance role).
+
+### S5. Determinism
+Doubles throughout, ascending slot order, Jacobi step-start reads, no RNG/threads/trig in the
+step. `Checksum()` (FNV-1a over live slots' position/velocity bits) is gated in selftest (two
+fresh 1,540-body worlds, 120 steps). The 120 s seeded fingerprint golden was re-recorded
+(motion changed). The HordeMove float32 parity gate is retired with the GDScript move path.
+
+### S6. Profile (headless, reference container: 4-core Xeon @ 2.1 GHz, Godot mono Debug build)
+`horde_prof.gd`: full `TowerState` tick (spawns, C# step + mirror pull, every weapon's targeting
+and damage through the C# queries, troops, reap), N live bodies (fodder mix + haulers) topped
+up each tick on a 10-building board, after a 6 s warm-up so the pile has formed:
+
+| bodies | full sim tick | C# step | rules + pull | mean overlap |
+|---|---|---|---|---|
+| 1,000 | 1.5 ms | 0.5 ms | 1.0 ms | 0.12 |
+| 10,000 | **7.1 ms** (target ≤ 8) | 4.8 ms | 2.4 ms | 0.17 |
+| 20,000 | 16.3 ms | 12.8 ms | 3.5 ms | 0.25 |
+
+The sim runs 20 substeps/s, so 10k costs ~14% of one core; 20k ~33%.
+**Bench correction:** the A12 microbenchmark (1.09 ms at 10k) spawned bodies 900–1800 px out
+and timed 2 s of travel, so no pile had formed; dense-pile pair counts are 3–4x higher. The
+numbers above are the real ones. H11's "≤ 4 ms headless at 10k" is not met on this CPU (C# step
+alone 4.8 ms); it is a logged, not asserted, target.
+
+### S7. Blockers / open items
+- **horde_mult x4 still ships** (`Tune.horde_mult` default 4, `Main` sets it). Retiring it needs
+  the D3 designed swarm compositions and the D5 economy (horde-designer / balance roles); the
+  engine no longer depends on it.
+- **Rendering**: `Battle.gd` still fills its MultiMesh from GDScript over the mirror (one pass per
+  frame over every body). A9's C# `FillMultiMesh` is the render role's next step.
+- **Intel roster** (`Intel.roster`) scans every body per frame in GDScript: fine at 1k, should
+  read per-kind counts from C# at 10k+.
+- Save/Load of live bodies (A10) not implemented: saves stay wave-boundary.
+- Over 20k alive the pile cost grows super-linearly; keep the D3 alive cap (16,384).

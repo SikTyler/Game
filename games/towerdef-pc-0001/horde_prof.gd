@@ -1,41 +1,86 @@
 extends SceneTree
-## HORDE hot-loop profile: EnemyStore.move() on N bodies (1k/2k/5k) packed in
-## a ring around the Core, C# (HordeMove.cs) vs the GDScript reference path.
-## Also asserts both paths leave bit-identical positions.
-## Usage: godot --headless --path games/towerdef-pc-0001 --script res://horde_prof.gd
+## MASS_HORDE profile: the FULL sim tick (TowerState._step: spawns, C#
+## HordeWorld step + mirror pull, every weapon's targeting/damage through the
+## C# queries, troops, reap) with N live bodies (1k / 10k / 20k) converging on
+## a built-up board, plus the C# step alone. Bodies are fodder-tough (they do
+## not all die in the first second) and get topped back up to N each tick so
+## the count holds. Not a CI gate (MASS_HORDE H11): prints numbers.
+## Usage: godot --headless --path games/towerdef-pc-0001 --script res://horde_prof.gd [-- 1000 10000 20000]
 
+const BOARD: Dictionary = {16: "gun", 17: "mortar", 18: "tesla", 23: "frost", 25: "flak", 30: "hut_infantry", 31: "hut_sapper", 32: "hut_drone", 10: "railgun", 38: "barricade"}
+const WARM: int = 120    # 6 s of sim: the crowd reaches the board and piles up
 const STEPS: int = 60
 
 
 func _initialize() -> void:
-	var ES = load("res://EnemyStore.gd")
-	var TS = load("res://TowerState.gd")
-	var C: Vector2 = TS.CENTER
-	var prm := PackedFloat64Array([6.0, 0.5, 0.35, 6.0])
-	for n in [1000, 2000, 5000]:
-		var res: Dictionary = {}
-		for mode in [0, 1]:
-			ES.cs_mode = mode
-			if mode == 1 and not ES.cs_available():
-				print("HORDE PROF C# unavailable")
-				continue
-			var en = ES.new()
-			for i in n:
-				var a: float = TAU * float(i) / 97.0
-				var s: int = en.alloc(i + 1, "ranged" if i % 9 == 0 else "drone", C + Vector2.from_angle(a) * (200.0 + float(i % 53) * 9.0))
-				en.spd[s] = 40.0
-				en.hp[s] = 10.0
-				en.set_size(s, 12.0 + float(i % 4) * 4.0)
-				if i % 5 == 0:
-					en.knock(s, Vector2.from_angle(a) * 80.0)
-			en.move(1.0 / 60.0, false, C, 70.0, 160.0, 2.0, PackedByteArray(), 9, 78.0, prm)   # warm-up
-			var t0: int = Time.get_ticks_usec()
-			for k in STEPS:
-				en.move(1.0 / 60.0, false, C, 70.0, 160.0, 2.0, PackedByteArray(), 9, 78.0, prm)
-			var ms: float = float(Time.get_ticks_usec() - t0) / 1000.0 / float(STEPS)
-			res[mode] = en.pos
-			print("HORDE PROF n=%d path=%s %.3f ms/move" % [n, "cs" if mode == 1 else "gd", ms])
-		if res.size() == 2:
-			print("HORDE PROF n=%d identical=%s" % [n, str(res[0] == res[1])])
-	ES.cs_mode = -1
+	var sizes: Array = [1000, 10000, 20000]
+	var ua: PackedStringArray = OS.get_cmdline_user_args()
+	if not ua.is_empty():
+		sizes = []
+		for a in ua:
+			sizes.append(int(a))
+	for n in sizes:
+		_run(int(n))
 	quit(0)
+
+
+func _top_up(S, n: int, k: int) -> void:
+	var KS: Array = ["mite", "mite", "mite", "mite", "drone", "drone", "skitter", "ranged", "hauler"]
+	var i: int = S.en.count()
+	while i < n:
+		var a: float = TAU * float(i + k * 7919) / 1031.0
+		var kind: String = String(KS[(i + k) % KS.size()])
+		var d: Dictionary = EnemyDBRef.get_def(kind).duplicate()
+		d["kind"] = kind
+		d["pos"] = S.CENTER + Vector2.from_angle(a) * (380.0 + float((i * 37) % 300))
+		d["hp"] = 30.0
+		d["max_hp"] = 30.0
+		S.add_enemy(d)
+		i += 1
+
+
+const EnemyDBRef := preload("res://data/EnemyDB.gd")
+
+
+func _run(n: int) -> void:
+	var BM = load("res://BaseMeta.gd")
+	var TS = load("res://TowerState.gd")
+	var save: Dictionary = BM.normalize(BM.default_save())
+	var S = TS.new()
+	S.setup(4242, save, 1_700_000_000)
+	for i in BOARD.keys():
+		S.slots[int(i)] = {"id": String(BOARD[i]), "perm": 0, "run": 2}
+		S.unlocked[int(i)] = true
+	S.recompute()
+	S.spawn_hold = true
+	_top_up(S, n, 0)
+	for k in WARM:
+		_keep(S)
+		S.tick(TS.SUBSTEP)
+		_top_up(S, n, k)
+	var tick_us: int = 0
+	var cs_us: int = 0
+	var worst: int = 0
+	for k in STEPS:
+		_keep(S)
+		var t0: int = Time.get_ticks_usec()
+		S.tick(TS.SUBSTEP)
+		var dt: int = Time.get_ticks_usec() - t0
+		tick_us += dt
+		worst = maxi(worst, dt)
+		cs_us += int((S.en.world.call("Stats") as Dictionary)["step_us"])
+		_top_up(S, n, k + WARM)
+	var ov: PackedFloat64Array = S.en.world.call("OverlapStats")
+	print("HORDE PROF n=%d alive=%d full_tick=%.2f ms (worst %.2f) cs_step=%.2f ms rules+pull=%.2f ms overlap_mean=%.2f kills=%d" % [n, S.en.count(), float(tick_us) / 1000.0 / STEPS, float(worst) / 1000.0, float(cs_us) / 1000.0 / STEPS, float(tick_us - cs_us) / 1000.0 / STEPS, ov[1], S.kills])
+
+
+func _keep(S) -> void:
+	S.hp = maxf(S.hp, 1e9)
+	if not S.draft.is_empty():
+		S.choose_card(0)
+	if not S.perk_offer.is_empty():
+		S.choose_perk(0)
+	if not S.mutation_offer.is_empty():
+		S.choose_mutation(0)
+	if S.pending_place != "":
+		S.cancel_place()
