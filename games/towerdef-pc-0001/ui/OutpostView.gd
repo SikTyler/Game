@@ -545,7 +545,7 @@ static func draw(m, _cr: Rect2) -> void:
 	var s: Dictionary = m.save
 	var o: Dictionary = _o(m)
 	var mr: Rect2 = map_rect(m)
-	Kit.panel(m, mr.grow(4), Kit.EDGE, Color("0d1013"))
+	Kit.panel(m, mr.grow(4), Kit.EDGE, Kit.BG)
 	_draw_map(m, s, o, mr)
 	# mask map overflow (panned / zoomed) outside its frame
 	var cr: Rect2 = m.content_rect()
@@ -613,7 +613,7 @@ static func _draw_map(m, s: Dictionary, o: Dictionary, mr: Rect2) -> void:
 			if m.op_sel == String(uid):
 				Kit.outline(m, r2, Kit.GOLD)
 			continue
-		m.draw_rect(r2.grow(-2), Color("1b2026") if linked else Color("2a1416"))
+		m.draw_rect(r2.grow(-2), Color("111a2e") if linked else Color("2a1022"))
 		m.draw_rect(r2.grow(-2), Color(Kit.EDGE, 0.8) if linked else Color(Kit.ENEMY, 0.6), false, 2.0)
 		_art(m, art_of(id, int(b["lvl"])), r2.grow(-3), Color(1, 1, 1, 0.35 if moving else (1.0 if bool(b["built"]) else 0.5)))
 		if not bool(b["built"]):
@@ -627,7 +627,7 @@ static func _draw_map(m, s: Dictionary, o: Dictionary, mr: Rect2) -> void:
 			Kit.icon(m, "op_plug", Rect2(r2.end - Vector2(c * 0.45, c * 0.45), Vector2(c * 0.4, c * 0.4)))
 		# level pip + storage bar
 		Kit.panel(m, Rect2(r2.position.x + 4, r2.position.y + 4, 30, 20), Kit.EDGE, Color(0, 0, 0, 0.7), 1)
-		Kit.t(m, "%d" % int(b["lvl"]), Vector2(r2.position.x + 19, r2.position.y + 19), 13, Kit.GOLD, HORIZONTAL_ALIGNMENT_CENTER, 30.0)
+		Kit.t(m, "%d" % int(b["lvl"]), Vector2(r2.position.x + 19, r2.position.y + 19), 14, Kit.GOLD, HORIZONTAL_ALIGNMENT_CENTER, 30.0)
 		if OutpostDB.GENERATORS.has(id) and bool(b["built"]):
 			var cp: float = maxf(0.001, Outpost.cap(s, String(uid), con))
 			var fr: float = clampf(float(b["stored"]) / cp, 0.0, 1.0)
@@ -819,7 +819,7 @@ static func _draw_palette(m, s: Dictionary, o: Dictionary) -> void:
 	Kit.t(m, "BUILD", Vector2(x + 46, pr.position.y + 40), 26, Kit.RUST, HORIZONTAL_ALIGNMENT_LEFT, w)
 	var cred: int = int(o.get("credit", 0))
 	Kit.t(m, ("Build credit %s coins" % Kit.fmt(float(cred))) if cred > 0 else "Pick one, then click the map", Vector2(x + 140, pr.position.y + 38), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w - 140)
-	Kit.t(m, "Categories", Vector2(x, pr.position.y + 88), 13, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w)
+	Kit.t(m, "Categories", Vector2(x, pr.position.y + 88), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w)
 	# entries
 	var ids: Array = CAT_IDS[m.op_cat]
 	for k in ids.size():
@@ -830,7 +830,7 @@ static func _draw_palette(m, s: Dictionary, o: Dictionary) -> void:
 		var n: int = 0 if is_decor(id) else Outpost.count_of(o, id)
 		var ok: bool = Outpost.can_afford(s, int(cc["coins"])) and n < lim
 		var armed: bool = m.op_arm == id
-		Kit.panel(m, r, Kit.GOLD if armed else (Kit.EDGE if ok else Color("2a3038")), Color("232a33") if ok else Color("1a1e24"), 3 if armed else 1)
+		Kit.panel(m, r, Kit.GOLD if armed else (Kit.EDGE2 if ok else Kit.EDGE), Kit.CARD if ok else Kit.PANEL, 3 if armed else 1)
 		var isz: float = r.size.y - 10.0
 		_art(m, art_of(id, 1), Rect2(r.position.x + 5, r.position.y + 5, isz, isz), Color.WHITE if ok else Color(1, 1, 1, 0.45))
 		var tx: float = r.position.x + isz + 12.0
@@ -840,7 +840,7 @@ static func _draw_palette(m, s: Dictionary, o: Dictionary) -> void:
 		if not is_decor(id) and r.size.x >= 180.0:
 			sub += "  ·  %d/%d" % [n, lim]
 		Kit.icon(m, "cur_coin", Rect2(tx, r.position.y + r.size.y * 0.42 + 5, 16, 16))
-		Kit.t(m, sub, Vector2(tx + 19, r.position.y + r.size.y * 0.42 + 18), 13, Kit.GOLD if ok else Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, tw - 19)
+		Kit.t(m, sub, Vector2(tx + 19, r.position.y + r.size.y * 0.42 + 18), 14, Kit.GOLD if ok else Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, tw - 19)
 	# selected
 	var sr: Rect2 = sel_rect(m)
 	Kit.panel(m, sr, Kit.EDGE, Kit.PANEL2)
@@ -890,7 +890,7 @@ static func _draw_selected(m, s: Dictionary, o: Dictionary, sr: Rect2) -> void:
 	var id: String = String(b["id"])
 	_art(m, art_of(id, int(b["lvl"])), Rect2(x, sr.position.y + 10, 72, 72))
 	Kit.t(m, "%s  Lv%d / %d" % [name_of(id), int(b["lvl"]), Outpost.max_lvl(s, id)], Vector2(x + 84, sr.position.y + 34), 18, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w - 84)
-	Kit.wrap(m, String(DESC.get(id, "")), Vector2(x + 84, sr.position.y + 50), 13, Kit.DIM, w - 84, 3)
+	Kit.wrap(m, String(DESC.get(id, "")), Vector2(x + 84, sr.position.y + 50), 14, Kit.DIM, w - 84, 3)
 	var con: Dictionary = Outpost.connected(o)
 	var y: float = sr.position.y + 110.0
 	Kit.t(m, ("Linked to the Relay" if bool(con.get(who, false)) else "NOT LINKED — add Conduits") if id != "conduit" else "Conduit", Vector2(x, y), 15, Kit.GREEN if bool(con.get(who, false)) else Kit.ENEMY, HORIZONTAL_ALIGNMENT_LEFT, w)

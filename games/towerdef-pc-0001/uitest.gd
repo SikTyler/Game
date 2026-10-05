@@ -17,6 +17,8 @@ extends SceneTree
 ## Run: godot --headless --path games/towerdef-pc-0001/ --script res://uitest.gd
 
 const Hub := preload("res://ui/Hub.gd")
+const Kit := preload("res://ui/Kit.gd")
+const Fonts := preload("res://ui/Fonts.gd")
 const Intel := preload("res://ui/Intel.gd")
 const TowerState := preload("res://TowerState.gd")
 const BaseMeta := preload("res://BaseMeta.gd")
@@ -206,6 +208,14 @@ func _audit(where: String) -> void:
 		if not vis.grow(1.0).encloses(b.get_global_rect()):
 			bad.append(_label(b) + " out %s" % b.get_global_rect())
 	_check("PC-U2 %s: buttons have tooltips, press mode, >= 40 px, inside the window" % where, bad.is_empty(), str(bad))
+	# P2 layout audit: the last drawn frame asked for no text below Kit.MIN_TEXT
+	# and no button label is smaller either.
+	var small: Array = Kit.small_text.duplicate()
+	for c in _all_buttons():
+		var b2: Button = c
+		if b2.visible and b2.text != "" and b2.get_theme_font_size("font_size") < Kit.MIN_TEXT:
+			small.append(_label(b2) + " btn %d" % b2.get_theme_font_size("font_size"))
+	_check("P2 %s: no text below %d px" % [where, Kit.MIN_TEXT], small.is_empty(), str(small))
 
 
 func _run() -> void:
@@ -220,6 +230,14 @@ func _run() -> void:
 	_check("PC: boots to the main menu", main.screen == "menu")
 	_check("PC: slot picker shows 3 slots", _find("SLOT 1 PLAY") != null and _find("SLOT 2 PLAY") != null and _find("SLOT 3 PLAY") != null)
 	_audit("menu")
+	# ---- P2 neon theme ------------------------------------------------------------
+	var f0: int = Kit.frames
+	await _frames()
+	_check("P2: the draw pass runs headless (the text-size audit is live)", Kit.frames > f0)
+	_check("P2: body text is Inter, headings Chakra Petch (bundled OFL fonts)", main.font is FontVariation and (main.font as FontVariation).base_font.resource_path.ends_with("Inter.ttf") and Fonts.head().resource_path.ends_with("ChakraPetch-SemiBold.ttf") and Fonts.bold().resource_path.ends_with("ChakraPetch-Bold.ttf"))
+	_check("P2: the neon Theme is set on the widget layer and tooltips", main.ui.theme != null and main.tipbox.theme == main.ui.theme and main.ui.theme.default_font == main.font)
+	var b1: Button = _find("SLOT 1 PLAY")
+	_check("P2: buttons use Chakra Petch labels and a glowing hover", b1.get_theme_font("font") == Fonts.head() and (b1.get_theme_stylebox("hover") as StyleBoxFlat).shadow_size > 0)
 	_press("SLOT 1 PLAY")
 	await _frames()
 	_check("PC: slot 1 loads to the hub (Play tab)", main.screen == "base" and main.tab == "play" and MetaSave.active == 1)
@@ -486,6 +504,10 @@ func _home() -> void:
 	main.set_tab("play")
 	await _frames()
 	_check("V2 home: Outpost map + top menu Core / Research / Missions / Reforge", _findp("OPBUILD ") != null and _find("DSTART") != null and _find("DTAB Core") != null and _find("DTAB Research") != null and _find("DTAB Missions") != null and _find("DTAB Reforge") != null and _find("DTAB Core Bay") == null and _find("DTAB Crates") == null and _find("DTAB Cards") == null)
+	var fg: Button = _find("DTAB Forge")
+	_check("P2 nav: OUTPOST / CORE / FORGE / RESEARCH / REFORGE, Forge shown locked until the gear engine", fg != null and fg.disabled and fg.tooltip_text.contains("Forge") and _find("DTAB Outpost").text == "OUTPOST")
+	var mb: Button = _find("DTAB Missions")
+	_check("P2 nav: Missions is a top-bar button", mb != null and mb.position.y < float(main.TOP_H) and mb.position.x > Hub.start_rect(main).position.x - 700.0)
 	for nv in [["DTAB Core", "core"], ["DTAB Research", "research"], ["DTAB Missions", "missions"], ["DTAB Reforge", "reforge"]]:
 		_press(String(nv[0]))
 		await _frames()

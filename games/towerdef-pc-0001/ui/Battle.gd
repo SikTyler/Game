@@ -10,12 +10,13 @@ const TowerState := preload("res://TowerState.gd")
 const PickDB := preload("res://data/PickDB.gd")
 const CoreDB := preload("res://data/CoreDB.gd")
 const Tiers := preload("res://Tiers.gd")
+const Roll := preload("res://vfx/Roll.gd")
 const Kit := preload("res://ui/Kit.gd")
 const DraftPanel := preload("res://ui/DraftPanel.gd")
 const Hotbar := preload("res://ui/Hotbar.gd")
 const Intel := preload("res://ui/Intel.gd")
 
-const ENEMY2: Color = Color("e04bc0")
+const ENEMY2: Color = Kit.MAGENTA
 const SHIELD: Color = Color("7fd8ff")
 const TRACK_ICON: Dictionary = {"dmg": "pk_arsenal", "rate": "pk_overclock", "range": "pk_optics", "eco": "pk_ledger", "armor": "pk_fort"}
 const TRACK_TIP: Dictionary = {
@@ -113,7 +114,7 @@ static func core_attack_fx(m, ev: Dictionary) -> void:
 	match kind:
 		"pulse":
 			var cw: Dictionary = (S.stats["weapons"] as Array).back()
-			m._ring(c, float(cw.get("range", 200.0)), 0.35, Color("b48cff"))
+			m._ring(c, float(cw.get("range", 200.0)), 0.35, Kit.LAB)
 		"beam":
 			pass   # drawn continuously from S.beam_eid
 		_:
@@ -131,8 +132,8 @@ static func special_fx(m, ev: Dictionary) -> void:
 	var id: String = String(ev.get("id", ""))
 	match id:
 		"sp_emp":
-			m._ring(c, 420.0, 0.6, Color("5ad1f0"))
-			m._ring(c, 260.0, 0.45, Color("5ad1f0"))
+			m._ring(c, 420.0, 0.6, Kit.CYAN)
+			m._ring(c, 260.0, 0.45, Kit.CYAN)
 		"sp_repair":
 			m.heal_flash = 0.6
 		"sp_overdrive":
@@ -273,7 +274,7 @@ static func draw(m, off: Vector2) -> void:
 
 
 static func _draw_field_bg(m, fr: Rect2) -> void:
-	m.draw_rect(fr, Color("12161b"))
+	m.draw_rect(fr, Kit.BG2)
 	var gc := Color(1, 1, 1, 0.025)
 	var x: float = fr.position.x
 	while x <= fr.end.x:
@@ -294,7 +295,7 @@ static func _draw_grid(m) -> void:
 	var hs: float = float(S.grid_n) * 0.5
 	var goff: Vector2 = Vector2(0.5, 0.5) * c if S.grid_n % 2 == 0 else Vector2.ZERO
 	var plate := Rect2(C + goff - Vector2(hs * c + 8, hs * c + 8), Vector2(2.0 * hs * c + 16, 2.0 * hs * c + 16))
-	m.draw_rect(plate, Color("0d1014"))
+	m.draw_rect(plate, Kit.BG)
 	m.draw_rect(plate, Color(Kit.RUST, 0.55), false, 3.0)
 	var placing: bool = S.pending_place != "" or m.drag_card >= 0
 	for i in TowerState.N:
@@ -307,17 +308,17 @@ static func _draw_grid(m) -> void:
 		if i == TowerState.CORE_SLOT or not S.in_grid(i):
 			continue
 		if not bool(S.unlocked[i]):
-			m.draw_rect(r, Color("15191e"))
+			m.draw_rect(r, Color("0e1528"))
 			m.draw_rect(r.grow(-6), Color(1, 1, 1, 0.025), false, 1.0)
 			continue
 		var id: String = S.id_at(i)
 		if id == "":
-			var oc := Color("3d4752")
-			var fill := Color("1d232a")
+			var oc := Kit.EDGE2
+			var fill := Color("121b31")
 			if placing and (S.pending_place == "" or S.can_place(i, S.pending_place)):
 				# Floor the pulse so valid cells always read as "glowing".
 				oc = Color(Kit.GREEN, 0.7 + 0.25 * sin(m.t_anim * 8.0))
-				fill = Color("1d232a").lerp(Kit.GREEN, 0.12)
+				fill = Color("121b31").lerp(Kit.GREEN, 0.12)
 			m.draw_rect(r, fill)
 			m.draw_rect(r, oc, false, 2.0)
 		else:
@@ -656,7 +657,7 @@ static func _draw_right(m) -> void:
 	var y: float = rr.position.y + 14.0
 	var cd: Dictionary = CoreDB.get_def(S.core_id)
 	# portrait
-	Kit.panel(m, Rect2(x, y, 96, 96), Kit.RUST, Color("12161b"))
+	Kit.panel(m, Rect2(x, y, 96, 96), Kit.RUST, Kit.BG2)
 	Kit.icon(m, "core_bastion", Rect2(x + 6, y + 6, 84, 84))
 	Kit.t(m, "The Core", Vector2(x + 110, y + 26), 22, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w - 110)
 	Kit.t(m, "Lv %d" % int(S.core_lvl), Vector2(x + 110, y + 50), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w - 110)
@@ -665,7 +666,7 @@ static func _draw_right(m) -> void:
 	y += 108.0
 	# HP + shield
 	var mhp: float = maxf(1.0, float(S.stats["max_hp"]))
-	Kit.bar(m, Rect2(x, y, w, 24), float(S.hp) / mhp, Color("e8434f"))
+	Kit.bar_glow(m, Rect2(x, y, w, 24), float(S.hp) / mhp, Kit.ENEMY, 10)
 	Kit.t(m, "HP %d / %d" % [clampi(int(ceil(float(S.hp))), 0, int(mhp)), int(mhp)], Vector2(x + w * 0.5, y + 19), 16, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, w)
 	m.stat_tips.append([Rect2(x, y, w, 24), "Core HP. The run ends at 0."])
 	y += 28.0
@@ -680,7 +681,7 @@ static func _draw_right(m) -> void:
 	Kit.t(m, "$%s" % Kit.fmt(float(S.cash)), Vector2(x + 44, y), 30, Kit.GREEN, HORIZONTAL_ALIGNMENT_LEFT, w * 0.55)
 	var st: Dictionary = S.stats
 	Kit.t(m, "+%.1f/s" % float(st.get("cash_ps", 0.0)), Vector2(x + w, y - 12), 15, Kit.GREEN, HORIZONTAL_ALIGNMENT_RIGHT, w * 0.4)
-	Kit.t(m, "interest %d%% (cap %d)" % [int(round(float(st.get("interest_rate", 0.0)) * 100.0)), int(float(st.get("interest_cap", 0.0)))], Vector2(x + w, y + 6), 13, Kit.DIM, HORIZONTAL_ALIGNMENT_RIGHT, w * 0.5)
+	Kit.t(m, "interest %d%% (cap %d)" % [int(round(float(st.get("interest_rate", 0.0)) * 100.0)), int(float(st.get("interest_cap", 0.0)))], Vector2(x + w, y + 6), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_RIGHT, w * 0.5)
 	m.stat_tips.append([Rect2(x, y - 34, w, 44), "Run cash: buys Core Enhancements and rerolls. Earned per second, per kill (x1.10 per wave) and as interest each wave on banked cash up to the cap."])
 	y += 30.0
 	# Owner feedback #1: enemies killed lives in the Core panel (bodies counted)
@@ -720,17 +721,17 @@ static func _draw_right(m) -> void:
 		var r := Rect2(x, ty + k * (th + 6.0), w, th)
 		var c: int = S.track_cost(tid)
 		var can: bool = c >= 0 and S.cash >= float(c)
-		Kit.panel(m, r, Kit.GREEN if can else Kit.EDGE, Color("1a2a1e") if can else Color("1b2027"))
+		Kit.panel(m, r, Kit.GREEN if can else Kit.EDGE, Kit.tint(Kit.GREEN, 0.12) if can else Kit.PANEL)
 		Kit.icon(m, String(TRACK_ICON[tid]), Rect2(r.position.x + 8, r.position.y + (th - 36) * 0.5, 36, 36), Color.WHITE if can else Color(1, 1, 1, 0.5))
 		Kit.t(m, "%s  Lv %d" % [String(td["name"]), int(S.tracks[tid])], Vector2(r.position.x + 52, r.position.y + th * 0.45), 18, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w - 150)
-		Kit.t(m, "%s  ·  %s" % [String(td["desc"]), String(td.get("minus", ""))], Vector2(r.position.x + 52, r.position.y + th * 0.45 + 18), 13, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w - 150)
+		Kit.t(m, "%s  ·  %s" % [String(td["desc"]), String(td.get("minus", ""))], Vector2(r.position.x + 52, r.position.y + th * 0.45 + 18), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w - 150)
 		Kit.t(m, ("$%s" % Kit.fmt(float(c))) if c >= 0 else "MAX", Vector2(r.end.x - 10, r.position.y + th * 0.45), 18, Kit.GREEN if can else Kit.DIM, HORIZONTAL_ALIGNMENT_RIGHT, 100.0)
 
 
 static func _draw_results(m) -> void:
 	m.draw_rect(m.field_rect(), Color(0, 0, 0, 0.55))
 	var r: Rect2 = results_rect(m)
-	Kit.panel(m, r, Kit.ENEMY, Color(0.09, 0.11, 0.14, 0.97), 3)
+	Kit.panel(m, r, Kit.ENEMY, Color(Kit.BG2, 0.97), 3)
 	var cx: float = r.get_center().x
 	var lr: Dictionary = m.last_result
 	Kit.t(m, "CORE DESTROYED", Vector2(cx, r.position.y + 58), 40, Kit.ENEMY, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
@@ -750,8 +751,13 @@ static func _draw_results(m) -> void:
 		var rw: Array = rows[k]
 		Kit.row(m, String(rw[0]), String(rw[1]), Vector2(x, y + 34 + k * 30.0), w, Kit.TEXT, "", 17)
 	var yb: float = y + 34 + rows.size() * 30.0 + 20.0
+	# casino moment: the banked total rolls up, then pops (vfx/Roll.gd)
+	var tot: float = float(lr.get("coins", 0))
+	var el: float = m.t_anim - m.results_t0 - 0.3
+	var rd: float = Roll.duration(tot) * 1.6
+	Kit.glow(m, Vector2(x + 20, yb + 16), 60.0, Kit.GOLD, 0.35)
 	Kit.icon(m, "cur_coin", Rect2(x, yb - 4, 40, 40))
-	Kit.t(m, "+%s coins" % Kit.fmt(float(lr.get("coins", 0))), Vector2(x + 48, yb + 28), 28, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, w)
+	Kit.big_number(m, "+%s coins" % Kit.fmt(Roll.value_at(0.0, tot, maxf(0.0, el), rd)), Vector2(x + 48, yb + 30), 32, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, w, Roll.pop_at(maxf(0.0, el), rd))
 	Kit.t(m, "%d missions completed" % m.run_missions, Vector2(x, yb + 104), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w)
 	# loot
 	var lx: float = r.get_center().x + 20.0

@@ -104,8 +104,11 @@ static func build(m) -> void:
 	_focus_first(m)
 
 
-static func _build_topbar(m) -> void:
-	var x: float = m.vw - 8.0
+const TOP_BTN_W: float = 150.0
+
+
+## Right-hand top-bar buttons: [label, tip, callable, key, icon].
+static func _topbar_items(m) -> Array:
 	var items: Array = []
 	if m.screen == "run":
 		items.append(["Pause", "Pause the run (engine time freezes)", func() -> void: m.set_overlay("pause"), "HUD Pause", "icon_pause"])
@@ -113,15 +116,27 @@ static func _build_topbar(m) -> void:
 		items.append(["Menu", "Save slots and quit", m.go_menu, "HUD Menu", "icon_menu"])
 	items.append(["Settings", "Video, audio, controls (key remapping) and gameplay", func() -> void: m.set_overlay("settings"), "HUD Settings", "icon_gear"])
 	items.append(["Records", "Lifetime stats, run history and achievements", func() -> void: m.set_overlay("stats"), "HUD Stats", "icon_stats"])
-	for it in items:
+	if m.screen == "base":
+		items.append(["Missions", "Daily missions and the login streak", func() -> void: m.set_tab("missions"), "DTAB Missions", "tab_missions"])
+	return items
+
+
+## Left edge of the right-hand button cluster (and the run's Speed button).
+static func topbar_right_x(m) -> float:
+	return m.vw - 8.0 - TOP_BTN_W * float(_topbar_items(m).size()) - (132.0 if m.screen == "run" else 0.0)
+
+
+static func _build_topbar(m) -> void:
+	var x: float = m.vw - 8.0
+	for it in _topbar_items(m):
 		var a: Array = it
-		var w: float = 168.0
-		x -= w
-		Kit.btn(m, String(a[0]), Rect2(x, 8, w - 8.0, 40), a[2], String(a[1]), true, Kit.NEUTRAL, String(a[3]), String(a[4]), 16)
+		x -= TOP_BTN_W
+		var on: bool = String(a[3]) == "DTAB Missions" and m.tab == "missions"
+		Kit.btn(m, String(a[0]), Rect2(x, 8, TOP_BTN_W - 8.0, 40), a[2], String(a[1]), true, Kit.CYAN if on else Kit.NEUTRAL, String(a[3]), String(a[4]), 15)
 	if m.screen == "run" and m.S != null:
 		var steps: Array = Labs.speed_steps(m.save)
 		x -= 132.0
-		Kit.btn(m, "Speed %sx" % Battle.speed_str(m.S.speed), Rect2(x, 8, 124, 40), func() -> void: m.cycle_speed(), "Game speed [%s/%s]. Research Game Speed unlocks faster steps." % [hint(m, "speed_down"), hint(m, "speed_up")], steps.size() > 1, Kit.GEM, "SPD", "icon_speed", 16)
+		Kit.btn(m, "Speed %sx" % Battle.speed_str(m.S.speed), Rect2(x, 8, 124, 40), func() -> void: m.cycle_speed(), "Game speed [%s/%s]. Research Game Speed unlocks faster steps." % [hint(m, "speed_down"), hint(m, "speed_up")], steps.size() > 1, Kit.CYAN, "SPD", "icon_speed", 15)
 
 
 static func _build_menu(m) -> void:
@@ -598,55 +613,67 @@ static func tip_at(m, p: Vector2) -> String:
 # ===================================================================== draw
 static func draw_topbar(m) -> void:
 	var r := Rect2(0, 0, m.vw, m.TOP_H)
-	m.draw_rect(r, Kit.PANEL)
-	m.draw_line(Vector2(0, m.TOP_H), Vector2(m.vw, m.TOP_H), Kit.RUST, 2.0)
+	m.draw_polygon(PackedVector2Array([r.position, Vector2(r.end.x, 0), r.end, Vector2(0, r.end.y)]), PackedColorArray([Kit.BG, Kit.BG, Kit.BG2, Kit.BG2]))
+	# glowing cyan edge that fades out toward both ends
+	var y: float = m.TOP_H - 1.0
+	var mid := Color(Kit.CYAN, 0.7)
+	var clear := Color(Kit.CYAN, 0.0)
+	m.draw_polygon(PackedVector2Array([Vector2(0, y - 1), Vector2(m.vw * 0.5, y - 1), Vector2(m.vw * 0.5, y + 1), Vector2(0, y + 1)]), PackedColorArray([clear, mid, mid, clear]))
+	m.draw_polygon(PackedVector2Array([Vector2(m.vw * 0.5, y - 1), Vector2(m.vw, y - 1), Vector2(m.vw, y + 1), Vector2(m.vw * 0.5, y + 1)]), PackedColorArray([mid, clear, clear, mid]))
 	Kit.icon(m, "core_bastion", Rect2(12, 8, 40, 40))
-	Kit.t(m, "COREHOLD", Vector2(58, 37), 22, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, 150.0)
-	var s: Dictionary = m.save
-	var x: float = 200.0
-	# Owner feedback #1: during a run the bar counts this run's coins / loot live.
-	var live_c: int = 0
-	var live_sc: int = 0
-	if m.screen == "run" and m.S != null and not m.S.over:
-		live_c = int(m.S.coins_run)
-		live_sc = int((m.S.loot as Dictionary).get("scrap", 0))
+	Kit.th(m, "COREHOLD", Vector2(59, 37), 24, Kit.CYAN, HORIZONTAL_ALIGNMENT_LEFT, 150.0)
+	var x: float = 210.0
+	var rl: Dictionary = m.rolls
 	var cur: Array = [
-		["cur_coin", Kit.fmt(float(int(s["coins"]) + live_c)), Kit.GOLD, "Coins — Core levels, the Outpost, research and forging (live during a run)", 128.0],
-		["cur_scrap", Kit.fmt(float(int(s.get("scrap", 0)) + live_sc)), Kit.SCRAP, "Scrap — the Forge's material: reroll, lock and upgrade gear (drops, salvage, Scrap Refinery)", 110.0],
-		["cur_shard", str(int(s.get("shards", 0))), Kit.SHARD, "Reforge Shards — spend on the permanent Reforge tree", 90.0],
+		["cur_coin", "coins", Kit.GOLD, "Coins — Core levels, the Outpost, research and forging (live during a run)", 134.0, true],
+		["cur_scrap", "scrap", Kit.SCRAP, "Scrap — the Forge's material: reroll, lock and upgrade gear (drops, salvage, Scrap Refinery)", 116.0, true],
+		["cur_shard", "shards", Kit.SHARD, "Reforge Shards — spend on the permanent Reforge tree", 96.0, false],
 	]
 	var compact: bool = m.vw < 1500.0
 	for c in cur:
 		var a: Array = c
 		var w: float = float(a[4]) * (0.85 if compact else 1.0)
-		Kit.chip(m, String(a[0]), String(a[1]), Vector2(x, 38), a[2], String(a[3]), w)
-		x += w + 6.0
+		var ro: Variant = rl.get(String(a[1]))
+		var v: float = float(m.save.get(String(a[1]), 0)) if ro == null else (ro as RefCounted).call("value")
+		var sc: float = 1.0 if ro == null else float((ro as RefCounted).call("scale"))
+		var txt: String = Kit.fmt(v) if bool(a[5]) else str(int(round(v)))
+		Kit.chip(m, String(a[0]), txt, Vector2(x, 38), a[2], String(a[3]), w, sc)
+		x += w + 8.0
 	# centre: run wave / tier, or hub tier / best
-	var right_x: float = m.vw - 3.0 * 168.0 - (140.0 if m.screen == "run" else 0.0) - 16.0
+	var right_x: float = topbar_right_x(m) - 16.0
 	var cx: float = (x + right_x) * 0.5
 	var cw: float = maxf(120.0, right_x - x - 20.0)
+	var s: Dictionary = m.save
 	if (m.screen == "run" or m.screen == "results") and m.S != null:
 		var S = m.S
 		var mode: String = "" if S.mode == "normal" else "  ·  " + String(S.mode).capitalize()
-		Kit.t(m, "WAVE %d" % int(S.wave), Vector2(cx - 90, 37), 24, Kit.TEXT, HORIZONTAL_ALIGNMENT_RIGHT, 160.0)
+		Kit.th(m, "WAVE %d" % int(S.wave), Vector2(cx - 90, 38), 26, Kit.TEXT, HORIZONTAL_ALIGNMENT_RIGHT, 160.0)
 		var bw: float = minf(200.0, cw * 0.4)
-		Kit.bar(m, Rect2(cx - 70, 16, bw, 6), float(S.wave_t) / maxf(0.01, float(S.wave_time)), Color(1, 1, 1, 0.5))
+		Kit.bar_glow(m, Rect2(cx - 70, 15, bw, 7), float(S.wave_t) / maxf(0.01, float(S.wave_time)), Kit.CYAN)
 		Kit.t(m, "Tier %d%s  ·  %s" % [int(S.tier), mode, Kit.dur(int(S.time_alive))], Vector2(cx - 70, 44), 15, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, cw * 0.5)
 		m.stat_tips.append([Rect2(cx - cw * 0.5, 4, cw, 50), "Wave %d — the bar shows the time to the next wave. Tier %d." % [int(S.wave), int(S.tier)]])
 	else:
-		Kit.t(m, "Tier %d  ·  Best wave %d" % [int(m.view_tier), int(s["best_wave"])], Vector2(cx, 37), 18, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, cw)
+		Kit.th(m, "TIER %d  ·  BEST WAVE %d" % [int(m.view_tier), int(s["best_wave"])], Vector2(cx, 36), 17, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, cw)
+	if m.screen == "base" and m.overlay == "" and m.offline_offer.is_empty() and Hub.badge(m, "missions"):
+		badge_dot_top(m)
+
+
+## Missions badge on its top-bar button (the right-most item in the hub).
+static func badge_dot_top(m) -> void:
+	var p := Vector2(m.vw - 8.0 - TOP_BTN_W * float(_topbar_items(m).size()) + TOP_BTN_W - 18.0, 14.0)
+	Hub.badge_dot(m, p)
 
 
 static func draw_toast(m) -> void:
 	if m.toast_t <= 0.0 or m.toast_text == "" or m.screen == "menu":
 		return
 	var a: float = clampf(m.toast_t * 3.0, 0.0, 1.0)
-	# Corner toast (PM fix round): top-right, just under the top bar (and the
-	# Base nav), clear of the battlefield and the Outpost map.
-	var w: float = 440.0
-	var y: float = m.TOP_H + (m.NAV_H if m.screen == "base" else 0.0) + 8.0
-	var r := Rect2(m.vw - w - 12.0, y, w, 40)
-	Kit.panel(m, r, Color(Kit.GOLD, a), Color(0.16, 0.13, 0.07, 0.96 * a))
+	# V2: hub toasts sit bottom-centre (clear of the nav and panel headers);
+	# in a run they sit at the top of the field, clear of the hotbar.
+	var w: float = 460.0
+	var y: float = m.vh - 112.0 if m.screen == "base" else m.TOP_H + 12.0
+	var r := Rect2(floorf((m.vw - w) * 0.5), y, w, 42)
+	Kit.panel_glow(m, r, Color(Kit.GOLD, a), Color(Kit.BG2, 0.96 * a), 0.9 * a)
 	Kit.t(m, m.toast_text, Vector2(r.get_center().x, y + 26), 16, Color(Kit.TEXT, a), HORIZONTAL_ALIGNMENT_CENTER, w - 20.0)
 
 
@@ -655,8 +682,9 @@ static func draw_menu(m) -> void:
 	for k in 6:
 		var a: float = m.t_anim * 0.2 + float(k) * TAU / 6.0
 		m.draw_arc(Vector2(c.x, 180), 120.0 + 24.0 * float(k), a, a + 1.2, 24, Color(Kit.RUST, 0.08 + 0.02 * float(k)), 3.0)
+	Kit.glow(m, Vector2(c.x, 156), 220.0, Kit.CYAN, 0.2 + 0.05 * sin(m.t_anim * 1.5))
 	Kit.icon(m, "core_bastion", Rect2(c.x - 64, 92, 128, 128))
-	Kit.t(m, "COREHOLD", Vector2(c.x, 280), 64, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, 900.0)
+	Kit.big_number(m, "COREHOLD", Vector2(c.x, 280), 68, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, 900.0)
 	Kit.t(m, "PC EDITION  ·  choose a save slot", Vector2(c.x, 314), 20, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, 900.0)
 	var cw: float = 440.0
 	var x0: float = floorf((m.vw - (cw * 3.0 + 40.0)) * 0.5)
@@ -834,8 +862,8 @@ static func _draw_achievements(m, r: Rect2) -> void:
 		var on: bool = Achievements.is_unlocked(m.save, id)
 		var cx: float = x + float(k % 3) * cw
 		var cy: float = y + float(k / 3) * rh
-		Kit.panel(m, Rect2(cx, cy, cw - 10, rh - 6), Kit.GOLD if on else Kit.EDGE, Kit.PANEL if on else Color("1e242b"))
+		Kit.panel(m, Rect2(cx, cy, cw - 10, rh - 6), Kit.GOLD if on else Kit.EDGE, Kit.CARD if on else Kit.PANEL)
 		Kit.icon(m, "icon_trophy", Rect2(cx + 8, cy + (rh - 6) * 0.5 - 16, 32, 32), Color.WHITE if on else Color(1, 1, 1, 0.25))
 		Kit.t(m, String(d["name"]), Vector2(cx + 48, cy + rh * 0.42), 17, Kit.TEXT if on else Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, cw - 66)
-		Kit.t(m, String(d["desc"]), Vector2(cx + 48, cy + rh * 0.42 + 19), 13, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, cw - 66)
+		Kit.t(m, String(d["desc"]), Vector2(cx + 48, cy + rh * 0.42 + 19), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, cw - 66)
 		m.stat_tips.append([Rect2(cx, cy, cw - 10, rh - 6), "%s\n%s" % [String(d["name"]), String(d["desc"])]])

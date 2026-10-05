@@ -42,7 +42,7 @@ static func draw(m) -> void:
 		var c: Vector2 = r.get_center()
 		var rad: float = SLOT * 0.5
 		m.draw_circle(c + Vector2(0, 4), rad, Color(0, 0, 0, 0.45))
-		m.draw_circle(c, rad, Color("101418") if has else Color(0.09, 0.11, 0.13, 0.55))
+		m.draw_circle(c, rad, Kit.BG2 if has else Color(Kit.BG2, 0.55))
 		m.draw_arc(c, rad, 0, TAU, 48, Kit.GOLD if armed else (Kit.GEM if has else Color(Kit.EDGE, 0.6)), 4.0 if armed else 2.5)
 		if has:
 			var sd: Dictionary = S.specials[k]

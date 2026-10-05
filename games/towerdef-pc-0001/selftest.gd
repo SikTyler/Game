@@ -4,6 +4,7 @@ extends SceneTree
 ## 0) or "SELFTEST FAIL: <reason>" (exit 1).
 ## Run: godot --headless --path games/towerdef-pc-0001/ --script res://selftest.gd
 
+const StKit := preload("res://tests/st_kit.gd")
 const TowerState := preload("res://TowerState.gd")
 const MissionDB := preload("res://data/MissionDB.gd")
 const BaseMeta := preload("res://BaseMeta.gd")
@@ -275,6 +276,7 @@ func _initialize() -> void:
 	_pc_engine_stages()
 	_redesign_run_stages()
 	_horde_stages()
+	StKit.run(self)
 
 	if fails.is_empty():
 		print("SELFTEST OK")

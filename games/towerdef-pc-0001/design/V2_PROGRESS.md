@@ -28,6 +28,7 @@ The full `playtest.gd` (~35 min, 52 gates) is the P9 gate only. 7 mass balance g
 |---|---|---|
 | P0 setup / baseline / docs / smoke | done | tools/setup_godot.sh, tools/test_all.sh, tools/parse_all.gd, smoke.gd, V2 docs |
 | P1 strip + hard reset | done | Removed Factory, Crates, Cards, Parts/Sets, Core Bay, 4 Cores→1, Keys, Core Cores, air (Drone Nest, flyer-only Flak), plaza; restored the pre-Factory Outpost (OutpostView from 5b10ce8, no Key Forge); save v5 hard reset (+ one-time banner); interim Core tab; Scrap-only drops. selftest 580 checks, uitest 166 PASS, smoke OK. |
+| P2 neon casino UI foundation | done | Fonts (Inter body + Chakra Petch headings/numbers, OFL, `fonts/`), `ui/Fonts.gd`, `ui/NeonTheme.gd` (Godot Theme on the widget layer + tooltips), Kit V2 palette by token (navy #070a12→#0d1220, cyan #39e6ff, magenta #ff3ea5, gold #ffd34d, 7 gear rarities incl. prismatic Exotic), glowing buttons/panels, widgets `panel_glow` / `card_frame` / `tabs` / `big_number` / `req_chip` / `bar_glow` / `rarity_beam` / `glow` / `bg`, `vfx/Roll.gd` (counter roll-up + pop: top-bar currencies, results total), `vfx/Beam.gd` (loot beam + card shimmer), `Juice.shake(mag)`, `Sfx.play(clip, pitch)` + `seq_pitch`. Nav OUTPOST / CORE / FORGE (locked, SOON) / RESEARCH / REFORGE + magenta PLAY; Missions moved to the top bar. All screens restyled by token; no text below 14 px. |
 
 ## Test ledger
 Every deleted, rewritten or added check, with its reason. A surviving check is never silently loosened.
@@ -38,6 +39,9 @@ Every deleted, rewritten or added check, with its reason. A surviving check is n
 | P1 | rewrote Stage 12 (save migration → v5 hard reset), Stage 9 (perm base → Core level carry), PC-E9 (v2 migration → reset + legacy import as fresh v5), `_core_stages` (4 Cores → 1 + attack-sheet fixtures), Reforge AC-21 (no parts / Lance / Core Cores), drops (Scrap only), achievements (39 → 33), cards in-run → wind_hp / skip_chance mechanics | rewritten | V2 design: one Core, no crates/cards/keys, hard reset |
 | P1 | literals: Steadfast ×1.02 removed, rerolls (no card reroll), LabDB 12 → 10, huts 3 → 2, Insight 7 → 6, snapshot troops 4 → 3, day-7 streak chest → +60 Scrap | adjusted | follow-on of the removals |
 | P1 | uitest: Core Bay / Crates / Factory / Cards sections → Core tab, restored pre-Factory `_outpost` (5b10ce8), V2 home + research/missions; loot feed newest row = bounty; Core tooltip = level + attack | 210 → 166 PASS | removed screens |
+| P2 | added `tests/st_kit.gd` (selftest): palette contrast (every text token on every surface ≥ WCAG 4.5; rarities readable on cards), roll-up curve (monotonic, exact landing, ease-out, pop once, deterministic, snap/retarget), `Juice.shake_amount` scaling, `Sfx.seq_pitch` ladder | +17 | P2 foundation (pure parts) |
+| P2 | uitest: per-screen text-size audit in `_audit` (drawn text and button labels ≥ 14 px, every audited screen), draw pass live headless, fonts bundled (Inter / Chakra Petch), Theme on `ui` + tooltips, button font + hover glow, nav (Forge locked, Missions in the top bar) | +22 PASS | P2 layout audit (V2_DESIGN P2) |
+| P2 | 17 draw calls below 14 px raised to 14 (Intel enemy table rows 30 → 34 px, flow header 10 → 14 px; Draft card tags; Outpost palette; Reforge costs; enhancement descriptions; tier readout) | adjusted | P2 audit findings |
 
 ## Golden fingerprint history (HORDE_FP_GOLDEN)
 | Phase | Hash | Why it changed |
@@ -48,3 +52,6 @@ Every deleted, rewritten or added check, with its reason. A surviving check is n
 ## Deviations from V2_DESIGN
 - P1: the playtest bot was slimmed (spec / set / forge-loop jobs and RD gates removed with parts, crates, cards and the Factory); its Outpost plan is the pre-Factory OP_PLAN minus the Key Forge. The full rewrite stays in P9.
 - P1: the Reforge Outpost nodes (`builder2`, `bp_*`, `retain`) are live again with the restored Outpost; `crate_luck` is removed.
+- P2: the theme builder is `ui/NeonTheme.gd`, not `ui/Theme.gd` (`Theme` is a Godot class name); fonts live in `ui/Fonts.gd` so Kit and the theme share them without a preload cycle.
+- P2: contrast is asserted in selftest (`st_kit`, pure) rather than uitest; uitest owns the drawn-text size audit.
+- P2: hub toasts moved to bottom-centre (they covered the Outpost BUILD header); run toasts sit at the top of the field, clear of the hotbar.

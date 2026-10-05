@@ -50,6 +50,7 @@ static func draw(m, cr: Rect2) -> void:
 	for k in 4:
 		var a: float = m.t_anim * (0.25 + 0.1 * float(k)) + float(k) * 1.4
 		m.draw_arc(c, 150.0 + 26.0 * float(k), a, a + 2.0, 40, Color(Kit.GEM, 0.12 + 0.05 * float(k)), 3.0)
+	Kit.glow(m, c, 260.0, Kit.CYAN, 0.18 + 0.05 * sin(m.t_anim * 1.7))
 	Kit.icon(m, "core_bastion", Rect2(c - Vector2(110, 110), Vector2(220, 220)))
 	Kit.t(m, "THE CORE", Vector2(c.x, cr.position.y + 60), 34, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, 600.0)
 	Kit.t(m, "Level %d / %d" % [lv, Cores.max_level(s)], Vector2(c.x, c.y + 190), 26, Kit.GOLD, HORIZONTAL_ALIGNMENT_CENTER, 400.0)

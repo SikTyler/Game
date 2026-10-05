@@ -180,11 +180,11 @@ static func draw(m, x: float, w: float, y0: float, y1: float) -> void:
 		var cw: float = w / 4.0
 		for ci in 4:
 			var c: Array = cols[ci]
-			Kit.t(m, String(c[0]), Vector2(x + cw * float(ci), y + 10), 10, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, cw)
-			Kit.t(m, String(c[1]), Vector2(x + cw * float(ci), y + 28), 16, c[2], HORIZONTAL_ALIGNMENT_LEFT, cw)
-		m.stat_tips.append([Rect2(x, y, w, 34), "The horde in four numbers (last ~3 s):\nALIVE bodies on the field · IN/s spawning · KILLS/s you deal · LEAK/s reaching the Core (a leaked body pays no cash).\nKeep KILLS/s above IN/s or the tide piles up on the Core."])
-		y += 38.0
-	var rh: float = 30.0
+			Kit.th(m, String(c[0]), Vector2(x + cw * float(ci), y + 12), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, cw)
+			Kit.th(m, String(c[1]), Vector2(x + cw * float(ci), y + 32), 18, c[2], HORIZONTAL_ALIGNMENT_LEFT, cw)
+		m.stat_tips.append([Rect2(x, y, w, 38), "The horde in four numbers (last ~3 s):\nALIVE bodies on the field · IN/s spawning · KILLS/s you deal · LEAK/s reaching the Core (a leaked body pays no cash).\nKeep KILLS/s above IN/s or the tide piles up on the Core."])
+		y += 44.0
+	var rh: float = 34.0
 	var kinds: Array = []
 	for k in ORDER:
 		if ro.has(k):
@@ -201,16 +201,16 @@ static func draw(m, x: float, w: float, y0: float, y1: float) -> void:
 		var nw: bool = int(m.intel_seen.get(k, 0)) == int(S.wave) and int(S.wave) > 1
 		Kit.t(m, String(NAMES.get(k, k.capitalize())), Vector2(x + 32, ry + 14), 15, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, 110)
 		if nw:
-			Kit.t(m, "NEW", Vector2(x + 32, ry + 28), 11, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, 40)
+			Kit.th(m, "NEW", Vector2(x + 32, ry + 31), 14, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, 40)
 		var st: int = stars(S, k)
 		for j in 5:
 			_star(m, Vector2(x + 152 + float(j) * 13.0, ry + 10), 6.0, Kit.GOLD if j < st else Color(1, 1, 1, 0.15))
-		Kit.t(m, "HP %s" % Kit.fmt(float(r["hp"])), Vector2(x + 152, ry + 28), 12, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, 90)
+		Kit.t(m, "HP %s" % Kit.fmt(float(r["hp"])), Vector2(x + 152, ry + 31), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, 90)
 		Kit.t(m, "%d%s" % [int(r["n"]), (" +%d" % int(r["q"])) if int(r["q"]) > 0 else ""], Vector2(x + w, ry + 18), 15, Kit.ENEMY, HORIZONTAL_ALIGNMENT_RIGHT, 80)
 		var d: Dictionary = EnemyDB.mass_def(k) if bool(S.mass) else EnemyDB.get_def(k)
 		m.stat_tips.append([Rect2(x, ry, w, rh), "%s  ·  %d star%s\n%s\nHP %s  ·  speed %d  ·  hits for %s\n%d alive, %d still to spawn" % [String(NAMES.get(k, k)), st, "" if st == 1 else "s", String(TRAITS.get(k, "")), Kit.fmt(float(r["hp"])), int(float(d.get("spd", 0.0))), Kit.fmt(float(d.get("dmg", 0.0)) * float(S.hp_mult)), int(r["n"]), int(r["q"])]])
 	if kinds.size() > room:
-		Kit.t(m, "+%d more types" % (kinds.size() - room), Vector2(x + w, y0 + 16), 12, Kit.DIM, HORIZONTAL_ALIGNMENT_RIGHT, 120)
+		Kit.t(m, "+%d more types" % (kinds.size() - room), Vector2(x + w, y0 + 16), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_RIGHT, 120)
 	# loot
 	y = y0 + half + 4.0
 	Kit.head(m, "LOOT DROPS  (this run)", Vector2(x, y + 16), w, Kit.GOLD)

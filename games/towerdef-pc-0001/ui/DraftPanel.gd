@@ -84,7 +84,7 @@ static func card_type(m, cd: Dictionary) -> Dictionary:
 	var rw: String = String(cd.get("reward", ""))
 	if kind == "new":
 		var dup: bool = bool(cd.get("dup", false))
-		return {"type": "BUILDING", "col": Color("4fb3ff"), "icon": "ui_blueprint",
+		return {"type": "BUILDING", "col": Kit.RARITY["rare"], "icon": "ui_blueprint",
 			"sub": "Place another %s on the grid" % nm if dup else "Place it on a grid cell",
 			"how": "BUILDING: drag onto an empty cell (or click, then click a cell)"}
 	if kind == "plus":
@@ -183,7 +183,7 @@ static func _draw_card(m, r: Rect2, cd: Dictionary, k: int) -> void:
 	if dragging:
 		m.draw_rect(r, Color(0, 0, 0, 0.45))
 	var isz: float = minf(r.size.y - 44.0, 92.0)
-	Kit.panel(m, Rect2(r.position.x + 10, r.position.y + 34, isz, isz), Color(rc, 0.5), Color("101418"), 1)
+	Kit.panel(m, Rect2(r.position.x + 10, r.position.y + 34, isz, isz), Color(rc, 0.5), Kit.BG2, 1)
 	Kit.icon(m, id, Rect2(r.position.x + 14, r.position.y + 38, isz - 8, isz - 8))
 	# Owner feedback #1: a type banner (icon + colour + label) on every card.
 	var ct: Dictionary = card_type(m, cd)
@@ -193,8 +193,8 @@ static func _draw_card(m, r: Rect2, cd: Dictionary, k: int) -> void:
 	m.draw_rect(Rect2(br.position, Vector2(6, br.size.y)), tcol)
 	Kit.icon(m, String(ct["icon"]), Rect2(br.position.x + 10, br.position.y + 2, 22, 22))
 	Kit.t(m, String(ct["type"]), Vector2(br.position.x + 38, br.position.y + 20), 16, tcol.lightened(0.25), HORIZONTAL_ALIGNMENT_LEFT, 110.0)
-	Kit.t(m, String(ct["sub"]), Vector2(br.position.x + 38 + 110, br.position.y + 19), 13, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, br.size.x - 160.0 - 64.0)
-	Kit.t(m, rar.capitalize(), Vector2(br.end.x - 8, br.position.y + 19), 13, rc, HORIZONTAL_ALIGNMENT_RIGHT, 70.0)
+	Kit.t(m, String(ct["sub"]), Vector2(br.position.x + 38 + 110, br.position.y + 19), 14, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, br.size.x - 160.0 - 64.0)
+	Kit.t(m, rar.capitalize(), Vector2(br.end.x - 8, br.position.y + 19), 14, rc, HORIZONTAL_ALIGNMENT_RIGHT, 70.0)
 	var tx: float = r.position.x + 22.0 + isz
 	var tw: float = r.end.x - tx - 10.0
 	Kit.t(m, String(d.get("name", id)), Vector2(tx, r.position.y + 58), 21, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, tw)
@@ -207,9 +207,9 @@ static func _draw_card(m, r: Rect2, cd: Dictionary, k: int) -> void:
 		if cx + cw > r.end.x - 8.0:
 			break
 		var cr := Rect2(cx, r.end.y - 28, cw, 20)
-		Kit.panel(m, cr, Kit.EDGE, Color("14181d"), 1)
+		Kit.panel(m, cr, Kit.EDGE, Kit.BG2, 1)
 		Kit.icon(m, "tag_" + tag, Rect2(cx + 2, r.end.y - 27, 18, 18))
-		Kit.t(m, tag, Vector2(cx + 20, r.end.y - 13), 12, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, cw - 20)
+		Kit.t(m, tag, Vector2(cx + 20, r.end.y - 13), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, cw - 20)
 		cx += cw + 4.0
 	
 

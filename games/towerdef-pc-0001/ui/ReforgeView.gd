@@ -10,7 +10,7 @@ const ReforgeDB := preload("res://data/ReforgeDB.gd")
 const Kit := preload("res://ui/Kit.gd")
 const TuneRef := preload("res://Tune.gd")
 
-const BRANCHES: Array = [["power", "POWER", "rf_power", Color("e8434f")], ["economy", "ECONOMY", "rf_economy", Color("f2c94c")], ["mastery", "MASTERY", "rf_mastery", Color("5ad1f0")]]
+const BRANCHES: Array = [["power", "POWER", "rf_power", Kit.ENEMY], ["economy", "ECONOMY", "rf_economy", Kit.GOLD], ["mastery", "MASTERY", "rf_mastery", Kit.CYAN]]
 const NODE_R: float = 34.0
 
 
@@ -94,7 +94,7 @@ static func draw(m, _cr: Rect2) -> void:
 	Kit.t(m, "%d banked  ·  %d earned all-time  ·  Reforges %d" % [int(s.get("shards", 0)), int(pv["cumulative"]), Reforge.count(s)], Vector2(x + 80, y + 62), 15, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w - 80)
 	y += 92.0
 	var gate: String = "Ready to Reforge" if bool(pv["ok"]) else "Locked: reach wave %d on any tier, or earn 1,000,000 coins since the last Reforge (%s so far)" % [int(pv["gate_wave"]), Kit.fmt(float(pv["coins_since"]))]
-	y += Kit.wrap(m, gate, Vector2(x, y), 16, Kit.GREEN if bool(pv["ok"]) else Color("ff8a8a"), w, 3) + 8.0
+	y += Kit.wrap(m, gate, Vector2(x, y), 16, Kit.GREEN if bool(pv["ok"]) else Kit.ENEMY, w, 3) + 8.0
 	if bool(pv["ok"]):
 		Kit.t(m, "Worth it: +%d is at least half of everything earned so far" % int(pv["shards"]) if bool(pv["worth"]) else "Tip: push further first — this Reforge is under half your lifetime shards", Vector2(x, y + 10), 15, Kit.GREEN if bool(pv["worth"]) else Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, w)
 		y += 30.0
@@ -104,10 +104,10 @@ static func draw(m, _cr: Rect2) -> void:
 	Kit.head(m, "KEEPS", Vector2(x + cw + 20, y), cw, Kit.GREEN)
 	var ry: float = y + 26.0
 	for r in pv["resets"]:
-		ry += Kit.wrap(m, "- " + String(r), Vector2(x, ry), 15, Color("ff9a9a"), cw, 3) + 6.0
+		ry += Kit.wrap(m, "- " + String(r), Vector2(x, ry), 15, Kit.ENEMY, cw, 3) + 6.0
 	var ky: float = y + 26.0
 	for k in pv["keeps"]:
-		ky += Kit.wrap(m, "+ " + String(k), Vector2(x + cw + 20, ky), 15, Color("9ae6a0"), cw, 3) + 6.0
+		ky += Kit.wrap(m, "+ " + String(k), Vector2(x + cw + 20, ky), 15, Kit.GREEN, cw, 3) + 6.0
 	if m.rf_confirm == 1:
 		Kit.panel(m, Rect2(x - 8, l.end.y - 140, w + 16, 52), Kit.ENEMY, Color(0.2, 0.05, 0.06, 0.95))
 		Kit.t(m, "Are you sure? Coins, Core levels, part levels and research reset.", Vector2(l.get_center().x, l.end.y - 108), 15, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, w)
@@ -116,7 +116,7 @@ static func draw(m, _cr: Rect2) -> void:
 
 static func _draw_tree(m, s: Dictionary) -> void:
 	var tr: Rect2 = tree_rect(m)
-	Kit.panel(m, tr, Kit.EDGE, Color("13171c"))
+	Kit.panel(m, tr, Kit.EDGE, Kit.BG2)
 	Kit.t(m, "SHARD TREE", Vector2(tr.position.x + 20, tr.position.y + 36), 22, Kit.SHARD, HORIZONTAL_ALIGNMENT_LEFT, 300.0)
 	Kit.chip(m, "cur_shard", "%d shards" % int(s.get("shards", 0)), Vector2(tr.end.x - 190, tr.position.y + 38), Kit.SHARD, "Shards to spend", 180.0)
 	var root: Vector2 = node_pos(m, "root_forge")
@@ -152,7 +152,7 @@ static func _draw_tree(m, s: Dictionary) -> void:
 			m.draw_arc(p2, NODE_R + 4.0, 0, TAU, 40, Color(col2, 0.5 + 0.4 * sin(m.t_anim * 4.0)), 3.0)
 		var lx: float = p2.x + NODE_R + 8.0
 		Kit.t(m, "%s  %d/%d" % [String(d["name"]), lv, int(d["max"])], Vector2(lx, p2.y - 2), 15, col2 if lv > 0 else Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, 200.0)
-		Kit.t(m, ("%d shards" % ReforgeDB.cost(String(id), lv)) if lv < int(d["max"]) else "max", Vector2(lx, p2.y + 17), 13, Kit.SHARD if can else Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, 170.0)
+		Kit.t(m, ("%d shards" % ReforgeDB.cost(String(id), lv)) if lv < int(d["max"]) else "max", Vector2(lx, p2.y + 17), 14, Kit.SHARD if can else Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, 170.0)
 
 
 static func _commas(n: int) -> String:

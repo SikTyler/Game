@@ -38,6 +38,17 @@ func add_trauma(amount: float) -> void:
 	trauma = clampf(trauma + add, 0.0, TRAUMA_MAX)
 
 
+## Trauma for an event of size `mag` (P2 casino juice): 0 = a tick, 1 = a
+## Rare drop, 6 = an Exotic / boss kill. Grows with size, capped below max.
+static func shake_amount(mag: float) -> float:
+	return clampf(0.08 + 0.09 * maxf(0.0, mag), 0.08, 0.7)
+
+
+## Shake scaled by event size (loot reveals, big hits, level-ups).
+func shake(mag: float) -> void:
+	add_trauma(shake_amount(mag))
+
+
 func hit_pause(secs: float) -> void:
 	if _pause_cd > 0.0 and pause_t <= 0.0:
 		return

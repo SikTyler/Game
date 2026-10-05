@@ -40,14 +40,17 @@ const Battle := preload("res://ui/Battle.gd")
 const Intel := preload("res://ui/Intel.gd")
 const Hub := preload("res://ui/Hub.gd")
 const OutpostView := preload("res://ui/OutpostView.gd")
+const Fonts := preload("res://ui/Fonts.gd")
+const NeonTheme := preload("res://ui/NeonTheme.gd")
+const Roll := preload("res://vfx/Roll.gd")
 
-const GOLD: Color = Color("f2c94c")
-const GEM: Color = Color("5ad1f0")
-const ENEMY: Color = Color("e8434f")
-const ENEMY2: Color = Color("e04bc0")
+const GOLD: Color = Kit.GOLD
+const GEM: Color = Kit.GEM
+const ENEMY: Color = Kit.ENEMY
+const ENEMY2: Color = Kit.MAGENTA
 const SHIELD: Color = Color("7fd8ff")
-const TEXT: Color = Color("e9edf2")
-const GREEN: Color = Color("6bd46b")
+const TEXT: Color = Kit.TEXT
+const GREEN: Color = Kit.GREEN
 const TOP_H: float = 56.0
 const HOT_H: float = 96.0
 const NAV_H: float = 60.0
@@ -67,8 +70,12 @@ var sel: int = -1                    # run: selected grid cell
 var last_result: Dictionary = {}
 var last_breakdown: Dictionary = {}
 var ui: Control
-var font: Font
+var font: Font                       # Inter (body); Kit picks Chakra Petch for headings
+var font_head: Font
+## Top-bar currency counters roll up to their new value (vfx/Roll.gd).
+var rolls: Dictionary = {"coins": Roll.new(), "scrap": Roll.new(), "shards": Roll.new()}
 var t_anim: float = 0.0
+var results_t0: float = 0.0          # t_anim when the results screen opened (coin roll-up)
 var ui_t: float = 0.0
 var poll_t: float = 0.0
 var last_tap_ms: int = -1000
@@ -157,7 +164,8 @@ var credits_scroll: float = 0.0
 
 
 func _ready() -> void:
-	font = ThemeDB.fallback_font
+	font = Fonts.body()
+	font_head = Fonts.head()
 	settings = Settings.read()
 	Settings.apply(settings, get_tree())
 	SteamService.init()
@@ -174,11 +182,13 @@ func _ready() -> void:
 	gore.call("setup", TowerState.CENTER, gore_level())
 	ui = Control.new()
 	ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.theme = NeonTheme.get_theme()
 	add_child(ui)
 	tipbox = PanelContainer.new()
 	tipbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	tipbox.visible = false
 	tipbox.add_theme_stylebox_override("panel", Kit.tip_style())
+	tipbox.theme = NeonTheme.get_theme()
 	tip_label = Label.new()
 	tip_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	tip_label.add_theme_font_size_override("font_size", 17)
@@ -203,7 +213,7 @@ func _ready() -> void:
 	tipbox.add_child(tvb)
 	add_child(tipbox)
 	fader = ColorRect.new()
-	fader.color = Color(0.05, 0.06, 0.08, 1.0)
+	fader.color = Kit.BG
 	fader.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	fader.modulate = Color(1, 1, 1, 0)
 	add_child(fader)
@@ -741,9 +751,9 @@ func _meta_sfx(ev: Array) -> void:
 				sfx_play("coin")
 
 
-func sfx_play(clip: String) -> void:
+func sfx_play(clip: String, pitch: float = -1.0) -> void:
 	if sfx != null:
-		sfx.play(clip)
+		sfx.play(clip, pitch)
 
 
 ## Volume / mute API: persists in save["settings"] and re-applies to the buses.
@@ -956,6 +966,7 @@ func _handle(events: Array) -> void:
 			"dead":
 				last_result = ev
 				screen = "results"
+				results_t0 = t_anim
 				aim_special = -1
 				juice.add_trauma(0.9)
 				flash = 0.6
@@ -1130,6 +1141,7 @@ func core_flash() -> void:
 
 func _process(delta: float) -> void:
 	t_anim += delta
+	_update_rolls(delta)
 	SteamService.tick()
 	if S != null and screen == "run":
 		SteamService.update_presence("run", int(S.wave), int(S.tier), String(S.mode), float(S.mod_coin))
@@ -1220,8 +1232,9 @@ func _rebuild_ui() -> void:
 
 func _draw() -> void:
 	stat_tips = []
+	Kit.frame_begin()
 	fclip.visible = screen == "run" or screen == "results"
-	draw_rect(Rect2(0, 0, vw, vh), Kit.BG)
+	Kit.bg(self, Rect2(0, 0, vw, vh), t_anim if not _reduce_motion() else 0.0)
 	match screen:
 		"menu":
 			Desktop.draw_menu(self)
@@ -1240,6 +1253,32 @@ func _draw() -> void:
 	Desktop.draw_toast(self)
 	if dbg_overlay:
 		_draw_debug_overlay()
+
+
+## Top-bar counters: banked amount (+ this run's live coins / scrap).
+func roll_targets() -> Dictionary:
+	var c: float = float(save.get("coins", 0))
+	var sc: float = float(save.get("scrap", 0))
+	if screen == "run" and S != null and not S.over:
+		c += float(S.coins_run)
+		sc += float((S.loot as Dictionary).get("scrap", 0))
+	return {"coins": c, "scrap": sc, "shards": float(save.get("shards", 0))}
+
+
+func _update_rolls(delta: float) -> void:
+	if save.is_empty():
+		return
+	var tg: Dictionary = roll_targets()
+	var snap: bool = _reduce_motion() or screen == "menu"
+	for k in rolls:
+		var r: Roll = rolls[k]
+		r.set_target(float(tg[k]), snap)
+		r.update(delta)
+
+
+func _reduce_motion() -> bool:
+	var v: Variant = settings.get("video", {})
+	return v is Dictionary and bool((v as Dictionary).get("reduce_motion", false))
 
 
 ## Settings > Video "Gore" level (off / low / full; default low).

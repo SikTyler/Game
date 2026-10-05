@@ -65,8 +65,16 @@ func _ready() -> void:
 	add_child(music)
 
 
-## Starts `clip` unless rate-limited / frame-capped / unknown. Returns true if logged.
-func play(clip: String) -> bool:
+## Pitch for step `k` of a rising sequence (P2 casino juice): a whole tone
+## per step from 1.0, capped at two octaves (a reel tick or reveal ladder).
+static func seq_pitch(k: int) -> float:
+	return minf(4.0, pow(2.0, float(maxi(0, k)) * 2.0 / 12.0))
+
+
+## Starts `clip` unless rate-limited / frame-capped / unknown. Returns true if
+## logged. `pitch` > 0 plays at that pitch (rising sequences); otherwise a
+## small random detune.
+func play(clip: String, pitch: float = -1.0) -> bool:
 	if not streams.has(clip):
 		return false
 	var now_ms: int = Time.get_ticks_msec()
@@ -81,7 +89,7 @@ func play(clip: String) -> bool:
 		return false
 	frame_count += 1
 	last_ms[clip] = now_ms
-	clip_log.append({"clip": clip, "ms": now_ms})
+	clip_log.append({"clip": clip, "ms": now_ms, "pitch": pitch if pitch > 0.0 else 1.0})
 	if clip_log.size() > LOG_MAX:
 		clip_log.remove_at(0)
 	var p: AudioStreamPlayer = players[next_idx]
@@ -89,7 +97,7 @@ func play(clip: String) -> bool:
 	if silent:
 		return true
 	p.stream = streams[clip]
-	p.pitch_scale = rng.randf_range(0.97, 1.03)
+	p.pitch_scale = pitch if pitch > 0.0 else rng.randf_range(0.97, 1.03)
 	p.play()
 	return true
 

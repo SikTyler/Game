@@ -1,7 +1,7 @@
 extends RefCounted
 ## The hub between runs (V2): a nav row under the top bar — Outpost (home),
-## Core, Research, Missions, Reforge — and the deploy cluster (tier, modes,
-## PLAY). This file owns the nav and the Research and Missions tabs; the
+## Core, Forge, Research, Reforge — and the deploy cluster (tier, modes,
+## PLAY); Missions is a top-bar button. This file owns the nav and the Research and Missions tabs; the
 ## Outpost lives in OutpostView, the Core in CoreView, Reforge in
 ## ReforgeView. View only: buttons call pure modules and hand the returned
 ## events to Main.meta_act().
@@ -49,46 +49,87 @@ static func is_home(tab: String) -> bool:
 	return tab == "play" or tab == "outpost"
 
 
-## Top menu (left): Outpost (home), then Core, Research, Missions, Reforge.
-## Widths shrink to stay clear of the deploy cluster on narrow windows.
+## Top menu (left): OUTPOST (home), CORE, FORGE, RESEARCH, REFORGE; the
+## deploy cluster (tier, Modes, PLAY) sits right. Missions moved to the top
+## bar (Desktop). The Forge tab is shown locked until the gear engine (P4).
 const NAV: Array = [
-	["core", "Core", "core_open", "The Core: level, stats (and soon its Weapon, Modules and look)"],
-	["research", "Research", "icon_lab", "Research: permanent upgrades (instant)"],
-	["missions", "Missions", "tab_missions", "Daily missions and the login streak"],
-	["reforge", "Reforge", "rf_root", "Core Reforge: reset for Shards and permanent nodes"],
+	["core", "CORE", "core_open", "The Core: level, stats (and soon its Weapon, Modules and look)"],
+	["forge", "FORGE", "icon_gear", "The Forge (coming soon): forge, merge, upgrade and reroll your Weapon and Modules"],
+	["research", "RESEARCH", "icon_lab", "Research: permanent upgrades (instant)"],
+	["reforge", "REFORGE", "rf_root", "Core Reforge: reset for Shards and permanent nodes"],
 ]
+## Tabs not playable yet (shown locked).
+const LOCKED: Array = ["forge"]
+const OUTPOST_W: float = 172.0
 
 
 static func nav_w(m) -> float:
-	var avail: float = start_rect(m).position.x - 340.0 - 206.0
-	return clampf(avail / float(NAV.size()) - 8.0, 96.0, 160.0)
+	var avail: float = start_rect(m).position.x - 340.0 - (OUTPOST_W + 20.0)
+	return clampf(avail / float(NAV.size()) - 8.0, 96.0, 156.0)
 
 
 static func nav_rect(m, k: int) -> Rect2:
-	var w: float = 190.0 if k == 0 else nav_w(m)
-	var x: float = 8.0 + (0.0 if k == 0 else 198.0 + float(k - 1) * (nav_w(m) + 8.0))
-	return Rect2(x, m.TOP_H + 8.0, w, m.NAV_H - 14.0)
+	var w: float = OUTPOST_W if k == 0 else nav_w(m)
+	var x: float = 12.0 + (0.0 if k == 0 else OUTPOST_W + 8.0 + float(k - 1) * (nav_w(m) + 8.0))
+	return Rect2(x, m.TOP_H + 8.0, w, m.NAV_H - 16.0)
 
 
 static func start_rect(m) -> Rect2:
-	return Rect2(m.vw - START_W - 8.0, m.TOP_H + 6.0, START_W, m.NAV_H - 10.0)
+	return Rect2(m.vw - START_W - 12.0, m.TOP_H + 6.0, START_W, m.NAV_H - 12.0)
+
+
+## Tab button styling: the active tab is filled cyan with a bright underline.
+static func _tab(m, label: String, r: Rect2, id: String, tip: String, key: String, icon_id: String, on: bool, fsize: int) -> void:
+	var b: Button = Kit.btn(m, label, r, func() -> void: m.set_tab(id), tip, not (id in LOCKED), Kit.CYAN if on else Kit.NEUTRAL, key, icon_id, fsize)
+	if on:
+		var st: StyleBoxFlat = Kit.sb(Kit.CYAN, Kit.tint(Kit.CYAN, 0.2), 2, 8, 1.1).duplicate()
+		st.border_width_bottom = 4
+		b.add_theme_stylebox_override("normal", st)
+		b.add_theme_stylebox_override("hover", st)
+		b.add_theme_color_override("font_color", Color.WHITE)
+	else:
+		b.add_theme_stylebox_override("normal", Kit.sb(Color(Kit.EDGE2, 0.9), Color(Kit.BG2, 0.75), 1, 8))
+		b.add_theme_color_override("font_color", Kit.DIM)
+	if id in LOCKED:
+		# "SOON" pill on the locked tab (a child Label so it draws over the button)
+		var tag := Label.new()
+		tag.text = "SOON"
+		tag.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		tag.add_theme_font_override("font", Kit.Fonts.head())
+		tag.add_theme_font_size_override("font_size", 14)
+		tag.add_theme_color_override("font_color", Color.WHITE)
+		var st2: StyleBoxFlat = Kit.sb(Kit.MAGENTA, Kit.tint(Kit.MAGENTA, 0.45), 1, 8, 0.5).duplicate()
+		st2.content_margin_left = 6
+		st2.content_margin_right = 6
+		tag.add_theme_stylebox_override("normal", st2)
+		tag.position = Vector2(r.size.x - 52.0, -8.0)
+		tag.size = Vector2(48, 20)
+		tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		tag.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		b.add_child(tag)
 
 
 static func build(m) -> void:
 	var home: bool = is_home(String(m.tab))
-	Kit.btn(m, "Outpost" if home else "Back to Outpost", nav_rect(m, 0), func() -> void: m.set_tab("play"), "Your Outpost: build, upgrade and collect", true, Kit.RUST if home else Kit.NEUTRAL, "DTAB Outpost", "op_relay_1", 16)
+	var fs: int = 16 if nav_w(m) >= 140.0 else 14
+	_tab(m, "OUTPOST", nav_rect(m, 0), "play", "Your Outpost: build, upgrade and collect", "DTAB Outpost", "op_relay_1", home, 16)
 	for k in NAV.size():
 		var nv: Array = NAV[k]
 		var tid: String = String(nv[0])
-		Kit.btn(m, String(nv[1]), nav_rect(m, k + 1), func() -> void: m.set_tab(tid), String(nv[3]), true, Kit.RUST if m.tab == tid else Kit.NEUTRAL, "DTAB " + String(nv[1]), String(nv[2]), 15 if nav_w(m) >= 140.0 else 13)
-	# deploy cluster (right): tier < T > · Modes · START RUN
+		_tab(m, String(nv[1]), nav_rect(m, k + 1), tid, String(nv[3]), "DTAB " + String(nv[1]).capitalize(), String(nv[2]), m.tab == tid, fs)
+	# deploy cluster (right): < TIER > · Modes · PLAY
 	var sr: Rect2 = start_rect(m)
 	var ny: float = m.TOP_H + 8.0
-	var nh: float = m.NAV_H - 14.0
+	var nh: float = m.NAV_H - 16.0
 	Kit.btn(m, "<", Rect2(sr.position.x - 330, ny, 46, nh), func() -> void: m.shift_tier(-1), "Previous tier", m.view_tier > 1, Kit.NEUTRAL, "<", "", 22)
 	Kit.btn(m, ">", Rect2(sr.position.x - 194, ny, 46, nh), func() -> void: m.shift_tier(1), "Next tier (tougher enemies, more coins)", m.view_tier < mini(Tiers.tier_max(), Tiers.highest(m.save) + 1), Kit.NEUTRAL, ">", "", 22)
-	Kit.btn(m, "Modes", Rect2(sr.position.x - 140, ny, 130, nh), func() -> void: m.set_overlay("modes"), "Pick Normal or Endless and stack challenge modifiers for bonus coins", true, Kit.MAG, "MODES", "icon_mod", 15)
-	Kit.btn(m, "PLAY  T%d" % m.view_tier, sr, func() -> void: m.start_run(), "Start a run on Tier %d (Core Lv%d)" % [m.view_tier, Cores.level(m.save)], Tiers.is_unlocked(m.save, m.view_tier), Kit.RUST, "DSTART", "", 20)
+	Kit.btn(m, "Modes", Rect2(sr.position.x - 140, ny, 128, nh), func() -> void: m.set_overlay("modes"), "Pick Normal or Endless and stack challenge modifiers for bonus coins", true, Kit.MAGENTA, "MODES", "icon_mod", 15)
+	var ok: bool = Tiers.is_unlocked(m.save, m.view_tier)
+	var pb: Button = Kit.btn(m, "PLAY  T%d" % m.view_tier, sr, func() -> void: m.start_run(), "Start a run on Tier %d (Core Lv%d)" % [m.view_tier, Cores.level(m.save)], ok, Kit.GOLD, "DSTART", "", 24)
+	pb.add_theme_font_override("font", Kit.Fonts.bold())
+	pb.add_theme_stylebox_override("normal", Kit.sb(Kit.GOLD, Kit.MAGENTA.darkened(0.45), 2, 10, 1.2))
+	pb.add_theme_stylebox_override("hover", Kit.sb(Color.WHITE, Kit.MAGENTA.darkened(0.25), 2, 10, 2.0))
+	pb.add_theme_stylebox_override("pressed", Kit.sb(Color.WHITE, Kit.MAGENTA.darkened(0.1), 2, 10, 2.2))
 	if home:
 		OutpostView.build(m)
 		return
@@ -108,16 +149,22 @@ static func draw(m) -> void:
 	var home0: bool = is_home(String(m.tab))
 	if home0:
 		OutpostView.draw(m, cr)   # first: the nav row below paints over any map overdraw
-	m.draw_rect(Rect2(0, m.TOP_H, m.vw, m.NAV_H), Color("1a1f26"))
-	m.draw_line(Vector2(0, m.TOP_H + m.NAV_H), Vector2(m.vw, m.TOP_H + m.NAV_H), Kit.EDGE, 2.0)
+	var nr := Rect2(0, m.TOP_H, m.vw, m.NAV_H)
+	m.draw_polygon(PackedVector2Array([nr.position, Vector2(nr.end.x, nr.position.y), nr.end, Vector2(nr.position.x, nr.end.y)]), PackedColorArray([Kit.BG2, Kit.BG2, Kit.BG, Kit.BG]))
+	m.draw_line(Vector2(0, nr.end.y), Vector2(m.vw, nr.end.y), Kit.EDGE2, 1.0)
 	var home: bool = is_home(String(m.tab))
-	# tier readout between < and >
+	# PLAY: pulsing magenta halo behind the button (the button draws on top)
 	var sr: Rect2 = start_rect(m)
+	var pulse: float = 0.5 + 0.5 * sin(m.t_anim * 2.4)
+	if Tiers.is_unlocked(m.save, m.view_tier):
+		Kit.panel_glow(m, sr.grow(1.0 + 2.0 * pulse), Color(Kit.MAGENTA, 0.5 + 0.4 * pulse), Color(0, 0, 0, 0), 0.8 + 1.0 * pulse, 1)
+	# tier readout between < and >
 	var tx: float = sr.position.x - 239.0
 	var vt: int = m.view_tier
-	Kit.t(m, "TIER %d" % vt, Vector2(tx, m.TOP_H + 30), 20, Kit.TEXT if Tiers.is_unlocked(m.save, vt) else Color("ff8a8a"), HORIZONTAL_ALIGNMENT_CENTER, 90.0)
-	Kit.t(m, ("x%.1f coins" % Tiers.coin_mult(vt)) if Tiers.is_unlocked(m.save, vt) else "locked", Vector2(tx, m.TOP_H + 49), 13, Kit.GOLD if Tiers.is_unlocked(m.save, vt) else Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, 90.0)
-	m.stat_tips.append([Rect2(tx - 45, m.TOP_H + 8, 90, m.NAV_H - 14), ("Tier %d: coins x%.1f, enemy HP x%.1f" % [vt, Tiers.coin_mult(vt), Tiers.hp_mult(vt)]) if Tiers.is_unlocked(m.save, vt) else Tiers.requirement(vt)])
+	var unlocked: bool = Tiers.is_unlocked(m.save, vt)
+	Kit.th(m, "TIER %d" % vt, Vector2(tx, m.TOP_H + 29), 20, Kit.TEXT if unlocked else Kit.ENEMY, HORIZONTAL_ALIGNMENT_CENTER, 90.0)
+	Kit.t(m, ("x%.1f coins" % Tiers.coin_mult(vt)) if unlocked else "locked", Vector2(tx, m.TOP_H + 48), 14, Kit.GOLD if unlocked else Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, 92.0)
+	m.stat_tips.append([Rect2(tx - 45, m.TOP_H + 8, 90, m.NAV_H - 14), ("Tier %d: coins x%.1f, enemy HP x%.1f" % [vt, Tiers.coin_mult(vt), Tiers.hp_mult(vt)]) if unlocked else Tiers.requirement(vt)])
 	if not home:
 		match String(m.tab):
 			"core":
@@ -134,7 +181,14 @@ static func draw(m) -> void:
 	for e in nb:
 		if m.overlay == "" and m.offline_offer.is_empty() and badge(m, String((e as Array)[0])):
 			var r: Rect2 = nav_rect(m, int((e as Array)[1]))
-			m.draw_circle(Vector2(r.end.x - 10, r.position.y + 10), 6.0, Kit.ENEMY)
+			badge_dot(m, Vector2(r.end.x - 9, r.position.y + 9))
+
+
+## Notification dot: a magenta pip with a soft halo.
+static func badge_dot(m, p: Vector2) -> void:
+	m.draw_circle(p, 9.0, Color(Kit.MAGENTA, 0.25 + 0.15 * sin(m.t_anim * 4.0)))
+	m.draw_circle(p, 5.5, Kit.MAGENTA)
+	m.draw_circle(p + Vector2(-1.5, -1.5), 1.8, Color(1, 1, 1, 0.8))
 
 
 # ================================================================= RESEARCH
@@ -168,7 +222,7 @@ static func _draw_research(m, cr: Rect2) -> void:
 		var lvl: int = Labs.level(s, id2)
 		var mx: int = LabDB.max_of(id2)
 		var ok: bool = Labs.can_start(s, id2)
-		Kit.panel(m, r2, Kit.LAB if ok else Kit.EDGE, Kit.PANEL2 if ok else Color("1c2128"))
+		Kit.panel(m, r2, Kit.LAB if ok else Kit.EDGE, Kit.CARD if ok else Kit.PANEL)
 		if not Kit.icon(m, "lab_" + id2, Rect2(r2.position.x + 12, r2.position.y + 14, 52, 52), Color.WHITE if ok or lvl >= mx else Color(1, 1, 1, 0.5)):
 			Kit.icon(m, "icon_lab", Rect2(r2.position.x + 12, r2.position.y + 14, 52, 52), Color.WHITE if ok else Color(1, 1, 1, 0.5))
 		Kit.t(m, String(d2["name"]), Vector2(r2.position.x + 76, r2.position.y + 34), 19, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, r2.size.x - 90)
@@ -226,7 +280,7 @@ static func _draw_missions(m, cr: Rect2) -> void:
 		var r := Rect2(cr.position.x + 20.0 + float(k) * (dw + 8.0), cr.position.y + 66, dw, 130)
 		var done: bool = _streak_done(s, k, t)
 		var is_next: bool = avail and k == nxt - 1
-		Kit.panel(m, r, Kit.GOLD if is_next else (Kit.GREEN if done else Kit.EDGE), Color(0.15, 0.25, 0.15) if done else Color("1f252c"))
+		Kit.panel(m, r, Kit.GOLD if is_next else (Kit.GREEN if done else Kit.EDGE), Kit.tint(Kit.GREEN, 0.16) if done else Kit.PANEL)
 		Kit.t(m, "Day %d" % (k + 1), Vector2(r.get_center().x, r.position.y + 26), 17, Kit.TEXT if (done or is_next) else Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
 		var rw: Dictionary = MissionDB.STREAK[k]
 		var icon_id: String = "chest" if bool(rw.get("chest", false)) else "cur_coin"
