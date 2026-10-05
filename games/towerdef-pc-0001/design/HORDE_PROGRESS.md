@@ -144,3 +144,40 @@ Next pass (blocked by the effort cap, not attempted): taper `pc_enemy_hp` by tie
 | 5,000 | 5.0 → 4.24 | 2.5 → 3.07 |
 
 The building block check adds about 25% to move. Total step time is lower because fewer events are emitted.
+
+## HORDE Phases 3+4: fixed substeps, one-pass move with separation, contact rule, knockback
+Commits: P3+P4 core, then the separation perf fix (both on towerdef-0001).
+- **C8, fixed substeps:** `tick()` adds `delta*speed` to `step_acc` and runs a whole `_step(SUBSTEP=0.05)` for each full substep. A short frame may run no step, and the remainder carries over. At 60 fps and 1×, the sim steps every third frame. View interpolation between steps is NOT done yet (follow-up for Phase 6), so motion can look choppy at 1×.
+- **One hot pass** (`EnemyStore.move`): timers, then courier/taunt, then seek toward CENTER with acceleration (`horde_accel` 6/s up to `spd`), then soft separation, then knockback velocity with friction (`horde_friction` 6/s), then the stop-ring wall.
+  - Separation is a linked-cell grid (32 px cells, 96×96) built in-pass from the old positions (a Jacobi read), weighted by mass so heavy bodies shove light ones. It is capped at `size*0.35` per substep, and the scan is capped at 12 candidates per body (`prm[4]`, deterministic spawn order). Bodies off the grid skip separation.
+- **Contact rule:** a body that is blocked by a building (leading edge in a standing building's cell) attacks that building first. Otherwise only bodies with `|p-C| <= stop + size/2 + 0.5` attack the Core. Rear ranks pile up and do not attack.
+- **Knockback:** `EnemyStore.knock` applies `vel += J/mass`, with mass = (size/16)². Bosses and couriers are immune.
+  - Single-target hits push away from the shooter with `KNOCK_W[weapon] * horde_knock(60) * (0.25 + min(1, dmg/max_hp))`. Gun 0.6, railgun 1.6, flak 0.5, tesla 0.3, Core 1.0.
+  - Mortar uses `radial_knock` (linear falloff, 1.5× splash).
+  - The Pulse 12 px teleport is replaced by an equivalent outward impulse: 12 px total under friction.
+- **Deterministic:** the HORDE golden 120 s fingerprint did not change (9376f262…; the seeded run never exceeds the cap or reaches the crowd regime there), and the two-run determinism check passes.
+- **Tests (deliberate, tagged):**
+  - New selftest `_horde_p34`: fixed-substep accumulate/carry, separation, front-rank-only contact, knock v/mass with boss immunity, and friction.
+  - The pulse-knockback assertion now checks outward velocity instead of displacement (Phase 4).
+  - selftest `tick(0.01)` literals → `tick(0.05)`, because a tick shorter than a substep now runs no step.
+  - The uitest "Space resumes" check now waits, bounded at 120 frames, for one substep.
+
+### Gates
+import clean · --quit-after 120 clean · SELFTEST OK · UITEST OK · PLAYTEST FAIL **15** (baseline after feedback-1: 19).
+- **Now passing:** progressable, no_death_spiral, rd_no_plateau, rd_archetypes_viable, set4_no_trap.
+- **Newly failing:** no_plateau_before_t3.
+- **Still failing:** t2_by_day5 (t2_day **8**, was never), tier3_by_day30, offline_below_active (314 offline vs 1071 active /min), ac38_eco_mix, first_run_short (244.5 s; band 300–480), no_plateau_after_t3, seeds_ok, pc_endless_runs, rd_frontier_band, rd_loops_faster, rd_outpost_share, rd_ac27_storage_fill, ac29_wave_gap, ac25_fresh_wall.
+- The contact rule cut Core damage (only the front rank hits), so the main campaign now reaches T2. The balance taper proposed in the feedback-1 section is still the next lever. It was not attempted, because of the effort cap.
+
+### Profile (tools/horde/profile.gd, full board, 20 substeps; move = seek+separation+knock in one pass)
+| bodies | move ms (feedback-1 → P3/4) | step ms |
+|---|---|---|
+| 1,000 | 0.59 → 4.9 | 5.1 |
+| 5,000 | 3.07 → 20.5 | 21.3 |
+| 10,000 | — → 38.9 | 41.5 |
+
+The profile scatters bodies over the board, so they overlap heavily: the crowd is denser than a packed horde. Before the neighbour cap, the cost grew quadratically (444 ms at 10k).
+
+**Verdict:** GDScript cannot hold 60 fps at the HORDE_PLAN PC target. At 20 Hz substeps, 5k bodies cost about 420 ms per second of sim at 1× (2× and 3× speed multiply that), and 10k cost about 830 ms/s.
+
+**PROPOSAL (not implemented, owner decision):** move `EnemyStore.move` and the separation grid to a C# (or GDExtension C++) hot loop over the same packed arrays. The expected gain is 20–50× in the inner pair loop, which puts 10k under 2 ms per substep. Alternatively, a compute-shader separation pass with a CPU readback of positions. A cheaper step first: cap separation to every other substep, or use the 12-candidate scan only inside the crowd band near the Core.
