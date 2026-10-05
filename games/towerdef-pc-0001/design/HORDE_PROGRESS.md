@@ -19,19 +19,20 @@
 - `--import`, `--quit-after 120`: clean (no SCRIPT ERROR / ERROR: / Failed to load).
 - selftest: **SELFTEST OK** (incl. the golden: fingerprint == Dict golden).
 - uitest: **UITEST OK** (158 PASS, same as baseline).
-- playtest: PLAYTEST_RESULT_PLACEHOLDER
+- playtest: **PLAYTEST OK**; full `PLAYTEST METRICS` JSON diffed against `design/baseline/playtest_metrics.json`: **0 differences** (excluding `runtime_s`). Runtime 550 s vs 503 s baseline (+9%, same container class; the bot sims run ≤220 bodies where the hash is mostly on its small-n path).
 
 ### Profile (tools/horde/profile.gd, full board, 40 substeps, HP pinned, ms per substep; baseline = HORDE_BASELINE Dict impl)
 
 | bodies | `_step` ms (base → now) | move ms | fire ms | reap ms | `_densest` |
 |---|---|---|---|---|---|
-| 220 | 0.56 → **0.32** | 0.36 → 0.12 | 0.05 → 0.09 | 0.05 → 0.02 | 17 ms → 3.6 ms |
-| 1,000 | 2.75 → **1.14** | 1.89 → 0.50 | 0.20 → 0.26 | 0.25 → 0.09 | 370 ms → ~70 ms |
-| 5,000 | 16.3 → **8.1** | 11.0 → 3.7 | 1.31 → 1.7 | 1.48 → 0.43 | 11.3 s → 1.1 s |
+| 220 | 0.56 → **0.29** | 0.36 → 0.12 | 0.05 → 0.07 | 0.05 → 0.03 | 17 ms → 2.5 ms |
+| 1,000 | 2.75 → **1.13** | 1.89 → 0.51 | 0.20 → 0.25 | 0.25 → 0.09 | 370 ms → 35 ms |
+| 5,000 | 16.3 → **5.6** | 11.0 → 2.7 | 1.31 → 1.19 | 1.48 → 0.42 | 11.3 s → 0.82 s |
 
-Move is ~0.5–0.7 µs/body (plan target ≤3 µs incl. separation: met with room). Spawn is still ~7.5 µs/body (TuneRef/EnemyDB lookups per spawn, not storage). Achievements+Missions on events: 0.59 ms @1k, 4.2 ms @5k (Phase 2 aggregation's job).
+Move is ~0.5 µs/body (plan target ≤3 µs incl. separation: met with room). Spawn is still ~7.5 µs/body (TuneRef/EnemyDB lookups per spawn, not storage). Achievements+Missions on events: 0.67 ms @1k, 2.8 ms @5k (Phase 2 aggregation's job).
 
 ### Open / notes
 - `_densest` stays an exact neighbour count (C13): 1.1 s at 5k bodies piled on the stop ring. Fine at today's 220 cap; at horde scale it needs the cell-histogram approximation (changes Orbital auto-aim ties, so it belongs with the Phase-3 behaviour change).
-- Fire got marginally slower at 220/5k (candidate gather + sort per query for weapons whose range covers most of the field; the hash falls back to the whole `order` there). Revisit in Phase 7 if it matters.
+- EnemyHash keys are `(cell << 20) | spawn_rank` in a natively sorted PackedInt64Array; a cell row is one contiguous run found by `bsearch`. A first counting-sort version paid a fixed 1024-cell prefix pass per rebuild, which made low-count sims slower than the Dict code (a playtest run took 1718 s vs 503 s baseline — partly also orphaned processes from an aborted earlier run); replaced, plus a small-n fast path (≤64 bodies: candidates = `order`, no rebuild). Seeded 4×120 s fingerprint sim: Dict 2.04 s → SoA 1.48 s.
+- Queries whose AABB covers ≥ half the grid (Railgun 590 px, big Core ranges) return the whole `order` (exact superset, no gather/sort).
 - `tools/horde/draw.gd` (Phase-0 draw profiler) still reads `S.enemies`; not adapted (Phase 2 replaces the draw path with MultiMesh).
