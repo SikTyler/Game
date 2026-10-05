@@ -19,8 +19,8 @@ using Godot;
 [GlobalClass]
 public partial class HordeWorld : RefCounted
 {
-	public const int ACT_BLD = 0, ACT_SHOT = 1, ACT_HIT = 2, ACT_ESCAPE = 3;
-	public const int KC_OTHER = 0, KC_COURIER = 1, KC_RANGED = 2, KC_BOSS = 3;
+	public const int ACT_BLD = 0, ACT_SHOT = 1, ACT_HIT = 2, ACT_ESCAPE = 3, ACT_BOOM = 4;
+	public const int KC_OTHER = 0, KC_COURIER = 1, KC_RANGED = 2, KC_BOSS = 3, KC_SAPPER = 4;
 	const int F_EXIT = 2;
 
 	// ---------------------------------------------------------------- bodies
@@ -739,6 +739,14 @@ public partial class HordeWorld : RefCounted
 				if (vn < 0) { vx[s] -= vn * rx / Math.Sqrt(rx * rx + ry * ry); vy[s] -= vn * ry / Math.Sqrt(rx * rx + ry * ry); }
 			}
 			int bi = ResolveBuildings(s, dirX[s], dirY[s]);
+			if (bi >= 0 && md != 4 && kc[s] == KC_SAPPER)
+			{
+				// MASS_HORDE §D1 Sapper: detonates on the first structure it presses
+				// (sealed or not); the rules apply the blast and reap the body.
+				live[s] = 0; qdirty = true;
+				acts.Add(ACT_BOOM); acts.Add(s); acts.Add(bi);
+				continue;
+			}
 			if (bi >= 0 && md != 4)
 			{
 				// Pressing a face. Sealed path (the cheapest route from here runs

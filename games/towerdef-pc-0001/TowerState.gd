@@ -210,7 +210,36 @@ var xp: float = 0.0
 var level: int = 1
 var coins_run: float = 0.0
 var kills: int = 0
-var horde_mult: int = 1   # classic in tests; Main sets Tune.horde_mult() for real runs   # HORDE Phase 2: bodies per plan entry
+var horde_mult: int = 1   # LEGACY split knob (MASS_HORDE §D9): 1 everywhere it ships; only Tune legacy_horde_mult / tests raise it
+## MASS_HORDE (§D3/§D5): designed mass waves (100s -> 1,000s -> 10,000s of
+## designed bodies). Main and the playtest bot set it (the shipping ruleset);
+## false keeps the classic single-enemy ruleset the selftest pins.
+var mass: bool = false
+## Test-harness fidelity knob (playtest campaign jobs only, never shipping):
+## > 0 compresses a wave planned above this many bodies to one body per k
+## (k = ceil(B / cap)) that carries k x HP / damage / pool share / kill count.
+## 0 (default, shipping, every H-gate) = every planned body spawns.
+var mass_lod_cap: int = 0
+const MASS_CAP: int = 16384       # alive cap (§D3): the spawner holds the queue, never drops
+var mass_cap: int = MASS_CAP      # (tests lower it to exercise the hold)
+var wave_acct: Dictionary = {}    # wave -> pool accounting (§D5), see _mass_acct
+var mass_peak: int = 0            # peak alive bodies this run
+var mass_wave_peak: int = 0       # peak alive bodies during the current wave
+var mass_spawned: int = 0         # bodies spawned this run (weights)
+var mass_leaked: int = 0          # bodies that reached the Core this run (weights)
+var mass_kills_wave: Dictionary = {}   # wave -> kills credited while it was the current wave
+var mass_wall_hits: Dictionary = {}    # building slot -> body hits this wave (Wall of Flesh)
+var burning: PackedInt32Array = PackedInt32Array()   # slots on fire (Flamer)
+var burn_acc: float = 0.0                             # Flamer burn tick accumulator
+var kills_by_weapon: Dictionary = {}                  # MASS_HORDE §D6: source -> kills this run
+var _src: String = ""                                 # damage source of the hits being applied
+var _blockable: bool = false                          # the current hit is a frontal projectile (Shieldbearer)
+var _blocked: bool = false                            # set by _hit when a Shieldbearer absorbed it
+var _hn: int = 0                                      # mass hit aggregation (no per-hit events at 10k)
+var _hsum: float = 0.0
+var _hcrit: int = 0
+var _htop: Array = []
+var plan_lod: Dictionary = {}          # wave -> harness LOD factor of its plan
 var agg: bool = false   # aggregate per-hit/per-kill events (set from horde_mult in tick)
 var core_run_lvl: int = 0         # mirror of tracks["dmg"] (legacy name the view reads)
 var spawn_hold: bool = false      # test/tool hook: suppress wave spawns (bosses included)
@@ -388,6 +417,21 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	last_wave_spawned = {}
 	wave_started = false
 	wave_cash0 = 0.0
+	wave_acct = {}
+	mass_peak = 0
+	mass_wave_peak = 0
+	mass_spawned = 0
+	mass_leaked = 0
+	mass_kills_wave = {}
+	mass_wall_hits = {}
+	burning = PackedInt32Array()
+	plan_lod = {}
+	burn_acc = 0.0
+	kills_by_weapon = {}
+	_hn = 0
+	_hsum = 0.0
+	_hcrit = 0
+	_htop = []
 	time_alive = 0.0
 	cash = 0.0 if modifiers.has("poverty") else float(int(mods.get("start_cash", 0)))
 	xp = 0.0
@@ -534,7 +578,7 @@ func grid_half_px() -> float:
 ## so the view can zoom in and keep the same travel time).
 func spawn_r() -> float:
 	var gap: float = TuneRef.num("pc_spawn_gap", 260.0)
-	if horde_mult > 1:
+	if crowd():
 		gap *= TuneRef.num("pc_horde_map", 1.8)   # FB2: bigger battlefield for the x4 horde
 	return grid_half_px() * 1.42 + gap
 
@@ -543,6 +587,12 @@ func spawn_r() -> float:
 ## horde battlefield never shrinks the base grid on screen.
 func view_r() -> float:
 	return grid_half_px() * 1.42 + TuneRef.num("pc_spawn_gap", 260.0)
+
+
+## Crowd ruleset (mass waves, or the legacy split knob): big battlefield,
+## event aggregation, omnidirectional barricades / riflemen.
+func crowd() -> bool:
+	return mass or horde_mult > 1
 
 
 ## Railgun needs ring 2+; everything else goes anywhere on the grid.
@@ -745,17 +795,17 @@ func compute_stats() -> Dictionary:
 		var rng_c: float = float(adj_range[i]) + range_add
 		match id:
 			"gun":
-				weapons.append({"slot": i, "kind": "gun", "dmg": 6.0 * m2 * dm, "rate": 2.0 * rate_m, "range": (3.0 + rng_c) * px * ring_m})
+				weapons.append({"slot": i, "lvl": lvl_at(i), "kind": "gun", "dmg": 6.0 * m2 * dm, "rate": 2.0 * rate_m, "range": (3.0 + rng_c) * px * ring_m})
 			"mortar":
-				weapons.append({"slot": i, "kind": "mortar", "dmg": 18.0 * m2 * dm, "rate": 0.4 * rate_m, "range": (4.5 + rng_c) * px * ring_m, "splash": 1.0 * px, "min_range": 1.5 * px})
+				weapons.append({"slot": i, "lvl": lvl_at(i), "kind": "mortar", "dmg": 18.0 * m2 * dm, "rate": 0.4 * rate_m, "range": (4.5 + rng_c) * px * ring_m, "splash": 1.0 * px, "min_range": 1.5 * px})
 			"tesla":
-				weapons.append({"slot": i, "kind": "tesla", "dmg": 9.0 * m2 * dm * (1.0 + pf("chain_dmg")), "rate": 0.8 * rate_m, "range": (3.0 + rng_c) * px * ring_m, "chains": 3 + int(pf("chain")), "chain_frac": 0.7})
+				weapons.append({"slot": i, "lvl": lvl_at(i), "kind": "tesla", "dmg": 9.0 * m2 * dm * (1.0 + pf("chain_dmg")), "rate": 0.8 * rate_m, "range": (3.0 + rng_c) * px * ring_m, "chains": 3 + int(pf("chain")), "chain_frac": 0.7})
 			"flak":
-				weapons.append({"slot": i, "kind": "flak", "dmg": 8.0 * m2 * dm, "rate": 1.5 * rate_m, "range": (3.5 + rng_c) * px * ring_m, "prey": 2.5})
+				weapons.append({"slot": i, "lvl": lvl_at(i), "kind": "flak", "dmg": 8.0 * m2 * dm, "rate": 1.5 * rate_m, "range": (3.5 + rng_c) * px * ring_m, "prey": 2.5})
 			"railgun":
-				weapons.append({"slot": i, "kind": "railgun", "dmg": 60.0 * m2 * dm, "rate": 0.25 * rate_m, "range": (7.0 + rng_c) * px * ring_m, "pierce": 14.0})
+				weapons.append({"slot": i, "lvl": lvl_at(i), "kind": "railgun", "dmg": 60.0 * m2 * dm, "rate": 0.25 * rate_m, "range": (7.0 + rng_c) * px * ring_m, "pierce": 14.0})
 			"frost":
-				weapons.append({"slot": i, "kind": "frost", "dmg": 1.5 * m2 * dm, "rate": 2.0, "range": (2.5 + rng_c) * px, "slow": 0.30, "slow_t": 0.6})
+				weapons.append({"slot": i, "lvl": lvl_at(i), "kind": "frost", "dmg": 1.5 * m2 * dm, "rate": 2.0, "range": (2.5 + rng_c) * px, "slow": 0.30, "slow_t": 0.6})
 			"bulwark":
 				hp_add += 40.0 * m2
 				links.append([i, CORE_SLOT, "BUL"])
@@ -782,7 +832,7 @@ func compute_stats() -> Dictionary:
 				var dir: Vector2 = (slot_pos(i) - CENTER).normalized()
 				var post: Vector2 = CENTER + dir * (grid_half_px() + 0.6 * px)
 				var hut: Dictionary = {"slot": i, "id": id, "lvl": lvl_at(i), "home": slot_pos(i), "anchor": post}
-				if id == "hut_infantry" and horde_mult > 1:
+				if id == "hut_infantry" and crowd():
 					# FB2 Rifle Barracks (omnidirectional): riflemen guard the whole
 					# perimeter - seek/leash around the Core, idle at their post.
 					var gh: float = grid_half_px() / px
@@ -1029,7 +1079,9 @@ func tick(delta: float) -> Array:
 			break
 		var at: int = ev.size()
 		_step(SUBSTEP, ev)
-		if horde_mult > 1:
+		if mass:
+			_flush_hits(ev)
+		if crowd():
 			aggregate_events(ev, at)
 	return ev
 
@@ -1065,10 +1117,11 @@ static func aggregate_events(ev: Array, at: int = 0) -> void:
 		var e: Dictionary = ev[i]
 		var t: String = String(e.get("t", ""))
 		if t == "kill" and String(e.get("kind", "")) != "boss":
-			kn += 1
+			var kw: int = int(e.get("n", 1))   # bodies the kill stands for (1 unless the harness LOD)
+			kn += kw
 			kcash += float(e.get("cash", 0.0))
 			var kk: String = String(e.get("kind", "drone"))
-			by_kind[kk] = int(by_kind.get(kk, 0)) + 1
+			by_kind[kk] = int(by_kind.get(kk, 0)) + kw
 			if kpos.size() < AGG_POS:
 				kpos.append(e["pos"])
 		elif t == "dmg":
@@ -1112,6 +1165,18 @@ static func aggregate_events(ev: Array, at: int = 0) -> void:
 		ev.append({"t": "bld_hits", "n": bn, "dmg": bdmg})
 
 
+## Mass runs: one "hits" summary per substep straight from counters (the
+## per-hit "dmg" events would cost more than the sim at 10k bodies).
+func _flush_hits(ev: Array) -> void:
+	if _hn == 0:
+		return
+	ev.append({"t": "hits", "n": _hn, "sum": _hsum, "crit_n": _hcrit, "top": _htop})
+	_hn = 0
+	_hsum = 0.0
+	_hcrit = 0
+	_htop = []
+
+
 func _step(sub: float, ev: Array) -> void:
 	var dt: float = sub * time_scale()
 	time_alive += dt
@@ -1142,9 +1207,15 @@ func _step(sub: float, ev: Array) -> void:
 	_tick_buffs(dt, ev)
 	_move_enemies(dt, ev)
 	_fire(dt, ev)
+	_src = ""
+	_blockable = false
 	_wall_auras()
 	_kb_k = 0.0
+	if mass:
+		_burn_step(dt, ev)
+	_src = "troop"
 	_troops_step(dt, ev)
+	_src = "frost"
 	_reap(ev)
 	_check_queue(ev)
 	if hp <= 0.0 and not over:
@@ -1182,11 +1253,20 @@ func _tick_buffs(dt: float, ev: Array) -> void:
 			continue
 		var c: Vector2 = od["pos"]
 		var n: int = 0
+		_src = "special"
+		_kb_k = 0.0
+		_blockable = false
 		for s in eh.candidates(c, float(od["r"]) + en.max_size * 0.5):
 			if en.hp[s] > 0.0 and en.pos[s].distance_to(c) <= float(od["r"]) + en.size[s] * 0.5:
 				_hit(s, float(od["dmg"]), ev)
 				n += 1
+		_src = ""
 		ev.append({"t": "orbital_hit", "pos": c, "r": float(od["r"]), "hits": n})
+		if mass:
+			# §D4 knockback special: the strike's shock wave parts the sea.
+			var pushed: int = en.radial_knock(c, float(od["r"]) * 2.0, TuneRef.num("horde_knock", 60.0) * TuneRef.num("mass_orbital_knock", 3.0))
+			if pushed >= 500:
+				ev.append({"t": "part_sea", "n": pushed, "pos": c})
 	orbitals = keep
 
 
@@ -1234,6 +1314,11 @@ func _queue_drafts(cleared: int) -> void:
 
 
 func _advance_wave(ev: Array) -> void:
+	if mass:
+		ev.append({"t": "wave_kills", "wave": wave, "n": int(mass_kills_wave.get(wave, 0)), "peak": mass_wave_peak})
+		if mass_wave_peak >= 10000:
+			ev.append({"t": "tide", "wave": wave, "peak": mass_wave_peak})
+		mass_wave_peak = 0
 	_queue_drafts(wave)
 	_enter_wave(wave + 1)
 	# Wave Skip card (B8): this wave is skipped (50% coins, no kills) and the
@@ -1252,9 +1337,15 @@ func _advance_wave(ev: Array) -> void:
 		ev.append(_telegraph_event(next_plan))   # late telegraph (skipped wave)
 	_adopt_plan(next_plan, ev, false)
 	if wave % boss_every == 0:
-		_spawn("boss", ev)
+		for _b in ((1 + (tier - 1) / 2) if mass else 1):
+			_spawn("boss", ev)
 	if Drops.courier_roll(drop_rng, wave):
 		_spawn_courier(ev)
+	if mass:
+		# §D3: +1 Courier per 2,000 bodies in the wave.
+		for _c in mini(6, mass_bodies(wave) / 2000):
+			_spawn_courier(ev)
+		mass_wall_hits = {}
 
 
 func _drain_troop_events(ev: Array) -> void:
@@ -1272,7 +1363,7 @@ func _on_death(ev: Array) -> void:
 		return
 	hp = 0.0
 	over = true
-	_sweep_horde_loot()
+	_sweep_horde_loot(true)
 	var cashout: int = int(floor(TuneRef.num("cashout_frac", 0.12) * cash_earned / maxf(1.0, cash_index()) * tier_coin_mult * mod_coin * mode_coin))
 	var coins: int = int(coins_run) + cashout
 	var bd: Dictionary = {
@@ -1287,7 +1378,8 @@ func _on_death(ev: Array) -> void:
 		"seed": run_seed, "tier": tier, "mode": mode, "modifiers": modifiers.duplicate(), "mutations": mutations_taken.duplicate(),
 		"duration_s": time_alive, "build": build, "ts": now_unix, "dps": dps(),
 		"core": core_id, "core_lvl": core_lvl, "picks": picks_taken.duplicate(), "insight": insight_found.duplicate(),
-		"loot": loot.duplicate(true), "specials_cast": special_casts, "tracks": tracks.duplicate(), "couriers": _couriers_caught()})
+		"loot": loot.duplicate(true), "specials_cast": special_casts, "tracks": tracks.duplicate(), "couriers": _couriers_caught(),
+			"kills_by_weapon": kills_by_weapon.duplicate(), "mass_peak": mass_peak, "mass_spawned": mass_spawned, "mass_leaked": mass_leaked})
 	# Endless records its own best and never feeds the tier ladder (§3.1).
 	ev.append_array(BaseMeta.bank(save, coins, wave, tier, time_alive / 60.0, now_unix, mode != "endless"))
 	if mode == "endless":
@@ -1333,6 +1425,8 @@ func interval_for(w: int) -> float:
 ## from w8) is chosen on the separate drop RNG. Directions are rolled at spawn
 ## time, uniformly around the Core.
 func _build_plan(w: int, lead: float) -> Dictionary:
+	if mass:
+		return _build_mass_plan(w, lead)
 	var iv: float = interval_for(w)
 	var t: float = lead + 0.5 * iv if lead > 0.0 else 0.5 * iv
 	var entries: Array = []
@@ -1351,7 +1445,168 @@ func _build_plan(w: int, lead: float) -> Dictionary:
 
 
 func _telegraph_event(p: Dictionary) -> Dictionary:
-	return {"t": "wave_telegraph", "wave": int(p["wave"]), "total": (p["entries"] as Array).size(), "elites": int(p["elites"]), "boss": bool(p["boss"]), "lead": telegraph_s()}
+	var tot: int = int(p.get("bodies", (p["entries"] as Array).size()))
+	return {"t": "wave_telegraph", "wave": int(p["wave"]), "total": tot, "elites": int(p["elites"]), "boss": bool(p["boss"]), "lead": telegraph_s(), "mix": p.get("mix", {})}
+
+
+# ---------------------------------------------------------------- MASS_HORDE
+## §D3 body count of wave w (before the harness LOD): 120 x 1.11^(w-1) x
+## tierB, x modifiers / perks that change enemy counts, capped (Tune mass_b_cap).
+func mass_bodies(w: int) -> int:
+	var b: float = TuneRef.num("mass_b0", 120.0) * pow(TuneRef.num("mass_b_growth", 1.11), float(maxi(1, w) - 1)) * EnemyDB.tier_b(tier)
+	b *= TuneRef.num("mass_body_mult", 1.0) * count_mult / maxf(0.1, float(stats.get("perk_spawn", 1.0)))
+	return clampi(int(round(b)), 1, TuneRef.int_of("mass_b_cap", 20000))
+
+
+## Harness LOD factor for a wave of `b` bodies (1 = every body spawns).
+func mass_lod(b: int) -> int:
+	if mass_lod_cap <= 0 or b <= mass_lod_cap:
+		return 1
+	return int(ceil(float(b) / float(mass_lod_cap)))
+
+
+## §D5 per-wave pools in wave-1 units (kill cash / XP are x cash_index and the
+## run multipliers when paid). Shape: the classic per-wave kill income (the
+## POWER_MODEL / IDLE_MATH spine, so meta pacing stays valid) x mass_cash_unit;
+## a full clear adds mass_clear (30%) on top.
+func mass_cash_pool(w: int) -> float:
+	return wave_time / interval_for(w) * TuneRef.num("mass_cash_unit", 1.0)
+
+
+func mass_coin_pool(w: int) -> float:
+	return (2.0 + 0.4 * float(w)) * TuneRef.num("mass_coin_unit", 1.2)
+
+
+## Drops cap per wave (§D5): 6 at T1, +2 per tier.
+func mass_drop_cap() -> int:
+	return TuneRef.int_of("mass_drop_cap", 6) + 2 * (tier - 1)
+
+
+func _mass_acct(w: int) -> Dictionary:
+	if not wave_acct.has(w):
+		wave_acct[w] = {"n": 0, "spawned": 0, "dead": 0, "leak": 0, "pool": 0.0, "W": 1.0, "xpool": 0.0, "cpool": 0.0, "CW": 0.0,
+			"cclear": 0.0, "loot": 0.0, "drops": 0, "ks": 1.0, "planned_done": false, "paid": false}
+	return wave_acct[w]
+
+
+## Seeded §D3 plan: B(w) designed bodies in 3-6 surges (dense 60-120 deg arcs
+## from one or two sides; Encircled uses every side), mix by wave band, elites
+## floor(w/5) from wave 5, a marked loot carrier on the drop RNG. Entries
+## carry their own angle / depth so the spawn is a dense arc, not a ring.
+func _build_mass_plan(w: int, lead: float) -> Dictionary:
+	var B: int = mass_bodies(w)
+	var lod: int = mass_lod(B)
+	var n: int = int(ceil(float(B) / float(lod)))
+	var mix: Dictionary = EnemyDB.mass_mix(w, tier)
+	var kinds: Array = []
+	var cum: Array = []
+	var acc: float = 0.0
+	for k in EnemyDB.MASS_ORDER:
+		if mix.has(k) and float(mix[k]) > 0.0:
+			acc += float(mix[k])
+			kinds.append(k)
+			cum.append(acc)
+	var ns: int = clampi(3 + w / 10, 3, 6)
+	var t0: float = lead + 0.5 if lead > 0.0 else 0.5
+	var gap: float = maxf(1.0, (wave_time - 1.5 - t0) / float(ns))
+	var span: float = minf(TuneRef.num("mass_surge_s", 2.5), gap * 0.8)
+	var depth: float = TuneRef.num("mass_spawn_depth", 140.0)
+	var entries: Array = []
+	var elites: int = 0
+	var all_sides: bool = modifiers.has("allsides")
+	var cash_w: float = 0.0
+	var coin_w: float = 0.0
+	var by_kind: Dictionary = {}
+	for si in ns:
+		var cnt: int = n / ns + (1 if si < n % ns else 0)
+		var a0: float = rng.randf() * TAU
+		var arc: float = deg_to_rad(60.0 + 60.0 * rng.randf())
+		var two: bool = rng.randf() < 0.35
+		var ts: float = t0 + gap * float(si)
+		for j in cnt:
+			var r: float = rng.randf()
+			var kind: String = String(kinds[kinds.size() - 1]) if kinds.size() > 0 else "mite"
+			for q in kinds.size():
+				if r * acc < float(cum[q]):
+					kind = String(kinds[q])
+					break
+			var a: float = a0 + (rng.randf() - 0.5) * arc
+			if all_sides:
+				a = rng.randf() * TAU
+			elif two and (j & 1) == 1:
+				a += PI
+			var ent: Dictionary = {"t": ts + span * float(j) / float(maxi(1, cnt)), "kind": kind, "a": a, "j": rng.randf() * depth, "w": w}
+			entries.append(ent)
+			var md: Dictionary = EnemyDB.mass_def(kind)
+			cash_w += float(md["cash"]) * float(lod)
+			coin_w += float(md["coin"]) * float(lod)
+			by_kind[kind] = int(by_kind.get(kind, 0)) + lod
+	# Elites (kept units, §D1): floor(w/5) from wave 5 (Elite Guard x3, tiers add).
+	var ne: int = 0
+	if w >= 5:
+		ne = w / 5 + int(round(Tiers.elite_weight(tier) * 10.0))
+		if modifiers.has("elitist"):
+			ne *= 3
+	for k in ne:
+		var ta: float = t0 + (wave_time - 2.0 - t0) * float(k + 1) / float(ne + 1)
+		entries.append({"t": ta, "kind": "elite", "a": rng.randf() * TAU, "j": 0.0, "w": w})
+		elites += 1
+		cash_w += float(EnemyDB.mass_def("elite")["cash"])
+		coin_w += float(EnemyDB.mass_def("elite")["coin"])
+	entries.sort_custom(func(x: Dictionary, y: Dictionary) -> bool: return float(x["t"]) < float(y["t"]))
+	var boss: bool = w % boss_every == 0
+	var nboss: int = (1 + (tier - 1) / 2) if boss else 0
+	cash_w += float(nboss) * float(EnemyDB.mass_def("boss")["cash"])
+	coin_w += float(nboss) * float(EnemyDB.mass_def("boss")["coin"])
+	# Marked loot carrier (drop RNG): a heavy or an elite, never a swarmling.
+	if entries.size() > 0 and Drops.elite_mark_roll(drop_rng, w):
+		var mi: int = drop_rng.randi_range(entries.size() / 4, entries.size() - 1)
+		for q in entries.size():
+			var x: Dictionary = entries[(mi + q) % entries.size()]
+			if ["elite", "hauler", "shield", "splitter"].has(String(x["kind"])):
+				x["marked"] = true
+				break
+	return {"wave": w, "entries": entries, "elites": elites, "boss": boss, "nboss": nboss, "bodies": B + elites, "lod": lod,
+		"cash_w": maxf(1.0, cash_w), "coin_w": coin_w, "mix": by_kind}
+
+
+## Register a wave's pools when its plan is adopted (§D5).
+func _mass_open(p: Dictionary) -> void:
+	var w: int = int(p["wave"])
+	var a: Dictionary = _mass_acct(w)
+	plan_lod[w] = int(p.get("lod", 1))
+	a["n"] = int(a["n"]) + (p["entries"] as Array).size() + int(p.get("nboss", 0))
+	a["pool"] = mass_cash_pool(w)
+	a["W"] = float(p["cash_w"])
+	a["xpool"] = mass_cash_pool(w) * TuneRef.num("mass_xp_unit", 1.25) / maxf(0.01, TuneRef.num("mass_cash_unit", 1.0))
+	var cp: float = mass_coin_pool(w) * run_coin_mult()
+	var kill_half: float = cp * 0.5 if float(p["coin_w"]) > 0.0 else 0.0
+	a["cpool"] = kill_half
+	a["CW"] = float(p["coin_w"])
+	a["cclear"] = cp - kill_half
+	a["drops"] = mass_drop_cap()
+	# Key / part odds per body: a classic plan entry's odds spread over the
+	# wave's bodies (per-wave drop rates unchanged as the count grows 100x).
+	a["ks"] = clampf(wave_time / interval_for(w) / maxf(1.0, float(int(p["bodies"]))), 0.0, 1.0)
+
+
+## Pay a wave's clear bonus once all of its bodies are dead (§D5): 30% of the
+## cash pool and the clear half of its coins, minus the leaked share.
+func _mass_try_clear(w: int, ev: Array) -> void:
+	var a: Dictionary = wave_acct.get(w, {})
+	if a.is_empty() or bool(a["paid"]) or not bool(a["planned_done"]) or int(a["dead"]) < int(a["spawned"]):
+		return
+	a["paid"] = true
+	var kept: float = 1.0 - clampf(float(a["leak"]) / maxf(1.0, float(a["spawned"])), 0.0, 1.0)
+	var cg: float = float(a["pool"]) * TuneRef.num("mass_clear", 0.3) * kept * cash_index() * run_cash_mult() * kill_cash_mod
+	cash += cg
+	cash_earned += cg
+	var coins: float = float(a["cclear"]) * kept
+	coins_run += coins
+	coins_wave += coins
+	_mass_sweep_loot(a)
+	ev.append({"t": "wave_clear", "wave": w, "cash": cg, "coins": coins, "kept": kept, "kills": int(a["dead"]) - int(a["leak"]), "leaked": int(a["leak"])})
+	wave_acct.erase(w)
 
 
 ## Make `p` the current wave's plan. The opening wave telegraphs here (it has
@@ -1359,6 +1614,16 @@ func _telegraph_event(p: Dictionary) -> Dictionary:
 func _adopt_plan(p: Dictionary, ev: Array, opening: bool) -> void:
 	if plan_wave > 0:
 		last_wave_spawned = {"wave": plan_wave, "n": wave_spawned}
+	if mass:
+		# The alive cap held part of the previous wave: it spawns first (never dropped).
+		var left: Array = plan.slice(plan_idx) if plan_wave > 0 else []
+		for x in left:
+			(x as Dictionary)["t"] = 0.0
+		if plan_wave > 0 and left.is_empty() and wave_acct.has(plan_wave):
+			(wave_acct[plan_wave] as Dictionary)["planned_done"] = true
+		_mass_open(p)
+		left.append_array(p["entries"])
+		p["entries"] = left
 	plan = p["entries"]
 	plan_idx = 0
 	plan_wave = int(p["wave"])
@@ -1378,6 +1643,9 @@ func _spawn_due(ev: Array) -> void:
 		_adopt_plan(_build_plan(wave, 0.0), ev, true)
 	if spawn_hold:
 		return
+	if mass:
+		_spawn_mass_due(ev)
+		return
 	while plan_idx < plan.size() and float((plan[plan_idx] as Dictionary)["t"]) <= wave_t:
 		var pe: Dictionary = plan[plan_idx]
 		plan_idx += 1
@@ -1387,6 +1655,27 @@ func _spawn_due(ev: Array) -> void:
 		if _spawn(pk, ev, Vector2.INF, pm, 1.0 / float(gm)):
 			wave_spawned += 1
 			_spawn_clones(gm)
+
+
+## Mass plan spawns (§D3): everything due spawns now unless the alive cap is
+## reached, in which case the queue HOLDS (the rest spawn as bodies die).
+func _spawn_mass_due(ev: Array) -> void:
+	var lod: int = 1
+	while plan_idx < plan.size() and float((plan[plan_idx] as Dictionary)["t"]) <= wave_t:
+		if en.count() >= mass_cap:
+			return
+		var pe: Dictionary = plan[plan_idx]
+		plan_idx += 1
+		var pw: int = int(pe.get("w", wave))
+		lod = int(plan_lod.get(pw, 1))
+		var at: Vector2 = CENTER + Vector2.from_angle(float(pe.get("a", 0.0))) * (spawn_r() + float(pe.get("j", 0.0)))
+		if _spawn(String(pe["kind"]), ev, at, bool(pe.get("marked", false)), 1.0, pw, lod):
+			wave_spawned += 1
+	if plan_idx >= plan.size() and wave_acct.has(plan_wave):
+		var a: Dictionary = wave_acct[plan_wave]
+		if not bool(a["planned_done"]):
+			a["planned_done"] = true
+			_mass_try_clear(plan_wave, ev)
 
 
 ## Weighted roll in SPEC order: hauler, splitter, elite, ranged, skitter, drone.
@@ -1421,6 +1710,8 @@ func _roll_kind(for_wave: int = -1) -> String:
 
 ## Body budget: MAX_ENEMIES entries' worth of bodies (220 at horde_mult 1).
 func max_bodies() -> int:
+	if mass:
+		return mass_cap
 	return MAX_ENEMIES * horde_mult
 
 
@@ -1441,7 +1732,11 @@ func _spawn_clones(gm: int) -> void:
 		add_enemy(d)
 
 
-func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF, marked: bool = false, share: float = 1.0) -> bool:
+func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF, marked: bool = false, share: float = 1.0, pw: int = -1, lod: int = 1) -> bool:
+	if mass:
+		# The alive cap is enforced where the plan spawns (it HOLDS the queue);
+		# bosses, couriers and Broodsac young are never dropped.
+		return _spawn_mass(kind, ev, at, marked, pw if pw > 0 else wave, lod)
 	if en.count() >= max_bodies():
 		return false
 	var d: Dictionary = EnemyDB.get_def(kind)
@@ -1494,6 +1789,112 @@ func _spawn(kind: String, ev: Array, at: Vector2 = Vector2.INF, marked: bool = f
 		# FB2: art + hit box + separation scale back with the body count (area-conserving)
 		en.set_size(e, en.size[e] * maxf(sqrt(share), TuneRef.num("pc_horde_size_floor", 0.45)))
 	en.commit(e)
+	if kind == "boss":
+		ev.append({"t": "boss", "pos": en.pos[e]})
+	if marked:
+		ev.append({"t": "elite_marked", "eid": en.eid[e], "pos": en.pos[e]})
+	return true
+
+
+## §D2 per-body HP scale of `kind` at wave w: fodder / line x1.035^(w-1),
+## heavies x1.05^(w-1) (Tune mass_hp_g_f / mass_hp_g_h), x tier / perks /
+## modifiers / global difficulty x mass_hp_k. Elites and bosses keep the
+## classic curves (§D2: "elites and bosses keep the existing curves").
+func mass_hp_scale(kind: String, w: int) -> float:
+	var g: String = String(EnemyDB.mass_def(kind).get("grow", "f"))
+	var gr: float = mass_hp_growth(tier) * (TuneRef.num("mass_hp_heavy", 1.015) if g == "h" else 1.0)
+	var cap_w: int = TuneRef.int_of("pc_endless_soft_wave", 100)
+	var ww: int = mini(w, cap_w) if mode == "endless" else w
+	var sc: float = pow(gr, float(ww - 1)) * TuneRef.num("mass_hp_k", 0.5)
+	if mode == "endless" and w > cap_w:
+		sc *= pow(TuneRef.num("mass_endless_hp_exp", 1.04), float(w - cap_w))
+	return sc * hp_mult * float(stats.get("perk_enemy_hp", 1.0)) * enemy_hp_mod * (1.0 + 0.15 * float(pack_n("pk_gambit"))) * difficulty_hp()
+
+
+## Per-body HP growth per wave (fodder / line). Re-derived from bot runs
+## (MASS_HORDE §D10 dated note): §D2's 1.035 left total wave HP growing x1.149
+## per wave against a player whose power grows with the classic curve, so runs
+## never ended (a fresh bot reached wave 73). The body count carries most of
+## the growth (x1.11); the body HP carries the rest of the classic tier curve:
+## hp_growth(tier) / mass_b_growth x mass_hp_track (1.04 = the classic
+## per-wave spawn-count growth averaged over waves 1-40).
+static func mass_hp_growth(t: int) -> float:
+	var g: float = TuneRef.num("mass_hp_g_f", 0.0)
+	if g > 0.0:
+		return g
+	return PowerModel.hp_growth(t) / TuneRef.num("mass_b_growth", 1.11) * TuneRef.num("mass_hp_track", 1.04)
+
+
+## One designed mass body (§D1/§D2). `lod` > 1 only under the harness LOD.
+func _spawn_mass(kind: String, ev: Array, at: Vector2, marked: bool, pw: int, lod: int) -> bool:
+	var md: Dictionary = EnemyDB.mass_def(kind)
+	var bossy: bool = kind == "boss" or kind == "elite"
+	var pos: Vector2 = at
+	if at == Vector2.INF:
+		pos = CENTER + Vector2.from_angle(rng.randf() * TAU) * spawn_r()
+	var e: int = en.alloc(next_eid, kind, pos)
+	next_eid += 1
+	var lw: float = float(lod)
+	if kind == "courier":
+		# Loot runner (top layer): classic rewards, outside the wave pools.
+		var cdef: Dictionary = EnemyDB.get_def("courier")
+		en.hp[e] = float(md["hp"]) * mass_hp_scale(kind, pw)
+		en.max_hp[e] = en.hp[e]
+		en.spd[e] = float(md["spd"]) * enemy_spd_mod
+		en.cash[e] = float(cdef["cash"])
+		en.xp[e] = float(cdef["xp"])
+		en.coin[e] = float(cdef["coin"])
+		en.set_size(e, float(md["size"]))
+		en.commit(e)
+		return true
+	var a: Dictionary = _mass_acct(pw)
+	if bossy:
+		# Kept units: classic HP curve (boss ramps below), designed contact damage.
+		var cd: Dictionary = EnemyDB.get_def(kind)
+		var sc: float = scale() * hp_mult * float(stats.get("perk_enemy_hp", 1.0)) * enemy_hp_mod * (1.0 + 0.15 * float(pack_n("pk_gambit"))) * difficulty_hp()
+		en.hp[e] = float(cd["hp"]) * sc * TuneRef.num("mass_" + kind + "_hp", 1.0)
+	else:
+		en.hp[e] = float(md["hp"]) * mass_hp_scale(kind, pw) * lw
+	en.max_hp[e] = en.hp[e]
+	en.spd[e] = float(md["spd"]) * float(stats.get("perk_enemy_spd", 1.0)) * enemy_spd_mod
+	if kind == "boss":
+		# The boss keeps the classic contact damage curve too (tuned against the
+		# Core's HP track; §D2's 40 per hit walled the first boss).
+		en.dmg[e] = float(EnemyDB.get_def(kind)["dmg"]) * pow(dmg_growth, float(wave - 1)) * hp_mult * enemy_dmg_mod * difficulty_dmg()
+	else:
+		en.dmg[e] = float(md["dmg"]) * pow(TuneRef.num("mass_dmg_g", 1.02), float(pw - 1)) * hp_mult * enemy_dmg_mod * difficulty_dmg() * TuneRef.num("mass_dmg_k", 0.6) * lw
+	en.cash[e] = float(a["pool"]) * float(md["cash"]) / float(a["W"]) * lw
+	en.xp[e] = float(a["xpool"]) * float(md["xp"]) / float(a["W"]) * lw
+	en.coin[e] = float(a["cpool"]) * float(md["coin"]) / float(a["CW"]) * lw if float(a["CW"]) > 0.0 else 0.0
+	en.set_size(e, float(md["size"]) * minf(3.0, sqrt(lw)))
+	en.wv[e] = pw
+	en.wt[e] = lod
+	a["spawned"] = int(a["spawned"]) + lod
+	mass_spawned += lod
+	match kind:
+		"boss":
+			var r0: float = TuneRef.num("boss_ramp_from", 10.0)
+			var ramp: float = clampf((float(wave) - r0) / 20.0, 0.0, 1.0)
+			var bm: float = TuneRef.num("boss_hp_hi", 0.5) if tier >= 2 else 1.0 + (TuneRef.num("boss_hp_t1", 3.0) - 1.0) * ramp
+			if tier == 1 and wave <= 10:
+				bm *= TuneRef.num("pc_first_boss", 0.6)
+			en.hp[e] = en.hp[e] * bm
+			en.max_hp[e] = en.hp[e]
+			en.dmg[e] = en.dmg[e] * TuneRef.num("pc_boss_dmg", 1.0)
+		"elite":
+			en.shield[e] = TuneRef.int_of("elite_shield_base", 3) + pw / 10 + elite_shield_add
+			en.max_shield[e] = en.shield[e]
+		"ranged":
+			en.fire_cd[e] = TuneRef.num("ranged_fire", 2.0)
+		"shield":
+			en.guard[e] = float(md.get("guard", 0.0)) * mass_hp_scale(kind, pw) * lw
+	if marked:
+		en.flags[e] = en.flags[e] | EnemyStore.F_MARKED
+		en.hp[e] = en.hp[e] * TuneRef.num("pc_mark_hp", 3.0)
+		en.max_hp[e] = en.max_hp[e] * TuneRef.num("pc_mark_hp", 3.0)
+	en.commit(e)
+	mass_peak = maxi(mass_peak, en.count())
+	mass_wave_peak = maxi(mass_wave_peak, en.count())
 	if kind == "boss":
 		ev.append({"t": "boss", "pos": en.pos[e]})
 	if marked:
@@ -1615,13 +2016,38 @@ func _move_enemies(dt: float, ev: Array) -> void:
 				var amt: float = en.bld_dmg[c]
 				bld_hp[c] = float(bld_hp[c]) - amt
 				ev.append({"t": "bld_hit", "slot": c, "dmg": amt, "n": nh, "pos": slot_pos(c)})
+				if mass:
+					var wh: int = int(mass_wall_hits.get(c, 0)) + nh
+					mass_wall_hits[c] = wh
+					if wh >= 2000 and wh - nh < 2000 and id_at(c) == "barricade":
+						ev.append({"t": "wall_of_flesh", "slot": c, "n": wh})
 				if float(bld_hp[c]) <= 0.0:
 					_destroy_building(c, ev)
 					lost = true
+			EnemyStore.ACT_BOOM:
+				# MASS_HORDE §D1 Sapper: one structure blast, then it is gone (no reward).
+				var bc: int = acts[k]
+				k += 1
+				en.hp[e] = 0.0
+				en.flags[e] = en.flags[e] | EnemyStore.F_BOOM
+				if float(bld_hp[bc]) <= 0.0 or id_at(bc) == "":
+					continue
+				var bamt: float = en.dmg[e] * float(EnemyDB.mass_def("sapper")["bld"]) / float(EnemyDB.mass_def("sapper")["dmg"])
+				bld_hp[bc] = float(bld_hp[bc]) - bamt
+				ev.append({"t": "sapper_blast", "slot": bc, "dmg": bamt, "pos": en.pos[e]})
+				if float(bld_hp[bc]) <= 0.0:
+					_destroy_building(bc, ev)
+					lost = true
 			EnemyStore.ACT_SHOT:
-				_core_damage(en.dmg[e], ev, "enemy_shot", en.pos[e], -1, en.share[e])
+				_core_damage(en.dmg[e], ev, "enemy_shot", en.pos[e], -1, _armor_share(e))
 			EnemyStore.ACT_HIT:
-				_core_damage(en.dmg[e], ev, "core_hit", en.pos[e], e, en.share[e])
+				if mass and (en.flags[e] & EnemyStore.F_LEAK) == 0:
+					en.flags[e] = en.flags[e] | EnemyStore.F_LEAK
+					mass_leaked += en.wt[e]
+					var la: Dictionary = wave_acct.get(en.wv[e], {})
+					if not la.is_empty():
+						la["leak"] = int(la["leak"]) + en.wt[e]
+				_core_damage(en.dmg[e], ev, "core_hit", en.pos[e], e, _armor_share(e))
 			EnemyStore.ACT_ESCAPE:
 				escaped.append(e)
 	if lost:
@@ -1631,6 +2057,16 @@ func _move_enemies(dt: float, ev: Array) -> void:
 		var xs: int = x
 		ev.append({"t": "courier_escape", "eid": en.eid[xs], "pos": en.pos[xs]})
 		en.remove(xs)
+
+
+## Flat Core armor per contact hit (owner C4): the classic split carried
+## `share`; a designed mass body is armored against in proportion to its hit
+## size vs the classic drone hit (4), so armor blunts the tide without making
+## a swarmling hit vanish (the 25% floor still applies).
+func _armor_share(e: int) -> float:
+	if not mass:
+		return en.share[e]
+	return clampf(float(EnemyDB.mass_def(en.kind[e])["dmg"]) / 4.0, 0.02, 1.0) * float(en.wt[e])
 
 
 ## Targeting (pattern adapted from ape1121/Godot-4-Tower-Defense-Template, MIT:
@@ -1703,6 +2139,20 @@ func _hit(e: int, dmg_in: float, ev: Array, crit: bool = false) -> void:
 	var dmg: float = dmg_in
 	if not crit and ironclad > 0.0:
 		dmg *= 1.0 - ironclad
+	_blocked = false
+	if mass and en.guard[e] > 0.0 and _blockable:
+		# Shieldbearer (§D1): its frontal shield (facing the Core, the way it
+		# walks) soaks projectiles from the front; AoE / chain / flank get by.
+		var to_shooter: Vector2 = _kb_from - en.pos[e]
+		var facing: Vector2 = CENTER - en.pos[e]
+		if to_shooter.dot(facing) > 0.7071 * to_shooter.length() * facing.length():
+			_blocked = true
+			var g: float = en.guard[e] - dmg
+			en.guard[e] = maxf(0.0, g)
+			ev.append({"t": "shield_hit", "pos": en.pos[e], "left": int(ceil(maxf(0.0, g)))})
+			if g >= 0.0:
+				return
+			dmg = -g
 	var sh: int = en.shield[e]
 	if sh > 0:
 		sh -= 1
@@ -1719,19 +2169,35 @@ func _hit(e: int, dmg_in: float, ev: Array, crit: bool = false) -> void:
 		dmg *= float(stats.get("normal_mult", 1.0))
 	if en.shred_n[e] > 0:
 		dmg *= 1.0 + float(stats.get("shred", 0.0)) * float(en.shred_n[e])
+	if mass and (en.flags[e] & EnemyStore.F_FROST) != 0 and en.slow_t[e] > 0.0 and BOSSY.has(en.kind[e]):
+		dmg *= TuneRef.num("mass_brittle", 1.25)   # Cryo Brittle (§D4)
 	var real: float = minf(dmg, maxf(0.0, en.hp[e]))
 	if _kb_k > 0.0 and en.max_hp[e] > 0.0:
 		# Phase 4: hit impulse scaled by damage share and the weapon factor
 		var away: Vector2 = en.pos[e] - _kb_from
 		if away != Vector2.ZERO:
 			en.knock(e, away.normalized() * (_kb_k * TuneRef.num("horde_knock", 60.0) * (0.25 + minf(1.0, dmg / en.max_hp[e]))))
+	var was: float = en.hp[e]
 	en.hp[e] = en.hp[e] - dmg
 	if en.hp[e] <= 0.0:
 		en.kill(e)
+		if mass and was > 0.0:
+			var sk: String = _src if _src != "" else "other"
+			kills_by_weapon[sk] = int(kills_by_weapon.get(sk, 0)) + en.wt[e]
 	en.flash(e, HIT_FLASH)
 	var ls: float = float(stats.get("lifesteal", 0.0))
 	if ls > 0.0 and real > 0.0:
 		hp = minf(float(stats["max_hp"]), hp + real * ls)
+	if mass:
+		_hn += 1
+		_hsum += dmg
+		if crit:
+			_hcrit += 1
+		if _htop.size() < AGG_TOP:
+			_htop.append({"t": "dmg", "eid": en.eid[e], "pos": en.pos[e], "amt": dmg, "crit": crit})
+		elif dmg > float((_htop[_hn % AGG_TOP] as Dictionary)["amt"]):
+			_htop[_hn % AGG_TOP] = {"t": "dmg", "eid": en.eid[e], "pos": en.pos[e], "amt": dmg, "crit": crit}
+		return
 	if crit:
 		ev.append({"t": "dmg", "eid": en.eid[e], "pos": en.pos[e], "amt": dmg, "crit": true})
 	else:
@@ -1750,7 +2216,7 @@ func _hit_carry(e0: int, dmg: float, ev: Array, crit: bool, from: Vector2, rng_l
 	var cands: PackedInt32Array = PackedInt32Array()
 	var have_cands: bool = false
 	# FB2 crowd tool: the Gun's overkill carry hops further through a horde
-	var hops: int = TuneRef.int_of("pc_carry_hops", 2) + (TuneRef.int_of("pc_horde_carry_hops", 2) if horde_mult > 1 else 0)
+	var hops: int = TuneRef.int_of("pc_carry_hops", 2) + (TuneRef.int_of("pc_horde_carry_hops", 2) if crowd() else 0)
 	for hop in hops + 1:
 		var before: float = en.hp[cur]
 		var sh: int = en.shield[cur]
@@ -1790,7 +2256,7 @@ func _roll_crit(wd: Dictionary) -> bool:
 ## lane to wall off, so each Barricade drags every body within its radius
 ## (-30% speed) on top of being the high-HP blocker. Horde ruleset only.
 func _wall_auras() -> void:
-	if horde_mult <= 1:
+	if not crowd():
 		return
 	var r: float = TuneRef.num("pc_wall_aura", 1.5) * cpx()
 	var sm: float = 1.0 - TuneRef.num("pc_wall_slow", 0.30)
@@ -1817,9 +2283,12 @@ func _fire(dt: float, ev: Array) -> void:
 				_beam_hold(wd, dt)
 			continue
 		_kb_k = 0.0
+		_blockable = false
 		if si == CORE_SLOT:
 			_kb_k = float(KNOCK_W["core"])
 			_kb_from = CENTER
+			_src = "core"
+			_blockable = ["cannon", "beam"].has(String(wd.get("attack", "")))
 			# Queen Engine: the Core holds fire while 3+ troops are alive.
 			if pf("queen_hold") > 0.0 and Troops.alive_count(troops) >= 3:
 				cooldowns[si] = 0.0
@@ -1836,22 +2305,31 @@ func _fire(dt: float, ev: Array) -> void:
 		var from: Vector2 = slot_pos(si)
 		_kb_k = float(KNOCK_W.get(kind, 0.0))
 		_kb_from = from
+		_src = kind
 		if kind == "frost":
 			# Aura: every pulse slows and chills every enemy in range.
+			# MASS_HORDE §D4: -50% in the field; slowed bodies block the ones
+			# behind (the C# front-blocking rule), so the flow backs up behind
+			# the field (viscosity); chilled bodies shatter / turn Brittle.
 			var any: bool = false
 			var frange: float = float(wd["range"])
+			var fslow: float = maxf(float(wd["slow"]), TuneRef.num("mass_frost_slow", 0.5)) if mass else float(wd["slow"])
 			for fe in eh.candidates(from, frange):
 				if en.hp[fe] > 0.0 and from.distance_to(en.pos[fe]) <= frange:
 					any = true
-					en.apply_slow(fe, float(wd["slow_t"]), 1.0 - float(wd["slow"]))
-					_hit(fe, float(wd["dmg"]), ev)
+					en.apply_slow(fe, float(wd["slow_t"]), 1.0 - fslow)
+					if mass:
+						en.flags[fe] = en.flags[fe] | EnemyStore.F_FROST
+						_hit(fe, float(wd["dmg"]) * TuneRef.num("mass_frost_dmg", 0.1), ev)   # a force multiplier, not a blender (§D4: 5-20 kills/s direct)
+					else:
+						_hit(fe, float(wd["dmg"]), ev)
 			if any:
 				ev.append({"t": "shot", "kind": "frost", "from": from, "to": from, "radius": float(wd["range"])})
 				cooldowns[si] = cd + 1.0 / rate
 			else:
 				cooldowns[si] = 0.0
 			continue
-		var tgt: int = pick_target(from, float(wd["range"]), String(target_modes[si]) if si < target_modes.size() else "nearest", kind == "flak")
+		var tgt: int = pick_target(from, float(wd["range"]), String(target_modes[si]) if si < target_modes.size() else "nearest", kind == "flak" and not mass)
 		if kind == "mortar" and tgt >= 0 and from.distance_to(en.pos[tgt]) < float(wd.get("min_range", 0.0)):
 			tgt = -1
 		if tgt < 0:
@@ -1864,6 +2342,9 @@ func _fire(dt: float, ev: Array) -> void:
 		var crit: bool = _roll_crit(wd)
 		if crit:
 			dmg *= TuneRef.num("pc_crit_mult", 2.0)
+		if mass:
+			_fire_mass(kind, wd, from, te, dmg, crit, ev)
+			continue
 		match kind:
 			"railgun":
 				# Pierces every enemy on the line from the gun through the target.
@@ -1921,6 +2402,170 @@ func _fire(dt: float, ev: Array) -> void:
 			_:
 				_hit_carry(te, dmg, ev, crit, from, float(wd["range"]))
 				ev.append({"t": "shot", "kind": kind, "from": from, "to": tpos})
+
+
+## MASS_HORDE §D4 weapon verbs (mass runs). Damage stays in each weapon's
+## classic range (upgrades / Labs / parts apply unchanged); the SHAPE changes
+## so every weapon turns its DPS into kills per second against a dense crowd.
+func _fire_mass(kind: String, wd: Dictionary, from: Vector2, te: int, dmg: float, crit: bool, ev: Array) -> void:
+	var tpos: Vector2 = en.pos[te]
+	var lvl: int = int(wd.get("lvl", 1))
+	match kind:
+		"railgun":
+			# Infinite pierce along the line, no falloff; x4 on the first elite /
+			# boss it meets (the elite/boss killer). Bodies in line order.
+			var dir: Vector2 = (tpos - from).normalized()
+			var reach: float = float(wd["range"])
+			var tip: Vector2 = from + dir * reach
+			var on: Array = []
+			for ed in eh.line(from, tip, float(wd["pierce"]) + en.max_size * 0.5 + 1.0):
+				if en.hp[ed] <= 0.0:
+					continue
+				var rel: Vector2 = en.pos[ed] - from
+				var along: float = rel.dot(dir)
+				if along < 0.0 or along > reach or absf(rel.cross(dir)) > float(wd["pierce"]) + en.size[ed] * 0.5:
+					continue
+				on.append([along, ed])
+			on.sort_custom(func(x: Array, y: Array) -> bool: return float(x[0]) < float(y[0]) or (float(x[0]) == float(y[0]) and int(x[1]) < int(y[1])))
+			var boss_hit: bool = false
+			_blockable = true
+			for x in on:
+				var ed2: int = int((x as Array)[1])
+				var m: float = 1.0
+				if not boss_hit and (BOSSY.has(en.kind[ed2]) or en.is_marked(ed2)):
+					boss_hit = true
+					m = TuneRef.num("mass_rail_boss", 4.0)
+				_hit(ed2, dmg * m, ev, crit)
+			_blockable = false
+			ev.append({"t": "shot", "kind": kind, "from": from, "to": tip})
+		"flak":
+			# Flamer: a 40 deg cone (2.2 cells, +10%/lv): an instant lick plus a
+			# 2 s burn that spreads to bodies touching a burning one.
+			var dir2: Vector2 = (tpos - from).normalized()
+			var cl: float = minf(float(wd["range"]), TuneRef.num("mass_flame_len", 2.2) * cpx() * (1.0 + 0.1 * float(lvl - 1)))
+			var bdps: float = dmg * TuneRef.num("mass_flame_burn", 0.5)
+			for ed in eh.cone(from, dir2, deg_to_rad(20.0), cl):
+				if en.hp[ed] <= 0.0:
+					continue
+				_hit(ed, dmg * TuneRef.num("mass_flame_hit", 0.6), ev, crit)
+				_ignite(ed, TuneRef.num("mass_burn_s", 2.0), bdps)
+			ev.append({"t": "shot", "kind": kind, "from": from, "to": from + dir2 * cl, "cone": 40.0})
+		"mortar":
+			# AoE r 1 cell (+20%/lv); the outer ring is a knockback blast that
+			# parts the sea (impulse / mass); 500+ pushed = Parting the Sea.
+			var rad: float = float(wd["splash"]) * (1.0 + 0.2 * float(lvl - 1))
+			for ed in eh.candidates(tpos, rad):
+				if en.hp[ed] > 0.0 and en.pos[ed].distance_to(tpos) <= rad:
+					_hit(ed, dmg, ev, crit)
+			var pushed: int = en.radial_knock(tpos, rad * 1.5, TuneRef.num("horde_knock", 60.0) * TuneRef.num("mass_mortar_knock", 2.0))
+			if pushed >= 500:
+				ev.append({"t": "part_sea", "n": pushed, "pos": tpos})
+			ev.append({"t": "shot", "kind": kind, "from": from, "to": tpos, "radius": rad})
+		"tesla":
+			# Chain 6 (+3/lv, + chain parts, cap 20), 70 px jumps, x0.9 per jump;
+			# stuns elites / bosses for 0.2 s.
+			var n: int = mini(TuneRef.int_of("mass_chain_cap", 20), TuneRef.int_of("mass_chain", 6) + 3 * (lvl - 1) + int(pf("chain")))
+			var d2: float = dmg
+			var prev: Vector2 = from
+			for ce in eh.chain(te, n, TuneRef.num("mass_chain_r", 70.0)):
+				if en.hp[ce] <= 0.0:
+					continue
+				var cpos: Vector2 = en.pos[ce]
+				_hit(ce, d2, ev, crit)
+				en.set_shock(ce, 1.5)
+				en.shock_src[ce] = int(wd["slot"])
+				if BOSSY.has(en.kind[ce]):
+					en.apply_slow(ce, 0.2, 0.0)
+				ev.append({"t": "shot", "kind": kind, "from": prev, "to": cpos})
+				prev = cpos
+				d2 *= TuneRef.num("mass_chain_frac", 0.9)
+		_:
+			# Gun: rounds pierce 3 bodies (+2/lv, cap 12), x0.85 per body;
+			# a Shieldbearer's front stops the round.
+			var pn: int = mini(12, 3 + 2 * (lvl - 1))
+			var dir3: Vector2 = (tpos - from).normalized()
+			var reach3: float = float(wd["range"])
+			var on3: Array = []
+			for ed in eh.line(from, from + dir3 * reach3, en.max_size * 0.5 + 2.0):
+				if en.hp[ed] <= 0.0:
+					continue
+				var rel3: Vector2 = en.pos[ed] - from
+				var al: float = rel3.dot(dir3)
+				if al < 0.0 or al > reach3 or absf(rel3.cross(dir3)) > en.size[ed] * 0.5 + 2.0:
+					continue
+				on3.append([al, ed])
+			on3.sort_custom(func(x: Array, y: Array) -> bool: return float(x[0]) < float(y[0]) or (float(x[0]) == float(y[0]) and int(x[1]) < int(y[1])))
+			var d3: float = dmg
+			var hitn: int = 0
+			var last: Vector2 = tpos
+			_blockable = true
+			for x in on3:
+				if hitn >= pn:
+					break
+				var ed3: int = int((x as Array)[1])
+				_hit(ed3, d3, ev, crit)
+				last = en.pos[ed3]
+				hitn += 1
+				if _blocked:
+					break
+				d3 *= TuneRef.num("mass_pierce_fall", 0.85)
+			_blockable = false
+			if hitn == 0:
+				_hit(te, dmg, ev, crit)
+			ev.append({"t": "shot", "kind": kind, "from": from, "to": last})
+
+
+## Flamer burn (§D4): `t` seconds at `dps`, refreshed to the longer burn.
+func _ignite(e: int, t: float, dps: float) -> void:
+	if en.burn_t[e] <= 0.0:
+		burning.append(e)
+	en.burn_t[e] = maxf(en.burn_t[e], t)
+	en.burn_d[e] = maxf(en.burn_d[e], dps)
+
+
+## Burns tick every 0.25 s; each burning body with >= 0.5 s left lights one
+## touching neighbour (half its remaining time): fire spreads through a pile.
+func _burn_step(dt: float, ev: Array) -> void:
+	if burning.is_empty():
+		return
+	burn_acc += dt
+	if burn_acc < 0.25 - 0.000001:
+		return
+	var tk: float = burn_acc
+	burn_acc = 0.0
+	_src = "flak"
+	_kb_k = 0.0
+	_blockable = false
+	var keep: PackedInt32Array = PackedInt32Array()
+	var lit: Array = []
+	for b in burning:
+		if en.hp[b] <= 0.0 or en.burn_t[b] <= 0.0 or not en.world.call("IsLive", b):
+			en.burn_t[b] = 0.0
+			continue
+		var bt: float = minf(tk, en.burn_t[b])
+		_hit(b, en.burn_d[b] * bt, ev)
+		en.burn_t[b] = en.burn_t[b] - bt
+		if en.burn_t[b] >= 0.5 and en.hp[b] > 0.0:
+			lit.append([b, en.burn_t[b] * 0.5, en.burn_d[b]])
+		if en.burn_t[b] > 0.0 and en.hp[b] > 0.0:
+			keep.append(b)
+	burning = keep
+	for l in lit:
+		var src: int = int((l as Array)[0])
+		# the nearest touching body that is not already on fire
+		var sp: Vector2 = en.pos[src]
+		var nb: int = -1
+		var nd: float = INF
+		for x in eh.in_radius(sp, en.size[src] * 0.5 + 6.0, true):
+			if x == src or en.burn_t[x] > 0.0 or en.hp[x] <= 0.0:
+				continue
+			var d2: float = sp.distance_squared_to(en.pos[x])
+			if d2 < nd:
+				nd = d2
+				nb = x
+		if nb >= 0:
+			_ignite(nb, float((l as Array)[1]), float((l as Array)[2]))
+	_src = ""
 
 
 ## Lance beam: the ramp builds while the beam stays on one living target.
@@ -2035,11 +2680,17 @@ func _core_fire(wd: Dictionary, ev: Array) -> bool:
 			# Static: every 5th pulse chains 40% dmg to 3 targets beyond range.
 			if int(wd.get("chain_every", 0)) > 0 and pulse_n % int(wd["chain_every"]) == 0:
 				var outer: Array = []
-				for od in en.order:
-					if en.hp[od] > 0.0 and not in_set.has(od):
-						outer.append(od)
-				var P: PackedVector2Array = en.pos
-				outer.sort_custom(func(a: Variant, b: Variant) -> bool: return CENTER.distance_squared_to(P[int(a)]) < CENTER.distance_squared_to(P[int(b)]))
+				if mass:
+					# C# nearest-N (sorted) instead of a 10k-body GDScript sort
+					for od in eh.nearest_n(CENTER, inside.size() + int(wd["chain_n"]), spawn_r() * 2.0):
+						if en.hp[od] > 0.0 and not in_set.has(od):
+							outer.append(od)
+				else:
+					for od in en.order:
+						if en.hp[od] > 0.0 and not in_set.has(od):
+							outer.append(od)
+					var P: PackedVector2Array = en.pos
+					outer.sort_custom(func(a: Variant, b: Variant) -> bool: return CENTER.distance_squared_to(P[int(a)]) < CENTER.distance_squared_to(P[int(b)]))
 				for k in mini(int(wd["chain_n"]), outer.size()):
 					var cd2: int = outer[k]
 					_hit(cd2, dmg * float(wd["chain_frac"]), ev)
@@ -2088,7 +2739,7 @@ func _troops_step(dt: float, ev: Array) -> void:
 	_drain_troop_events(ev)
 	if troops.is_empty():
 		return
-	var res: Dictionary = Troops.step(troops, en, eh, dt, {"cell_px": cpx()})
+	var res: Dictionary = Troops.step(troops, en, eh, dt, {"cell_px": cpx(), "cleave": TuneRef.int_of("mass_cleave", 4) if mass else 0})
 	ev.append_array(res["ev"])
 	for h in res["hits"]:
 		var hd: Dictionary = h
@@ -2127,7 +2778,10 @@ func _horde_loot() -> void:
 
 ## FB2: wave end sweeps the undropped pool, so a wave's loot value is exactly
 ## what its kills were worth (drops only change how it arrives).
-func _sweep_horde_loot() -> void:
+func _sweep_horde_loot(all_waves: bool = false) -> void:
+	if all_waves:
+		for w in wave_acct.keys():
+			_mass_sweep_loot(wave_acct[w])
 	if horde_loot_pool > 0.0:
 		coins_run += horde_loot_pool
 		horde_loot_total += horde_loot_pool
@@ -2146,6 +2800,9 @@ func _reap(ev: Array) -> void:
 	if dead_in.is_empty():
 		return
 	alive = split[0]
+	if mass:
+		_reap_mass(alive, dead_in, ev, ci, magnet)
+		return
 	for ed in dead_in:
 		var pos: Vector2 = en.pos[ed]
 		var bm: float = 1.0
@@ -2190,9 +2847,108 @@ func _reap(ev: Array) -> void:
 		ev.append({"t": "split", "pos": sp, "n": nc})
 
 
+## MASS_HORDE reap (§D5): kill cash / XP / coins are each body's designed
+## share of its wave's pool; a leaked body (reached the Core) forfeits it, a
+## detonated Sapper is not a kill. Common loot draws from the wave's bounded
+## pool with p = drops_left / bodies_left, so drops spread over a wave of any
+## size. Freeze-shatter (Cryo) and Broodsac young happen here.
+func _reap_mass(alive: PackedInt32Array, dead_in: PackedInt32Array, ev: Array, ci: float, magnet: float) -> void:
+	var waves: Dictionary = {}
+	var splits: Array = []
+	var shatter: Array = []
+	var dead: PackedInt32Array = PackedInt32Array()
+	var kc_mult: float = float(stats.get("kill_cash", 1.0)) * run_cash_mult() * kill_cash_mod * magnet
+	for ed in dead_in:
+		dead.append(ed)
+		var pos: Vector2 = en.pos[ed]
+		var kind: String = en.kind[ed]
+		var wt: int = en.wt[ed]
+		var w: int = en.wv[ed]
+		var a: Dictionary = wave_acct.get(w, {})
+		if not a.is_empty():
+			a["dead"] = int(a["dead"]) + wt
+			waves[w] = true
+		if (en.flags[ed] & EnemyStore.F_BOOM) != 0:
+			ev.append({"t": "sapper_gone", "pos": pos})
+			continue
+		var leaked: bool = (en.flags[ed] & EnemyStore.F_LEAK) != 0
+		var gain: float = 0.0
+		if not leaked:
+			var bm: float = 1.0
+			for b in stats.get("bounties", []):
+				var bd: Dictionary = b
+				if (bd["pos"] as Vector2).distance_to(pos) <= float(bd["r"]):
+					bm += float(bd["mult"])
+			gain = en.cash[ed] * ci * bm * kc_mult
+			cash += gain
+			cash_earned += gain
+			xp += en.xp[ed] * float(stats["xp_mult"])
+			var cg: float = en.coin[ed] * (run_coin_mult() if kind == "courier" else 1.0)
+			if not a.is_empty() and cg > 0.0:
+				var fund: float = cg * HORDE_LOOT_FUND
+				a["loot"] = float(a["loot"]) + fund
+				cg -= fund
+			coins_run += cg
+			coins_kill += cg
+		kills += wt
+		mass_kills_wave[wave] = int(mass_kills_wave.get(wave, 0)) + wt
+		ev.append({"t": "kill", "pos": pos, "cash": gain, "kind": kind, "n": wt})
+		if not a.is_empty() and int(a["drops"]) > 0 and float(a["loot"]) > 0.0:
+			var left: int = maxi(1, int(a["n"]) - int(a["dead"]) + 1)
+			if horde_rng.randf() < float(a["drops"]) / float(left):
+				var g: float = float(a["loot"]) / float(a["drops"])
+				a["loot"] = float(a["loot"]) - g
+				a["drops"] = int(a["drops"]) - 1
+				coins_run += g
+				horde_loot_total += g
+				horde_loot_wave_val += g
+				ev.append({"t": "loot_drop", "pos": pos, "coins": g})
+		if kind == "boss":
+			_boss_bounty(pos, ev)
+		elif kind == "splitter":
+			splits.append([pos, w, wt])
+		if (en.flags[ed] & EnemyStore.F_FROST) != 0 and en.slow_t[ed] > 0.0:
+			shatter.append([pos, en.max_hp[ed] * TuneRef.num("mass_shatter", 0.2)])
+		_roll_drops(ed, ev, float(a.get("ks", 1.0)))
+	en.order = alive
+	for ds in dead:
+		en.release(ds)
+	# Broodsac: 6 designed swarmlings (their value is inside the Broodsac's share).
+	var nc: int = TuneRef.int_of("mass_brood", 6)
+	for p in splits:
+		var sp: Vector2 = (p as Array)[0]
+		for k in nc:
+			if _spawn("mite", ev, sp + Vector2.from_angle(TAU * float(k) / float(nc)) * 9.0, false, 1.0, int((p as Array)[1]), int((p as Array)[2])):
+				var cs: int = en.order[en.order.size() - 1]
+				en.cash[cs] = 0.0
+				en.xp[cs] = 0.0
+		ev.append({"t": "split", "pos": sp, "n": nc})
+	# Cryo freeze-shatter: a chilled body that dies hits its neighbours for 20% of its max HP.
+	for sh in shatter:
+		var c: Vector2 = (sh as Array)[0]
+		var amt: float = float((sh as Array)[1])
+		var hits: int = 0
+		for fe in eh.candidates(c, 22.0):
+			if en.hp[fe] > 0.0 and en.pos[fe].distance_to(c) <= 22.0:
+				_hit(fe, amt, ev)
+				hits += 1
+				if hits >= 4:
+					break
+	for w2 in waves.keys():
+		_mass_try_clear(int(w2), ev)
+
+
+func _mass_sweep_loot(a: Dictionary) -> void:
+	var l: float = float(a.get("loot", 0.0))
+	if l > 0.0:
+		coins_run += l
+		horde_loot_total += l
+		a["loot"] = 0.0
+
+
 ## Loot (REDESIGN §2.6) on the separate drop RNG: boss / elite / marked /
 ## Courier parts, boss Scrap, rare Keys.
-func _roll_drops(ed: int, ev: Array) -> void:
+func _roll_drops(ed: int, ev: Array, ks: float = -1.0) -> void:
 	var kind: String = en.kind[ed]
 	var src: String = "kill"
 	if kind == "boss":
@@ -2201,7 +2957,7 @@ func _roll_drops(ed: int, ev: Array) -> void:
 		src = "courier"
 	elif kind == "elite" or en.is_marked(ed):
 		src = "elite"
-	var ctx: Dictionary = {"tier": tier, "drop_mult": 1.0 + float(ins.get("in_drop", 0.0)), "parts_so_far": Drops.capped_count(loot), "share": en.share[ed]}
+	var ctx: Dictionary = {"tier": tier, "drop_mult": 1.0 + float(ins.get("in_drop", 0.0)), "parts_so_far": Drops.capped_count(loot), "share": ks if ks >= 0.0 else en.share[ed]}
 	var got: Array = Drops.add(loot, Drops.roll(drop_rng, src, ctx))
 	for x in got:
 		var d: Dictionary = (x as Dictionary).duplicate()

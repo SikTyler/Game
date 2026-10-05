@@ -867,6 +867,162 @@ func _mass_horde_world() -> void:
 ## (flow field around buildings, liquid pressure, aggregated building contact,
 ## C# queries in slot order), so the golden was re-recorded from this build.
 const HORDE_FP_GOLDEN: String = "c21bb5667802945c564e73d073a63130ec2008225f1aed81091afc00bfb969a4"
+## MASS_HORDE §Design content (designed mass waves, the shipping ruleset).
+func _mfresh(seed_value: int = 1234):
+	var S = TowerState.new()
+	S.mass = true
+	S.setup(seed_value, BaseMeta.normalize({}))
+	return S
+
+
+func _mass_content_stages() -> void:
+	# ---- §D3 / H1: wave body counts 100s -> 1,000s -> 10,000s (T1)
+	var S = _mfresh()
+	_check("MASS H1 T1 bodies: w1 >= 100, w25 >= 1,000, w45 >= 10,000", S.mass_bodies(1) >= 100 and S.mass_bodies(25) >= 1000 and S.mass_bodies(45) >= 10000, "%d %d %d" % [S.mass_bodies(1), S.mass_bodies(25), S.mass_bodies(45)])
+	var p1: Dictionary = S._build_mass_plan(1, 0.0)
+	var mix_ok: bool = true
+	for e in p1["entries"]:
+		mix_ok = mix_ok and ["mite", "drone"].has(String((e as Dictionary)["kind"]))
+	_check("MASS plan w1: B(1) designed bodies, swarmlings + grunts only, telegraph total", (p1["entries"] as Array).size() == S.mass_bodies(1) and mix_ok and int(S._telegraph_event(p1)["total"]) == S.mass_bodies(1))
+	var p20: Dictionary = S._build_mass_plan(20, 0.0)
+	var kinds20: Dictionary = {}
+	for e in p20["entries"]:
+		kinds20[String((e as Dictionary)["kind"])] = true
+	_check("MASS plan w20: full roster (sapper, shield, splitter, hauler, elites) + boss flag", kinds20.has("sapper") and kinds20.has("shield") and kinds20.has("splitter") and kinds20.has("hauler") and kinds20.has("elite") and bool(p20["boss"]))
+	_check("MASS T3: more bodies than T1 and sappers from wave 1", EnemyDB.tier_b(3) > EnemyDB.tier_b(1) and EnemyDB.mass_mix(1, 3).has("sapper") and not EnemyDB.mass_mix(1, 1).has("sapper"))
+	_check("MASS H3: the legacy split knob ships off (Tune.horde_mult() == 1)", TuneRef.horde_mult() == 1)
+	# ---- H4 + H3: spawned bodies carry designed HP, never a share
+	var ev: Array = []
+	for i in 160:
+		ev.append_array(S.tick(0.05))
+	var h4: bool = S.en.count() > 0
+	for sl in S.en.order:
+		var k: String = S.en.kind[sl]
+		var want: float = float(EnemyDB.mass_def(k)["hp"]) * S.mass_hp_scale(k, 1)
+		if S.en.share[sl] != 1.0 or (not S.en.is_marked(sl) and absf(S.en.max_hp[sl] - want) > 1e-6 * want):
+			h4 = false
+	_check("MASS H3/H4: every body share 1, HP = designed x growth (no split factor)", h4)
+	# ---- §D5 / H5: a full-clear wave pays its pool + 30% clear bonus
+	var SE = _mfresh(77)
+	SE.stats["weapons"] = []
+	var kcash: float = 0.0
+	var ccash: float = -1.0
+	var guard: int = 0
+	while ccash < 0.0 and guard < 600:
+		guard += 1
+		for e in SE.tick(0.05):
+			var ed: Dictionary = e
+			if String(ed["t"]) == "kills":
+				kcash += float(ed["cash"])
+			elif String(ed["t"]) == "wave_clear" and int(ed["wave"]) == 1:
+				ccash = float(ed["cash"])
+		for sl in SE.en.order:
+			if SE.en.hp[sl] > 0.0:
+				SE.en.hp[sl] = 0.0
+				SE.en.kill(sl)
+	var pool_c: float = SE.mass_cash_pool(1) * SE.run_cash_mult() * float(SE.stats["kill_cash"])
+	_check("MASS H5: full clear of wave 1 pays pool x 1.3 (+-5%)", ccash >= 0.0 and absf((kcash + ccash) - pool_c * 1.3) <= 0.05 * pool_c * 1.3, "kill %.2f clear %.2f pool %.2f" % [kcash, ccash, pool_c])
+	_check("MASS §D5: income per wave does not scale with the body count", absf(SE.mass_cash_pool(1) - SE.wave_time / SE.interval_for(1)) < 1e-9 and SE.mass_cash_pool(45) < 10.0 * SE.mass_cash_pool(1))
+	# ---- §D3: the alive cap HOLDS the queue (never drops a planned body)
+	var SH = _mfresh(5)
+	SH.mass_cap = 40
+	SH.stats["weapons"] = []
+	SH.max_hp_mult = 1.0e9
+	var peak: int = 0
+	for i in 400:
+		SH.tick(0.05)
+		peak = maxi(peak, SH.en.count())
+		SH.stats["weapons"] = []
+	var held: bool = SH.plan_idx < SH.plan.size() and peak <= 40
+	var killed: int = 0
+	guard = 0
+	while SH.plan_idx < SH.plan.size() and guard < 2000 and SH.wave == 1:
+		guard += 1
+		for sl in SH.en.order:
+			if SH.en.hp[sl] > 0.0 and killed < 1000:
+				SH.en.hp[sl] = 0.0
+				SH.en.kill(sl)
+				killed += 1
+		SH.tick(0.05)
+		SH.stats["weapons"] = []
+	var a1: Dictionary = SH.wave_acct.get(1, {})
+	_check("MASS alive cap: queue holds at the cap, then every planned body spawns", held and (a1.is_empty() or int(a1["spawned"]) == SH.mass_bodies(1)), "held %s peak %d" % [str(held), peak])
+	# ---- §D1 Sapper: detonates on the first structure it presses, no kill credit
+	var SS = _mfresh()
+	for i in TowerState.N:
+		SS.unlocked[i] = i != TowerState.CORE_SLOT
+	SS.spawn_hold = true
+	var bi: int = _rc(1, 3)
+	SS.slots[bi] = {"id": "barricade", "perm": 0, "run": 1}
+	SS.recompute()
+	var bhp0: float = float(SS.bld_hp[bi])
+	SS._spawn("sapper", [], TowerState.slot_pos(bi) + Vector2(0, -34))
+	var boom: Array = []
+	for i in 80:
+		boom.append_array(_evts(SS.tick(0.05), "sapper_blast"))
+	_check("MASS Sapper: one blast on the wall (x12.5 its Core hit), gone, not a kill", boom.size() == 1 and float(SS.bld_hp[bi]) < bhp0 and SS.en.count() == 0 and SS.kills == 0, "%d blasts hp %.1f->%.1f n %d kills %d" % [boom.size(), bhp0, float(SS.bld_hp[bi]), SS.en.count(), SS.kills])
+	# ---- §D1 Shieldbearer: the frontal shield soaks projectiles from the front only
+	var SB = _mfresh()
+	SB.spawn_hold = true
+	SB._spawn("shield", [], TowerState.CENTER + Vector2(0, -300))
+	var sb: int = SB.en.order[0]
+	var g0: float = SB.en.guard[sb]
+	var hp0: float = SB.en.hp[sb]
+	SB._blockable = true
+	SB._kb_from = TowerState.CENTER
+	SB._hit(sb, 5.0, [])
+	var front_ok: bool = SB.en.hp[sb] == hp0 and absf(SB.en.guard[sb] - (g0 - 5.0)) < 1e-9
+	SB._kb_from = TowerState.CENTER + Vector2(0, -700)
+	SB._hit(sb, 5.0, [])
+	SB._blockable = false
+	_check("MASS Shieldbearer: front hit soaked by its shield, a flank/rear hit is not", g0 > 0.0 and front_ok and absf(SB.en.hp[sb] - (hp0 - 5.0)) < 1e-9)
+	# ---- §D4 weapon verbs
+	var SG = _mfresh()
+	SG.spawn_hold = true
+	var gfrom: Vector2 = TowerState.CENTER
+	for i in 6:
+		SG.add_enemy({"kind": "mite", "pos": gfrom + Vector2(0, -60 - 14 * i), "hp": 999.0, "max_hp": 999.0, "size": 10.0})
+	SG.eh.rebuild()
+	SG._fire_mass("gun", {"slot": 0, "lvl": 1, "range": 300.0}, gfrom, SG.en.order[0], 10.0, false, [])
+	var gh: int = 0
+	for sl in SG.en.order:
+		if SG.en.hp[sl] < 999.0:
+			gh += 1
+	_check("MASS Gun: a round pierces 3 bodies in line at Lv1 (x0.85 falloff)", gh == 3 and absf(SG.en.hp[SG.en.order[2]] - (999.0 - 10.0 * 0.85 * 0.85)) < 1e-6, "hit %d" % gh)
+	var ST = _mfresh()
+	ST.spawn_hold = true
+	for i in 10:
+		ST.add_enemy({"kind": "mite", "pos": TowerState.CENTER + Vector2(-300 + 50 * i, -200), "hp": 999.0, "max_hp": 999.0, "size": 10.0})
+	ST.eh.rebuild()
+	ST._fire_mass("tesla", {"slot": 0, "lvl": 1, "range": 300.0}, TowerState.CENTER, ST.en.order[0], 10.0, false, [])
+	var th: int = 0
+	for sl in ST.en.order:
+		if ST.en.hp[sl] < 999.0:
+			th += 1
+	_check("MASS Tesla: chains 6 bodies at Lv1 (70 px jumps)", th == 6, "hit %d" % th)
+	var SF = _mfresh()
+	SF.spawn_hold = true
+	SF.add_enemy({"kind": "mite", "pos": TowerState.CENTER + Vector2(0, -100), "hp": 999.0, "max_hp": 999.0, "size": 10.0})
+	SF.add_enemy({"kind": "mite", "pos": TowerState.CENTER + Vector2(0, -108), "hp": 999.0, "max_hp": 999.0, "size": 10.0})
+	SF.add_enemy({"kind": "mite", "pos": TowerState.CENTER + Vector2(0, 100), "hp": 999.0, "max_hp": 999.0, "size": 10.0})
+	SF.eh.rebuild()
+	SF._fire_mass("flak", {"slot": 0, "lvl": 1, "range": 300.0}, TowerState.CENTER, SF.en.order[0], 10.0, false, [])
+	var cone_ok: bool = SF.en.hp[SF.en.order[0]] < 999.0 and SF.en.hp[SF.en.order[1]] < 999.0 and SF.en.hp[SF.en.order[2]] == 999.0 and SF.burning.size() == 2
+	SF.add_enemy({"kind": "mite", "pos": TowerState.CENTER + Vector2(9, -100), "hp": 999.0, "max_hp": 999.0, "size": 10.0})
+	SF.eh.rebuild()
+	SF._burn_step(0.25, [])
+	_check("MASS Flamer: cone licks bodies ahead (not behind), burn spreads to a touching body", cone_ok and SF.en.burn_t[SF.en.order[3]] > 0.0)
+	# ---- §D6 rescaled kill missions
+	_check("MASS §D6 missions: kill 5k / 15k / 40k; kill-in-one-wave 1k / 5k", MissionDB.target("kill", 0) == 5000 and MissionDB.target("kill", 25) == 15000 and MissionDB.target("kill", 40) == 40000 and MissionDB.target("wave_kills", 0) == 1000 and MissionDB.target("wave_kills", 40) == 5000)
+	# ---- H10: same seed, same mass run (kills / cash / bodies / C# checksum)
+	var D1 = _mfresh(99)
+	var D2 = _mfresh(99)
+	for i in 900:
+		D1.tick(0.05)
+		D2.tick(0.05)
+	_check("MASS H10: same seed -> identical kills / cash / bodies / C# checksum", D1.kills == D2.kills and D1.cash == D2.cash and D1.en.count() == D2.en.count() and int(D1.en.world.call("Checksum")) == int(D2.en.world.call("Checksum")) and D1.kills > 0)
+
+
 func _horde_stages() -> void:
 	var FP = load("res://horde_fp.gd")
 	var got: String = FP.run_all()
@@ -878,6 +1034,7 @@ func _horde_stages() -> void:
 	# checksum and the fingerprint above; the world itself is gated below.
 	_check("HORDE C# HordeWorld available (mono build)", load("res://EnemyStore.gd").cs_available())
 	_mass_horde_world()
+	_mass_content_stages()
 	_horde_p34()
 	var S = _fresh()
 	S.spawn_hold = true
@@ -2298,7 +2455,12 @@ func _pc_shell_stages() -> void:
 	var stx: Dictionary = BaseMeta.default_save()
 	Stats.on_event(stx, {"t": "game_over", "wave": 20, "couriers": 1, "specials_cast": 7, "duration_s": 1.0})
 	_check("ACH hooks: game_over feeds couriers + specials_cast stats", int(stx["stats"]["couriers"]) == 1 and int(stx["stats"]["specials_cast"]) == 7)
-	_check("PC-E10 34 achievements, unique ids", AchievementDB.LIST.size() == 34 and AchievementDB.ids().size() == 34)
+	# MASS_HORDE §D6 (deliberate content change): 34 -> 39 achievements (Exterminator
+	# II/III ladder, The Tide, Wall of Flesh, Parting the Sea); ids still unique.
+	var ach_u: Dictionary = {}
+	for aid in AchievementDB.ids():
+		ach_u[aid] = true
+	_check("PC-E10 39 achievements, unique ids", AchievementDB.LIST.size() == 39 and ach_u.size() == 39)
 	var ring3: int = 0
 	var full: Array = []
 	for i in BaseMeta.N:
@@ -2314,7 +2476,13 @@ func _pc_shell_stages() -> void:
 		"ACH_TIER_8": [{"best_wave_by_tier": {"1": 9999, "2": 9999, "3": 9999, "4": 9999, "5": 9999, "6": 9999, "7": 9999}}, [{"t": "meta"}], -1.0],
 		"ACH_FIRST_BOSS": [{}, [{"t": "boss_bounty"}], -1.0],
 		"ACH_BOSS_50": [{"stats": {"bosses": 50}}, [{"t": "meta"}], -1.0],
-		"ACH_KILLS_100K": [{"stats": {"kills": 100000 * preload("res://Tune.gd").horde_mult()}}, [{"t": "meta"}], -1.0],
+		"ACH_KILLS_100K": [{"stats": {"kills": 100000}}, [{"t": "meta"}], -1.0],
+		# MASS_HORDE §D6 additions (event / save driven).
+		"ACH_KILLS_1M": [{"stats": {"kills": 1000000}}, [{"t": "meta"}], -1.0],
+		"ACH_KILLS_10M": [{"stats": {"kills": 10000000}}, [{"t": "meta"}], -1.0],
+		"ACH_TIDE": [{}, [{"t": "tide", "wave": 45, "peak": 10000}], -1.0],
+		"ACH_WALL_FLESH": [{}, [{"t": "wall_of_flesh", "slot": 3, "n": 2000}], -1.0],
+		"ACH_PART_SEA": [{}, [{"t": "part_sea", "n": 500}], -1.0],
 		"ACH_RING_3": [{"unlocked": [ring3]}, [{"t": "meta"}], -1.0],
 		"ACH_FULL_BASE": [{"unlocked": full}, [{"t": "meta"}], -1.0],
 		"ACH_ALL_SYNERGY": [{}, [{"t": "synergies", "n": AchievementDB.SYNERGY_TARGET}], -1.0],
@@ -2351,7 +2519,7 @@ func _pc_shell_stages() -> void:
 	for k in 50:
 		m50.append({"t": "mission_claimed", "idx": 0, "gems": 1})
 	cases["ACH_MISSIONS_50"][1] = m50
-	_check("PC-E10 every achievement has a synthetic case", cases.size() == 34 and cases.keys().all(func(k: Variant) -> bool: return AchievementDB.ids().has(String(k))))
+	_check("PC-E10 every achievement has a synthetic case", cases.size() == 39 and cases.keys().all(func(k: Variant) -> bool: return AchievementDB.ids().has(String(k))))
 	for id in cases.keys():
 		var c: Array = cases[id]
 		var sv: Dictionary = BaseMeta.default_save()

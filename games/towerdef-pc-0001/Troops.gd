@@ -262,6 +262,25 @@ static func step(troops: Array, en, eh, dt: float, ctx: Dictionary) -> Dictionar
 			td["cd"] = 1.0 / float(td["rate"])
 			hits.append({"eid": en.eid[e2], "dmg": float(td["dmg"]), "tid": int(td["tid"])})
 			ev.append({"t": "troop_hit", "tid": int(td["tid"]), "eid": en.eid[e2], "pos": ep, "kind": String(td["kind"])})
+			# MASS_HORDE §D4: against a mass every troop attack cleaves -- it also
+			# hits up to cleave-1 more bodies within reach in a 90 deg arc toward
+			# the target (spawn order, deterministic), or a troop evaporates.
+			var cl: int = int(ctx.get("cleave", 0))
+			if cl > 1:
+				var tp: Vector2 = td["pos"]
+				var fwd: Vector2 = (ep - tp).normalized()
+				var got: int = 1
+				for xd in eh.candidates(tp, reach + en.max_size * 0.5):
+					if got >= cl:
+						break
+					if xd == e2 or en.hp[xd] <= 0.0 or en.kind[xd] == "courier":
+						continue
+					var rel: Vector2 = en.pos[xd] - tp
+					var rl: float = rel.length()
+					if rl > reach + en.size[xd] * 0.5 or (rl > 0.0 and rel.dot(fwd) < 0.7071 * rl):
+						continue
+					hits.append({"eid": en.eid[xd], "dmg": float(td["dmg"]), "tid": int(td["tid"])})
+					got += 1
 	return {"ev": ev, "hits": hits}
 
 

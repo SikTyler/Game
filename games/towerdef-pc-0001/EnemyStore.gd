@@ -26,6 +26,10 @@ const ACT_BLD: int = 0       # arg = slot of a body hitting the building on `cel
 const ACT_SHOT: int = 1      # arg = slot of a ranged body firing at the Core
 const ACT_HIT: int = 2       # arg = slot of a melee body hitting the Core
 const ACT_ESCAPE: int = 3    # arg = slot of a courier that reached its exit
+const ACT_BOOM: int = 4      # [op, slot, cell]: a Sapper detonated on the building on `cell`
+const F_LEAK: int = 4        # MASS_HORDE §D5: reached the Core (forfeits its pool share)
+const F_FROST: int = 8       # chilled by a Cryo Spire (freeze-shatter / Brittle)
+const F_BOOM: int = 16       # Sapper that detonated (reaped without a kill / reward)
 
 var pos: PackedVector2Array = PackedVector2Array()
 var vel: PackedVector2Array = PackedVector2Array()     # knockback (Phase 4); unused at horde_mult 1
@@ -47,7 +51,12 @@ var hit_t: PackedFloat64Array = PackedFloat64Array()
 var taunt_t: PackedFloat64Array = PackedFloat64Array()
 var share: PackedFloat64Array = PackedFloat64Array()   # horde body share 1/m (1.0 = whole entry)
 var kind: PackedStringArray = PackedStringArray()
-var kc: PackedInt32Array = PackedInt32Array()          # kind code for HordeWorld: 0 other, 1 courier, 2 ranged, 3 boss
+var kc: PackedInt32Array = PackedInt32Array()          # kind code for HordeWorld: 0 other, 1 courier, 2 ranged, 3 boss, 4 sapper
+var wv: PackedInt32Array = PackedInt32Array()          # MASS_HORDE: wave the body belongs to (pool accounting)
+var wt: PackedInt32Array = PackedInt32Array()          # bodies this one stands for (1; >1 only under the test-harness LOD)
+var guard: PackedFloat64Array = PackedFloat64Array()   # Shieldbearer frontal shield points
+var burn_t: PackedFloat64Array = PackedFloat64Array()  # Flamer burn seconds left
+var burn_d: PackedFloat64Array = PackedFloat64Array()  # Flamer burn damage per second
 var eid: PackedInt32Array = PackedInt32Array()
 var shield: PackedInt32Array = PackedInt32Array()
 var max_shield: PackedInt32Array = PackedInt32Array()
@@ -72,6 +81,8 @@ static func _kcode(k: String) -> int:
 			return 2
 		"boss":
 			return 3
+		"sapper":
+			return 4
 	return 0
 
 
@@ -111,6 +122,7 @@ func clear() -> void:
 	hp.clear(); max_hp.clear(); spd.clear(); dmg.clear(); cash.clear(); xp.clear(); coin.clear()
 	size.clear(); atk_cd.clear(); slow_t.clear(); slow_m.clear(); fire_cd.clear(); shock_t.clear()
 	hit_t.clear(); taunt_t.clear(); share.clear(); kind.clear(); kc.clear()
+	wv.clear(); wt.clear(); guard.clear(); burn_t.clear(); burn_d.clear()
 	eid.clear(); shield.clear(); max_shield.clear(); shock_src.clear(); quad.clear(); shred_n.clear()
 	flags.clear(); next_free.clear(); cur_s.clear()
 	world.call("Clear")
@@ -128,6 +140,7 @@ func _grow() -> void:
 	hp.resize(c); max_hp.resize(c); spd.resize(c); dmg.resize(c); cash.resize(c); xp.resize(c); coin.resize(c)
 	size.resize(c); atk_cd.resize(c); slow_t.resize(c); slow_m.resize(c); fire_cd.resize(c); shock_t.resize(c)
 	hit_t.resize(c); taunt_t.resize(c); share.resize(c); kind.resize(c); kc.resize(c)
+	wv.resize(c); wt.resize(c); guard.resize(c); burn_t.resize(c); burn_d.resize(c)
 	eid.resize(c); shield.resize(c); max_shield.resize(c); shock_src.resize(c); quad.resize(c); shred_n.resize(c)
 	flags.resize(c); next_free.resize(c); cur_s.resize(c)
 	world.call("Ensure", c)
@@ -151,6 +164,7 @@ func alloc(id: int, k: String, p: Vector2) -> int:
 	hit_t[s] = 0.0; taunt_t[s] = 0.0; share[s] = 1.0; kind[s] = k; kc[s] = _kcode(k)
 	eid[s] = id; shield[s] = 0; max_shield[s] = 0; shock_src[s] = -1; quad[s] = -1; shred_n[s] = 0
 	flags[s] = 0; cur_s[s] = 0.0
+	wv[s] = 0; wt[s] = 1; guard[s] = 0.0; burn_t[s] = 0.0; burn_d[s] = 0.0
 	eid_slot[id] = s
 	order.append(s)
 	dirty = true
@@ -335,6 +349,11 @@ func fill(s: int, d: Dictionary) -> void:
 	flags[s] = f
 	vel[s] = d.get("vel", Vector2.ZERO)
 	cur_s[s] = float(d.get("cur_s", 0.0))
+	wv[s] = int(d.get("wv", 0))
+	wt[s] = maxi(1, int(d.get("wt", 1)))
+	guard[s] = float(d.get("guard", 0.0))
+	burn_t[s] = float(d.get("burn_t", 0.0))
+	burn_d[s] = float(d.get("burn_d", 0.0))
 	commit(s)
 
 
@@ -347,6 +366,7 @@ func get_dict(s: int) -> Dictionary:
 		"fire_cd": fire_cd[s], "shock_t": shock_t[s], "shock_src": shock_src[s], "hit_t": hit_t[s],
 		"eid": eid[s], "taunt_t": taunt_t[s], "quad": quad[s], "shred_n": shred_n[s],
 		"marked": is_marked(s), "slot": s, "share": share[s], "vel": vel[s], "cur_s": cur_s[s],
+		"wv": wv[s], "wt": wt[s], "guard": guard[s], "burn_t": burn_t[s], "burn_d": burn_d[s],
 	}
 	if has_exit(s):
 		d["exit"] = exit[s]

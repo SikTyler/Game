@@ -85,6 +85,8 @@ static func on_run_events(s: Dictionary, events: Array) -> Array:
 				ev.append_array(progress(s, "kill", int(e.get("n", 0))))
 			"wave":
 				ev.append_array(progress(s, "wave", int(e.get("wave", 0)), true))
+			"wave_kills":   # MASS_HORDE §D6: kills credited during one wave
+				ev.append_array(progress(s, "wave_kills", int(e.get("n", 0)), true))
 			"boss_bounty":
 				ev.append_array(progress(s, "boss", 1))
 			"placed":

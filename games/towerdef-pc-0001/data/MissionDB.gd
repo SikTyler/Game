@@ -4,6 +4,7 @@ extends RefCounted
 
 const DEFS: Dictionary = {
 	"kill":    {"text": "Kill %d enemies",            "coins": 120},
+	"wave_kills": {"text": "Kill %d enemies in one wave", "coins": 120},
 	"wave":    {"text": "Reach wave %d",              "coins": 160},
 	"boss":    {"text": "Defeat %d bosses",           "coins": 160},
 	"eco":     {"text": "Place %d eco buildings",     "coins": 80},
@@ -13,7 +14,7 @@ const DEFS: Dictionary = {
 	"upgrade": {"text": "Buy %d permanent upgrades",  "coins": 80},
 }
 
-const IDS: Array = ["kill", "wave", "boss", "eco", "cash", "perk", "lab", "upgrade"]
+const IDS: Array = ["kill", "wave", "boss", "eco", "cash", "perk", "lab", "upgrade", "wave_kills"]
 
 ## Streak ladder: day 1..7.
 const STREAK: Array = [
@@ -29,7 +30,13 @@ static func target(tpl: String, best_wave: int) -> int:
 	var b: int = maxi(0, best_wave)
 	match tpl:
 		"kill":
-			return (150 + 10 * b) * preload("res://Tune.gd").horde_mult()   # kills are per body
+			# MASS_HORDE §D6: designed mass waves kill 100s-10,000s per wave
+			# (a wave-20 run is ~7k bodies, a wave-35 run ~37k).
+			if b >= 35:
+				return 40000
+			return 15000 if b >= 25 else 5000
+		"wave_kills":
+			return 5000 if b >= 35 else 1000
 		"wave":
 			return maxi(10, int(floor(float(b) * 0.8)))
 		"boss":

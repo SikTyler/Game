@@ -55,6 +55,12 @@ const DT: float = 0.1
 const MAX_SIM_S: float = 3600.0
 const RUNS: int = 8
 const FIRST_GOAL_WAVE: int = 5
+## MASS_HORDE harness fidelity (documented in MASS_HORDE §Content): the 30-day
+## campaign plays hundreds of runs, so a wave planned above this many bodies
+## spawns one body per k = ceil(B / cap) carrying k x HP / damage / pool share
+## / kill count. Waves up to the cap (every T1 wave <= 28, i.e. every first
+## run, H7) are simulated 1:1; the H1/H2/H8 mass gates always run at 1:1.
+const BOT_LOD_CAP: int = 2500
 const PROGRESS_GAIN: int = 5
 const SEED_DEFAULT: int = 4242
 const MIX_ECO_UNTIL: int = 15
@@ -613,7 +619,9 @@ static func _place_cell(S, id: String) -> int:
 
 static func run_once(save: Dictionary, policy: String, seed_value: int) -> Dictionary:
 	var S = TowerState.new()
-	S.horde_mult = preload("res://Tune.gd").horde_mult()   # FB2: bot plays the shipped x4 horde (Main does the same)
+	S.mass = true   # MASS_HORDE: the bot plays the shipped designed mass waves (Main does the same)
+	S.horde_mult = preload("res://Tune.gd").horde_mult()   # legacy split knob: 1 (off) as shipped
+	S.mass_lod_cap = BOT_LOD_CAP   # harness-only runtime cap (waves above it compress; see BOT_LOD_CAP)
 	S.setup(seed_value, save)
 	var t: float = 0.0
 	var acc: float = 0.0
@@ -885,7 +893,9 @@ const CARD_PRIO: Array = ["c_dmg", "c_hp", "c_wind", "c_coin", "c_cash", "c_xp",
 ## One run on `save` (mutated: banks, missions). Returns run facts.
 static func camp_run(save: Dictionary, policy: String, seed_value: int, now: int, perk_pref: String = "", feed_missions: bool = true, opts: Dictionary = {}) -> Dictionary:
 	var S = TowerState.new()
-	S.horde_mult = preload("res://Tune.gd").horde_mult()   # FB2: bot plays the shipped x4 horde (Main does the same)
+	S.mass = true   # MASS_HORDE: the bot plays the shipped designed mass waves (Main does the same)
+	S.horde_mult = preload("res://Tune.gd").horde_mult()   # legacy split knob: 1 (off) as shipped
+	S.mass_lod_cap = BOT_LOD_CAP   # harness-only runtime cap (waves above it compress; see BOT_LOD_CAP)
 	S.setup(seed_value, save, now, opts)
 	var t: float = 0.0
 	var acc: float = 0.0

@@ -371,7 +371,8 @@ func start_run(seed_override: int = 0) -> void:
 		return
 	BaseMeta.select_tier(save, view_tier)
 	S = TowerState.new()
-	S.horde_mult = TuneRef.horde_mult()   # FB1: horde on by default (per-body kills)
+	S.mass = true   # MASS_HORDE §D3: designed mass waves (100s -> 1,000s -> 10,000s)
+	S.horde_mult = TuneRef.horde_mult()   # legacy split knob (§D9): 1 unless Tune legacy_horde_mult
 	_clear_fx()
 	run_missions = 0
 	run_loot = []

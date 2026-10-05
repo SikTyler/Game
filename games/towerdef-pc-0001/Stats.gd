@@ -24,6 +24,8 @@ static func default_stats() -> Dictionary:
 		# Redesign meta counters (achievements): parts found, crates opened,
 		# specials cast, Couriers caught, Outpost collects, Reforges.
 		"parts_found": 0, "crates_opened": 0, "specials_cast": 0, "couriers": 0, "outpost_collects": 0, "reforges": 0,
+		# MASS_HORDE §D6: kills per weapon source (gun, mortar, ..., core, troop, special).
+		"kills_by_weapon": {},
 	}
 
 
@@ -82,6 +84,9 @@ static func on_event(s: Dictionary, e: Dictionary) -> void:
 			st["dps_best"] = maxf(float(st["dps_best"]), float(e.get("dps", 0.0)))
 			st["specials_cast"] = int(st["specials_cast"]) + maxi(0, int(e.get("specials_cast", 0)))
 			st["couriers"] = int(st["couriers"]) + maxi(0, int(e.get("couriers", 0)))
+			var kw: Dictionary = e.get("kills_by_weapon", {}) if e.get("kills_by_weapon", {}) is Dictionary else {}
+			for wk in kw:
+				_bump(st["kills_by_weapon"], String(wk), int(kw[wk]))
 			var bm: Dictionary = st["best_by_mode"]
 			var m: String = mode_of(e)
 			bm[m] = maxi(int(bm.get(m, 0)), int(e.get("wave", 0)))
@@ -136,6 +141,7 @@ static func normalize_stats(src: Variant) -> Dictionary:
 	d["play_s"] = maxf(0.0, float(st_in.get("play_s", 0.0)))
 	d["dps_best"] = maxf(0.0, float(st_in.get("dps_best", 0.0)))
 	d["kills_by_kind"] = _int_map(st_in.get("kills_by_kind", {}))
+	d["kills_by_weapon"] = _int_map(st_in.get("kills_by_weapon", {}))
 	d["placed"] = _int_map(st_in.get("placed", {}))
 	var bm_in: Dictionary = st_in.get("best_by_mode", {}) if st_in.get("best_by_mode", {}) is Dictionary else {}
 	var bm: Dictionary = {}

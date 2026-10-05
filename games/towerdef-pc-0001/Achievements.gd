@@ -122,6 +122,12 @@ static func on_events(save: Dictionary, run: Dictionary, events: Array, now: int
 				out.append_array(_wave_checks(save, run, w, now))
 			"boss_bounty":
 				out.append_array(unlock(save, "ACH_FIRST_BOSS", now))
+			"tide":
+				out.append_array(unlock(save, "ACH_TIDE", now))
+			"wall_of_flesh":
+				out.append_array(unlock(save, "ACH_WALL_FLESH", now))
+			"part_sea":
+				out.append_array(unlock(save, "ACH_PART_SEA", now))
 			"synergies":
 				run["synergies"] = maxi(int(run.get("synergies", 0)), int(ev.get("n", 0)))
 				if int(ev.get("n", 0)) >= AchievementDB.SYNERGY_TARGET:
@@ -189,8 +195,13 @@ static func check_save(save: Dictionary, now: int = 0) -> Array:
 		out.append_array(unlock(save, "ACH_FIRST_BOSS", now))
 	if int(st.get("bosses", 0)) >= 50:
 		out.append_array(unlock(save, "ACH_BOSS_50", now))
-	if int(st.get("kills", 0)) >= 100000 * preload("res://Tune.gd").horde_mult():   # per-body kills
+	# MASS_HORDE §D6 Exterminator ladder (designed mass bodies, no split factor).
+	if int(st.get("kills", 0)) >= 100000:
 		out.append_array(unlock(save, "ACH_KILLS_100K", now))
+	if int(st.get("kills", 0)) >= 1000000:
+		out.append_array(unlock(save, "ACH_KILLS_1M", now))
+	if int(st.get("kills", 0)) >= 10000000:
+		out.append_array(unlock(save, "ACH_KILLS_10M", now))
 	if int(st.get("runs", 0)) >= 1:
 		out.append_array(unlock(save, "ACH_FIRST_RUN", now))
 	if int(save.get("best_wave", 0)) >= 25:
