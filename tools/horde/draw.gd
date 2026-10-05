@@ -60,14 +60,15 @@ func _next() -> void:
 		var a: float = r.randf() * TAU
 		S._spawn(String(KINDS[k % KINDS.size()]), ev, S.CENTER + Vector2.from_angle(a) * r.randf_range(S.STOP_R, S.SPAWN_R), -1)
 	# realistic mix of decorations: ~half damaged (HP bar), some slowed / flashing
-	for k in S.enemies.size():
-		var e: Dictionary = S.enemies[k]
+	var en = S.en
+	for k in en.order.size():
+		var sl: int = en.order[k]
 		if k % 2 == 0:
-			e["hp"] = float(e["max_hp"]) * 0.5
+			en.hp[sl] = en.max_hp[sl] * 0.5
 		if k % 5 == 0:
-			e["slow_t"] = 1.0
+			en.slow_t[sl] = 1.0
 		if k % 3 == 0:
-			e["hit_t"] = 0.06
+			en.hit_t[sl] = 0.06
 	var sc := GDScript.new()
 	sc.source_code = VIEW_SRC
 	sc.reload()

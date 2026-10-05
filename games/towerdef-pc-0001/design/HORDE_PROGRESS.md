@@ -36,3 +36,79 @@ Move is ~0.5 µs/body (plan target ≤3 µs incl. separation: met with room). Sp
 - EnemyHash keys are `(cell << 20) | spawn_rank` in a natively sorted PackedInt64Array; a cell row is one contiguous run found by `bsearch`. A first counting-sort version paid a fixed 1024-cell prefix pass per rebuild, which made low-count sims slower than the Dict code (a playtest run took 1718 s vs 503 s baseline — partly also orphaned processes from an aborted earlier run); replaced, plus a small-n fast path (≤64 bodies: candidates = `order`, no rebuild). Seeded 4×120 s fingerprint sim: Dict 2.04 s → SoA 1.48 s.
 - Queries whose AABB covers ≥ half the grid (Railgun 590 px, big Core ranges) return the whole `order` (exact superset, no gather/sort).
 - `tools/horde/draw.gd` (Phase-0 draw profiler) still reads `S.enemies`; not adapted (Phase 2 replaces the draw path with MultiMesh).
+
+## Phase 2 — horde_mult, event aggregation, MultiMesh view (horde-p2)
+
+### What landed
+- **`horde_mult`** (`Tune.horde_mult()`, GF_TUNE `{"horde_mult":m}`, clamped 1..16, default 1). `_spawn_due` spawns each plan entry as `m` bodies: the first through the normal `_spawn` (same rng draws), then `_spawn_clones` copies it m-1 times, fanned ±2° around the Core by body index. **No extra rng draws**, so the wave sequence is unchanged. Each body's hp/max_hp/dmg/cash/xp/coin = entry × 1/m (new `EnemyStore.share`). **Single bodies:** boss, elite (whole shields, C5), marked elites and couriers. Splitter mites inherit the parent's share.
+- **Armor split (C4):** `_core_damage(..., share)` subtracts `armor × share` per body hit. The 25% floor is unchanged.
+- **Kills per body (C2):** `kills`, Stats and Missions count bodies. To keep pacing, kill-count thresholds scale by m: the daily "Kill N" mission target is `(150+10B)×m` and ACH_KILLS_100K is `100000×m`.
+- **Loot (C3):** loot rolls once per body. Parts and scrap only come from boss, elite and courier kills, which are all single bodies. A horde body rolls the per-kill key at `p×share`, so keys per wave are conserved at any m. Loot stays per body and low value, and the expected value per wave is unchanged. I did not add a new "common horde trinket" currency, because that would inflate the economy. It is left for the economy pass if the owner wants visible frequent drops.
+- **Event aggregation** (`TowerState.aggregate_events`, called per substep in `tick` only when m>1; at m=1 the stream is untouched): per-body `kill` (except boss), `dmg` and `core_hit`/`enemy_shot` events collapse into `kills{n,cash,by_kind,pos_sample≤16}`, `hits{n,sum,crit_n,top≤8}` and `core_hits{n,dmg,shots,pos_sample≤8}`. Consumers:
+  - Stats and Missions add `n`.
+  - Achievements treats these events as HOT, and `core_hits` sets damaged_early.
+  - `Main._handle` draws one burst/ring per sampled position, one trauma for `core_hits`, and damage popups only for the top 8 hits. Popups merge per 64 px cell, so numbers no longer stack.
+  - Sfx plays once per aggregate and keeps its existing GAP_MS rate limit.
+- **View:** `Battle._draw_enemies` uses one `MultiMesh` per enemy kind: an ArrayMesh unit quad textured with the kind's SVG icon. The 12-float instance buffer is refilled from SoA each frame. Per-instance colour gives the hit flash (over-bright) and the slow tint. Marked/shield overlays and HP bars are drawn only for boss/elite/courier/marked bodies. Enemy SVG imports are raised to `svg/scale=2.0` (128 px raster), which makes them crisp at 1080p.
+- **MAX_ENEMIES:** the 220 constant is kept. The cap is now `max_bodies() = MAX_ENEMIES × horde_mult`, so behaviour at m=1 is identical (C1).
+- **Tests:** selftest gained Phase 2 checks:
+  - conservation at m=4 (hp/cash/dmg)
+  - body budget
+  - armor split
+  - the aggregation schema, with the boss kill kept single
+  - aggregated kills counted in Stats
+  
+  No existing assertion changed. The `tools/horde/hlib.gd` anchors and `draw.gd` were ported to the store.
+
+### Gates
+- `--import` clean; `--quit-after 120`: no errors; **SELFTEST OK** (HORDE FP golden unchanged); **UITEST OK**; shots rendered (16_battle_late shows the MultiMesh enemies upright and crisp).
+- **PLAYTEST OK at horde_mult 1**: the `PLAYTEST METRICS` JSON vs `design/baseline/playtest_metrics.json` gives **0 differences** (excluding runtime_s). Runtime was 1873 s, with 4 playtests running in parallel on 4 cores.
+- **Warning for future runs:** the playtest jobs share `user://pt_jobs` snapshots. Running several playtests in parallel corrupts them (a first attempt crashed at playtest.gd:161 and gave a false m=1 diff). Give each concurrent run its own `XDG_DATA_HOME`.
+
+### Playtest at horde_mult 2 / 4 / 8 (GF_TUNE overrides; deltas vs baseline)
+| m | result | gates failing | metric keys differing |
+|---|---|---|---|
+| 1 | **OK** | — | 0 |
+| 2 | FAIL | progressable, no_death_spiral, seeds_ok, rd_loops_faster, rd_no_dominant_part | 38 |
+| 4 | FAIL | t2_by_day5, mix_beats_weapon, ac38_eco_mix, rd_no_dominant_part, ac25_fresh_wall | 38 |
+| 8 | FAIL | progressable, no_death_spiral, mix_beats_weapon, seeds_ok, pc_modifiers_reach_w25, pc_modifiers_fair, rd_archetypes_viable, rd_no_dominant_part, ac29_wave_gap, ac25_fresh_wall | 46 |
+
+Headline numbers (base → m2 / m4 / m8): balanced_best 30 → 30/30/30; eco_best 16 → 17/19/20; first_wave 20 → 30/20/30; day30 hi-tier wave 86 → 87/88/88; t2_day 3 → 3/2/5; t3_day 6 → 6/7/5.
+
+**Per-weapon AoE vs single-target value.** These are `mono_same_save` mean waves on the same save: gun = single target; mortar/tesla = AoE/chain.
+
+| m | d7 balanced / gun / mortar / tesla | d20 balanced / gun / mortar / tesla |
+|---|---|---|
+| 1 | 54.5 / 51.5 / 50.0 / 53.0 | 78.5 / 76.0 / 76.5 / 75.0 |
+| 2 | 58.5 / 53.0 / 51.5 / 57.0 | 75.0 / 68.0 / 74.5 / 76.0 |
+| 4 | 56.5 / 15.0 / 10.0 / 15.0 | 76.5 / 74.5 / 75.5 / 75.0 |
+| 8 | 60.0 / 56.5 / 56.0 / 60.0 | 75.0 / 46.0 / 46.0 / 48.0 |
+
+Reading the table:
+- Single-target gun loses the most value as m grows (d20: 76 → 68 at m2). Tesla gains relative to it at m2, which matches R5.
+- At m4 (d7) and m8 (d20), every mono board collapses (10–15 / 46–48 waves). Mixed boards hold at 75–78.
+- Balanced runs barely move, and eco gains (cheaper kills feed cash/s).
+- The failing gates are balance gates (death spiral / progress / dominance), not crashes.
+
+Retuning for m>1 is owner-facing balance work: weapon cadence and AoE scaling, plus the Phase 3 contact rule, which cuts Core damage once only the front rank attacks. The default stays m=1 until then.
+
+### Profile (container CPU, llvmpipe)
+Sim, `tools/horde/profile.gd` full board, 20 substeps, HP pinned, ms per substep (GF_TUNE m=1; m=8 within noise):
+
+| bodies | `_step` | move | fire | reap | Ach+Missions on events |
+|---|---|---|---|---|---|
+| 1,000 | 0.91 | 0.41 | 0.16 | 0.08 | 0.34 |
+| 5,000 | 5.0 | 2.5 | 0.95 | 0.42 | 1.7 |
+| 10,000 | 10.0 | 4.8 | 2.0 | 0.77 | 3.2 |
+
+The profile harness drives `_step` directly with bodies at the stop ring, so its event handling is the raw per-event stream (381 events/substep at 10k, mostly core_hit). In the game, `tick()` collapses these into at most 3 aggregate records per substep when m>1. Each aggregate costs O(1) in Stats, Missions and Main, plus O(events) for the single collapse pass.
+
+Draw, `tools/horde/draw.gd` (xvfb llvmpipe), `_draw_world` CPU per frame (baseline immediate mode → MultiMesh):
+
+| bodies | `_draw_world` CPU | frame (llvmpipe, upper bound) |
+|---|---|---|
+| 1,000 | 8.16 → **2.14 ms** | 39.9 → 16.8 ms |
+| 5,000 | 38.3 → **9.95 ms** | 155 → 58 ms |
+| 10,000 | — → **19.4 ms** | — → 91 ms |
+
+The remaining ~2 µs/body is the GDScript buffer fill. It still needs a real-GPU re-check on the owner's RTX 5080 (R9). Moving the fill into EnemyStore as a packed write is the Phase 7 lever.
