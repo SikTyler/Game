@@ -36,7 +36,7 @@ const BLOCKED: Array = [Vector2i(13, 9), Vector2i(0, 0), Vector2i(13, 4), Vector
 const DEFS: Dictionary = {
 	"relay": {"name": "Core Relay", "size": [2, 2], "power": 0, "coins": 3000, "time": 0, "res": "", "rate": 0.0, "storage_h": 0.0, "max_lvl": 10},
 	"mill": {"name": "Coin Mill", "size": [2, 2], "power": 2, "coins": 500, "time": 0, "res": "coins", "rate": MILL_RATE, "storage_h": 8.0},
-	"refinery": {"name": "Scrap Refinery", "size": [2, 2], "power": 3, "coins": 1500, "time": 0, "res": "scrap", "rate": 6.0, "storage_h": 12.0},
+	"refinery": {"name": "Scrap Refinery", "size": [2, 2], "power": 3, "coins": 1500, "time": 0, "res": "scrap", "rate": 6.0, "storage_h": 6.0},
 	"gemmine": {"name": "Deep Mine", "size": [2, 2], "power": 4, "coins": 10000, "time": 0, "res": "coins", "rate": MILL_RATE * 3.0, "storage_h": 8.0},
 	"keyforge": {"name": "Key Forge", "size": [2, 1], "power": 3, "coins": 8000, "time": 0, "res": "keys", "rate": 1.0 / 24.0, "storage_h": 0.0, "hard_cap": 3.0},
 	"research": {"name": "Research Hall", "size": [3, 2], "power": 3, "coins": 1000, "time": 0, "res": "", "rate": 0.0, "storage_h": 0.0},

@@ -438,7 +438,7 @@ static func warehouse_bonus(o: Dictionary, uid: String) -> float:
 		if String(w["id"]) != "warehouse" or not bool(w["built"]) or int(w["x"]) < 0 or String(k) == uid:
 			continue
 		if _cheb(_cells_of(o, String(k)), _cells_of(o, uid)) <= 2:
-			best = maxf(best, 0.25 + 0.05 * float(int(w["lvl"]) - 1))
+			best = maxf(best, 0.10 + 0.02 * float(int(w["lvl"]) - 1))
 	return best
 
 
@@ -512,7 +512,7 @@ static func cap(s: Dictionary, uid: String, con: Dictionary = {}) -> float:
 	if d.has("hard_cap"):
 		return float(d["hard_cap"])
 	var h: float = TuneRef.num("pc_storage_h", 8.0) if String(b["id"]) == "mill" else float(d["storage_h"])
-	return nominal_rate(s, uid, con) * h * (1.0 + warehouse_bonus(o, uid)) * (1.0 + 0.10 * float(_research_lvl(s, "offcap")))
+	return nominal_rate(s, uid, con) * h * (1.0 + warehouse_bonus(o, uid)) * (1.0 + 0.04 * float(_research_lvl(s, "offcap")))
 
 
 static func _accrue(s: Dictionary, upto: int) -> void:

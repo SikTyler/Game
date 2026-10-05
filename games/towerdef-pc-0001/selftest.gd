@@ -431,7 +431,7 @@ func _meta_stages() -> void:
 	_check("AC-17 capped at 8 h of storage", absf(float(Outpost.away_report(O, NOW + 86400)["coins"]) - 8.0 * OutpostDB.MILL_RATE) < 0.01)
 	O["research"]["lvls"]["offcap"] = 4
 	O["research"]["lvls"]["offrate"] = 2
-	_check("Storage Tech +10%/L, Logistics Tech +5%/L", absf(Outpost.cap(O, om) - OutpostDB.MILL_RATE * 1.10 * 8.0 * 1.4) < 0.01 and absf(Outpost.rate(O, om) - 1.1 * OutpostDB.MILL_RATE) < 0.01)
+	_check("Storage Tech +4%/L, Logistics Tech +5%/L", absf(Outpost.cap(O, om) - OutpostDB.MILL_RATE * 1.10 * 8.0 * 1.16) < 0.01 and absf(Outpost.rate(O, om) - 1.1 * OutpostDB.MILL_RATE) < 0.01)
 	O["research"]["lvls"]["offcap"] = 0
 	O["research"]["lvls"]["offrate"] = 0
 	var c18: int = int(O["coins"])
@@ -3453,7 +3453,7 @@ func _outpost_stages() -> void:
 	_op_build(j, "beaconpost", 3, 6)
 	var lb2: Dictionary = Outpost.layout_bonus(j["outpost"], ma)
 	_check("AC-19 Mill adj max +30%, +15% Warehouse, +5% Beacon", is_equal_approx(float(lb2["parts"]["mills"]), 0.20) and is_equal_approx(float(lb2["parts"]["warehouse"]), 0.15) and is_equal_approx(float(lb2["parts"]["beacon"]), 0.05))
-	_check("AC-19 Warehouse +25% storage within radius 2", is_equal_approx(Outpost.warehouse_bonus(j["outpost"], ma), 0.25))
+	_check("AC-19 Warehouse +10% storage within radius 2", is_equal_approx(Outpost.warehouse_bonus(j["outpost"], ma), 0.10))
 	var r: Dictionary = _op_save()
 	r["outpost"]["plots"] = [0, 1]
 	r["outpost"]["relay_lvl"] = 8

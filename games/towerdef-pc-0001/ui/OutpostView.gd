@@ -46,7 +46,7 @@ const DESC: Dictionary = {
 	"research": "Runs research projects; queues at Hall Lv1 / 4 / 8. Scholar decor speeds it.",
 	"barracks": "Each level: +10% troop HP and damage in runs. Training decor adds more.",
 	"archive": "Lv3 / 6: +1 / +2 Insight per run; Lv9: +1 banish per run.",
-	"warehouse": "+25% storage (+5% per level) to buildings within 2 cells.",
+	"warehouse": "+10% storage (+2% per level) to buildings within 2 cells.",
 	"scrapyard": "Salvaging parts returns more Scrap.",
 	"conduit": "Carries power: buildings work only when linked to the Relay.",
 	"beaconpost": "+5% production to buildings within 2 cells.",
