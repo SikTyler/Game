@@ -47,10 +47,21 @@ func _check(name: String, ok: bool, detail: String = "") -> void:
 		print("SELFTEST FAIL: " + name + ("" if detail == "" else "  [" + detail + "]"))
 
 
-## Mobile 5x5 index -> run board index (FEEDBACK-1: 11x11, Core at (5,5)):
-## (r, c) -> (r+3, c+3); rings are the same as on the old 7x7 board.
+## Legacy 5x5 index (Core at (2,2)) -> V2 P3b board (21x21, 26 px cells,
+## 3x3 Core): an offset d becomes d + sign(d), so a legacy cell keeps its ring
+## (ring 1 touches the Core). Cells that were neighbours across a ring may
+## now have a gap between them (tests that need adjacency use _at()).
 func _r(i5: int) -> int:
-	return (i5 / 5 + 3) * 11 + (i5 % 5 + 3)
+	return _lg(i5 / 5 - 2, i5 % 5 - 2)
+
+
+func _lg(dr: int, dc: int) -> int:
+	return TowerState.cell(dr + signi(dr) * TowerState.CORE_HALF, dc + signi(dc) * TowerState.CORE_HALF)
+
+
+## Raw cell (dr, dc) from the Core's centre cell (+-2 touches the Core).
+func _at(dr: int, dc: int) -> int:
+	return TowerState.cell(dr, dc)
 
 
 func _fresh(save: Dictionary = {}) -> RefCounted:
@@ -64,8 +75,10 @@ func _initialize() -> void:
 	var S = _fresh()
 	# REDESIGN: the Core's HP comes from its CoreDB sheet (Bastion L1 = 120).
 	_check("setup: full hp (Bastion sheet)", is_equal_approx(S.hp, 120.0) and S.core_id == "core" and S.core_lvl == 1)
-	_check("setup: inner ring unlocked, outer locked", bool(S.unlocked[_r(6)]) and not bool(S.unlocked[_r(0)]) and not bool(S.unlocked[_r(12)]))
-	_check("setup: 8 free slots", S.free_slots().size() == 8)
+	# V2 P3b (deliberate): the start grid is 7x7 small cells (rings 1-2 around
+	# the 3x3 Core); the 9 Core cells are never free.
+	_check("setup: rings 1-2 unlocked, outside the 7x7 grid locked, the Core locked", bool(S.unlocked[_r(6)]) and bool(S.unlocked[_r(0)]) and not bool(S.unlocked[_at(-4, -4)]) and not bool(S.unlocked[_r(12)]) and not bool(S.unlocked[_at(1, 1)]))
+	_check("setup: 40 free cells (7x7 minus the 3x3 Core)", S.free_slots().size() == 40)
 	_check("setup: core is the only weapon", (S.stats["weapons"] as Array).size() == 1)
 
 	# --- Stage 2: stats math + adjacency -------------------------------------
@@ -75,10 +88,10 @@ func _initialize() -> void:
 	S.recompute()
 	var gun_dmg: float = float((S.stats["weapons"] as Array)[0]["dmg"])
 	_check("gatling L1 6 dmg x building scale (Steadfast-free)", is_equal_approx(gun_dmg, 6.0 * TowerState.bld_dmg()))
-	S.slots[_r(6)] = {"id": "armory", "perm": 0, "run": 1}   # adjacent to gun (7) and core (12)
+	S.slots[_at(-2, -1)] = {"id": "armory", "perm": 0, "run": 1}   # touches the gun and the Core
 	S.recompute()
 	var buffed: float = float((S.stats["weapons"] as Array)[0]["dmg"])
-	_check("armory buffs adjacent gun +15%", is_equal_approx(buffed, gun_dmg * 1.15) and _has_link(S, _r(6), _r(7), "ARM"))
+	_check("armory buffs adjacent gun +15%", is_equal_approx(buffed, gun_dmg * 1.15) and _has_link(S, _at(-2, -1), _r(7), "ARM") and _has_link(S, _at(-2, -1), TowerState.CORE_SLOT, "ARM"))
 	S.slots[_r(0)] = {"id": "armory", "perm": 0, "run": 1}   # NOT adjacent to 7
 	S.recompute()
 	_check("armory does not buff non-adjacent", is_equal_approx(float((S.stats["weapons"] as Array)[0]["dmg"]), buffed))
@@ -147,10 +160,12 @@ func _initialize() -> void:
 	var card: Dictionary = S.draft[0]
 	S.choose_card(0)
 	_check("new card enters place mode", S.pending_place == String(card["id"]) and S.draft.is_empty())
-	S.place(_r(0))  # locked — rejected
+	S.place(_at(-5, -5))  # locked — rejected
 	_check("cannot place on locked slot", S.pending_place != "")
-	ev = S.place(_r(6))
-	_check("placed building in free slot", S.id_at(_r(6)) == "mortar" and S.pending_place == "" and is_equal_approx(S.time_scale(), 1.0))
+	S.place(_at(-2, -2))  # V2 P3b: the 2x2 Mortar would cover a Core cell — rejected
+	_check("cannot place a 2x2 over the Core", S.pending_place != "")
+	ev = S.place(_at(-3, -3))
+	_check("placed building in free slot (2x2 footprint)", S.id_at(_at(-3, -3)) == "mortar" and S.pending_place == "" and S.owner_at(_at(-2, -2)) == _at(-3, -3) and is_equal_approx(S.time_scale(), 1.0))
 	S.grant_draft()
 	# FEEDBACK-1 (deliberate): a duplicate WEAPON is a new individual building;
 	# a duplicate non-weapon is an upgrade applied onto the existing building.
@@ -201,7 +216,7 @@ func _initialize() -> void:
 	_check("cash cannot level a building", S.upgrade(_r(7)).is_empty() and S.lvl_at(_r(7)) == 1)
 	S.upgrade(_r(12))
 	_check("Core cell upgrade = Damage track", S.core_run_lvl == 1 and int(S.tracks["dmg"]) == 1 and S.cash < 1000.0)
-	_check("no per-cell run unlocks", S.unlock_plot(_r(0)).is_empty() and not bool(S.unlocked[_r(0)]))
+	_check("no per-cell run unlocks", S.unlock_plot(_at(-4, -4)).is_empty() and not bool(S.unlocked[_at(-4, -4)]))
 
 	# --- Stage 8: death banks coins into permanent save ----------------------
 	var save: Dictionary = BaseMeta.default_save()
@@ -223,7 +238,7 @@ func _initialize() -> void:
 	_check("Core level up spends coins", not Cores.try_level(save).is_empty() and Cores.level(save) == lv0 + 1 and int(save["coins"]) == 100000 - int(Cores.level_cost(lv0)["coins"]))
 	S = TowerState.new()
 	S.setup(6, save)
-	_check("run grid starts empty", S.building_count() == 0 and not bool(S.unlocked[_r(0)]))
+	_check("run grid starts empty", S.building_count() == 0 and not bool(S.unlocked[_at(-4, -4)]))
 	_check("Core level applies to the run (HP x1.05/level)", is_equal_approx(S.hp, 120.0 * 1.05) and S.core_lvl == lv0 + 1)
 
 	# --- Stage 10: persistence round-trip ------------------------------------
@@ -385,7 +400,8 @@ func _meta_stages() -> void:
 	_check("AC-20 queues 1/2/3 at Hall L1/L4/L8, 0 without a Hall", qok == [1, 1, 2, 2, 3, 3] and Labs.slots(nohall) == 0 and Labs.start(nohall, "dmg", NOW).is_empty())
 	# V2 (deliberate): Part Analysis / Crate Theory are gone with parts and crates -> 10.
 	_check("AC-20 every LabDB project + Grid (no part / crate research)", LabDB.IDS.size() == 10 and LabDB.DEFS.has("grid") and not LabDB.DEFS.has("labspeed") and not LabDB.DEFS.has("part_analysis") and not LabDB.DEFS.has("crate_theory") and String(LabDB.DEFS["offcap"]["name"]) == "Storage Tech" and String(LabDB.DEFS["offrate"]["name"]) == "Logistics Tech")
-	_check("FB1 grid research 3/5/7/8/10, cost 60 x3^L", LabDB.max_of("grid") == 4 and Labs.cost("grid", 0) == 60 and Labs.cost("grid", 3) == 1620 and TowerState.grid_for_level(0) == 3 and TowerState.grid_for_level(1) == 5 and TowerState.grid_for_level(2) == 7 and TowerState.grid_for_level(3) == 8 and TowerState.grid_for_level(4) == 10)
+	# V2 P3b/P8 (deliberate): 26 px cells, grid 7x7 -> 21x21 in 7 steep steps.
+	_check("V2 grid research 7..21 in 7 steps, costs 2k/10k/50k/200k/750k/2.5M/8M", LabDB.max_of("grid") == 7 and Labs.cost("grid", 0) == 2000 and Labs.cost("grid", 3) == 200000 and Labs.cost("grid", 6) == 8000000 and TowerState.grid_for_level(0) == 7 and TowerState.grid_for_level(1) == 9 and TowerState.grid_for_level(4) == 15 and TowerState.grid_for_level(7) == 21)
 	L["research"]["lvls"]["dmg"] = 30
 	_check("maxed track cannot start", Labs.start(L, "dmg", NOW).is_empty())
 	var lm: Dictionary = Labs.modifiers(L)
@@ -612,8 +628,8 @@ func _mass_horde_world() -> void:
 	W.spawn_hold = true
 	W.stats["weapons"] = []
 	var wall: Array = []
-	for c in range(0, 7):
-		var wi: int = _rc(-1, c)
+	for c in range(-7, 8):   # V2 P3b: 15 small cells (390 px) five rows north of the Core
+		var wi: int = _at(-5, c)
 		W.slots[wi] = {"id": "barricade", "perm": 0, "run": 2}
 		wall.append(wi)
 	W.recompute()
@@ -740,10 +756,8 @@ func _mass_horde_world() -> void:
 		G.spawn_hold = true
 		G.stats["weapons"] = []
 		if sealed:
-			for dr in [-1, 0, 1]:
-				for dc in [-1, 0, 1]:
-					if dr != 0 or dc != 0:
-						G.slots[_rc(3 + dr, 3 + dc)] = {"id": "barricade", "perm": 0, "run": 3}
+			for rc in TowerState.CORE_RING:
+				G.slots[int(rc)] = {"id": "barricade", "perm": 0, "run": 3}
 		G.recompute()
 		G.stats["weapons"] = []
 		_mh_field(G, "mite", 600, TowerState.slot_pos(_rc(2, 3)) + Vector2(0, -150), 0.0, 120.0)
@@ -776,7 +790,11 @@ func _mass_horde_world() -> void:
 ## V2 P1 (deliberate): one Core (the 3 other attacks as sheet fixtures), no
 ## Drone Nest on the board (no air), no Steadfast trait / legacy Core stats,
 ## so the golden was re-recorded from this build (was c21bb566).
-const HORDE_FP_GOLDEN: String = "c9854a03c5355c55d7b0dc24437d3236f30838aa68a47f07bdb7df036172c22e"
+## V2 P3b (deliberate): 21x21 board of 26 px cells, 3x3 Core (STOP_R 44),
+## 2x2 Mortar / Railgun, flow cells derived from the cell size, sticky face
+## slides; the fingerprint board was re-laid on the new grid, so the golden
+## was re-recorded from this build (was c9854a03).
+const HORDE_FP_GOLDEN: String = "e5a407bd2e4e65145a86d0f657e533e6e75612e396a0eaf5aee02e04839a0402"
 ## MASS_HORDE §Design content (designed mass waves, the shipping ruleset).
 func _mfresh(seed_value: int = 1234):
 	var S = TowerState.new()
@@ -1254,18 +1272,18 @@ func _engine_b_stages() -> void:
 	S.slots[_r(7)] = {"id": "gun", "perm": 0, "run": 9}
 	_check("building level capped at 5", S.lvl_at(_r(7)) == 5 and TowerState.lvl_cap() == 5)
 	S.slots[_r(7)] = {"id": "gun", "perm": 0, "run": 1}
-	S.slots[_r(8)] = {"id": "oilmill", "perm": 0, "run": 1}
+	S.slots[_at(-2, 1)] = {"id": "oilmill", "perm": 0, "run": 1}   # touches the gun (and the Core)
 	S.recompute()
-	_check("oil mill: +2.0 cash/s, adjacent buildings -10% rate", is_equal_approx(float(_weapon(S, "gun")["rate"]), gr * 0.9) and _has_link(S, _r(8), _r(7), "OIL"))
-	S.slots[_r(8)] = {}
+	_check("oil mill: +2.0 cash/s, adjacent buildings -10% rate (never the Core)", is_equal_approx(float(_weapon(S, "gun")["rate"]), gr * 0.9) and _has_link(S, _at(-2, 1), _r(7), "OIL") and not _has_link(S, _at(-2, 1), TowerState.CORE_SLOT, "OIL"))
+	S.slots[_at(-2, 1)] = {}
 	S.slots[_rc(4, 1)] = {"id": "beacon", "perm": 0, "run": 1}
 	S.recompute()
 	var gb: Dictionary = _weapon(S, "gun")
-	_check("beacon radius 2: +10% rate, +0.3 range", is_equal_approx(float(gb["rate"]), gr * 1.1) and is_equal_approx(float(gb["range"]), 3.3 * TowerState.cpx()) and _has_link(S, _rc(4, 1), _r(7), "BEA"))
+	_check("beacon radius 4 cells: +10% rate, +0.3 range", is_equal_approx(float(gb["rate"]), gr * 1.1) and is_equal_approx(float(gb["range"]), 3.3 * TowerState.cpx()) and _has_link(S, _rc(4, 1), _r(7), "BEA"))
 	S.slots[_rc(4, 1)] = {}
-	S.slots[_rc(0, 0)] = {"id": "beacon", "perm": 0, "run": 1}
+	S.slots[_at(-7, 0)] = {"id": "beacon", "perm": 0, "run": 1}
 	S.recompute()
-	_check("beacon does not reach 3 cells away", is_equal_approx(float(_weapon(S, "gun")["rate"]), gr))
+	_check("beacon does not reach 5 cells away", is_equal_approx(float(_weapon(S, "gun")["rate"]), gr))
 	# Aegis: Core shield absorbs hits, regenerates after 4 s without damage.
 	S = _fresh()
 	S.spawn_hold = true
@@ -1573,14 +1591,14 @@ func _pc_board_stages() -> void:
 	var S = _fresh()
 	var open_ok: bool = true
 	for i in TowerState.N:
-		open_ok = open_ok and bool(S.unlocked[i]) == (TowerState.ring_of(i) == 1)
-	_check("PC-E1 new save: exactly ring 1 unlocked (3x3 grid)", open_ok and S.free_slots().size() == 8 and S.grid_n == 3)
-	# FEEDBACK-1 (deliberate): the run grid is a Research unlock (3x3 -> 5x5 ->
-	# 7x7 -> 8x8 -> 10x10, Core centred); Core tracks no longer open rings.
+		open_ok = open_ok and bool(S.unlocked[i]) == (TowerState.ring_of(i) == 1 or TowerState.ring_of(i) == 2)
+	_check("PC-E1 new save: exactly rings 1-2 unlocked (7x7 small-cell grid)", open_ok and S.free_slots().size() == 40 and S.grid_n == 7)
+	# FEEDBACK-1 (deliberate): the run grid is a Research unlock (V2 P3b: 7x7
+	# -> 9x9 ... -> 21x21 small cells, Core centred); Core tracks never open rings.
 	var S1 = TowerState.new()
 	S1.setup(3, BaseMeta.default_save())
 	S1.cash = 1.0e9
-	var e2c: int = _rc(1, 3)   # ring 2 edge (7x7 coords)
+	var e2c: int = _at(-4, 0)   # ring 3: just outside the 7x7 start grid
 	_check("PC-E1 run: per-cell unlock is gone", S1.unlock_plot(e2c).is_empty() and not bool(S1.unlocked[e2c]))
 	var rev: Array = []
 	for t in TowerState.TRACK_IDS:
@@ -1589,7 +1607,7 @@ func _pc_board_stages() -> void:
 	_check("FB1 run: tracks never open grid cells", not bool(S1.unlocked[e2c]) and _evts(rev, "ring_open").is_empty() and S1.track_total() == 15)
 	var gsz: Array = []
 	var gopen: Array = []
-	for lv in 5:
+	for lv in 8:
 		var gs: Dictionary = BaseMeta.default_save()
 		gs["research"]["lvls"]["grid"] = lv
 		var G = TowerState.new()
@@ -1602,13 +1620,13 @@ func _pc_board_stages() -> void:
 				n_open += 1
 				centred = centred and G.in_grid(i)
 		gopen.append(n_open)
-	_check("FB1 grid research 3/5/7/8/10 opens GxG-1 cells", gsz == [3, 5, 7, 8, 10] and gopen == [8, 24, 48, 63, 99])
-	_check("FB1 even grids keep the Core inside (8x8 rows 2..9, 10x10 rows 1..10)", TowerState.grid_lo(8) == 2 and TowerState.grid_lo(10) == 1 and TowerState.in_grid_n(TowerState.CORE_SLOT, 8) and TowerState.in_grid_n(TowerState.CORE_SLOT, 10) and not TowerState.in_grid_n(0, 10))
+	_check("V2 grid research 7..21 opens GxG-9 cells (the 3x3 Core never opens)", gsz == [7, 9, 11, 13, 15, 17, 19, 21] and gopen == [40, 72, 112, 160, 216, 280, 352, 432])
+	_check("V2 grids are centred on the Core (7x7 rows 7..13, 21x21 the whole board)", TowerState.grid_lo(7) == 7 and TowerState.grid_lo(21) == 0 and TowerState.in_grid_n(TowerState.CORE_SLOT, 7) and TowerState.in_grid_n(0, 21) and not TowerState.in_grid_n(0, 19))
 	var G2 = TowerState.new()
-	G2.setup(7, BaseMeta.default_save(), 0, {"grid": 7})
-	_check("FB1 opts.grid override (tests/tools)", G2.grid_n == 7 and bool(G2.unlocked[_rc(0, 3)]) and not bool(G2.unlocked[_rc(-1, 3)]))
+	G2.setup(7, BaseMeta.default_save(), 0, {"grid": 9})
+	_check("FB1 opts.grid override (tests/tools)", G2.grid_n == 9 and bool(G2.unlocked[_at(-4, 0)]) and not bool(G2.unlocked[_at(-5, 0)]))
 	var G3 = TowerState.new()
-	G3.setup(7, BaseMeta.default_save(), 0, {"grid": 10})
+	G3.setup(7, BaseMeta.default_save(), 0, {"grid": 21})
 	_check("FB1 view fits: spawn radius grows with the grid", float(G3.spawn_r()) > float(G2.spawn_r()) and float(G2.spawn_r()) > float(S1.spawn_r()))
 	S = TowerState.new()
 	S.setup(5, BaseMeta.default_save())
@@ -1765,10 +1783,10 @@ func _open_run():
 	return S
 
 
-## (r, c) in the legacy 7x7 coordinates (Core at (3,3)) -> run board index
-## (FEEDBACK-1: 11x11 board, Core at (5,5); rings are unchanged by the shift).
+## (r, c) in the legacy 7x7 coordinates (Core at (3,3)) -> V2 P3b board, ring
+## preserving (see _r).
 func _rc(r: int, c: int) -> int:
-	return (r + 2) * TowerState.SIDE + (c + 2)
+	return _lg(r - 3, c - 3)
 
 
 ## PC-E3 new buildings + synergies S8-S11.
@@ -1778,7 +1796,9 @@ func _pc_building_stages() -> void:
 	var S = _open_run()
 	S.pending_place = "railgun"
 	_check("PC-E3 railgun rejected on ring 1", S.place(r1).is_empty() and S.id_at(r1) == "")
-	_check("PC-E3 railgun placed on ring 2", not S.place(r2).is_empty() and S.id_at(r2) == "railgun")
+	# V2 P3b: the 2x2 Railgun needs its whole footprint on ring 3+ (>= 2 old cells out)
+	_check("PC-E3 railgun rejected with a footprint cell on ring 2", S.place(_at(-4, -1)).is_empty() and S.id_at(_at(-4, -1)) == "")
+	_check("PC-E3 railgun placed on ring 3+ (2x2)", not S.place(_at(-5, -1)).is_empty() and S.id_at(_at(-5, -1)) == "railgun" and S.owner_at(_at(-4, 0)) == _at(-5, -1))
 	# REDESIGN (deliberate): S8-S11 synergies are gone; numbers follow the
 	# redesign sheet (Railgun 60 dmg, Flak air-only x2.5).
 	S = _open_run()
@@ -1850,11 +1870,9 @@ func _pc_building_stages() -> void:
 	_sync(S, [wa])
 	_check("MASS_HORDE an open-ground building is flowed around: the body reaches the Core, nothing squeezes", (wa["pos"] as Vector2).distance_to(TowerState.CENTER) <= TowerState.STOP_R + 8.5 and int(S.en.world.call("Squeezing")) == 0 and S.id_at(r2) == "barricade")
 	S = _open_run()
-	var rn: int = _rc(2, 3)   # the Core's north neighbour
-	for dr in [-1, 0, 1]:
-		for dc in [-1, 0, 1]:
-			if dr != 0 or dc != 0:
-				S.slots[_rc(3 + dr, 3 + dc)] = {"id": "barricade", "perm": 0, "run": 2}
+	var rn: int = _at(-2, 0)   # the Core's north neighbour
+	for rc in TowerState.CORE_RING:   # V2 P3b: the 16 cells touching the 3x3 Core
+		S.slots[int(rc)] = {"id": "barricade", "perm": 0, "run": 2}
 	S.recompute()
 	S.stats["weapons"] = []
 	var wn: Dictionary = _enemy("drone", TowerState.slot_pos(rn) + Vector2(0, -60))
@@ -1889,10 +1907,10 @@ func _pc_building_stages() -> void:
 	for k in 30:
 		S._move_enemies(0.05, hit_ev)
 	_check("V2 P3a: once through, its attacks land on the Core", _evts(hit_ev, "core_hit").size() >= 1)
-	# Outer rings reach further (+8% per ring past 1).
+	# Outer rings reach further (+8% per old 52 px ring past 1 = +4% per small ring).
 	S = _open_run()
 	S.slots[r1] = {"id": "gun", "perm": 0, "run": 1}
-	S.slots[_rc(0, 3)] = {"id": "gun", "perm": 0, "run": 1}
+	S.slots[_at(-6, 0)] = {"id": "gun", "perm": 0, "run": 1}   # ring 5 = 156 px out, the old ring 3
 	S.recompute()
 	var rg1: float = 0.0
 	var rg3: float = 0.0
@@ -1902,7 +1920,7 @@ func _pc_building_stages() -> void:
 				rg1 = float(w["range"])
 			else:
 				rg3 = float(w["range"])
-	_check("PC-E3 ring range bonus +8%/ring", rg1 > 0.0 and is_equal_approx(rg3, rg1 * 1.16))
+	_check("PC-E3 ring range bonus +8% per 52 px ring (+4% per small ring)", rg1 > 0.0 and is_equal_approx(rg3, rg1 * 1.16))
 	var ids_ok: bool = true
 	for id in PickDB.BUILDINGS + PickDB.HUTS:
 		ids_ok = ids_ok and String(BuildingDB.get_def(String(id)).get("name", "")) != "" and String(PickDB.get_def(String(id)).get("desc", "")) != ""

@@ -550,13 +550,29 @@ static func move_cursor(m, d: int) -> void:
 	if i < 0:
 		m.sel = TowerState.CORE_SLOT
 	else:
+		# V2 P3b: step off the current footprint (the 3x3 Core, a 2x2 building)
+		# in one push; landing on a building selects its anchor.
+		var S = m.S
+		var own: int = S.owner_at(i) if S != null else -1
 		var r: int = i / TowerState.SIDE
 		var c: int = i % TowerState.SIDE
-		if absi(d) == 1:
-			c = clampi(c + d, 0, TowerState.SIDE - 1)
-		else:
-			r = clampi(r + d / TowerState.SIDE, 0, TowerState.SIDE - 1)
-		m.sel = r * TowerState.SIDE + c
+		var cur: int = i
+		for _k in TowerState.SIDE:
+			var r2: int = r
+			var c2: int = c
+			if absi(d) == 1:
+				c2 = clampi(c + d, 0, TowerState.SIDE - 1)
+			else:
+				r2 = clampi(r + d / TowerState.SIDE, 0, TowerState.SIDE - 1)
+			if r2 == r and c2 == c:
+				break
+			r = r2
+			c = c2
+			cur = r * TowerState.SIDE + c
+			if own < 0 or S == null or S.owner_at(cur) != own:
+				break
+		var o2: int = S.owner_at(cur) if S != null else -1
+		m.sel = o2 if o2 >= 0 else cur
 	m._rebuild_ui()
 
 

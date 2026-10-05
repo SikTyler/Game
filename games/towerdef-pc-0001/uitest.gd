@@ -778,10 +778,14 @@ func _run_screen() -> void:
 	main._rebuild_ui()
 	await _frames()
 	var cb: Button = _findp("DCARD 1")
-	var cell2: int = TowerState.CORE_RING[1]
+	var cell2: int = TowerState.CORE_RING[4]   # V2 P3b: clear of the gun on CORE_RING[0]
+	# V2 P3b: a 2x2 footprint centres on the grid corner nearest the cursor;
+	# drop on cell2's top-left corner so the Mortar covers cell2.
+	var corner: Vector2 = TowerState.slot_pos(cell2) - Vector2(TowerState.CELL, TowerState.CELL) * 0.5
 	if cb != null:
-		await _drag(cb.get_global_rect().get_center(), _cell_scr(cell2))
-	_check("RUN: dragging a draft card onto a cell places it", S.id_at(cell2) == "mortar" and S.draft.is_empty())
+		await _drag(cb.get_global_rect().get_center(), main.w2s(corner))
+	var a2: int = TowerState.anchor_at(corner, 2)
+	_check("RUN: dragging a draft card onto a cell places it (2x2 footprint under the cursor)", S.id_at(a2) == "mortar" and S.owner_at(cell2) == a2 and S.draft.is_empty(), "a2 %d cell2 %d owner %d id '%s' draft %d pending '%s' reason '%s'" % [a2, cell2, S.owner_at(cell2), S.id_at(a2), S.draft.size(), S.pending_place, BattleUI.place_reason(main, a2, "mortar")])
 	# target mode on a selected weapon
 	_click(_cell_scr(cell))
 	await _frames()
@@ -893,12 +897,13 @@ func _pad_and_slots() -> void:
 	await _frames()
 	_pad_axis(JOY_AXIS_LEFT_X, 1.0)
 	await _frames()
-	_check("PC-U5: stick moves the grid cursor once per push", main.sel == TowerState.CORE_SLOT + 1, str(main.sel))
+	# V2 P3b: one push steps off the 3x3 Core onto the next free cell
+	_check("PC-U5: stick moves the grid cursor once per push", main.sel == TowerState.CORE_SLOT + 2, str(main.sel))
 	_pad_axis(JOY_AXIS_LEFT_X, 0.0)
 	main.S.pending_place = "gun"
 	_pad_button(JOY_BUTTON_A)
 	await _frames()
-	_check("PC-U5: A places at the cursor", main.S.id_at(TowerState.CORE_SLOT + 1) == "gun")
+	_check("PC-U5: A places at the cursor", main.S.id_at(TowerState.CORE_SLOT + 2) == "gun")
 	main.abandon_run()
 	await _frames(3)
 	_key(KEY_ESCAPE)

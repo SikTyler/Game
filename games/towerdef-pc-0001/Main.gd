@@ -291,6 +291,21 @@ func world_scale() -> float:
 	return world_xform().get_scale().x
 
 
+## Building under a world point: the anchor of the footprint covering the
+## cell (CORE_SLOT on the Core), else the bare cell (-1 off the board).
+func pick_at(pos: Vector2) -> int:
+	var c: int = slot_at(pos)
+	if c < 0 or S == null:
+		return c
+	var o: int = S.owner_at(c)
+	return o if o >= 0 else c
+
+
+## Anchor for placing `id` with its footprint centred under a world point.
+func place_anchor(pos: Vector2, id: String) -> int:
+	return TowerState.anchor_at(pos, TowerState.size_of(id))
+
+
 ## Grid cell under a world point (-1 = none).
 func slot_at(pos: Vector2) -> int:
 	var hs: float = float(TowerState.SIDE) * 0.5 * TowerState.CELL
@@ -1027,7 +1042,7 @@ func _input(event: InputEvent) -> void:
 			elif S != null and S.pending_upgrade != "":
 				_handle(S.cancel_upgrade())
 			else:
-				sel = slot_at(s2w(mb.position))
+				sel = pick_at(s2w(mb.position))
 			_rebuild_ui()
 			get_viewport().set_input_as_handled()
 		MOUSE_BUTTON_WHEEL_UP:
@@ -1076,11 +1091,18 @@ func tap_at(pos: Vector2) -> void:
 	if aim_special >= 0:
 		cast_at(pos)
 		return
-	var i: int = slot_at(s2w(pos))
-	if (S.pending_place != "" or S.pending_upgrade != "") and i >= 0:
-		place_at(i)
+	var wp: Vector2 = s2w(pos)
+	if S.pending_place != "":
+		var a: int = place_anchor(wp, S.pending_place)
+		if a >= 0:
+			place_at(a)
 		return
-	sel = i
+	if S.pending_upgrade != "":
+		var u: int = pick_at(wp)
+		if u >= 0:
+			place_at(u)
+		return
+	sel = pick_at(wp)
 	_rebuild_ui()
 
 
@@ -1099,8 +1121,8 @@ func _end_drag(pos: Vector2) -> void:
 	var moved: bool = pos.distance_to(drag_start) > 12.0
 	if card >= 0 and screen == "run" and S != null:
 		if moved and field_rect().has_point(pos) and card < S.draft.size():
-			var i: int = slot_at(s2w(pos))
 			var cd: Dictionary = S.draft[card]
+			var i: int = place_anchor(s2w(pos), String(cd["id"])) if String(cd.get("kind", "")) == "new" else pick_at(s2w(pos))
 			if i >= 0 and String(cd.get("kind", "")) == "new" and Battle.place_reason(self, i, String(cd["id"])) == "":
 				_handle(S.choose_card(card))
 				if S.pending_place != "":

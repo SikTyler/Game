@@ -34,6 +34,7 @@ public partial class HordeWorld : RefCounted
 	int[] kc = new int[0], flg = new int[0];
 	byte[] live = new byte[0];   // 1 = stored and alive (hp > 0), 0 = free or dead
 	byte[] sqz = new byte[0];    // V2 P3a: 1 = squeezing through a structure that seals its route
+	sbyte[] slideS = new sbyte[0];   // V2 P3b: the side a body slides along a face (sticky until it stops pressing)
 	// step scratch
 	double[] ox = new double[0], oy = new double[0], pushX = new double[0], pushY = new double[0];
 	double[] front = new double[0], dirX = new double[0], dirY = new double[0], want = new double[0];
@@ -57,8 +58,12 @@ public partial class HordeWorld : RefCounted
 	double pressBand = 0.0;
 
 	// ---------------------------------------------------------------- flow field
-	const int FLOW_PER_CELL = 4;   // flow cells per building cell (52 / 4 = 13 px)
-	const int FLOW_MARGIN = 13;    // building cells of open ground beyond the 11x11 grid (covers the spawn ring; outside it bodies seek the Core directly)
+	// V2 P3b: derived from the building cell in Configure. Flow cells stay
+	// ~13 px and the open-ground margin ~676 px (covers the spawn ring; outside
+	// it bodies seek the Core directly) whatever the board's cell size.
+	const double FLOW_PX = 13.0, MARGIN_PX = 676.0;
+	int FLOW_PER_CELL = 4;   // flow cells per building cell (52 px -> 4, 26 px -> 2)
+	int FLOW_MARGIN = 13;    // building cells of open ground beyond the grid
 	double fc = 13.0, fox = 0.0, foy = 0.0;
 	int fw = 0;
 	double[] fdist = new double[0], fvx = new double[0], fvy = new double[0];
@@ -95,6 +100,8 @@ public partial class HordeWorld : RefCounted
 	public void Configure(double centerX, double centerY, double coreStopR, int gridSide, double cellPx)
 	{
 		cx = centerX; cy = centerY; stopR = coreStopR; side = gridSide; bcell = cellPx;
+		FLOW_PER_CELL = Math.Max(1, (int)Math.Round(bcell / FLOW_PX));
+		FLOW_MARGIN = (int)Math.Ceiling(MARGIN_PX / bcell);
 		fc = bcell / FLOW_PER_CELL;
 		fw = (side + 2 * FLOW_MARGIN) * FLOW_PER_CELL;
 		fox = cx - bcell * (side * 0.5 + FLOW_MARGIN);
@@ -136,7 +143,7 @@ public partial class HordeWorld : RefCounted
 		Array.Resize(ref slowT, c); Array.Resize(ref slowM, c); Array.Resize(ref shockT, c); Array.Resize(ref hitT, c);
 		Array.Resize(ref tauntT, c); Array.Resize(ref atkCd, c); Array.Resize(ref fireCd, c);
 		Array.Resize(ref exX, c); Array.Resize(ref exY, c); Array.Resize(ref lvx, c); Array.Resize(ref lvy, c);
-		Array.Resize(ref kc, c); Array.Resize(ref flg, c); Array.Resize(ref live, c); Array.Resize(ref sqz, c);
+		Array.Resize(ref kc, c); Array.Resize(ref flg, c); Array.Resize(ref live, c); Array.Resize(ref sqz, c); Array.Resize(ref slideS, c);
 		ox = new double[c]; oy = new double[c]; pushX = new double[c]; pushY = new double[c];
 		front = new double[c]; dirX = new double[c]; dirY = new double[c]; want = new double[c];
 		mode = new byte[c]; qlink = new int[c];
@@ -158,7 +165,7 @@ public partial class HordeWorld : RefCounted
 		px[s] = f[0]; py[s] = f[1]; rad[s] = f[2] * 0.5; spd[s] = f[3]; dmg[s] = f[4];
 		exX[s] = f[5]; exY[s] = f[6]; atkCd[s] = f[7]; fireCd[s] = f[8]; slowT[s] = f[9]; slowM[s] = f[10];
 		shockT[s] = f[11]; hitT[s] = f[12]; tauntT[s] = f[13]; curS[s] = f[14]; vx[s] = f[15]; vy[s] = f[16];
-		kc[s] = kcode; flg[s] = flags; lvx[s] = 0.0; lvy[s] = 0.0; sqz[s] = 0;
+		kc[s] = kcode; flg[s] = flags; lvx[s] = 0.0; lvy[s] = 0.0; sqz[s] = 0; slideS[s] = 0;
 		live[s] = (byte)(f[17] > 0.0 ? 1 : 0);
 		qdirty = true;
 	}
@@ -503,10 +510,11 @@ public partial class HordeWorld : RefCounted
 		if (bldCount == 0) return false;
 		int half = side / 2;
 		int gx = (int)Math.Floor((x - cx) / bcell + half + 0.5), gy = (int)Math.Floor((y - cy) / bcell + half + 0.5);
-		for (int yy = gy - 1; yy <= gy + 1; yy++)
+		int reach = (int)Math.Ceiling((r + 0.5) / bcell);
+		for (int yy = gy - reach; yy <= gy + reach; yy++)
 		{
 			if (yy < 0 || yy >= side) continue;
-			for (int xx = gx - 1; xx <= gx + 1; xx++)
+			for (int xx = gx - reach; xx <= gx + reach; xx++)
 			{
 				if (xx < 0 || xx >= side) continue;
 				int bi = yy * side + xx;
@@ -532,13 +540,15 @@ public partial class HordeWorld : RefCounted
 		double r = rad[s];
 		double gxf = (px[s] - cx) / bcell + half + 0.5, gyf = (py[s] - cy) / bcell + half + 0.5;
 		int gx = (int)Math.Floor(gxf), gy = (int)Math.Floor(gyf);
-		if (gx < -1 || gy < -1 || gx > side || gy > side) return -1;
+		// a body can overlap squares up to ceil((r + 0.5) / cell) away (V2 P3b small cells)
+		int reach = (int)Math.Ceiling((r + 0.5) / bcell);
+		if (gx < -reach || gy < -reach || gx >= side + reach || gy >= side + reach) return -1;
 		int press = -1;
 		double bestDot = attackDot;
-		for (int yy = gy - 1; yy <= gy + 1; yy++)
+		for (int yy = gy - reach; yy <= gy + reach; yy++)
 		{
 			if (yy < 0 || yy >= side) continue;
-			for (int xx = gx - 1; xx <= gx + 1; xx++)
+			for (int xx = gx - reach; xx <= gx + reach; xx++)
 			{
 				if (xx < 0 || xx >= side) continue;
 				int bi = yy * side + xx;
@@ -829,11 +839,18 @@ public partial class HordeWorld : RefCounted
 						double a = CostAt(px[s] + tx * fc * 2.0, py[s] + ty * fc * 2.0);
 						double b2 = CostAt(px[s] - tx * fc * 2.0, py[s] - ty * fc * 2.0);
 						double sg = a < b2 ? 1.0 : (b2 < a ? -1.0 : ((s & 1) == 0 ? 1.0 : -1.0));
+						// Sticky side (V2 P3b): with small squares the two samples straddle
+						// a face's middle and would flip every step; keep the side once
+						// chosen unless the other way is clearly (2+ flow cells) cheaper.
+						int prev = slideS[s];
+						if (prev != 0 && sg != prev && Math.Abs(a - b2) < 2.0) sg = prev;
+						slideS[s] = (sbyte)(sg > 0 ? 1 : -1);
 						double slide = Math.Max(want[s], spd[s] * 0.5 * dt);
 						px[s] += tx * sg * slide; py[s] += ty * sg * slide;
 						ResolveBuildings(s, dirX[s], dirY[s]);
 					}
 				}
+				else slideS[s] = 0;
 			}
 			lvx[s] = (px[s] - ox[s]) / stepDt; lvy[s] = (py[s] - oy[s]) / stepDt;
 			rx = px[s] - cx; ry = py[s] - cy;

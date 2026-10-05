@@ -57,8 +57,8 @@ static func build(m) -> void:
 	if m.sel >= 0 and S.is_weapon_slot(m.sel) and m.sel != TowerState.CORE_SLOT:
 		var i: int = m.sel
 		# floats on the field just under the selected weapon (left bar = Perks)
-		var cs: float = TowerState.CELL * m.world_scale()
-		var cp: Vector2 = m.w2s(TowerState.slot_pos(i)) + Vector2(0, cs * 0.5 + 6.0)
+		var cs: float = TowerState.CELL * float(S.size_at(i)) * m.world_scale()
+		var cp: Vector2 = m.w2s(S.fp_pos(i)) + Vector2(0, cs * 0.5 + 6.0)
 		var fr0: Rect2 = m.field_rect()
 		var tr0 := Rect2(clampf(cp.x - 110.0, fr0.position.x + 4.0, fr0.end.x - 224.0), clampf(cp.y, fr0.position.y + 4.0, fr0.end.y - 150.0), 220, 40)
 		Kit.btn(m, "Target: %s" % String(S.target_modes[i]).capitalize(), tr0, func() -> void: m._handle(S.cycle_target_mode(i)); m._rebuild_ui(), "Cycle this weapon's targeting mode (nearest / first / strongest / weakest)", true, Kit.ENEMY, "Target:")
@@ -87,19 +87,25 @@ static func results_rect(m) -> Rect2:
 	return Rect2(fr.get_center().x - w * 0.5, fr.get_center().y - h * 0.5, w, h)
 
 
-## Why `id` cannot go on cell `i` right now ("" when it can).
+## Why `id` cannot go with its footprint anchored at cell `i` right now
+## ("" when it can).
 static func place_reason(m, i: int, id: String) -> String:
 	var S = m.S
 	if i < 0:
 		return "Not a cell"
-	if i == TowerState.CORE_SLOT:
-		return "The Core"
-	if not bool(S.unlocked[i]):
-		return "Ring %d is closed (buy Core Enhancements)" % TowerState.ring_of(i)
-	if S.id_at(i) != "":
-		return "Occupied"
+	var fp: Array = TowerState.footprint(i, TowerState.size_of(id))
+	if fp.is_empty():
+		return "Off the grid"
+	for c in fp:
+		var ci: int = c
+		if TowerState.is_core_cell(ci):
+			return "The Core"
+		if not bool(S.unlocked[ci]):
+			return "Outside your grid (Research Grid Expansion)"
+		if S.owner_at(ci) >= 0:
+			return "Occupied"
 	if not S.can_place(i, id):
-		return "Ring 2+ only" if id == "railgun" else ("Build cap reached" if S.at_cap() else "Can't place here")
+		return "Ring 3+ only" if id == "railgun" else ("Build cap reached" if S.at_cap() else "Can't place here")
 	return ""
 
 
@@ -167,7 +173,8 @@ static func world_tip(m, p: Vector2) -> String:
 			return "%s (troop)\nHP %d / %d" % [String(td["kind"]).capitalize(), int(ceil(float(td["hp"]))), int(float(td["max_hp"]))]
 	var i: int = m.slot_at(wp)
 	if i >= 0:
-		return cell_text(m, i)
+		var o: int = S.owner_at(i)
+		return cell_text(m, o if o >= 0 else i)
 	return ""
 
 
@@ -204,7 +211,7 @@ static func range_of(m, i: int) -> Dictionary:
 		if int(wd.get("slot", -2)) == i:
 			return {"r": float(wd.get("range", 0.0)), "kind": "weapon"}
 	if i != TowerState.CORE_SLOT and S.id_at(i) != "":
-		return {"r": TowerState.CELL * 1.5, "kind": "aura"}
+		return {"r": TowerState.CELL * (0.5 * float(S.size_at(i)) + 1.0), "kind": "aura"}
 	return {}
 
 
@@ -237,7 +244,7 @@ static func draw_reach(m, c: Vector2, rg: Dictionary, col: Color) -> void:
 static func _draw_ranges(m) -> void:
 	var S = m.S
 	if m.sel >= 0 and m.sel != TowerState.CORE_SLOT and S.id_at(m.sel) != "":
-		draw_reach(m, TowerState.slot_pos(m.sel), range_of(m, m.sel), Kit.GEM)
+		draw_reach(m, S.fp_pos(m.sel), range_of(m, m.sel), Kit.GEM)
 		m.set_meta("range_shown", m.sel)
 	else:
 		m.set_meta("range_shown", -1)
@@ -298,50 +305,68 @@ static func _draw_grid(m) -> void:
 	m.draw_rect(plate, Kit.BG)
 	m.draw_rect(plate, Color(Kit.RUST, 0.55), false, 3.0)
 	var placing: bool = S.pending_place != "" or m.drag_card >= 0
+	# V2 P3b: cells a footprint of the pending pick could cover right now
+	var ok_cells: Dictionary = {}
+	if S.pending_place != "":
+		var psz: int = TowerState.size_of(S.pending_place)
+		for a in TowerState.N:
+			if S.can_place(a, S.pending_place):
+				for fc in TowerState.footprint(a, psz):
+					ok_cells[fc] = true
 	for i in TowerState.N:
+		if TowerState.is_core_cell(i) or not S.in_grid(i):
+			continue
 		var p: Vector2 = TowerState.slot_pos(i)
+		var half: float = c * 0.5 - 1.0
+		var r := Rect2(p - Vector2(half, half), Vector2(half * 2, half * 2))
+		if not bool(S.unlocked[i]):
+			m.draw_rect(r, Color("0e1528"))
+			continue
+		var o: int = S.owner_at(i)
+		if o < 0:
+			var oc := Color(Kit.EDGE2, 0.8)
+			var fill := Color("121b31")
+			if placing and (ok_cells.has(i) if S.pending_place != "" else true):
+				# Floor the pulse so valid cells always read as "glowing".
+				oc = Color(Kit.GREEN, 0.55 + 0.25 * sin(m.t_anim * 8.0))
+				fill = Color("121b31").lerp(Kit.GREEN, 0.12)
+			m.draw_rect(r, fill)
+			m.draw_rect(r, oc, false, 1.0)
+			if i == m.sel:
+				m.draw_rect(r.grow(3), Color(1, 1, 1, 0.9), false, 2.0)
+			continue
+		if o != i:
+			continue   # covered by a bigger footprint (drawn from its anchor)
+		var id: String = S.id_at(i)
+		var sz: int = S.size_at(i)
 		var sc: float = 1.0
 		if m.slot_pop.has(i):
 			sc = 1.0 + 0.3 * float(m.slot_pop[i]) / 0.3
-		var half: float = (c * 0.5 - 3.0) * sc
-		var r := Rect2(p - Vector2(half, half), Vector2(half * 2, half * 2))
-		if i == TowerState.CORE_SLOT or not S.in_grid(i):
-			continue
-		if not bool(S.unlocked[i]):
-			m.draw_rect(r, Color("0e1528"))
-			m.draw_rect(r.grow(-6), Color(1, 1, 1, 0.025), false, 1.0)
-			continue
-		var id: String = S.id_at(i)
-		if id == "":
-			var oc := Kit.EDGE2
-			var fill := Color("121b31")
-			if placing and (S.pending_place == "" or S.can_place(i, S.pending_place)):
-				# Floor the pulse so valid cells always read as "glowing".
-				oc = Color(Kit.GREEN, 0.7 + 0.25 * sin(m.t_anim * 8.0))
-				fill = Color("121b31").lerp(Kit.GREEN, 0.12)
-			m.draw_rect(r, fill)
-			m.draw_rect(r, oc, false, 2.0)
-		else:
-			var rc: Color = Kit.rarity_col(PickDB.rarity_of(id))
-			m.draw_rect(r, Color(rc, 0.12))
-			if not Kit.icon(m, id, r.grow(2)):
-				m.draw_rect(r.grow(-6), rc)
-			var lv: int = S.lvl_at(i)
-			for k in lv:
-				m.draw_rect(Rect2(r.position + Vector2(4 + k * 7, r.size.y - 7), Vector2(5, 4)), Kit.GOLD)
-			# pending upgrade: glow the buildings it can be applied to
-			if S.pending_upgrade == id and S.upgrade_targets(id).has(i):
-				m.draw_rect(r.grow(3), Color(Kit.GOLD, 0.6 + 0.35 * sin(m.t_anim * 8.0)), false, 3.0)
+		var bh: float = (c * 0.5 * float(sz) - 1.0) * sc
+		var br := Rect2(S.fp_pos(i) - Vector2(bh, bh), Vector2(bh, bh) * 2.0)
+		var rc: Color = Kit.rarity_col(PickDB.rarity_of(id))
+		m.draw_rect(br, Color(rc, 0.14))
+		m.draw_rect(br, Color(rc, 0.55), false, 1.0)
+		if not Kit.icon(m, id, br.grow(1)):
+			m.draw_rect(br.grow(-4), rc)
+		var lv: int = S.lvl_at(i)
+		var pw: float = minf(4.0, (br.size.x - 4.0) / 5.0 - 1.0)
+		for k in lv:
+			m.draw_rect(Rect2(br.position + Vector2(2.0 + float(k) * (pw + 1.0), br.size.y - 4.0), Vector2(pw, 3)), Kit.GOLD)
+		# pending upgrade: glow the buildings it can be applied to
+		if S.pending_upgrade == id and S.upgrade_targets(id).has(i):
+			m.draw_rect(br.grow(3), Color(Kit.GOLD, 0.6 + 0.35 * sin(m.t_anim * 8.0)), false, 2.0)
 		if i == m.sel:
-			m.draw_rect(r.grow(4), Color(1, 1, 1, 0.9), false, 3.0)
+			m.draw_rect(br.grow(3), Color(1, 1, 1, 0.9), false, 2.0)
 	# Core
 	var cw: Dictionary = (S.stats["weapons"] as Array).back() if (S.stats.get("weapons", []) as Array).size() > 0 else {}
-	if m.sel == TowerState.CORE_SLOT or m.mouse_pos.distance_to(m.w2s(C)) < c * m.world_scale():
+	if m.sel == TowerState.CORE_SLOT or m.mouse_pos.distance_to(m.w2s(C)) < c * 1.5 * m.world_scale():
 		m.draw_circle(C, float(cw.get("range", 200.0)), Color(Kit.GEM, 0.05))
 		m.draw_arc(C, float(cw.get("range", 200.0)), 0, TAU, 96, Color(Kit.GEM, 0.5), 2.0)
 	var pulse: float = 0.5 + 0.5 * sin(m.t_anim * 3.0)
-	var cr: float = c * 0.78
-	m.draw_circle(C, cr + 8.0 + 4.0 * pulse, Color(1, 1, 1, 0.06))
+	var cr: float = c * 1.45   # the 3x3 Core footprint
+	Kit.glow(m, C, cr * 2.2, Kit.CYAN, 0.12 + 0.06 * pulse)
+	m.draw_circle(C, cr + 6.0 + 3.0 * pulse, Color(1, 1, 1, 0.05))
 	if not Kit.icon(m, "core_bastion", Rect2(C - Vector2(cr, cr), Vector2(cr, cr) * 2.0)):
 		m.draw_circle(C, cr, Kit.RUST)
 	if float(S.shield) > 0.0:
@@ -607,7 +632,11 @@ static func _draw_ghost(m) -> void:
 	var at: Vector2 = m.mouse_pos
 	var ok: bool = false
 	if m.field_rect().has_point(m.mouse_pos):
-		var i: int = m.slot_at(m.s2w(m.mouse_pos))
+		var wp: Vector2 = m.s2w(m.mouse_pos)
+		var sz: int = TowerState.size_of(id) if is_new else 1
+		# new picks snap their footprint under the cursor; upgrades target the
+		# building covering the cell
+		var i: int = TowerState.anchor_at(wp, sz) if is_new else m.pick_at(wp)
 		if i >= 0:
 			if is_new:
 				reason = place_reason(m, i, id)
@@ -616,8 +645,11 @@ static func _draw_ghost(m) -> void:
 			else:
 				reason = "Release to take this pick"
 			ok = reason == "" or reason.begins_with("Release")
-			at = m.w2s(TowerState.slot_pos(i))
-			var cr := Rect2(at - Vector2(cs, cs) * 0.5, Vector2(cs, cs))
+			if not is_new:
+				sz = S.size_at(i)
+			at = m.w2s(TowerState.fp_center(i, sz))
+			var fs: float = cs * float(sz)
+			var cr := Rect2(at - Vector2(fs, fs) * 0.5, Vector2(fs, fs))
 			m.draw_rect(cr, Color(Kit.GREEN, 0.25) if ok else Color(Kit.ENEMY, 0.25))
 			m.draw_rect(cr, Kit.GREEN if ok else Kit.ENEMY, false, 3.0)
 			if is_new and (S.pending_place != "" or m.drag_card >= 0):
@@ -631,7 +663,7 @@ static func _draw_ghost(m) -> void:
 				else:
 					m.draw_circle(at, sr, Color(rc, 0.08))
 					m.draw_arc(at, sr, 0, TAU, 96, Color(rc, 0.7), 2.0)
-	var gs: float = maxf(48.0, cs * 0.9)
+	var gs: float = maxf(40.0, cs * 0.9 * float(TowerState.size_of(id)))
 	Kit.icon(m, id, Rect2(at - Vector2(gs, gs) * 0.5, Vector2(gs, gs)), Color(0.6, 1.0, 0.6, 0.85) if ok else Color(1.0, 0.55, 0.55, 0.8))
 	if reason != "" and not ok:
 		var tw: float = 24.0 + m.font.get_string_size(reason, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x

@@ -37,19 +37,24 @@ const EnemyStore := preload("res://EnemyStore.gd")
 const EnemyHash := preload("res://EnemyHash.gd")
 
 const CENTER: Vector2 = Vector2(360, 470)
-const CELL: float = 52.0
-## PC board (owner feedback #1): an 11x11 index space with the Core at (5,5);
-## the playable run grid is a centred GxG window whose size is a Research
-## unlock (GRID_SIZES: 3x3 start -> 5x5 -> 7x7 -> 8x8 -> 10x10). Cell index
-## i = row * SIDE + col. Rings (Chebyshev distance to the Core) still drive
-## the per-ring range bonus and the Railgun ring-2 rule; they no longer open
-## during a run.
-const SIDE: int = 11
-const N: int = 121
-const CORE_SLOT: int = 60
-const GRID_SIZES: Array = [3, 5, 7, 8, 10]
+const CELL: float = 26.0
+## V2 P3b board (owner brief: "grids feel too large ... not very creative"):
+## a 21x21 index space of 26 px cells - half the old 52 px - with a 3x3 Core
+## footprint centred on CORE_SLOT (row 10, col 10). The playable run grid is a
+## centred GxG window whose size is a Research unlock (GRID_SIZES: 7x7 start
+## -> ... -> 21x21, the old 10x10 in pixels). Cell index i = row * SIDE + col.
+## Buildings occupy a footprint (1x1, or 2x2 for heavy weapons) anchored at
+## its top-left cell: slots[anchor] holds the building, occ[cell] the anchor
+## covering a cell (CORE_SLOT on the Core, -1 free). Rings are the Chebyshev
+## distance from the Core footprint (1 = touching it); ranges stay in cpx()
+## units (78 px), so the reach of every weapon is unchanged in pixels.
+const SIDE: int = 21
+const N: int = 441
+const CORE_SLOT: int = 220
+const CORE_HALF: int = 1          # the Core covers CORE_SLOT +/- 1 row/col (3x3)
+const GRID_SIZES: Array = [7, 9, 11, 13, 15, 17, 19, 21]
 const SPAWN_R: float = 470.0      # legacy reference radius (7x7); see spawn_r()
-const STOP_R: float = 34.0        # melee contact distance from the Core centre
+const STOP_R: float = 44.0        # melee contact distance from the Core centre (3x3 Core)
 const MAX_LVL: int = 5           # building / hut level cap (duplicate picks)
 const MAX_ENEMIES: int = 220
 const SUBSTEP: float = 0.05
@@ -59,7 +64,8 @@ var step_acc: float = 0.0   # Phase 3 fixed-substep accumulator (game seconds)
 const KNOCK_W: Dictionary = {"gun": 0.6, "railgun": 1.6, "flak": 0.5, "tesla": 0.3, "mortar": 0.0, "core": 1.0}
 var _kb_k: float = 0.0
 var _kb_from: Vector2 = Vector2.ZERO
-const CORE_RING: Array = [48, 49, 50, 59, 61, 70, 71, 72]
+## The 16 cells touching the 3x3 Core footprint (ring 1).
+const CORE_RING: Array = [176, 177, 178, 179, 180, 197, 201, 218, 222, 239, 243, 260, 261, 262, 263, 264]
 const TARGET_MODES: Array = ["nearest", "first", "strongest", "weakest"]
 const HIT_FLASH: float = 0.12   # view reads e["hit_t"] for the white hit flash
 const ECO_IDS: Array = ["mine", "oilmill", "bounty", "vault", "refinery"]
@@ -120,12 +126,12 @@ static func difficulty_dmg() -> float:
 	return TuneRef.num("pc_enemy_dmg", DIFF_DMG)
 
 
-## Grid side for a Research level (0 -> 3x3 ... 4 -> 10x10).
+## Grid side for a Research level (0 -> 7x7 ... 7 -> 21x21).
 static func grid_for_level(lv: int) -> int:
 	return int(GRID_SIZES[clampi(lv, 0, GRID_SIZES.size() - 1)])
 
 
-## First row/col of a centred GxG window (the Core sits at (5,5)).
+## First row/col of a centred GxG window (the Core is centred on (10,10)).
 static func grid_lo(g: int) -> int:
 	return SIDE / 2 - (g - 1) / 2
 
@@ -180,7 +186,8 @@ var next_plan: Dictionary = {}    # telegraphed plan for wave+1
 var wave_spawned: int = 0         # planned entries actually spawned this wave
 var last_wave_spawned: Dictionary = {}  # {wave, n} of the wave that just ended
 var wave_started: bool = false    # wave 1 starts after the opening telegraph lead
-var grid_n: int = 3               # run grid side (Research unlock)
+var grid_n: int = 7               # run grid side (Research unlock)
+var occ: PackedInt32Array = PackedInt32Array()   # cell -> anchor covering it (CORE_SLOT on the Core, -1 free)
 var wave_cash0: float = 0.0       # cash_earned at wave start
 var ironclad: float = 0.0         # Ironclad modifier: non-crit hits deal this much less
 
@@ -382,16 +389,16 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	unlocked.clear()
 	cooldowns.clear()
 	target_modes.clear()
-	build_cap = N - 1
+	build_cap = TuneRef.int_of("pc_build_cap", 40)
 	# Grid size: Research "grid" level (opts.grid overrides for tests/tools);
 	# Bastion Heart (ring_delay) shrinks it one step.
 	var glv: int = int(mods.get("grid_lvl", 0)) - int(pf("ring_delay"))
 	grid_n = grid_for_level(glv)
 	if opts.has("grid"):
-		grid_n = clampi(int(opts["grid"]), 3, 10)
+		grid_n = clampi(int(opts["grid"]), GRID_SIZES[0], SIDE)
 	for i in N:
 		slots.append({})
-		unlocked.append(i != CORE_SLOT and in_grid_n(i, grid_n))
+		unlocked.append(not is_core_cell(i) and in_grid_n(i, grid_n))
 		cooldowns.append(0.0)
 		target_modes.append("nearest")
 	en.clear()
@@ -551,16 +558,115 @@ func _apply_mods(m: Dictionary) -> void:
 
 
 # ---------------------------------------------------------------- geometry
+## Centre of cell i in world px.
 static func slot_pos(i: int) -> Vector2:
 	return CENTER + Vector2(float(i % SIDE - SIDE / 2) * CELL, float(i / SIDE - SIDE / 2) * CELL)
 
 
+## Is cell i under the 3x3 Core?
+static func is_core_cell(i: int) -> bool:
+	return i >= 0 and i < N and absi(i / SIDE - SIDE / 2) <= CORE_HALF and absi(i % SIDE - SIDE / 2) <= CORE_HALF
+
+
+## Ring of cell i: Chebyshev distance from the Core footprint (1 = touching
+## it; 0 = under it).
 static func ring_of(i: int) -> int:
-	return maxi(absi(i / SIDE - SIDE / 2), absi(i % SIDE - SIDE / 2))
+	return maxi(0, maxi(absi(i / SIDE - SIDE / 2), absi(i % SIDE - SIDE / 2)) - CORE_HALF)
+
+
+## Footprint side of a building id (1x1 default; heavy weapons 2x2).
+static func size_of(id: String) -> int:
+	return PickDB.size_of(id)
+
+
+## Cells covered by a size x size footprint anchored (top-left) at cell i;
+## empty when it would leave the board.
+static func footprint(i: int, size: int) -> Array:
+	var out: Array = []
+	if i < 0 or i >= N:
+		return out
+	var r0: int = i / SIDE
+	var c0: int = i % SIDE
+	if r0 + size > SIDE or c0 + size > SIDE:
+		return out
+	for dr in size:
+		for dc in size:
+			out.append((r0 + dr) * SIDE + c0 + dc)
+	return out
+
+
+## Centre of a size x size footprint anchored at cell i (world px).
+static func fp_center(i: int, size: int) -> Vector2:
+	return slot_pos(i) + Vector2(CELL, CELL) * (0.5 * float(size - 1))
+
+
+## Anchor (top-left cell) of a size x size footprint centred as close as
+## possible to world point `pos` (placement under the cursor); -1 off-board.
+static func anchor_at(pos: Vector2, size: int) -> int:
+	var hs: float = float(SIDE) * 0.5 * CELL
+	var rel: Vector2 = pos - CENTER + Vector2(hs, hs) - Vector2(CELL, CELL) * (0.5 * float(size - 1))
+	var x: int = int(floor(rel.x / CELL))
+	var y: int = int(floor(rel.y / CELL))
+	if x < 0 or y < 0 or x + size > SIDE or y + size > SIDE:
+		return -1
+	return y * SIDE + x
+
+
+## Cell (dr, dc) rows/cols from the Core's centre cell (tests, bots and tools
+## place relative to the Core with this; +-2 touches the 3x3 Core).
+static func cell(dr: int, dc: int) -> int:
+	return (SIDE / 2 + dr) * SIDE + SIDE / 2 + dc
 
 
 func in_grid(i: int) -> bool:
 	return in_grid_n(i, grid_n)
+
+
+## Rebuild the cell -> anchor map from slots (recompute / place call it).
+func _rebuild_occ() -> void:
+	occ.resize(N)
+	occ.fill(-1)
+	for i in N:
+		if is_core_cell(i):
+			occ[i] = CORE_SLOT
+	for i in N:
+		var sd: Dictionary = slots[i] if i < slots.size() else {}
+		if sd.is_empty():
+			continue
+		for c in footprint(i, size_of(String(sd["id"]))):
+			occ[int(c)] = i
+
+
+## Anchor of the building covering cell i (CORE_SLOT on the Core), or -1.
+func owner_at(i: int) -> int:
+	if i < 0 or i >= N:
+		return -1
+	if occ.size() != N:
+		_rebuild_occ()
+	return occ[i]
+
+
+## Footprint side of the building anchored at i (1 when empty).
+func size_at(i: int) -> int:
+	if i == CORE_SLOT:
+		return 2 * CORE_HALF + 1
+	var id: String = id_at(i)
+	return 1 if id == "" else size_of(id)
+
+
+## World centre of the building anchored at i (the Core: CENTER).
+func fp_pos(i: int) -> Vector2:
+	if i == CORE_SLOT:
+		return CENTER
+	return fp_center(i, size_at(i))
+
+
+## Ring of the building anchored at i (its footprint cell nearest the Core).
+func ring_at(i: int) -> int:
+	var best: int = 99
+	for c in footprint(i, size_at(i)):
+		best = mini(best, ring_of(int(c)))
+	return best if best < 99 else ring_of(i)
 
 
 ## Half-extent of the run grid in world px (the view fits the field to it).
@@ -589,11 +695,19 @@ func crowd() -> bool:
 	return mass or horde_mult > 1
 
 
-## Railgun needs ring 2+; everything else goes anywhere on the grid.
+## Railgun needs ring 3+ (>= 2 old 52 px cells out); everything else goes
+## anywhere on the grid.
 static func ring_ok(i: int, id: String) -> bool:
-	return not (id == "railgun" and ring_of(i) < 2)
+	if id != "railgun":
+		return true
+	var fp: Array = footprint(i, size_of(id))
+	for c in fp:
+		if ring_of(int(c)) < 3:
+			return false
+	return not fp.is_empty()
 
 
+## The 8 cells around cell i (cell level; buildings use adjacent()).
 static func neighbors(i: int) -> Array:
 	var out: Array = []
 	var x: int = i % SIDE
@@ -612,6 +726,34 @@ static func neighbors(i: int) -> Array:
 ## Chebyshev cell distance on the grid.
 static func cell_dist(a: int, b: int) -> int:
 	return maxi(absi(a % SIDE - b % SIDE), absi(a / SIDE - b / SIDE))
+
+
+## Chebyshev gap between two footprints (1 = touching, 0 = overlapping).
+func fp_dist(a: int, b: int) -> int:
+	var best: int = 999
+	var fa: Array = footprint(a, size_at(a)) if a != CORE_SLOT else _core_cells()
+	var fb: Array = footprint(b, size_at(b)) if b != CORE_SLOT else _core_cells()
+	for x in fa:
+		for y in fb:
+			best = mini(best, cell_dist(int(x), int(y)))
+	return best
+
+
+static func _core_cells() -> Array:
+	return footprint(CORE_SLOT - CORE_HALF * SIDE - CORE_HALF, 2 * CORE_HALF + 1)
+
+
+## Anchors of the buildings (and CORE_SLOT for the Core) touching the
+## footprint of the building anchored at i.
+func adjacent(i: int) -> Array:
+	var out: Array = []
+	var fa: Array = footprint(i, size_at(i)) if i != CORE_SLOT else _core_cells()
+	for c in fa:
+		for n in neighbors(int(c)):
+			var o: int = owner_at(int(n))
+			if o >= 0 and o != i and not out.has(o):
+				out.append(o)
+	return out
 
 
 func lvl_at(i: int) -> int:
@@ -633,8 +775,9 @@ func slot_of_id(id: String) -> int:
 	return -1
 
 
+## Is cell i open ground on the run grid (unlocked, not the Core, not covered)?
 func is_free(i: int) -> bool:
-	return i >= 0 and i < N and i != CORE_SLOT and bool(unlocked[i]) and (slots[i] as Dictionary).is_empty()
+	return i >= 0 and i < N and bool(unlocked[i]) and owner_at(i) < 0
 
 
 func building_count() -> int:
@@ -657,9 +800,18 @@ func at_cap() -> bool:
 	return building_count() >= build_cap
 
 
-## Can `id` go on cell i right now (free, open ring, ring rule)?
+## Can `id` go with its footprint anchored at cell i right now (every
+## covered cell free, under the build cap, ring rule)?
 func can_place(i: int, id: String) -> bool:
-	return is_free(i) and not at_cap() and ring_ok(i, id)
+	if at_cap() or not ring_ok(i, id):
+		return false
+	var fp: Array = footprint(i, size_of(id))
+	if fp.is_empty():
+		return false
+	for c in fp:
+		if not is_free(int(c)):
+			return false
+	return true
 
 
 # ------------------------------------------------------------------- stats
@@ -740,19 +892,19 @@ func compute_stats() -> Dictionary:
 		var m: float = pow(1.35, float(lvl_at(i) - 1))
 		match sid:
 			"armory":
-				for n in neighbors(i):
-					if id_at(n) != "" or n == CORE_SLOT:
-						adj_dmg[n] = float(adj_dmg[n]) + 0.15 * m
-						links.append([i, n, "ARM"])
+				for n in adjacent(i):
+					adj_dmg[n] = float(adj_dmg[n]) + 0.15 * m
+					links.append([i, n, "ARM"])
 			"beacon":
+				# V2 P3b: radius 4 small cells (the old 2 x 52 px)
 				for n in N:
-					if n != i and cell_dist(i, n) <= 2 and (id_at(n) != "" or n == CORE_SLOT):
+					if n != i and (id_at(n) != "" or n == CORE_SLOT) and fp_dist(i, n) <= 4:
 						adj_rate[n] = float(adj_rate[n]) + 0.10 * m
 						adj_range[n] = float(adj_range[n]) + 0.3 * m
 						links.append([i, n, "BEA"])
 			"oilmill":
-				for n in neighbors(i):
-					if id_at(n) != "":
+				for n in adjacent(i):
+					if n != CORE_SLOT:
 						adj_rate[n] = float(adj_rate[n]) - 0.10
 						links.append([i, n, "OIL"])
 	# Core attack range (cells).
@@ -767,7 +919,8 @@ func compute_stats() -> Dictionary:
 		if id == "":
 			continue
 		var m2: float = pow(1.35, float(lvl_at(i) - 1))
-		var ring_m: float = 1.0 + rr * float(maxi(0, ring_of(i) - 1))
+		# +pc_ring_range per old 52 px ring past the first (2 small rings each)
+		var ring_m: float = 1.0 + rr * 0.5 * float(maxi(0, ring_at(i) - 1))
 		var rate_m: float = rate_all * float(adj_rate[i]) * maxf(0.1, 1.0 + pf("bld_rate"))
 		var dm: float = dmg_all * float(adj_dmg[i]) * bld_dmg() * maxf(0.1, 1.0 + pf("bld_dmg"))
 		var rng_c: float = float(adj_range[i]) + range_add
@@ -800,16 +953,16 @@ func compute_stats() -> Dictionary:
 				cash_add += 0.5 * m2
 				st["xp_mult"] = float(st["xp_mult"]) + 0.15 * m2
 			"bounty":
-				(st["bounties"] as Array).append({"slot": i, "pos": slot_pos(i), "r": 3.0 * px, "mult": 0.20 * m2})
+				(st["bounties"] as Array).append({"slot": i, "pos": fp_pos(i), "r": 3.0 * px, "mult": 0.20 * m2})
 			"vault":
 				st["interest_rate"] = float(st["interest_rate"]) + 0.02 * m2
 				st["interest_cap"] = float(st["interest_cap"]) + 100.0 * m2
 			"obelisk":
 				st["lifesteal"] = float(st["lifesteal"]) + 0.01 * m2
 			"hut_infantry", "hut_sapper":
-				var dir: Vector2 = (slot_pos(i) - CENTER).normalized()
+				var dir: Vector2 = (fp_pos(i) - CENTER).normalized()
 				var post: Vector2 = CENTER + dir * (grid_half_px() + 0.6 * px)
-				var hut: Dictionary = {"slot": i, "id": id, "lvl": lvl_at(i), "home": slot_pos(i), "anchor": post}
+				var hut: Dictionary = {"slot": i, "id": id, "lvl": lvl_at(i), "home": fp_pos(i), "anchor": post}
 				if id == "hut_infantry" and crowd():
 					# FB2 Rifle Barracks (omnidirectional): riflemen guard the whole
 					# perimeter - seek/leash around the Core, idle at their post.
@@ -879,6 +1032,7 @@ func compute_stats() -> Dictionary:
 
 
 func recompute() -> void:
+	_rebuild_occ()
 	var old_max: float = float(stats.get("max_hp", 0.0))
 	stats = compute_stats()
 	var new_max: float = float(stats["max_hp"])
@@ -1900,11 +2054,14 @@ func _move_enemies(dt: float, ev: Array) -> void:
 	var r_stop: float = TuneRef.num("ranged_stop", 230.0)
 	var r_fire: float = TuneRef.num("ranged_fire", 2.0)
 	var frozen: bool = float(buffs.get("warp_t", 0.0)) > 0.0
-	# Occupancy of the board's buildings (the Core cell is never a blocker).
+	# Occupancy of every building footprint cell (the Core is never a blocker:
+	# its contact ring is STOP_R).
 	var blk: PackedByteArray = PackedByteArray()
 	blk.resize(N)
+	if occ.size() != N:
+		_rebuild_occ()
 	for i in N:
-		if i != CORE_SLOT and id_at(i) != "":
+		if occ[i] >= 0 and occ[i] != CORE_SLOT:
 			blk[i] = 1
 	# MASS_HORDE: the step runs in the C# HordeWorld (flow field, pressure,
 	# knockback, contact). It returns an ordered action log of Core effects,
@@ -2170,7 +2327,7 @@ func _wall_auras(ev: Array) -> void:
 	for i in slots.size():
 		if id_at(i) != "barricade":
 			continue
-		var c: Vector2 = slot_pos(i)
+		var c: Vector2 = fp_pos(i)
 		var seen: Dictionary = mass_wall_slowed.get(i, {})
 		var n0: int = seen.size()
 		for fe in eh.candidates(c, r):
@@ -2217,7 +2374,7 @@ func _fire(dt: float, ev: Array) -> void:
 				cooldowns[si] = 0.0
 			continue
 		var kind: String = wd["kind"]
-		var from: Vector2 = slot_pos(si)
+		var from: Vector2 = fp_pos(si)
 		_kb_k = float(KNOCK_W.get(kind, 0.0))
 		_kb_from = from
 		_src = kind
@@ -3002,7 +3159,7 @@ func _draft_ctx(guarantee: String) -> Dictionary:
 			copies[id] = int(copies.get(id, 0)) + 1
 		elif is_free(i):
 			free = true
-			if ring_of(i) >= 2:
+			if ring_of(i) >= 3:
 				free_outer = true
 	var sp: Dictionary = {}
 	for s in specials:

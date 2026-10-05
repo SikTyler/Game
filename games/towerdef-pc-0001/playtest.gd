@@ -384,12 +384,13 @@ static func _weapon_kps(kinds_s: String, lv: int, seed0: int) -> float:
 	var S = _mass_S(seed0 + 9)
 	S.spawn_hold = true
 	var kinds: PackedStringArray = kinds_s.split("+")
-	var si: int = TowerState.CORE_SLOT - TowerState.SIDE * (2 if kinds[0] == "railgun" else 1)
+	var si: int = _north_anchor(kinds[0])
 	S.slots[si] = {"id": kinds[0], "perm": 0, "run": lv}
 	S.unlocked[si] = true
 	if kinds.size() > 1:
-		S.slots[si - 1] = {"id": kinds[1], "perm": 0, "run": lv}
-		S.unlocked[si - 1] = true
+		var s2: int = si - TowerState.size_of(kinds[1])   # V2 P3b: just west of the first footprint
+		S.slots[s2] = {"id": kinds[1], "perm": 0, "run": lv}
+		S.unlocked[s2] = true
 	S.wave = 10
 	S.recompute()
 	var keep: Array = []
@@ -397,7 +398,7 @@ static func _weapon_kps(kinds_s: String, lv: int, seed0: int) -> float:
 		if kinds.has(String((w as Dictionary)["kind"])):
 			keep.append(w)
 	S.stats["weapons"] = keep
-	var from: Vector2 = TowerState.slot_pos(si)
+	var from: Vector2 = S.fp_pos(si)
 	# the field sits beyond the Mortar's minimum range and inside every range
 	var c: Vector2 = from + Vector2(0, -180)
 	var pts: Array = []
@@ -430,13 +431,21 @@ static func _weapon_kps(kinds_s: String, lv: int, seed0: int) -> float:
 	return float(S.kills - k0) / T
 
 
+## V2 P3b: anchor of a footprint just north of the 3x3 Core (ring 1; the
+## Railgun's ring 3+), centred on the Core's column.
+static func _north_anchor(id: String) -> int:
+	var sz: int = TowerState.size_of(id)
+	var dr: int = (-5 if id == "railgun" else -2) - (sz - 1)
+	return TowerState.cell(dr, -(sz - 1) / 2 if sz > 1 else 0)
+
+
 ## Single-target DPS vs a boss of each weapon at Lv5 (the Railgun's x4 on the
 ## first elite / boss it hits; Gun rounds 2; Tesla's first arc only).
 static func _boss_dps_lv5(seed0: int) -> Dictionary:
 	var S = _mass_S(seed0 + 11)
 	var out: Dictionary = {}
 	for wk in ["gun", "mortar", "tesla", "flak", "railgun"]:
-		var si: int = TowerState.CORE_SLOT - TowerState.SIDE * (2 if wk == "railgun" else 1)
+		var si: int = _north_anchor(wk)
 		for i in TowerState.N:
 			if i != TowerState.CORE_SLOT:
 				S.slots[i] = {}

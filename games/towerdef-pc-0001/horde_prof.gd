@@ -7,7 +7,18 @@ extends SceneTree
 ## the count holds. Not a CI gate (MASS_HORDE H11): prints numbers.
 ## Usage: godot --headless --path games/towerdef-pc-0001 --script res://horde_prof.gd [-- 1000 10000 20000]
 
-const BOARD: Dictionary = {16: "gun", 17: "mortar", 18: "tesla", 23: "frost", 25: "flak", 30: "hut_infantry", 31: "hut_sapper", 10: "railgun", 38: "barricade"}
+## V2 P3b board (21x21 small cells, 3x3 Core): [dr, dc] from the Core's
+## centre cell -> id (the Mortar and Railgun are 2x2, anchored top-left).
+const BOARD_RC: Array = [[-5, 0, "gun"], [-7, 2, "mortar"], [-5, 5, "tesla"], [-4, -5, "frost"], [-4, -3, "flak"],
+	[-4, 3, "hut_infantry"], [-3, 6, "hut_sapper"], [-8, 7, "railgun"], [-3, 0, "barricade"]]
+
+
+static func board() -> Dictionary:
+	var TS = load("res://TowerState.gd")
+	var out: Dictionary = {}
+	for e in BOARD_RC:
+		out[int(TS.cell(int(e[0]), int(e[1])))] = String(e[2])
+	return out
 const WARM: int = 120    # 6 s of sim: the crowd reaches the board and piles up
 const STEPS: int = 60
 
@@ -48,8 +59,9 @@ func _run(n: int) -> void:
 	var save: Dictionary = BM.normalize(BM.default_save())
 	var S = TS.new()
 	S.setup(4242, save, 1_700_000_000)
-	for i in BOARD.keys():
-		S.slots[int(i)] = {"id": String(BOARD[i]), "perm": 0, "run": 2}
+	var bd: Dictionary = board()
+	for i in bd.keys():
+		S.slots[int(i)] = {"id": String(bd[i]), "perm": 0, "run": 2}
 		S.unlocked[int(i)] = true
 	S.recompute()
 	S.spawn_hold = true

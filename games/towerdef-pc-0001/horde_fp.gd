@@ -8,7 +8,18 @@ extends SceneTree
 ## implementation (pre-SoA), so the SoA port must reproduce it bit-for-bit.
 ## Usage: godot --headless --path games/towerdef-pc-0001 --script res://horde_fp.gd
 
-const BOARD: Dictionary = {16: "gun", 17: "mortar", 18: "tesla", 23: "frost", 25: "flak", 30: "hut_infantry", 31: "hut_sapper", 10: "railgun", 38: "barricade"}
+## V2 P3b board (21x21 small cells, 3x3 Core): [dr, dc] from the Core's
+## centre cell -> id (the Mortar and Railgun are 2x2, anchored top-left).
+const BOARD_RC: Array = [[-5, 0, "gun"], [-7, 2, "mortar"], [-5, 5, "tesla"], [-4, -5, "frost"], [-4, -3, "flak"],
+	[-4, 3, "hut_infantry"], [-3, 6, "hut_sapper"], [-8, 7, "railgun"], [-3, 0, "barricade"]]
+
+
+static func board() -> Dictionary:
+	var TS = load("res://TowerState.gd")
+	var out: Dictionary = {}
+	for e in BOARD_RC:
+		out[int(TS.cell(int(e[0]), int(e[1])))] = String(e[2])
+	return out
 ## Attack sheets swapped onto the Core (V2: one Core; these are P4 frames).
 const SHEETS: Dictionary = {
 	"slag": {"name": "Foundry", "dmg": 5.0, "rate": 1.0, "range": 3.5, "hp": 100.0, "regen": 0.8, "armor": 1.0, "cash": 4.0, "irate": 0.05, "icap": 150.0,
@@ -52,8 +63,9 @@ static func run_one(core: String) -> String:
 	S.setup(4242, save, 1_700_000_000)
 	if SHEETS.has(core):
 		S.core_def = SHEETS[core]
-	for i in BOARD.keys():
-		S.slots[int(i)] = {"id": String(BOARD[i]), "perm": 0, "run": 2}
+	var bd: Dictionary = board()
+	for i in bd.keys():
+		S.slots[int(i)] = {"id": String(bd[i]), "perm": 0, "run": 2}
 		S.unlocked[int(i)] = true
 	S.recompute()
 	S.wave = 14       # mid-game mix (elites, ranged, splitters, w15 boss)

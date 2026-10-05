@@ -2,11 +2,13 @@ extends RefCounted
 ## Research Hall projects (SPEC A3, REDESIGN_SPEC §3.3). cost(L) =
 ## base*growth^L coins. Research is INSTANT (owner feedback #1: no research
 ## timers; the old dur_* fields and Lab Speed are gone). offcap = Storage Tech,
-## offrate = Logistics Tech (ids kept for saves). "grid" grows the run grid
-## 3x3 -> 5x5 -> 7x7 -> 8x8 -> 10x10 (TowerState.GRID_SIZES).
+## offrate = Logistics Tech (ids kept for saves). "grid" grows the V2 run grid
+## 7x7 -> 9x9 -> ... -> 21x21 (TowerState.GRID_SIZES) at the V2 steep costs.
+## A def with "costs" prices each step explicitly (the steep key researches);
+## otherwise cost(L) = base * growth^L.
 
 const DEFS: Dictionary = {
-	"grid":      {"name": "Grid Expansion", "max": 4, "base": 60.0, "growth": 3.0, "effect": "Bigger run grid: 3x3 -> 5x5 -> 7x7 -> 8x8 -> 10x10"},
+	"grid":      {"name": "Grid Expansion", "max": 7, "costs": [2000, 10000, 50000, 200000, 750000, 2500000, 8000000], "effect": "Bigger run grid: 7x7 -> 9x9 -> 11x11 ... -> 21x21"},
 	"speed":     {"name": "Game Speed",    "max": 3,  "base": 400.0, "growth": 4.0,  "effect": "Unlocks a faster game speed"},
 	"dmg":       {"name": "Damage",        "max": 30, "base": 80.0,  "growth": 1.8, "effect": "+5% damage (core & weapons)"},
 	"hp":        {"name": "Health",        "max": 30, "base": 80.0,  "growth": 1.8, "effect": "+5% core max HP"},

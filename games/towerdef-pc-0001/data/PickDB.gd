@@ -6,6 +6,7 @@ extends RefCounted
 ##   rarity: common | rare | epic | legendary | insight
 ##   tags: eco dps aoe control troop special sustain (synergy chips + filter)
 ##   max: building/hut level cap (L5) or pack/special stack cap
+##   size: run-grid footprint side (V2 P3b; 1 when absent, 2 = a 2x2 building)
 ## Building and hut stats live in TowerState.compute_stats (one owner of the
 ## math); this table is identity + display text + draft weights.
 
@@ -19,12 +20,12 @@ const SPECIAL_COPIES: int = 3
 const DEFS: Dictionary = {
 	# ---- buildings (17; the 15 "adapted" ids keep their art) ----------------
 	"gun":       {"fam": "building", "name": "Gatling", "rarity": "common", "tags": ["dps"], "max": 5, "desc": "6 dmg, 2.0/s, range 3"},
-	"mortar":    {"fam": "building", "name": "Mortar", "rarity": "common", "tags": ["aoe", "dps"], "max": 5, "desc": "18 dmg, 0.4/s, range 4.5, 1-cell splash (min range 1.5)"},
+	"mortar":    {"fam": "building", "name": "Mortar", "rarity": "common", "tags": ["aoe", "dps"], "max": 5, "size": 2, "desc": "2x2. 18 dmg, 0.4/s, range 4.5, 1-cell splash (min range 1.5)"},
 	"tesla":     {"fam": "building", "name": "Tesla Coil", "rarity": "rare", "tags": ["aoe", "control"], "max": 5, "desc": "9 dmg, 0.8/s, chains 3 at 70%"},
 	"flak":      {"fam": "building", "name": "Flamer", "rarity": "common", "tags": ["dps", "aoe"], "max": 5, "desc": "40 deg cone of fire; burn spreads through the pile"},
-	"railgun":   {"fam": "building", "name": "Railgun", "rarity": "epic", "tags": ["dps"], "max": 5, "desc": "60 dmg, 0.25/s, pierces a line (range 7); ring 2+"},
+	"railgun":   {"fam": "building", "name": "Railgun", "rarity": "epic", "tags": ["dps"], "max": 5, "size": 2, "desc": "2x2. 60 dmg, 0.25/s, pierces a line (range 7); ring 3+"},
 	"armory":    {"fam": "building", "name": "Armory", "rarity": "rare", "tags": ["dps"], "max": 5, "desc": "Adjacent buildings +15% dmg"},
-	"beacon":    {"fam": "building", "name": "Beacon", "rarity": "rare", "tags": ["dps"], "max": 5, "desc": "Radius 2: +10% rate, +0.3 range"},
+	"beacon":    {"fam": "building", "name": "Beacon", "rarity": "rare", "tags": ["dps"], "max": 5, "desc": "Within 4 cells: +10% rate, +0.3 range"},
 	"bulwark":   {"fam": "building", "name": "Bulwark", "rarity": "common", "tags": ["sustain"], "max": 5, "desc": "Core +40 HP"},
 	"aegis":     {"fam": "building", "name": "Aegis", "rarity": "epic", "tags": ["sustain"], "max": 5, "desc": "60-pt Core shield; regen 6/s after 4 s without damage"},
 	"barricade": {"fam": "building", "name": "Wall", "rarity": "common", "tags": ["control"], "max": 5, "desc": "Blocker: the horde flows around it or squeezes through at a crawl; every enemy within 1.5 cells is slowed 30%"},
@@ -70,6 +71,11 @@ const HUTS: Array = ["hut_infantry", "hut_sapper"]
 const PACKS: Array = ["pk_arsenal", "pk_overclock", "pk_fort", "pk_ledger", "pk_optics", "pk_crit", "pk_logistics", "pk_core", "pk_barracks", "pk_gambit"]
 const SPECIALS: Array = ["sp_orbital", "sp_emp", "sp_repair", "sp_overdrive", "sp_magnet", "sp_timewarp"]
 const INSIGHT: Array = ["in_dmg", "in_hp", "in_cash", "in_rate", "in_luck", "in_drop"]
+
+
+## Run-grid footprint side of a pick (1x1 unless the def says otherwise).
+static func size_of(id: String) -> int:
+	return int((DEFS.get(id, {}) as Dictionary).get("size", 1))
 
 
 static func ids() -> Array:

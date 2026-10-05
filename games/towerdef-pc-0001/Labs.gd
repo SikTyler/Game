@@ -51,6 +51,9 @@ static func cost(id: String, lvl: int) -> int:
 	var d: Dictionary = LabDB.DEFS.get(id, {})
 	if d.is_empty():
 		return 0
+	if d.has("costs"):
+		var cs: Array = d["costs"]
+		return int(cs[clampi(lvl, 0, cs.size() - 1)])
 	return int(float(d["base"]) * pow(float(d["growth"]), float(lvl)))
 
 
