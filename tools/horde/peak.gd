@@ -12,9 +12,8 @@ func _initialize() -> void:
 		var p: PackedStringArray = String(a).split("=", true, 1)
 		args[p[0]] = p[1] if p.size() > 1 else "1"
 	var cap: int = int(args.get("cap", "-1"))
-	var g: GDScript = HL.build(cap)
-	HL.take_over(g)
-	var PT: GDScript = load("res://playtest.gd")
+	var PT: GDScript = HL.user_playtest(cap)
+	var g: GDScript = load("user://horde_TowerState.gd")
 	PT.set("QUIET", true)
 	var job: String = String(args.get("job", "fresh"))
 	var t0: int = Time.get_ticks_msec()

@@ -27,3 +27,19 @@ static func _rep(src: String, a: String, b: String) -> String:
 
 static func take_over(g: GDScript) -> void:
 	g.take_over_path("res://TowerState.gd")
+
+
+## Typed `const X := preload(...)` cannot resolve a taken-over path, so for
+## playtest.gd write the instrumented TowerState + a re-pointed playtest copy to
+## user:// (outside the repo) and load those instead.
+static func user_playtest(max_enemies: int = -1) -> GDScript:
+	var g: GDScript = build(max_enemies)
+	var f := FileAccess.open("user://horde_TowerState.gd", FileAccess.WRITE)
+	f.store_string(g.source_code)
+	f.close()
+	var pt: String = FileAccess.get_file_as_string("res://playtest.gd")
+	pt = _rep(pt, 'preload("res://TowerState.gd")', 'preload("user://horde_TowerState.gd")')
+	var f2 := FileAccess.open("user://horde_playtest.gd", FileAccess.WRITE)
+	f2.store_string(pt)
+	f2.close()
+	return load("user://horde_playtest.gd")
