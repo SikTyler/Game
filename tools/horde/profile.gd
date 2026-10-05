@@ -7,8 +7,8 @@ extends SceneTree
 ## Usage: godot --headless --path games/towerdef-pc-0001 --script ../../tools/horde/profile.gd -- counts=220,1000,5000 steps=40 board=full|core
 const HL := preload("res://../../tools/horde/hlib.gd")
 const KINDS: Array = ["drone", "drone", "drone", "skitter", "skitter", "hauler", "ranged", "splitter", "elite"]
-## ring-1 cells around the Core (16..32) + ring-2 railgun / hut cells.
-const BOARD: Dictionary = {16: "gun", 17: "mortar", 18: "tesla", 23: "frost", 25: "flak", 30: "gun", 31: "mortar", 32: "tesla", 10: "railgun", 38: "railgun"}
+## ring-1 cells around the Core (48..72, 11x11) + ring-2 railgun / hut cells.
+const BOARD: Dictionary = {48: "gun", 49: "mortar", 50: "tesla", 59: "frost", 61: "flak", 70: "gun", 71: "mortar", 72: "tesla", 38: "railgun", 82: "railgun"}   # 11x11 board (FEEDBACK-1)
 
 var Ach = null
 var Mis = null
