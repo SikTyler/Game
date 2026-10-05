@@ -20,7 +20,7 @@ const Cores := preload("res://Cores.gd")
 const PAL_W: float = 400.0
 const HEAD_H: float = 48.0
 ## [id, label, icon] — FB1: obvious build categories with icons.
-const CATS: Array = [["prod", "Produce", "op_mill_1"], ["support", "Support", "op_research_1"], ["infra", "Links", "op_conduit"], ["decor", "Decor", "dc_tree"]]
+const CATS: Array = [["prod", "Production", "op_mill_1"], ["support", "Support", "op_research_1"], ["infra", "Links", "op_conduit"], ["decor", "Decor", "dc_tree"]]
 ## FB1 home: the Command Plaza west of the grid (negative cell x) holds the
 ## buildings that open the meta screens. [tab, name, art, top-left cell, blurb]
 const PLAZA_W: int = 4
@@ -382,10 +382,10 @@ static func build(m) -> void:
 	var x: float = pr.position.x + 12.0
 	var w: float = pr.size.x - 24.0
 	# category tabs
-	var cw: float = (w - 18.0) / 4.0
+	var cw: float = (w - 6.0) / 2.0
 	for k in CATS.size():
 		var cat: String = String((CATS[k] as Array)[0])
-		Kit.btn(m, String((CATS[k] as Array)[1]), Rect2(x + k * (cw + 6.0), pr.position.y + 100, cw, 52), func() -> void: m.op_cat = cat; m._rebuild_ui(), "Build category: %s" % String((CATS[k] as Array)[1]), true, Kit.RUST if m.op_cat == cat else Kit.NEUTRAL, "OPCAT " + cat, String((CATS[k] as Array)[2]), 14)
+		Kit.btn(m, String((CATS[k] as Array)[1]), Rect2(x + float(k % 2) * (cw + 6.0), pr.position.y + 98 + float(k / 2) * 50.0, cw, 46), func() -> void: m.op_cat = cat; m._rebuild_ui(), "Build category: %s" % String((CATS[k] as Array)[1]), true, Kit.RUST if m.op_cat == cat else Kit.NEUTRAL, "OPCAT " + cat, String((CATS[k] as Array)[2]), 14)
 	# palette entries
 	var ids: Array = CAT_IDS[m.op_cat]
 	for k in ids.size():
@@ -477,7 +477,7 @@ static func _import(m) -> void:
 static func pal_entry(m, k: int) -> Rect2:
 	var pr: Rect2 = pal_rect(m)
 	var ids: Array = CAT_IDS[m.op_cat]
-	var top: float = pr.position.y + 162.0
+	var top: float = pr.position.y + 202.0
 	var avail: float = sel_rect(m).position.y - top - 10.0
 	var cols: int = 3 if ids.size() > 9 else (2 if ids.size() > 4 else 1)
 	var rows: int = int(ceil(float(ids.size()) / float(cols)))
@@ -488,7 +488,7 @@ static func pal_entry(m, k: int) -> Rect2:
 
 static func sel_rect(m) -> Rect2:
 	var pr: Rect2 = pal_rect(m)
-	return Rect2(pr.position.x + 12, pr.end.y - 520, pr.size.x - 24, 410)
+	return Rect2(pr.position.x + 12, pr.end.y - 490, pr.size.x - 24, 380)
 
 
 static func bp_rect(m) -> Rect2:
@@ -586,7 +586,7 @@ static func _draw_map(m, s: Dictionary, o: Dictionary, mr: Rect2) -> void:
 				if OutpostDB.VEINS.has(cv):
 					Kit.icon(m, "op_vein", r)
 			else:
-				Kit.icon(m, "tile_ash", r, Color(0.28, 0.29, 0.32))   # FB1: resources hidden until bought
+				Kit.icon(m, "tile_ash", r, Color(0.42, 0.42, 0.46))   # FB1: resources hidden until bought
 			m.draw_rect(r, Color(1, 1, 1, 0.05), false, 1.0)
 	# locked plots
 	for k in OutpostDB.PLOTS.size():
@@ -595,8 +595,8 @@ static func _draw_map(m, s: Dictionary, o: Dictionary, mr: Rect2) -> void:
 		var pr: Rect2i = OutpostDB.PLOTS[k]
 		var rr: Rect2 = cell_rect(m, pr.position.x, pr.position.y, pr.size.x, pr.size.y)
 		var sel: bool = m.op_sel == "plot:%d" % k
-		m.draw_rect(rr, Color(0, 0, 0, 0.35))
-		m.draw_rect(rr.grow(-2), Kit.GOLD if sel else Color(1, 1, 1, 0.15), false, 3.0 if sel else 1.0)
+		m.draw_rect(rr, Color(0.02, 0.03, 0.05, 0.30))
+		m.draw_rect(rr.grow(-2), Kit.GOLD if sel else Color(1, 1, 1, 0.22), false, 3.0 if sel else 1.5)
 		var isz: float = minf(c * 1.2, minf(rr.size.x, rr.size.y) - 8.0)
 		Kit.icon(m, "op_plot_locked", Rect2(rr.get_center() - Vector2(isz, isz) * 0.5, Vector2(isz, isz)), Color(1, 1, 1, 0.75 if Outpost.plot_adjacent(o, k) else 0.3))
 	_draw_plaza(m, c)
@@ -856,7 +856,7 @@ static func _draw_palette(m, s: Dictionary, o: Dictionary) -> void:
 	Kit.icon(m, "op_builder", Rect2(x - 2, pr.position.y + 10, 40, 40))
 	Kit.t(m, "BUILD", Vector2(x + 46, pr.position.y + 40), 26, Kit.RUST, HORIZONTAL_ALIGNMENT_LEFT, w)
 	var cred: int = int(o.get("credit", 0))
-	Kit.t(m, ("Build credit %s coins" % Kit.fmt(float(cred))) if cred > 0 else "Pick a building, then click the map", Vector2(x + 140, pr.position.y + 38), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w - 140)
+	Kit.t(m, ("Build credit %s coins" % Kit.fmt(float(cred))) if cred > 0 else "Pick one, then click the map", Vector2(x + 140, pr.position.y + 38), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w - 140)
 	Kit.t(m, "Categories", Vector2(x, pr.position.y + 88), 13, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w)
 	# entries
 	var ids: Array = CAT_IDS[m.op_cat]
@@ -943,7 +943,7 @@ static func _draw_selected(m, s: Dictionary, o: Dictionary, sr: Rect2) -> void:
 		for k in (lb["parts"] as Dictionary).keys():
 			parts.append("%s %+d%%" % [String(k), int(round(float(lb["parts"][k]) * 100.0))])
 		Kit.t(m, "Layout %+d%%  %s" % [int(round(float(lb["total"]) * 100.0)), ("(" + ", ".join(parts) + ")") if not parts.is_empty() else ""], Vector2(x, y + 62), 14, Kit.GREEN if float(lb["total"]) > 0.0 else Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w)
-	_draw_delta(m, s, who, x, sr.position.y + 202.0, w)
+	_draw_delta(m, s, who, x, sr.position.y + 192.0, w)
 
 
 # ============================================================ upgrade delta
@@ -1012,11 +1012,11 @@ static func _draw_delta(m, s: Dictionary, uid: String, x: float, y: float, w: fl
 		return
 	Kit.t(m, "NEXT UPGRADE", Vector2(x, y), 14, Kit.GREEN, HORIZONTAL_ALIGNMENT_LEFT, w)
 	m.draw_line(Vector2(x, y + 6), Vector2(x + w, y + 6), Color(Kit.GREEN, 0.3), 1.0)
-	var ry: float = y + 26.0
-	for r in rows.slice(0, 5):
+	var ry: float = y + 24.0
+	for r in rows.slice(0, 4):
 		var a: Array = r
 		Kit.t(m, String(a[0]), Vector2(x, ry), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w * 0.5)
 		Kit.t(m, String(a[1]), Vector2(x + w * 0.62, ry), 14, Kit.TEXT, HORIZONTAL_ALIGNMENT_RIGHT, w * 0.2)
 		Kit.t(m, "->", Vector2(x + w * 0.69, ry), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, 30.0)
 		Kit.t(m, String(a[2]), Vector2(x + w, ry), 14, Kit.GREEN, HORIZONTAL_ALIGNMENT_RIGHT, w * 0.26)
-		ry += 19.0
+		ry += 18.0

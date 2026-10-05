@@ -477,6 +477,7 @@ static func _draw_inventory(m, s: Dictionary, core: String) -> void:
 	var pp: int = per_page(m)
 	var pages: int = maxi(1, int(ceil(float(ids.size()) / float(pp))))
 	Kit.t(m, "page %d / %d" % [m.bay_page + 1, pages], Vector2(i.end.x - 150, i.position.y + 158), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_RIGHT, 120.0)
+	Kit.t(m, "Double-click a part to equip it (replaces that slot) · double-click again to unequip", Vector2(i.position.x + 16, inv_grid(m).end.y + 30), 14, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, i.size.x - 32)
 	var row: Array = Parts.preset(s, core)
 	var start: int = m.bay_page * pp
 	for j in range(start, mini(ids.size(), start + pp)):
