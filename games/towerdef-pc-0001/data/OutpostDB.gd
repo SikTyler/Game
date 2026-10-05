@@ -13,18 +13,22 @@ extends RefCounted
 const MILL_RATE: float = 600.0
 ## Coin Mill output x (1 + MILL_TIER x (highest tier - 1)) (balance pass: 0.5 -> 0.8).
 const MILL_TIER: float = 0.8
-const W: int = 14
-const H: int = 10
+## FB1: "much larger" map — 24x16 (the original 14x10 block keeps its plots 0-7).
+const W: int = 24
+const H: int = 16
 const RELAY: Vector2i = Vector2i(2, 4)       # top-left of the 2x2 Relay
 const START: Rect2i = Rect2i(0, 2, 6, 6)      # open from the start
 ## Expansion plots, unlocked in any order that stays adjacent to open land.
 const PLOTS: Array = [
 	Rect2i(6, 2, 4, 4), Rect2i(6, 6, 4, 4), Rect2i(0, 0, 6, 2), Rect2i(0, 8, 6, 2),
 	Rect2i(6, 0, 4, 2), Rect2i(10, 0, 4, 4), Rect2i(10, 4, 4, 4), Rect2i(10, 8, 4, 2),
+	# FB1 grid chunks (indices 8+): east band, then the south band
+	Rect2i(14, 0, 5, 5), Rect2i(14, 5, 5, 5), Rect2i(19, 0, 5, 5), Rect2i(19, 5, 5, 5),
+	Rect2i(0, 10, 6, 6), Rect2i(6, 10, 4, 6), Rect2i(10, 10, 4, 6), Rect2i(14, 10, 5, 6), Rect2i(19, 10, 5, 6),
 ]
-## Crystal Veins: 1 in the start area, 2 in plots (Gem Mine only).
-const VEINS: Array = [Vector2i(1, 7), Vector2i(8, 8), Vector2i(12, 1)]
-const BLOCKED: Array = [Vector2i(13, 9), Vector2i(0, 0), Vector2i(13, 4)]
+## Crystal Veins: 1 in the start area, the rest inside plots (Gem Mine only); hidden until the plot is bought.
+const VEINS: Array = [Vector2i(1, 7), Vector2i(8, 8), Vector2i(12, 1), Vector2i(21, 2), Vector2i(16, 13), Vector2i(3, 14)]
+const BLOCKED: Array = [Vector2i(13, 9), Vector2i(0, 0), Vector2i(13, 4), Vector2i(17, 7), Vector2i(23, 15), Vector2i(8, 12), Vector2i(22, 9)]
 
 ## Buildings. size = [w, h] at rot 0 (rot 1 swaps). rate = L1 output per hour
 ## of `res`; storage_h = hours of L1 output the building stores at L1
