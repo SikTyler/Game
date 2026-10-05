@@ -1,3 +1,6 @@
-Corehold PC test build (towerdef-0001 @ 5fa3c28)
-Unzip and double-click Corehold.exe. Windows SmartScreen may warn (unsigned build): More info > Run anyway.
-Saves go to %APPDATA%\Godot\app_userdata\Corehold.
+Corehold PC test build (towerdef-0001 @ 75b7304)
+Run Corehold.exe for normal play.
+Run Corehold-horde-x4.bat / -x8.bat to try the experimental mass horde.
+F3 toggles the debug overlay (bodies, FPS, sim ms).
+SmartScreen may warn (unsigned): More info > Run anyway.
+Saves: %APPDATA%\Godot\app_userdata\Corehold
