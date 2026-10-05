@@ -25,7 +25,7 @@ const Outpost := preload("res://Outpost.gd")
 const Kit := preload("res://ui/Kit.gd")
 const Battle := preload("res://ui/Battle.gd")
 const Hub := preload("res://ui/Hub.gd")
-const OutpostView := preload("res://ui/OutpostView.gd")
+const FactoryView := preload("res://ui/FactoryView.gd")
 const CoreBay := preload("res://ui/CoreBay.gd")
 
 const OVERLAYS: Array = ["pause", "settings", "credits", "stats", "history", "achievements", "modes"]
@@ -89,7 +89,7 @@ static func build(m) -> void:
 		return
 	if m.screen == "base" and not m.offline_offer.is_empty():
 		var r: Rect2 = offline_rect(m)
-		Kit.btn(m, "Collect", Rect2(r.position.x + 230, r.end.y - 92, 300, 60), m.claim_offline, "Collect everything the Outpost stored while you were away", true, Kit.GOLD, "Collect", "ui_collect", 24)
+		Kit.btn(m, "Collect", Rect2(r.position.x + 230, r.end.y - 92, 300, 60), m.claim_offline, "Collect everything the factory banked while you were away", true, Kit.GOLD, "Collect", "ui_collect", 24)
 		_focus_first(m)
 		return
 	_build_topbar(m)
@@ -477,7 +477,7 @@ static func _hub_action(m, event: InputEvent) -> bool:
 	if _pressed(m, event, "confirm") and m.tab == "play" and m.op_arm == "" and m.op_sel == "" and String(m.last_device) != "pad":
 		m.start_run()
 		return true
-	if Hub.is_home(m.tab) and OutpostView.action(m, event):
+	if Hub.is_home(m.tab) and FactoryView.action(m, event):
 		return true
 	if m.tab == "bay" and CoreBay.action(m, event):
 		return true
@@ -513,7 +513,7 @@ static func _cancel(m) -> void:
 			m.set_overlay("pause")
 	elif m.screen == "base":
 		if Hub.is_home(m.tab) and (m.op_arm != "" or m.op_moving or m.op_sel != ""):
-			OutpostView.cancel(m)
+			FactoryView.cancel(m)
 		elif m.tab == "bay" and m.bay_part != "":
 			m.bay_part = ""
 			m._rebuild_ui()
@@ -579,8 +579,8 @@ static func tip_at(m, p: Vector2) -> String:
 		var w: String = Battle.world_tip(m, p)
 		if w != "":
 			return w
-	if m.screen == "base" and Hub.is_home(m.tab) and OutpostView.map_rect(m).has_point(p):
-		var o: String = OutpostView.map_tip(m, p)
+	if m.screen == "base" and Hub.is_home(m.tab) and FactoryView.map_rect(m).has_point(p):
+		var o: String = FactoryView.map_tip(m, p)
 		if o != "":
 			return o
 	for st in m.stat_tips:
@@ -742,8 +742,8 @@ static func _draw_offline(m) -> void:
 	var r: Rect2 = offline_rect(m)
 	Kit.panel(m, r, Kit.GOLD, Kit.PANEL2, 3)
 	Kit.t(m, "WHILE YOU WERE AWAY", Vector2(r.get_center().x, r.position.y + 70), 36, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
-	Kit.t(m, "Away %s — your Outpost kept producing" % Kit.dur(int(off.get("minutes", 0)) * 60), Vector2(r.get_center().x, r.position.y + 108), 19, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
-	var rows: Array = [["cur_coin", "coins", "coins", Kit.GOLD], ["cur_scrap", "scrap", "Scrap", Kit.SCRAP], ["cur_key", "keys", "Keys", Kit.KEYC]]
+	Kit.t(m, "Away %s — your factory kept producing at its measured rate" % Kit.dur(int(off.get("minutes", 0)) * 60), Vector2(r.get_center().x, r.position.y + 108), 19, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
+	var rows: Array = [["cur_coin", "coins", "coins", Kit.GOLD], ["cur_scrap", "scrap", "Scrap", Kit.SCRAP], ["cur_key", "keys", "Keys", Kit.KEYC], ["it_data_card", "data", "research data", Kit.LAB]]
 	var y: float = r.position.y + 150.0
 	for rw in rows:
 		var a: Array = rw
@@ -753,7 +753,7 @@ static func _draw_offline(m) -> void:
 		Kit.icon(m, String(a[0]), Rect2(r.position.x + 220, y, 52, 52))
 		Kit.t(m, "+%s %s" % [Kit.fmt(float(n)), String(a[2])], Vector2(r.position.x + 290, y + 40), 34, a[3], HORIZONTAL_ALIGNMENT_LEFT, 400.0)
 		y += 66.0
-	Kit.t(m, "Storage caps at 8 h — upgrade Warehouses and Storage Tech to bank more.", Vector2(r.get_center().x, r.end.y - 112), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 40.0)
+	Kit.t(m, "Production banks for up to %.1f h — build Chests and Vaults to extend it." % float(off.get("hours_cap", 4.0)), Vector2(r.get_center().x, r.end.y - 112), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 40.0)
 
 
 static func _draw_stats(m, r: Rect2) -> void:

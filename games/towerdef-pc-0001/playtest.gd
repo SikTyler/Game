@@ -756,67 +756,104 @@ static func _parts_equip(save: Dictionary, policy: String, spec_first: bool = fa
 			break
 
 
-## The Outpost plan a competent player follows (start area first, then plot
-## 0): [kind, id, x, y, rot]. Each session the bot takes the first affordable
-## action (one job per builder) within pc_bot_op_frac of its coins.
-const OP_PLAN: Array = [
-	["place", "mill", 4, 4, 0], ["place", "mill", 4, 6, 0], ["place", "warehouse", 3, 2, 0],
-	["up", "mill"], ["up", "relay"], ["up", "research"], ["place", "conduit", 2, 6, 0],
-	["place", "refinery", 0, 4, 0], ["place", "keyforge", 2, 7, 0], ["place", "gemmine", 0, 6, 0],
-	["plot", 0], ["place", "mill", 6, 4, 0], ["place", "archive", 6, 2, 0], ["place", "barracks", 8, 4, 0],
-	["place", "mill", 8, 2, 0], ["up", "warehouse"], ["up", "refinery"], ["up", "keyforge"], ["up", "gemmine"],
-	["up", "archive"], ["up", "barracks"],
+## The Factory plan a competent player follows (WP3): modules inside the
+## start chunks, cheapest first, each a list of [id, x, y, rot]; "tech" and
+## "fac" steps buy research / facility levels. Each session the bot banks the
+## factory's away output, then buys the first affordable steps within
+## pc_bot_op_frac of its coins.
+const FACTORY_PLAN: Array = [
+	["mod", [["miner", 40, 20, 0], ["belt", 42, 20, 3], ["belt", 42, 19, 3]]],
+	["mod", [["chest", 38, 22, 0], ["chest", 39, 22, 0], ["chest", 38, 23, 0]]],
+	["mod", [["inserter", 47, 20, 0], ["smelter", 48, 19, 0], ["inserter", 48, 21, 1], ["windmill", 44, 23, 0]]],
+	["fac", "research"],
+	["mod", [["miner", 43, 19, 3], ["windmill", 50, 20, 0]]],
+	["mod", [["miner", 52, 26, 2], ["belt", 51, 27, 2], ["belt", 50, 27, 2], ["belt", 49, 27, 3], ["belt", 49, 26, 3], ["belt", 49, 25, 3], ["belt", 49, 24, 2],
+		["pole", 51, 25, 0], ["windmill", 52, 23, 0], ["smelter", 46, 26, 0], ["inserter", 48, 26, 2], ["inserter", 47, 25, 3]]],
+	["mod", [["miner", 53, 17, 2], ["belt", 52, 18, 1], ["belt", 52, 19, 1], ["belt", 52, 20, 1], ["belt", 52, 21, 1], ["belt", 52, 22, 2], ["belt", 51, 22, 2], ["belt", 50, 22, 2], ["belt", 49, 22, 2]]],
+	["fac", "barracks"], ["fac", "archive"],
+	["tech", "coal_power"],
+	["mod", [["miner", 40, 27, 0], ["coal_gen", 42, 26, 0]]],
+	["mod", [["chest", 39, 23, 0], ["vault", 36, 22, 0]]],
+	["fac", "research"], ["fac", "barracks"], ["fac", "archive"], ["fac", "barracks"], ["fac", "archive"], ["fac", "research"], ["fac", "barracks"],
 ]
 
 
-static func _op_has(save: Dictionary, id: String, x: int, y: int) -> bool:
-	for k in save["outpost"]["buildings"].keys():
-		var b: Dictionary = save["outpost"]["buildings"][k]
-		if String(b["id"]) == id and int(b["x"]) == x and int(b["y"]) == y:
-			return true
-	return false
+static func _mod_done(save: Dictionary, parts: Array) -> bool:
+	for p in parts:
+		var u: String = Factory.uid_at(save, Vector2i(int(p[1]), int(p[2])))
+		if u == "" or String(Factory.ent(save, u)["id"]) != String(p[0]):
+			return false
+	return true
 
 
-static func outpost_spend(save: Dictionary, now: int) -> void:
-	Outpost.tick(save, now)
+static func _mod_cost(save: Dictionary, parts: Array) -> int:
+	var c: int = 0
+	for p in parts:
+		var u: String = Factory.uid_at(save, Vector2i(int(p[1]), int(p[2])))
+		if u == "" or String(Factory.ent(save, u)["id"]) != String(p[0]):
+			c += Factory.cost(String(p[0]))
+	return c
+
+
+## Bank the factory's away output (measured rate, storage cap) and pay it.
+static func factory_collect(save: Dictionary, now: int) -> Dictionary:
+	Factory.migrate_outpost(save)
+	Factory.settle(save, now)
+	var got: Dictionary = {"coins": 0, "scrap": 0, "keys": 0, "data": 0}
+	for x in Factory.claim_bank(save):
+		for k in got.keys():
+			got[k] = int(got[k]) + int((x as Dictionary).get(k, 0))
+	return got
+
+
+static func factory_spend(save: Dictionary, now: int) -> void:
+	factory_collect(save, now)
 	var guard: int = 0
-	while guard < 8 and Outpost.busy(save) < Outpost.builders(save):
+	while guard < 12:
 		guard += 1
-		var budget: int = int(float(save["coins"]) * TuneRef.num("pc_bot_op_frac", 0.4)) + int(save["outpost"].get("credit", 0))
+		var budget: int = int(float(save["coins"]) * TuneRef.num("pc_bot_op_frac", 0.4))
 		var did: bool = false
-		for st in OP_PLAN:
-			var a: Array = st
+		for si in FACTORY_PLAN.size():
+			var a: Array = FACTORY_PLAN[si]
 			match String(a[0]):
-				"place":
-					var id: String = String(a[1])
-					if _op_has(save, id, int(a[2]), int(a[3])):
+				"mod":
+					if _mod_done(save, a[1]):
 						continue
-					var d: Dictionary = OutpostDB.get_def(id)
-					if int(d["coins"]) > budget:
+					if _mod_cost(save, a[1]) > budget:
+						break
+					for p in a[1]:
+						Factory.place(save, String(p[0]), int(p[1]), int(p[2]), int(p[3]))
+					did = true
+				"tech":
+					if Factory.has_tech(save, String(a[1])):
 						continue
-					did = not Outpost.place(save, id, int(a[2]), int(a[3]), int(a[4]), now).is_empty()
-				"plot":
-					var pc: Dictionary = Outpost.plot_cost(save)
-					if int(pc["coins_alt"]) <= budget:
-						did = not Outpost.unlock_plot(save, int(a[1])).is_empty()
-				"up":
-					var uid: String = ""
-					if String(a[1]) == "relay":
-						if Outpost.relay_cost(int(save["outpost"]["relay_lvl"])) <= budget:
-							uid = "relay"
-					else:
-						var lo: int = 99
-						for k in save["outpost"]["buildings"].keys():
-							var b: Dictionary = save["outpost"]["buildings"][k]
-							if String(b["id"]) == String(a[1]) and int(b["lvl"]) < lo and Outpost.can_upgrade(save, String(k)) and Outpost.cost(String(b["id"]), int(b["lvl"])) <= budget:
-								lo = int(b["lvl"])
-								uid = String(k)
-					if uid != "":
-						did = not Outpost.upgrade(save, uid, now).is_empty()
-			if did:
-				break
+					if int((Factory.DB.TECH[String(a[1])] as Dictionary)["coins"]) > budget:
+						break
+					did = not Factory.research(save, String(a[1])).is_empty()
+				"fac":
+					var fid: String = String(a[1])
+					# each "fac" step is one level: count the earlier steps for this id
+					var want: int = 0
+					for sj in si + 1:
+						var st2: Array = FACTORY_PLAN[sj]
+						if String(st2[0]) == "fac" and String(st2[1]) == fid:
+							want += 1
+					if fid == "research":
+						want += 1    # the Research Lab starts at Lv1
+					if Factory.fac_level(save, fid) >= want:
+						continue
+					if Factory.fac_cost(fid, Factory.fac_level(save, fid)) > budget:
+						break
+					did = not Factory.fac_upgrade(save, fid).is_empty()
+			break
 		if not did:
 			break
+	Factory.ensure_rate(save)
+
+
+## Coins / hour the factory makes at its measured steady state.
+static func factory_coins_h(save: Dictionary) -> float:
+	return float(Factory.rate_now(save)["coins"]) * 3600.0
 
 
 # ======================================================================
@@ -830,6 +867,7 @@ const Labs := preload("res://Labs.gd")
 const Cards := preload("res://Cards.gd")
 const Missions := preload("res://Missions.gd")
 const Outpost := preload("res://Outpost.gd")
+const Factory := preload("res://Factory.gd")
 const Tiers := preload("res://Tiers.gd")
 const LabDB := preload("res://data/LabDB.gd")
 const ModifierDB := preload("res://data/ModifierDB.gd")
@@ -966,17 +1004,15 @@ static func session_open(save: Dictionary, now: int, rng: RandomNumberGenerator,
 	Missions.roll(save, now)
 	var c0: int = int(save["coins"])
 	var away: int = maxi(0, now - int(save["last_seen"])) / 60 if int(save["last_seen"]) > 0 else 0
-	for x in Outpost.claim_away(save, now):
-		var oe: Dictionary = x
-		if String(oe["t"]) == "offline":
-			led["offline_coins"] = int(led["offline_coins"]) + int(oe["coins"])
+	led["offline_coins"] = int(led["offline_coins"]) + int(factory_collect(save, now)["coins"])
+	save["last_seen"] = now
 	led["offline_min"] = int(led["offline_min"]) + away
 	Missions.streak_claim(save, now)
 	led["gross_coins"] = int(led["gross_coins"]) + int(save["coins"]) - c0
 	_claim_missions(save)
 	_gems_spend(save, rng)
 	_labs_spend(save, now)
-	outpost_spend(save, now)     # cheapest ROI first: Mills pay back in hours
+	factory_spend(save, now)     # cheapest ROI first: miners / smelters pay back in hours
 	spend_meta(save, policy, rng)
 	_labs_spend(save, now, 1.0)   # base saturated: the rest goes to research
 	var steps: Array = Labs.speed_steps(save)
@@ -1045,7 +1081,7 @@ static func campaign_days(seed0: int, policy: String = "balanced", n_days: int =
 		for id in LabDB.IDS:
 			lab_sum += Labs.level(save, String(id))
 		var bit: int = Tiers.best_in(save, hi)
-		var op_h: float = float(Outpost.production(save)["coins"])
+		var op_h: float = factory_coins_h(save)
 		var act_h: float = float(rate.get(Tiers.highest(save), rate.get(1, 0.0))) * 60.0
 		var row: Dictionary = {
 			"outpost_h": snappedf(op_h, 1.0), "outpost_ratio": snappedf(op_h / maxf(1.0, act_h), 0.001), "parts": Parts.count(save), "core_lvl": Cores.level(save, Cores.active(save)),
@@ -1730,7 +1766,7 @@ static func _forge_day(save: Dictionary, spec: String, day: int, key: int, runs:
 			sets[String(k)] = int(sc[k])
 	# Outpost vs active coins per wall-clock hour (POWER_MODEL §5 / AC-27): the
 	# Outpost's live production vs the coins the day's runs paid per hour played.
-	var op_h: float = float(Outpost.production(save)["coins"])
+	var op_h: float = factory_coins_h(save)
 	var rc: float = 0.0
 	var rs: float = 0.0
 	for x in runs:
@@ -1740,15 +1776,10 @@ static func _forge_day(save: Dictionary, spec: String, day: int, key: int, runs:
 	# AC-27: hours each built, connected stockpiling generator (storage_h > 0:
 	# Mill, Refinery; the Gem Mine / Key Forge hard caps are separate) takes
 	# to fill from empty at its live rate.
+	# WP3: the factory's away cap (hours of production storage holds)
 	var fill: Array = []
-	var ob: Dictionary = (save.get("outpost", {}) as Dictionary).get("buildings", {})
-	for uid in ob.keys():
-		var bd: Dictionary = ob[uid]
-		if float(OutpostDB.get_def(String(bd["id"])).get("storage_h", 0.0)) <= 0.0:
-			continue
-		var lr: float = Outpost.rate(save, String(uid))
-		if lr > 0.0:
-			fill.append(Outpost.cap(save, String(uid)) / lr)
+	if factory_coins_h(save) > 0.0:
+		fill.append(Factory.away_cap_s(save) / 3600.0)
 	var bdps: Array = []
 	for x in runs:
 		bdps.append(float((x as Dictionary).get("boss_dps", 0.0)))

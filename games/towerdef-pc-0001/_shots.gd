@@ -10,6 +10,7 @@ const BaseMeta := preload("res://BaseMeta.gd")
 const MetaSave := preload("res://MetaSave.gd")
 const Labs := preload("res://Labs.gd")
 const Outpost := preload("res://Outpost.gd")
+const Factory := preload("res://Factory.gd")
 const Cards := preload("res://Cards.gd")
 const Missions := preload("res://Missions.gd")
 const Parts := preload("res://Parts.gd")
@@ -44,8 +45,11 @@ func _initialize() -> void:
 	save["best_wave"] = 42
 	save["tier"] = 2
 	save["runs"] = 14
-	Outpost.place(save, "mill", 4, 4, 0, T0 - 3 * 3600 - 200)
-	Outpost.tick(save, T0 - 3 * 3600)
+	Outpost.place(save, "mill", 4, 4, 0, T0 - 3 * 3600 - 200)   # a legacy Outpost: migrated + refunded at boot
+	save["factory"] = Factory.default_block()
+	Factory.add_starter(save["factory"])
+	save["factory"]["migrated"] = false
+	save["factory"]["t"] = T0 - 3 * 3600
 	save["last_seen"] = T0 - 3 * 3600
 	save["research"]["lvls"]["speed"] = 2
 	main.now_override = T0
@@ -105,49 +109,92 @@ func _initialize() -> void:
 	main._rebuild_ui()
 	await _shot("%s/04c_crate_done.png" % outdir)
 	main.crate_anim = {}
-	# outpost: fresh (just the Mill + Hall), then developed
+	# factory: fresh (starter line), armed ghost, developed, zoomed, panels
+	var FV = load("res://ui/FactoryView.gd")
 	main.set_tab("outpost")
-	await _shot("%s/05_outpost_new.png" % outdir)
-	main.op_arm = "mill"
-	main.mouse_pos = load("res://ui/OutpostView.gd").cell_rect(main, 4, 6).get_center()
-	await _shot("%s/05c_outpost_hover.png" % outdir)
+	Factory.simulate(s, 20.0)
+	await _shot("%s/05_factory_new.png" % outdir)
+	main.op_arm = "miner"
+	main.op_rot = 1
+	main.mouse_pos = FV.cell_rect(main, 52, 26).get_center()
+	main._rebuild_ui()
+	await _shot("%s/05c_factory_ghost.png" % outdir)
+	main.op_arm = "smelter"
+	main.op_rot = 0
+	main.mouse_pos = FV.cell_rect(main, 47, 22).get_center()
+	await _shot("%s/05c2_factory_ghost_bad.png" % outdir)
 	main.op_arm = ""
 	s["coins"] = 400000
-	for k in 3:
-		Outpost.unlock_plot(s, k, "coins")
 	var t: int = T0
-	for k in 10:
-		Bot.outpost_spend(s, t)
+	for k in 14:
+		Bot.factory_spend(s, t)
 		t += 3 * 3600
-		Outpost.tick(s, t)
-	for dc in [["dc_lamp", 0, 6], ["dc_tree", 5, 2], ["dc_bookshelf", 3, 2], ["dc_shrub", 5, 7], ["dc_banner", 0, 3]]:
-		Outpost.place_decor(s, String(dc[0]), int(dc[1]), int(dc[2]), 0)
+	Factory.research(s, "electronics")
+	Factory.research(s, "underground")
+	Factory.unlock_chunk(s, 7)
+	Factory.unlock_chunk(s, 10)
+	# a wire -> circuit assembler pair fed from a chest (shows recipes + inserters)
+	var src: String = String(Factory.place(s, "chest", 54, 21, 0)[0]["uid"])
+	Factory.ent(s, src)["inv"] = {"copper_plate": 30, "iron_plate": 20}
+	Factory.place(s, "inserter", 55, 21, 0)
+	var asm_a: String = String(Factory.place(s, "assembler", 56, 20, 0)[0]["uid"])
+	Factory.set_recipe(s, asm_a, "wire")
+	Factory.place(s, "pole", 55, 23, 0)
+	Factory.place(s, "windmill", 56, 23, 0)
+	Factory.place(s, "inserter", 57, 19, 3)
+	Factory.place(s, "chest", 57, 18, 0)
+	Factory.simulate(s, 45.0)
 	main.now_override = t
-	Outpost.tick(s, t + 7200)
-	main.now_override = t + 7200
+	Factory.settle(s, t)
 	s["coins"] = 52000
 	_quiet()
-	main.op_sel = ""
-	for uid in (s["outpost"]["buildings"] as Dictionary).keys():
-		if String((s["outpost"]["buildings"][uid] as Dictionary)["id"]) == "mill":
-			main.op_sel = String(uid)
+	main.fc_zoom = 34.0
+	main.fc_center = Vector2(47.0, 23.0)
+	main.op_sel = asm_a
 	main._rebuild_ui()
-	await _shot("%s/05b_outpost_dev.png" % outdir)
-	# corner toast (achievement / missions banner) over the Outpost map
-	main.toast_text = "Achievement: Outpost Builder  (+500 coins)"
+	await _shot("%s/05b_factory_dev.png" % outdir)
+	main.op_sel = ""
+	main.fc_zoom = 64.0
+	main.fc_center = Vector2(46.0, 21.0)
+	main.mouse_pos = FV.cell_rect(main, 46, 20).get_center()
+	main._rebuild_ui()
+	await _shot("%s/05g_factory_zoom_items.png" % outdir)
+	main.fc_zoom = 11.0
+	main.fc_center = Vector2(48.0, 32.0)
+	main.mouse_pos = Vector2(-1, -1)
+	main._rebuild_ui()
+	await _shot("%s/05h_factory_zoom_out.png" % outdir)
+	# corner toast over the factory
+	main.fc_zoom = 34.0
+	main.fc_center = Vector2(47.0, 23.0)
+	main.toast_text = "Land bought: found Iron Ore, Crystal"
 	main.toast_t = 30.0
 	main.queue_redraw()
-	await _shot("%s/05f_outpost_toast.png" % outdir, false)
+	await _shot("%s/05f_factory_toast.png" % outdir, false)
 	_quiet()
-	main.op_sel = "plot:3"
+	main.op_sel = Factory.uid_at(s, Vector2i(47, 23))
 	main._rebuild_ui()
-	await _shot("%s/05d_outpost_plot.png" % outdir)
+	await _shot("%s/05i_factory_relay.png" % outdir)
+	main.op_sel = Factory.uid_at(s, Vector2i(60, 18))
+	main._rebuild_ui()
+	await _shot("%s/05j_factory_research_hub.png" % outdir)
+	main.op_sel = "chunk:3"
+	main.fc_center = Vector2(56.0, 14.0)
+	main._rebuild_ui()
+	await _shot("%s/05d_factory_land.png" % outdir)
 	main.op_sel = ""
-	main.op_arm = "conduit"
-	main.mouse_pos = load("res://ui/OutpostView.gd").cell_rect(main, 7, 3).get_center()
+	main.fc_center = Vector2(47.0, 23.0)
+	main.op_arm = "belt"
+	main.fc_line = Vector2i(38, 25)
+	main.mouse_pos = FV.cell_rect(main, 44, 30).get_center()
 	main._rebuild_ui()
-	await _shot("%s/05e_outpost_conduit.png" % outdir)
+	await _shot("%s/05e_factory_belt_drag.png" % outdir)
+	main.fc_line = FV.NONE
 	main.op_arm = ""
+	main.mouse_pos = FV.cell_rect(main, 48, 19).get_center()
+	main._rebuild_ui()
+	await _shot("%s/05k_factory_tooltip.png" % outdir, false)
+	main.mouse_pos = Vector2(-1, -1)
 	# research / cards / missions
 	Labs.start(s, "dmg", main.now_override - 120)
 	_quiet()

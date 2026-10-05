@@ -4,7 +4,7 @@ extends RefCounted
 ## and START RUN. This file owns the nav, the Play tab (active Core, tier
 ## select, mode, Outpost / research / mission summaries) and the Research,
 ## Cards and Missions tabs; the other tabs live in CoreBay / CrateView /
-## OutpostView / ReforgeView. View only: buttons call pure modules and hand
+## FactoryView / ReforgeView. View only: buttons call pure modules and hand
 ## the returned events to Main.meta_act().
 
 const TowerState := preload("res://TowerState.gd")
@@ -28,7 +28,8 @@ const TuneRef := preload("res://Tune.gd")
 const Kit := preload("res://ui/Kit.gd")
 const CoreBay := preload("res://ui/CoreBay.gd")
 const CrateView := preload("res://ui/CrateView.gd")
-const OutpostView := preload("res://ui/OutpostView.gd")
+const FactoryView := preload("res://ui/FactoryView.gd")
+const Factory := preload("res://Factory.gd")
 const ReforgeView := preload("res://ui/ReforgeView.gd")
 
 ## [id, label, hotkey action, icon]
@@ -55,8 +56,7 @@ static func badge(m, id: String) -> bool:
 		"crates":
 			return Crates.tokens(s) > 0 or Crates.can_pay(s, "field", "coins") or Crates.can_pay(s, "supply", "keys")
 		"outpost":
-			var p: Dictionary = Outpost.pending(s, t)
-			return float(p["coins"]) >= 1.0 or float(p["scrap"]) >= 1.0 or float(p["keys"]) >= 1.0
+			return FactoryView._bank_total(s) >= 1.0
 		"missions":
 			return Missions.has_claimable(s) or Missions.streak_available(s, t)
 		"reforge":
@@ -103,7 +103,7 @@ static func build(m) -> void:
 	Kit.btn(m, "Modes", Rect2(sr.position.x - 140, ny, 130, nh), func() -> void: m.set_overlay("modes"), "Pick Normal or Endless and stack challenge modifiers for bonus coins", true, Kit.MAG, "MODES", "icon_mod", 15)
 	Kit.btn(m, "PLAY  T%d" % m.view_tier, sr, func() -> void: m.start_run(), "Start a run on Tier %d with the %s Core" % [m.view_tier, String(CoreDB.get_def(Cores.active(m.save))["name"])], Tiers.is_unlocked(m.save, m.view_tier), Kit.RUST, "DSTART", "", 20)
 	if home:
-		OutpostView.build(m)
+		FactoryView.build(m)
 		return
 	match String(m.tab):
 		"bay":
@@ -122,6 +122,9 @@ static func build(m) -> void:
 
 static func draw(m) -> void:
 	var cr: Rect2 = m.content_rect()
+	var home0: bool = is_home(String(m.tab))
+	if home0:
+		FactoryView.draw(m, cr)   # first: the nav row below paints over any map overdraw
 	m.draw_rect(Rect2(0, m.TOP_H, m.vw, m.NAV_H), Color("1a1f26"))
 	m.draw_line(Vector2(0, m.TOP_H + m.NAV_H), Vector2(m.vw, m.TOP_H + m.NAV_H), Kit.EDGE, 2.0)
 	var home: bool = is_home(String(m.tab))
@@ -138,10 +141,9 @@ static func draw(m) -> void:
 		Kit.icon(m, String(sc[1]), Rect2(cx - 120, m.TOP_H + 12, 34, 34))
 		Kit.t(m, String(sc[0]).to_upper(), Vector2(cx - 78, m.TOP_H + 38), 22, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, 300.0)
 	if home:
-		OutpostView.draw(m, cr)
 		for id in ["bay", "crates", "research", "cards"]:
-			var lr: Rect2 = OutpostView.landmark_rect(m, String(id))
-			if m.overlay == "" and m.offline_offer.is_empty() and badge(m, String(id)) and OutpostView.map_rect(m).has_point(lr.position + Vector2(lr.size.x - 12, 12)):
+			var lr: Rect2 = FactoryView.landmark_rect(m, String(id))
+			if m.overlay == "" and m.offline_offer.is_empty() and badge(m, String(id)) and FactoryView.map_rect(m).has_point(lr.position + Vector2(lr.size.x - 12, 12)):
 				m.draw_circle(lr.position + Vector2(lr.size.x - 12, 12), 8.0, Kit.ENEMY)
 	else:
 		match String(m.tab):
@@ -180,8 +182,24 @@ static func _queue_rect(m, k: int) -> Rect2:
 	return Rect2(cr.position.x + 20.0 + float(k) * (w + 14.0), cr.position.y + 62.0, w, 110.0)
 
 
+## WP3: factory technology lives in the Research Lab too (a row under the projects).
+static func _tech_rect(m, k: int) -> Rect2:
+	var cr: Rect2 = m.content_rect()
+	var cols: int = 5
+	var w: float = (cr.size.x - 40.0 - float(cols - 1) * 10.0) / float(cols)
+	var top: float = _lab_rect(m, LabDB.IDS.size() - 1).end.y + 52.0
+	return Rect2(cr.position.x + 20.0 + float(k % cols) * (w + 10.0), top + float(k / cols) * 52.0, w, 46.0)
+
+
 static func _build_research(m) -> void:
 	var s: Dictionary = m.save
+	for k in Factory.DB.TECH_IDS.size():
+		var tid: String = Factory.DB.TECH_IDS[k]
+		var td: Dictionary = Factory.DB.TECH[tid]
+		var have: bool = Factory.has_tech(s, tid)
+		var label: String = ("%s  (done)" % String(td["name"])) if have else ("%s  %s%s" % [String(td["name"]), Kit.fmt(float(td["coins"])), (" + %d data" % int(td["data"])) if int(td["data"]) > 0 else ""])
+		var tip: String = "%s\n%s%s" % [String(td["name"]), String(td["desc"]), ("\nRequires %s" % String((Factory.DB.TECH[String(td["req"])] as Dictionary)["name"])) if String(td["req"]) != "" else ""]
+		Kit.btn(m, label, _tech_rect(m, k), func() -> void: m.meta_act(Factory.research(m.save, tid)), tip, Factory.tech_can(s, tid), Kit.GREEN if have else Kit.LAB, "FTECH " + tid, "", 14)
 	var t: int = m.now()
 	var run: Array = Labs.running(s)
 	for k in run.size():
@@ -200,7 +218,7 @@ static func _draw_research(m, cr: Rect2) -> void:
 	var t: int = m.now()
 	var run: Array = Labs.running(s)
 	Kit.t(m, "RESEARCH HALL", Vector2(cr.position.x + 20, cr.position.y + 40), 26, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, 500.0)
-	Kit.t(m, "Queues follow the Research Hall's level in the Outpost (1 / 2 / 3 at Hall L1 / L4 / L8). Research runs in real time.", Vector2(cr.position.x + 300, cr.position.y + 38), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, cr.size.x - 320)
+	Kit.t(m, "Queues follow the Research Lab's level (upgrade it at the factory's Core Relay: 1 / 2 / 3 queues at Lv1 / 4 / 8).", Vector2(cr.position.x + 300, cr.position.y + 38), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, cr.size.x - 320)
 	for k in Labs.MAX_SLOTS:
 		var r: Rect2 = _queue_rect(m, k)
 		if k < run.size():
@@ -221,6 +239,8 @@ static func _draw_research(m, cr: Rect2) -> void:
 			Kit.icon(m, "icon_lock", Rect2(r.position.x + 16, r.get_center().y - 18, 36, 36), Color(1, 1, 1, 0.5))
 			Kit.t(m, "Research Hall L%d opens this queue" % (4 if k == 1 else 8), Vector2(r.position.x + 64, r.get_center().y + 6), 17, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 70)
 	Kit.head(m, "PROJECTS", Vector2(cr.position.x + 20, cr.position.y + 202), cr.size.x - 40)
+	var tr0: Rect2 = _tech_rect(m, 0)
+	Kit.head(m, "FACTORY TECHNOLOGY  ·  %d research data (Data Cards at the Core Relay)" % int(Factory._f(s).get("data", 0)), Vector2(cr.position.x + 20, tr0.position.y - 14), cr.size.x - 40, Kit.LAB)
 	for k in LabDB.IDS.size():
 		var id2: String = LabDB.IDS[k]
 		var d2: Dictionary = LabDB.DEFS[id2]

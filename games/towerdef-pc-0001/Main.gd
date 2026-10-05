@@ -42,7 +42,8 @@ const Kit := preload("res://ui/Kit.gd")
 const Desktop := preload("res://ui/Desktop.gd")
 const Battle := preload("res://ui/Battle.gd")
 const Hub := preload("res://ui/Hub.gd")
-const OutpostView := preload("res://ui/OutpostView.gd")
+const FactoryView := preload("res://ui/FactoryView.gd")
+const Factory := preload("res://Factory.gd")
 const CoreBay := preload("res://ui/CoreBay.gd")
 const CrateView := preload("res://ui/CrateView.gd")
 
@@ -150,14 +151,20 @@ var op_arm: String = ""              # building / decor id armed for placement
 var op_rot: int = 0
 var op_sel: String = ""              # selected uid ("relay", "<uid>", "d<uid>")
 var op_moving: bool = false
-var op_cat: String = "prod"
+var op_cat: String = "logistics"
 var op_pan: bool = false
 var op_pan_from: Vector2 = Vector2.ZERO
 var op_pan_moved: bool = false
 var op_drag: bool = false            # palette -> map drag in progress
 var op_msg: String = ""
 var op_bp_text: String = ""
-var op_focus: Vector2i = Vector2i(4, 4)   # keyboard / pad map cursor
+var op_focus: Vector2i = Vector2i(47, 26)   # keyboard / pad map cursor
+# Factory camera / build state (FactoryView)
+var fc_center: Vector2 = Vector2(48.0, 24.0)   # camera centre (cells)
+var fc_zoom: float = 34.0                      # px per cell
+var fc_line: Vector2i = Vector2i(-9999, -9999) # belt drag start (NONE = not dragging)
+var fc_pan_left: bool = false
+var fc_save_t: float = 0.0
 # Reforge
 var rf_confirm: int = 0              # two-step confirm
 var credits_scroll: float = 0.0
@@ -306,18 +313,23 @@ func slot_at(pos: Vector2) -> int:
 ## -> "while you were away" modal (the Outpost's stored production).
 func boot(raw: Dictionary, t: int) -> void:
 	save = BaseMeta.normalize(raw)
-	var ev: Array = Outpost.tick(save, t)
+	var ev: Array = []
+	# WP3: the plot/generator Outpost becomes the Factory (refunds, once)
+	var ref: Dictionary = Factory.migrate_outpost(save)
+	if int(ref["coins"]) + int(ref["scrap"]) + int(ref["keys"]) > 0:
+		ev.append({"t": "factory_migrated", "coins": int(ref["coins"]), "scrap": int(ref["scrap"]), "keys": int(ref["keys"])})
 	ev.append_array(Labs.claim(save, t))
 	ev.append_array(Missions.roll(save, t))
-	var off: Dictionary = Outpost.away_report(save, t)
+	var off: Dictionary = Factory.away_report(save, t)
 	var any: bool = false
-	for k in ["coins", "scrap", "keys"]:
+	for k in ["coins", "scrap", "keys", "data"]:
 		if int(off[k]) > 0:
 			any = true
-	if any:
+	if any and int(off["minutes"]) * 60 >= TuneRef.int_of("offline_min", 300):
 		offline_offer = off
 	else:
 		offline_offer = {}
+		ev.append_array(Factory.claim_bank(save))
 		save["last_seen"] = t
 	view_tier = int(save["tier"])
 	bay_core = Cores.active(save)
@@ -365,6 +377,7 @@ func start_run(seed_override: int = 0) -> void:
 	if String(opts.get("mode", "normal")) == "endless" and not BaseMeta.endless_unlocked(save):
 		opts["mode"] = "normal"
 	ach_run = Achievements.new_run()
+	Factory.settle(save, now())   # stamp the factory clock: the run's time is banked on return
 	_handle(S.setup(sd, save, now(), opts))
 	screen = "run"
 	sel = -1
@@ -386,6 +399,12 @@ func go_base() -> void:
 	_clear_fx()
 	view_tier = int(save["tier"])
 	var lev: Array = Labs.claim(save, now())
+	# the factory kept producing during the run (measured rate, storage cap)
+	Factory.settle(save, now())
+	var fev: Array = Factory.claim_bank(save)
+	for e in fev:
+		(e as Dictionary)["t"] = "factory_run"
+	lev.append_array(fev)
 	_queue_toasts(lev)
 	_meta_sfx(lev)
 	_rebuild_ui()
@@ -500,7 +519,8 @@ func meta_act(ev: Array) -> void:
 
 
 func claim_offline() -> void:
-	var ev: Array = Outpost.claim_away(save, now())
+	var ev: Array = Factory.claim_bank(save)
+	save["last_seen"] = now()
 	offline_offer = {}
 	meta_act(ev)
 
@@ -716,6 +736,23 @@ func ev_text(e: Dictionary) -> String:
 			return "Day %d reward: +%d coins" % [int(e["day"]), int(e["coins"])]
 		"offline":
 			return "Collected the Outpost: +%s coins" % fmt_num(int(e["coins"]))
+		"factory_bank", "factory_run":
+			var parts: Array = []
+			for c in ["coins", "scrap", "keys", "data"]:
+				if int(e.get(c, 0)) > 0:
+					parts.append("+%s %s" % [fmt_num(int(e[c])), c])
+			return ("Factory output during the run: " if String(e["t"]) == "factory_run" else "Factory collected: ") + ", ".join(parts)
+		"factory_migrated":
+			return "The Outpost became a Factory: buildings refunded +%s coins" % fmt_num(int(e["coins"]))
+		"factory_chunk":
+			var dn: Array = []
+			for k in (e["deposits"] as Dictionary).keys():
+				dn.append(Factory.DB.item_name(String(k)))
+			return "Land bought%s" % ((": found " + ", ".join(dn)) if not dn.is_empty() else "")
+		"factory_tech":
+			return "Researched: %s" % String((Factory.DB.TECH[String(e["id"])] as Dictionary)["name"])
+		"factory_fac":
+			return "%s -> Lv%d" % [String((Factory.DB.FACILITIES[String(e["id"])] as Dictionary)["name"]), int(e["lvl"])]
 		"tier_unlocked":
 			return "Tier %d unlocked! +%d coins" % [int(e["tier"]), int(e.get("coins", 0))]
 		"missions_rolled":
@@ -1023,7 +1060,7 @@ func _input(event: InputEvent) -> void:
 			var dlt: Vector2 = (event as InputEventMouseMotion).relative
 			if mouse_pos.distance_to(op_pan_from) > 6.0:
 				op_pan_moved = true
-			op_cam += dlt
+			FactoryView.pan_by(self, dlt)
 		return
 	if not (event is InputEventMouseButton):
 		return
@@ -1033,11 +1070,14 @@ func _input(event: InputEvent) -> void:
 		if drag_card >= 0 or drag_part != "" or op_drag:
 			_end_drag(mb.position)
 			get_viewport().set_input_as_handled()
+		elif fc_line != FactoryView.NONE or fc_pan_left:
+			FactoryView.release(self, mb.position)
+			get_viewport().set_input_as_handled()
 		return
 	if overlay != "" or screen == "menu":
 		return
-	if screen == "base" and Hub.is_home(tab) and offline_offer.is_empty() and OutpostView.map_rect(self).has_point(mb.position):
-		if OutpostView.mouse(self, mb):
+	if screen == "base" and Hub.is_home(tab) and offline_offer.is_empty() and FactoryView.map_rect(self).has_point(mb.position):
+		if FactoryView.mouse(self, mb):
 			get_viewport().set_input_as_handled()
 		return
 	var in_field: bool = screen == "run" and field_rect().has_point(mb.position)
@@ -1157,8 +1197,8 @@ func _end_drag(pos: Vector2) -> void:
 				meta_act(Parts.equip(save, bay_core, k, part))
 				return
 	elif opd and screen == "base" and Hub.is_home(tab):
-		if moved and OutpostView.map_rect(self).has_point(pos):
-			OutpostView.place_at(self, OutpostView.cell_at(self, pos))
+		if moved and FactoryView.map_rect(self).has_point(pos):
+			FactoryView.place_at(self, FactoryView.cell_at(self, pos))
 			return
 	_rebuild_ui()
 
@@ -1184,12 +1224,19 @@ func _process(delta: float) -> void:
 			ui_t = 0.0
 			_rebuild_ui()   # refresh affordability (buttons fire on PRESS, so safe)
 	elif screen == "base" and overlay == "" and offline_offer.is_empty():
+		if Hub.is_home(tab):
+			# WP3: the factory runs live (fixed steps) while its screen is open
+			Factory.live(save, delta, now())
+			FactoryView.pan_keys(self, delta)
+			fc_save_t += delta
+			if fc_save_t >= 10.0:
+				fc_save_t = 0.0
+				_save()
 		poll_t += delta
 		if poll_t >= 1.0:
 			poll_t = 0.0
 			var t: int = now()
-			var ev: Array = Outpost.tick(save, t)
-			ev.append_array(Labs.claim(save, t))
+			var ev: Array = Labs.claim(save, t)
 			ev.append_array(Missions.roll(save, t))
 			if not ev.is_empty():
 				meta_act(ev)

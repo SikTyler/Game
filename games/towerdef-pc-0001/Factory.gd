@@ -50,12 +50,11 @@ static func default_block() -> Dictionary:
 ## A playable starter: an iron miner belted into the Relay (ore sells), with
 ## a Wind Turbine. New saves and migrated Outposts get it (free).
 static func add_starter(f: Dictionary) -> void:
-	_add(f, "miner", 41, 19, 0)            # iron patch 40..44 x 18..21; output (43, 19)
-	for x in range(43, 46):
-		_add(f, "belt", x, 19, 0)
-	_add(f, "belt", 46, 19, 1)
-	_add(f, "belt", 46, 20, 1)
-	_add(f, "belt", 46, 21, 1)             # feeds the Relay at (46, 22)
+	_add(f, "miner", 40, 18, 0)            # iron patch 40..44 x 18..21; output (42, 18)
+	for x in range(42, 46):
+		_add(f, "belt", x, 18, 0)
+	for y in range(18, 22):
+		_add(f, "belt", 46, y, 1)          # feeds the Relay at (46, 22)
 	_add(f, "windmill", 43, 21, 0)
 	f["rev"] = _layout_rev(f)
 
@@ -739,14 +738,31 @@ static func _sell(s: Dictionary, f: Dictionary, item: String) -> void:
 	var m: Dictionary = f["meter"]
 	(m["items"] as Dictionary)[item] = int((m["items"] as Dictionary).get(item, 0)) + 1
 	for cur in v.keys():
-		var amt: float = float(v[cur]) * value_mult(s, String(cur))
-		(m["got"] as Dictionary)[cur] = float((m["got"] as Dictionary).get(cur, 0.0)) + amt
-		_pay(s, f, String(cur), amt)
+		# the meter counts raw value; multipliers apply at payout (and to the
+		# away estimate), so buying a multiplier never stales the measured rate
+		(m["got"] as Dictionary)[cur] = float((m["got"] as Dictionary).get(cur, 0.0)) + float(v[cur])
+		_pay(s, f, String(cur), float(v[cur]) * value_mult(s, String(cur)))
 
 
-## Relay payout multiplier per currency (tune knob; coins scale with the
-## highest tier reached like the old Coin Mill: x(1 + 0.8 x (tier - 1))).
+static func _lab(s: Dictionary, id: String) -> int:
+	var rs: Variant = s.get("research", null)
+	if rs is Dictionary and (rs as Dictionary).get("lvls", null) is Dictionary:
+		return int(((rs as Dictionary)["lvls"] as Dictionary).get(id, 0))
+	return 0
+
+
+static func _rf_node(s: Dictionary, id: String) -> int:
+	var rf: Variant = s.get("reforge", null)
+	if rf is Dictionary and (rf as Dictionary).get("nodes", null) is Dictionary:
+		return int(((rf as Dictionary)["nodes"] as Dictionary).get(id, 0))
+	return 0
+
+
+## Relay payout multiplier per currency: tune knob x Logistics Tech (+5%/L)
+## x Reforge outpost_p (+8%/L); coins also scale with the highest tier
+## reached like the old Coin Mill: x(1 + 0.8 x (tier - 1)).
 static func value_mult(s: Dictionary, cur: String) -> float:
+	var g: float = (1.0 + 0.05 * float(_lab(s, "offrate"))) * (1.0 + 0.08 * float(_rf_node(s, "outpost_p")))
 	if cur == "coins":
 		var hi: int = 1
 		var bw: Variant = s.get("best_wave_by_tier", {})
@@ -754,8 +770,17 @@ static func value_mult(s: Dictionary, cur: String) -> float:
 			for k in (bw as Dictionary).keys():
 				if int((bw as Dictionary)[k]) > 0 or int(String(k)) == 1:
 					hi = maxi(hi, int(String(k)))
-		return TuneRef.num("factory_coin", 1.0) * (1.0 + OutpostDB.MILL_TIER * float(hi - 1))
-	return TuneRef.num("factory_" + cur, 1.0)
+		return g * TuneRef.num("factory_coin", 1.0) * (1.0 + OutpostDB.MILL_TIER * float(hi - 1))
+	return g * TuneRef.num("factory_" + cur, 1.0)
+
+
+## The measured rate with today's multipliers (what the player earns / s).
+static func rate_now(s: Dictionary) -> Dictionary:
+	var r: Dictionary = ensure_rate(s)
+	var out: Dictionary = {}
+	for cur in DB.CURRENCIES:
+		out[cur] = float(r.get(cur, 0.0)) * value_mult(s, cur)
+	return out
 
 
 ## Whole units go to the save; fractions carry in factory.frac.
@@ -1042,7 +1067,8 @@ static func storage_slots(s: Dictionary) -> int:
 
 ## How long the factory keeps producing unattended (seconds).
 static func away_cap_s(s: Dictionary) -> float:
-	return minf(DB.AWAY_MAX_H, DB.AWAY_BASE_H + DB.AWAY_PER_SLOT_H * float(storage_slots(s))) * 3600.0
+	var h: float = minf(DB.AWAY_MAX_H, DB.AWAY_BASE_H + DB.AWAY_PER_SLOT_H * float(storage_slots(s)))
+	return h * (1.0 + 0.04 * float(_lab(s, "offcap"))) * 3600.0
 
 
 ## Bank the time since factory.t at the measured rate, capped by storage.
@@ -1052,7 +1078,7 @@ static func settle(s: Dictionary, now: int) -> void:
 	f["t"] = now
 	if last <= 0 or now <= last:
 		return
-	var rate: Dictionary = ensure_rate(s)
+	var rate: Dictionary = rate_now(s)
 	var el: float = float(now - last)
 	var cap: float = away_cap_s(s)
 	var bank: Dictionary = f["bank"]
@@ -1063,7 +1089,7 @@ static func settle(s: Dictionary, now: int) -> void:
 
 ## Pure preview of what settle() would bank (no mutation, for estimates/tests).
 static func away_estimate(s: Dictionary, seconds: float) -> Dictionary:
-	var rate: Dictionary = ensure_rate(s)
+	var rate: Dictionary = rate_now(s)
 	var out: Dictionary = {}
 	var cap: float = away_cap_s(s)
 	for cur in DB.CURRENCIES:
