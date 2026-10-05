@@ -119,7 +119,7 @@ func _initialize() -> void:
 	var m: Dictionary = combine(R)
 	m["runtime_s"] = snappedf(float(Time.get_ticks_msec() - t0) / 1000.0, 0.1)
 	print("PLAYTEST METRICS " + JSON.stringify(m))
-	for key in GATES + RD_GATES:
+	for key in GATES + RD_GATES + MASS_GATES:
 		if not bool(m.get(key, false)):
 			fail_count += 1
 			print("PLAYTEST FAIL: " + key)
@@ -141,7 +141,7 @@ func _initialize() -> void:
 # `workers` at a time, and merges the results. Phase-B jobs replay the day-7 /
 # day-20 snapshots the "main" job writes (var_to_bytes: exact). `-- serial`
 # runs every job in-process (same results; for debugging).
-const JOBS_A: Array = ["main", "forge:balanced", "forge:eco", "forge:single", "forge:damage", "strat", "seed:0", "seed:1", "pol", "fresh"]
+const JOBS_A: Array = ["main", "forge:balanced", "forge:eco", "forge:single", "forge:damage", "strat", "seed:0", "seed:1", "pol", "fresh", "mass"]
 const JOBS_B: Array = ["perks", "mods", "mono", "specs", "sets"]
 
 
@@ -181,7 +181,294 @@ static func run_job(job: String, seed0: int, dir: String) -> Dictionary:
 			return forge_campaign(seed0, p[1])
 		"fresh":
 			return job_fresh(seed0)
+		"mass":
+			return job_mass(seed0)
 	return {}
+
+
+# ======================================================================
+# MASS_HORDE §D8 invariants H1-H12 (replace the split-model gates; owner
+# FEEDBACK_3). Every probe here runs the shipped ruleset at 1:1 (no harness
+# LOD): designed bodies, mass waves, legacy split knob off.
+#   H1 body counts 100s -> 1,000s -> 10,000s   H2 peak alive >= 10k, queue held
+#   H3 no split body (share 1, knob 1)          H4 designed HP x growth
+#   H5 full-clear wave pays pool x 1.3 (+-5%)   H6 drops <= cap, >= 1 per 2 waves
+#   H7 first-run goal held on day 1 (campaign)  H8 every weapon kills masses
+#   H9 fluid sanity (selftest MASS-HORDE world) H10 same seed -> same waves
+#   H11 perf logged (not gated)                 H12 = no_death_spiral (kept)
+# ======================================================================
+const MASS_GATES: Array = ["h1_wave_bodies", "h2_peak_10k_held", "h3_no_split", "h4_designed_hp", "h5_pool_cash", "h6_drops", "h7_first_goal_day1", "h8_weapons_matter", "h10_mass_determinism"]
+const EnemyDB := preload("res://data/EnemyDB.gd")
+const H8_WEAPONS: Array = ["gun", "mortar", "tesla", "flak", "railgun", "frost"]
+
+
+static func _mass_S(seed_value: int, save: Dictionary = {}):
+	var S = TowerState.new()
+	S.mass = true
+	S.setup(seed_value, save if not save.is_empty() else BaseMeta.default_save())
+	return S
+
+
+static func job_mass(seed0: int) -> Dictionary:
+	var out: Dictionary = {}
+	# ---- H1: the body-count curve, and what wave 1 actually spawns
+	var S1 = _mass_S(seed0)
+	var w1_spawned: int = 0
+	var guard: int = 0
+	while S1.wave == 1 and guard < 1000:
+		guard += 1
+		S1.tick(DT)
+	w1_spawned = S1.mass_spawned
+	out["h1"] = {"w1_planned": S1.mass_bodies(1), "w1_spawned": w1_spawned, "w25": S1.mass_bodies(25), "w45": S1.mass_bodies(45), "w50": S1.mass_bodies(50),
+		"t3_w1": 0, "t3_w30": 0}
+	var S3 = _mass_S(seed0)
+	S3.tier = 3
+	(out["h1"] as Dictionary)["t3_w1"] = S3.mass_bodies(1)
+	(out["h1"] as Dictionary)["t3_w30"] = S3.mass_bodies(30)
+	out["h1_ok"] = w1_spawned >= 100 and S1.mass_bodies(25) >= 1000 and S1.mass_bodies(45) >= 10000
+	# ---- H2 / H3 / H4 / H11: a forced T1 wave 50 (19,800 bodies) with no
+	# defence: the alive count climbs to the 16,384 cap, the queue holds, no
+	# planned body is dropped, every body is a designed one.
+	var S2 = _mass_S(seed0 + 1)
+	S2.max_hp_mult = 1.0e9
+	S2.recompute()
+	S2.hp = float(S2.stats["max_hp"])
+	S2.plan = []
+	S2.plan_idx = 0
+	S2.wave = 50
+	S2.wave_t = 0.0
+	var peak: int = 0
+	var ms_peak: float = 0.0
+	var t0: int = Time.get_ticks_usec()
+	var ticks: int = 0
+	for i in int(24.0 / DT):
+		S2.stats["weapons"] = []
+		var u0: int = Time.get_ticks_usec()
+		S2.tick(DT)
+		var u1: int = Time.get_ticks_usec()
+		ticks += 1
+		if S2.en.count() >= peak:
+			peak = S2.en.count()
+			ms_peak = float(u1 - u0) / 1000.0 / maxf(1.0, DT / TowerState.SUBSTEP)
+	var planned: int = (S2.plan as Array).size()
+	var a50: Dictionary = S2.wave_acct.get(50, {})
+	var queued: int = planned - S2.plan_idx
+	var spawned50: int = int(a50.get("spawned", 0))
+	var share_ok: bool = TuneRef.horde_mult() == 1 and S2.horde_mult == 1
+	var hp_ok: bool = S2.en.count() > 0
+	var n_chk: int = 0
+	for sl in S2.en.order:
+		if S2.en.share[sl] != 1.0:
+			share_ok = false
+		var k: String = S2.en.kind[sl]
+		if n_chk < 2000 and not S2.en.is_marked(sl) and not ["boss", "elite", "courier"].has(k):
+			n_chk += 1
+			var want: float = float(EnemyDB.mass_def(k)["hp"]) * S2.mass_hp_scale(k, 50)
+			if absf(S2.en.max_hp[sl] - want) > 1e-6 * want:
+				hp_ok = false
+	out["h2"] = {"planned": planned, "spawned": spawned50, "queued": queued, "peak_alive": peak, "cap": TowerState.MASS_CAP,
+		"ms_per_substep_at_peak": snappedf(ms_peak, 0.01), "wall_s": snappedf(float(Time.get_ticks_usec() - t0) / 1.0e6, 0.1)}
+	out["h2_ok"] = peak >= 10000 and peak <= TowerState.MASS_CAP and spawned50 + queued == planned and queued > 0
+	out["h3_ok"] = share_ok
+	out["h4_ok"] = hp_ok and n_chk > 100
+	say("MASS H2 forced wave 50: " + JSON.stringify(out["h2"]))
+	# ---- H5: full-clear waves pay pool x 1.3 (kill shares + clear bonus)
+	var h5: Dictionary = {}
+	var h5_ok: bool = true
+	for w in [1, 9, 25]:   # non-boss waves (a boss is spawned by the wave advance, not the forced plan)
+		var SE = _mass_S(seed0 + 2)
+		SE.max_hp_mult = 1.0e9
+		SE.recompute()
+		SE.hp = float(SE.stats["max_hp"])
+		SE.stats["weapons"] = []
+		if w > 1:
+			SE.plan = []
+			SE.plan_idx = 0
+			SE.wave = w
+			SE.wave_t = 0.0
+			SE.recompute()
+			SE.stats["weapons"] = []
+		var kc: float = 0.0
+		var cc: float = -1.0
+		guard = 0
+		while cc < 0.0 and guard < 2000:
+			guard += 1
+			for e in SE.tick(TowerState.SUBSTEP):
+				var ed: Dictionary = e
+				if String(ed["t"]) == "kills":
+					kc += float(ed["cash"])
+				elif String(ed["t"]) == "wave_clear" and int(ed["wave"]) == w:
+					cc = float(ed["cash"])
+			SE.stats["weapons"] = []
+			for sl in SE.en.order:
+				if SE.en.hp[sl] > 0.0 and int(SE.en.wv[sl]) == w:
+					SE.en.hp[sl] = 0.0
+					SE.en.kill(sl)
+		var want5: float = SE.mass_cash_pool(w) * 1.3 * PowerModel.cash_index(w, 1) * SE.run_cash_mult() * float(SE.stats["kill_cash"])
+		var got5: float = kc + maxf(0.0, cc)
+		h5[str(w)] = {"want": snappedf(want5, 0.1), "got": snappedf(got5, 0.1), "bodies": SE.mass_bodies(w)}
+		h5_ok = h5_ok and cc >= 0.0 and absf(got5 - want5) <= 0.05 * want5
+	out["h5"] = h5
+	out["h5_ok"] = h5_ok and float((h5["25"] as Dictionary)["want"]) / float((h5["1"] as Dictionary)["want"]) < float(S1.mass_bodies(25)) / float(S1.mass_bodies(1)) * PowerModel.cash_index(25, 1)
+	# ---- H6 + H10: a fresh balanced bot run (x3, same seed): drops per wave
+	# within the cap and >= 1 per 2 waves; per-wave kills / leaks / cash
+	# bit-identical across the three runs.
+	var fps: Array = []
+	var drops_w: Dictionary = {}
+	var waves_run: int = 0
+	for rep in 3:
+		var SR = _mass_S(seed0 + 3)
+		var fp: Array = []
+		var acc: float = 0.0
+		var lw: int = 1
+		var dw: Dictionary = {}
+		guard = 0
+		while not SR.over and SR.wave <= 14 and guard < 100000:
+			guard += 1
+			var ev: Array = SR.tick(DT)
+			acc += DT
+			for e in ev:
+				var ed2: Dictionary = e
+				if String(ed2["t"]) == "loot_drop":
+					var dwv: int = int(ed2.get("wave", SR.wave))
+					dw[dwv] = int(dw.get(dwv, 0)) + 1
+			if SR.wave != lw:
+				fp.append([lw, SR.kills, SR.mass_leaked, snappedf(SR.cash_earned, 0.000001)])
+				lw = SR.wave
+			if acc >= 0.5:
+				acc = 0.0
+				bot_step(SR, "balanced")
+		fps.append(fp)
+		drops_w = dw
+		waves_run = lw
+	var cap6: int = TuneRef.int_of("mass_drop_cap", 6)
+	var dmax: int = 0
+	var dtot: int = 0
+	for k in drops_w.keys():
+		dmax = maxi(dmax, int(drops_w[k]))
+		dtot += int(drops_w[k])
+	out["h6"] = {"drops_by_wave": drops_w, "max_per_wave": dmax, "cap": cap6, "total": dtot, "waves": waves_run}
+	out["h6_ok"] = dmax <= cap6 + 0 and dtot * 2 >= waves_run - 1
+	out["h10"] = {"waves": (fps[0] as Array).size(), "fp_last": (fps[0] as Array).back() if not (fps[0] as Array).is_empty() else []}
+	out["h10_ok"] = not (fps[0] as Array).is_empty() and fps[0] == fps[1] and fps[1] == fps[2]
+	# ---- H8: each weapon alone vs a dense mite field at wave 10
+	var h8: Dictionary = {}
+	for lv in [1, 5]:
+		var row: Dictionary = {}
+		for wk in H8_WEAPONS:
+			row[wk] = snappedf(_weapon_kps(String(wk), lv, seed0), 0.01)
+		h8["lv%d" % lv] = row
+	var b1: float = 0.0
+	var b5: float = 0.0
+	for wk in H8_WEAPONS:
+		b1 = maxf(b1, float((h8["lv1"] as Dictionary)[wk]))
+		b5 = maxf(b5, float((h8["lv5"] as Dictionary)[wk]))
+	# H8 (§D4, re-aimed and documented in MASS_HORDE §Content): the Cryo Spire
+	# is the force multiplier (D4: "5-20 kills/s directly"), so instead of a
+	# kill share it must lift a Gun's kills by >= 10% (Brittle / shatter);
+	# the Railgun's Lv5 exemption needs its elite/boss single-target DPS to lead.
+	var ok8: bool = b1 > 0.0
+	for wk in H8_WEAPONS:
+		if String(wk) == "frost":
+			continue
+		ok8 = ok8 and float((h8["lv1"] as Dictionary)[wk]) >= 0.25 * b1
+		if String(wk) != "railgun":
+			ok8 = ok8 and float((h8["lv5"] as Dictionary)[wk]) >= 0.15 * b5
+	var gf: float = _weapon_kps("gun+frost", 1, seed0)
+	h8["gun_plus_frost_lv1"] = snappedf(gf, 0.01)
+	ok8 = ok8 and gf >= 1.10 * float((h8["lv1"] as Dictionary)["gun"])
+	var bd: Dictionary = _boss_dps_lv5(seed0)
+	h8["boss_dps_lv5"] = bd
+	var rail_lead: bool = true
+	for wk in bd.keys():
+		if String(wk) != "railgun" and float(bd[wk]) >= float(bd["railgun"]):
+			rail_lead = false
+	ok8 = ok8 and (rail_lead or float((h8["lv5"] as Dictionary)["railgun"]) >= 0.15 * b5)
+	out["h8"] = h8
+	out["h8_ok"] = ok8
+	say("MASS H1 %s | H5 %s | H6 %s | H8 %s | H10 %s" % [JSON.stringify(out["h1"]), JSON.stringify(h5), JSON.stringify(out["h6"]), JSON.stringify(h8), JSON.stringify(out["h10"])])
+	return out
+
+
+## Kills per second of one weapon (alone, level `lv`, wave 10) against a
+## dense, replenished swarmling field (hex-packed 10 px apart, 150 px out).
+static func _weapon_kps(kinds_s: String, lv: int, seed0: int) -> float:
+	var S = _mass_S(seed0 + 9)
+	S.spawn_hold = true
+	var kinds: PackedStringArray = kinds_s.split("+")
+	var si: int = TowerState.CORE_SLOT - TowerState.SIDE * (2 if kinds[0] == "railgun" else 1)
+	S.slots[si] = {"id": kinds[0], "perm": 0, "run": lv}
+	S.unlocked[si] = true
+	if kinds.size() > 1:
+		S.slots[si - 1] = {"id": kinds[1], "perm": 0, "run": lv}
+		S.unlocked[si - 1] = true
+	S.wave = 10
+	S.recompute()
+	var keep: Array = []
+	for w in S.stats["weapons"]:
+		if kinds.has(String((w as Dictionary)["kind"])):
+			keep.append(w)
+	S.stats["weapons"] = keep
+	var from: Vector2 = TowerState.slot_pos(si)
+	# the field sits beyond the Mortar's minimum range and inside every range
+	var c: Vector2 = from + Vector2(0, -180)
+	var pts: Array = []
+	var row: int = 0
+	var y: float = -90.0
+	while y <= 90.0:
+		var x: float = -90.0 + (5.0 if row % 2 == 1 else 0.0)
+		while x <= 90.0:
+			if Vector2(x, y).length() <= 90.0:
+				pts.append(c + Vector2(x, y))
+			x += 10.0
+		y += 8.66
+		row += 1
+	var hp: float = float(EnemyDB.mass_def("mite")["hp"]) * S.mass_hp_scale("mite", 10)
+	var eids: Array = []
+	for p in pts:
+		var d: Dictionary = {"kind": "mite", "pos": p, "hp": hp, "max_hp": hp, "spd": 0.0, "size": 10.0}
+		S.add_enemy(d)
+		eids.append(int(d["eid"]))
+	var k0: int = S.kills
+	var T: float = 10.0
+	for i in int(T / TowerState.SUBSTEP):
+		S.tick(TowerState.SUBSTEP)
+		S.stats["weapons"] = keep
+		for j in eids.size():
+			if S.en.slot_of(int(eids[j])) < 0:
+				var d2: Dictionary = {"kind": "mite", "pos": pts[j], "hp": hp, "max_hp": hp, "spd": 0.0, "size": 10.0}
+				S.add_enemy(d2)
+				eids[j] = int(d2["eid"])
+	return float(S.kills - k0) / T
+
+
+## Single-target DPS vs a boss of each weapon at Lv5 (the Railgun's x4 on the
+## first elite / boss it hits; Gun rounds 2; Tesla's first arc only).
+static func _boss_dps_lv5(seed0: int) -> Dictionary:
+	var S = _mass_S(seed0 + 11)
+	var out: Dictionary = {}
+	for wk in ["gun", "mortar", "tesla", "flak", "railgun"]:
+		var si: int = TowerState.CORE_SLOT - TowerState.SIDE * (2 if wk == "railgun" else 1)
+		for i in TowerState.N:
+			if i != TowerState.CORE_SLOT:
+				S.slots[i] = {}
+		S.slots[si] = {"id": wk, "perm": 0, "run": 5}
+		S.unlocked[si] = true
+		S.recompute()
+		for w in S.stats["weapons"]:
+			var wd: Dictionary = w
+			if String(wd["kind"]) != wk:
+				continue
+			var d: float = float(wd["dmg"]) * float(wd["rate"])
+			match wk:
+				"railgun":
+					d *= TuneRef.num("mass_rail_boss", 4.0)
+				"gun":
+					d *= float(TuneRef.int_of("mass_gun_rounds", 2))
+				"flak":
+					d *= TuneRef.num("mass_flame_hit", 0.15) + TuneRef.num("mass_flame_burn", 0.3) * TuneRef.num("mass_burn_s", 2.0)
+			out[wk] = snappedf(d, 0.01)
+	return out
 
 
 ## AC-25 + the strong death-spiral partner: FRESH_N first runs of the
@@ -1065,6 +1352,8 @@ static func campaign_days(seed0: int, policy: String = "balanced", n_days: int =
 	var t2_day: int = -1
 	var t3_day: int = -1
 	var first_s: float = -1.0
+	var goal_run: int = -1
+	var goal_s: float = -1.0
 	for d in n_days:
 		for h in SESSION_H:
 			var now: int = maxi(NOW0 + d * 86400 + int(h) * 3600, int(save["last_seen"]) + 60)
@@ -1074,6 +1363,9 @@ static func campaign_days(seed0: int, policy: String = "balanced", n_days: int =
 			var r: Dictionary = camp_run(save, policy, seed0 + 1000 + run_idx * 131, now, _mission_perk(save))
 			if run_idx == 0:
 				first_s = float(r["real_s"])   # fresh save: game speed 1x
+			if goal_run < 0 and t == 1 and int(r["wave"]) > TowerState.RUN_GOAL_WAVE:
+				goal_run = run_idx + 1   # MASS_HORDE H7: first run that held the wave-20 goal
+				goal_s = float(r["real_s"])
 			run_idx += 1
 			var mins: float = maxf(0.1, float(r["real_s"]) / 60.0)
 			rate[t] = float(r["coins"]) / mins
@@ -1104,7 +1396,7 @@ static func campaign_days(seed0: int, policy: String = "balanced", n_days: int =
 		say("CAMPAIGN " + policy + " day %2d: T%d best@T%d w%d best w%d | coins gross %d bank %d | gems %d (earned %d) | labs %d cards %d | core L%d parts %d outpost %d/h (x%.3f)" % [d + 1, hi, hi, bit, row["best_wave"], row["coins_gross"], row["bank"], row["gems"], row["gems_earned"], lab_sum, row["cards"], row["core_lvl"], row["parts"], int(op_h), float(row["outpost_ratio"])])
 		if d + 1 == 7 or d + 1 == 20:
 			snaps[d + 1] = save.duplicate(true)
-	return {"days": days, "save": save, "led": led, "rate": rate, "t2_day": t2_day, "t3_day": t3_day, "snaps": snaps, "first_run_s": first_s}
+	return {"days": days, "save": save, "led": led, "rate": rate, "t2_day": t2_day, "t3_day": t3_day, "snaps": snaps, "first_run_s": first_s, "goal_run": goal_run, "goal_s": goal_s}
 
 
 ## Shard tree priority for the bot (power first, then economy, then speed).
@@ -1169,7 +1461,7 @@ static func job_main(seed0: int, dir: String) -> Dictionary:
 		var f := FileAccess.open(dir.path_join("snap%d.bin" % d), FileAccess.WRITE)
 		f.store_buffer(var_to_bytes((C["snaps"] as Dictionary)[d]))
 		f.close()
-	return {"days": C["days"], "led": C["led"], "gem_log": (C["save"] as Dictionary).get("gem_log", {}), "t2_day": C["t2_day"], "t3_day": C["t3_day"], "first_run_s": C["first_run_s"]}
+	return {"days": C["days"], "led": C["led"], "gem_log": (C["save"] as Dictionary).get("gem_log", {}), "t2_day": C["t2_day"], "t3_day": C["t3_day"], "first_run_s": C["first_run_s"], "goal_run": C["goal_run"], "goal_s": C["goal_s"]}
 
 
 ## AC-38 (strategy level): a week of pure-weapon / pure-eco play from the same fresh save.
@@ -1547,9 +1839,31 @@ static func combine(R: Dictionary) -> Dictionary:
 	})
 	m.merge(redesign_checks(R))
 	m.merge(fresh_checks(R.get("fresh", {})))
+	m.merge(mass_checks(R.get("mass", {}), M))
 	m.merge(spec_checks(R.get("specs", {})))
 	m.merge(set_checks(R.get("sets", {}), R.get("specs", {})))
 	return m
+
+
+## MASS_HORDE §D8 gates from the "mass" job (+ H7 from the main campaign).
+static func mass_checks(X: Dictionary, M: Dictionary) -> Dictionary:
+	var o: Dictionary = {"mass_h": X.duplicate(true)}
+	o["h1_wave_bodies"] = bool(X.get("h1_ok", false))
+	o["h2_peak_10k_held"] = bool(X.get("h2_ok", false))
+	o["h3_no_split"] = bool(X.get("h3_ok", false))
+	o["h4_designed_hp"] = bool(X.get("h4_ok", false))
+	o["h5_pool_cash"] = bool(X.get("h5_ok", false))
+	o["h6_drops"] = bool(X.get("h6_ok", false))
+	o["h8_weapons_matter"] = bool(X.get("h8_ok", false))
+	o["h10_mass_determinism"] = bool(X.get("h10_ok", false))
+	# H7 (re-aimed, documented in MASS_HORDE §Content): the campaign bot holds
+	# the T1 wave-20 goal within its first day (4 runs), and that run is
+	# shorter than 18 min (25 s waves: wave 20 is ~8.5 min).
+	var gr: int = int(M.get("goal_run", -1))
+	o["goal_run"] = gr
+	o["goal_run_s"] = snappedf(float(M.get("goal_s", -1.0)), 0.1)
+	o["h7_first_goal_day1"] = gr >= 1 and gr <= SESSION_H.size() and float(M.get("goal_s", 1e9)) <= 18.0 * 60.0
+	return o
 
 
 ## AC-29 on the same-save spec probe: each spec's median wave within 3 of

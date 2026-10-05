@@ -160,7 +160,7 @@ static func world_tip(m, p: Vector2) -> String:
 			best = dd
 			found = en.get_dict(s)
 	if not found.is_empty():
-		return "%s\nHP %d / %d" % [String(found["kind"]).capitalize(), int(ceil(float(found["hp"]))), int(float(found["max_hp"]))]
+		return "%s\nHP %d / %d" % [String(Intel.NAMES.get(String(found["kind"]), String(found["kind"]).capitalize())), int(ceil(float(found["hp"]))), int(float(found["max_hp"]))]
 	for t in S.troops:
 		var td: Dictionary = t
 		if String(td.get("state", "")) != "dead" and (td["pos"] as Vector2).distance_to(wp) < 14.0:

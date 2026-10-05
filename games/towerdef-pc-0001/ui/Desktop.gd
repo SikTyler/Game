@@ -28,7 +28,7 @@ const Hub := preload("res://ui/Hub.gd")
 const FactoryView := preload("res://ui/FactoryView.gd")
 const CoreBay := preload("res://ui/CoreBay.gd")
 
-const OVERLAYS: Array = ["pause", "settings", "credits", "stats", "history", "achievements", "modes"]
+const OVERLAYS: Array = ["pause", "settings", "credits", "stats", "history", "achievements", "modes", "goal"]
 const SET_TABS: Array = ["video", "audio", "controls", "gameplay"]
 const KEYS_PER_PAGE: int = 11
 
@@ -85,6 +85,8 @@ static func build(m) -> void:
 				_build_records(m)
 			"modes":
 				_build_modes(m)
+			"goal":
+				_build_goal(m)
 		_focus_first(m)
 		return
 	if m.screen == "base" and not m.offline_offer.is_empty():
@@ -170,6 +172,15 @@ static func _build_pause(m) -> void:
 	Kit.btn(m, "Settings", Rect2(x, r.position.y + 190, w, 56), func() -> void: m.set_overlay("settings"), "Video, audio, controls and gameplay", true, Kit.NEUTRAL, "Options", "icon_gear", 20)
 	Kit.btn(m, "Records", Rect2(x, r.position.y + 258, w, 56), func() -> void: m.set_overlay("stats"), "Stats, history and achievements", true, Kit.NEUTRAL, "PAUSE Records", "icon_stats", 20)
 	Kit.btn(m, "Abandon run (bank coins)", Rect2(x, r.position.y + 350, w, 56), m.abandon_run, "End the run now; coins earned so far are banked", true, Kit.ENEMY, "Abandon", "", 20)
+
+
+## MASS_HORDE §D7: the first run's soft goal (wave 20, the second boss).
+static func _build_goal(m) -> void:
+	var r: Rect2 = modal_rect(m, 640, 420)
+	var x: float = r.position.x + 60.0
+	var w: float = r.size.x - 120.0
+	Kit.btn(m, "Keep going  (the tide builds to wave 50)", Rect2(x, r.position.y + 250, w, 60), func() -> void: m.set_overlay(""), "Continue this run: waves 21-50 grow toward 10,000 enemies at once", true, Kit.GEM, "GOAL Continue", "", 20)
+	Kit.btn(m, "Bank coins and end the run", Rect2(x, r.position.y + 324, w, 56), m.abandon_run, "End the run now; coins earned so far are banked", true, Kit.GOLD, "GOAL Bank", "", 20)
 
 
 static func _build_credits(m) -> void:
@@ -696,6 +707,14 @@ static func draw_overlay(m) -> void:
 			Kit.panel(m, rp, Kit.GEM, Kit.PANEL2)
 			Kit.t(m, "PAUSED", Vector2(rp.get_center().x, rp.position.y + 64), 38, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, rp.size.x)
 			Kit.t(m, "Engine time is frozen", Vector2(rp.get_center().x, rp.position.y + 92), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, rp.size.x)
+		"goal":
+			var rg: Rect2 = modal_rect(m, 640, 420)
+			Kit.panel(m, rg, Kit.GOLD, Kit.PANEL2)
+			Kit.t(m, "RUN COMPLETE", Vector2(rg.get_center().x, rg.position.y + 70), 40, Kit.GOLD, HORIZONTAL_ALIGNMENT_CENTER, rg.size.x)
+			Kit.t(m, "Wave 20 held: the first run's goal.", Vector2(rg.get_center().x, rg.position.y + 112), 20, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, rg.size.x)
+			if m.S != null:
+				Kit.t(m, "%s kills  ·  %s" % [Kit.fmt(float(m.S.kills)), Kit.dur(int(m.S.time_alive))], Vector2(rg.get_center().x, rg.position.y + 150), 18, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, rg.size.x)
+			Kit.t(m, "From here the horde grows into the thousands, then 10,000+.", Vector2(rg.get_center().x, rg.position.y + 200), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, rg.size.x)
 		"credits":
 			var rc: Rect2 = modal_rect(m, 900, 800)
 			Kit.panel(m, rc, Kit.RUST, Kit.PANEL2)

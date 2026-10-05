@@ -337,15 +337,17 @@ func _initialize() -> void:
 	get_root().size = Vector2i(1920, 1080)
 	await _wait(6)
 	# HORDE P5/P6: dense horde with full gore + F3 overlay
-	S.horde_mult = 10
+	# MASS_HORDE: a designed mass wave (the shipping ruleset; Main sets S.mass)
 	main.settings["video"]["gore"] = "full"
 	main.dbg_overlay = true
 	var hp_keep: float = float(S.stats["max_hp"])
 	S.stats["max_hp"] = 1.0e9
 	S.hp = 1.0e9
 	var hev: Array = []
-	for k in 900:
-		S._spawn("drone" if k % 3 != 0 else "skitter", hev)
+	var mix: Array = ["mite", "mite", "mite", "mite", "drone", "drone", "skitter", "ranged", "shield", "sapper", "splitter", "hauler"]
+	for k in 3000:
+		var ang: float = TAU * float(k % 7) / 7.0 + float(k) * 0.0007
+		S._spawn(String(mix[k % mix.size()]), hev, TowerState.CENTER + Vector2.from_angle(ang) * (S.spawn_r() + float(k % 60) * 3.0), false, 1.0, S.wave, 1)
 	await _wait(150)
 	await _shot("%s/21_horde_gore.png" % outdir)
 	S.stats["max_hp"] = hp_keep

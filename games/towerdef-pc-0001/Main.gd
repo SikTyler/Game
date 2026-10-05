@@ -977,6 +977,13 @@ func _handle(events: Array) -> void:
 			"wave":
 				_pop(TowerState.CENTER + Vector2(0, -300), "WAVE %d" % int(ev["wave"]), 1.4, TEXT, 40)
 				rebuild = true
+			"run_goal":
+				set_overlay("goal")   # §D7 first-run soft goal: keep going or bank
+			"wave_clear":
+				if float(ev.get("cash", 0.0)) >= 1.0:
+					_pop(TowerState.CENTER + Vector2(0, -340), "WAVE %d CLEARED  +$%s" % [int(ev["wave"]), Kit.fmt(float(ev["cash"]))], 1.4, GOLD, 22)
+			"part_sea":
+				_pop(ev["pos"], "PARTED %d" % int(ev["n"]), 1.2, GEM, 22)
 			"boss":
 				_pop(TowerState.CENTER + Vector2(0, -250), "BOSS INBOUND", 1.8, ENEMY2, 30)
 				juice.add_trauma(0.55)

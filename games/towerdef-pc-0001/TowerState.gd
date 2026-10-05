@@ -220,6 +220,7 @@ var mass: bool = false
 ## (k = ceil(B / cap)) that carries k x HP / damage / pool share / kill count.
 ## 0 (default, shipping, every H-gate) = every planned body spawns.
 var mass_lod_cap: int = 0
+const RUN_GOAL_WAVE: int = 20     # §D7 first-run soft goal (Run complete panel)
 const MASS_CAP: int = 16384       # alive cap (§D3): the spawner holds the queue, never drops
 var mass_cap: int = MASS_CAP      # (tests lower it to exercise the hold)
 var wave_acct: Dictionary = {}    # wave -> pool accounting (§D5), see _mass_acct
@@ -801,7 +802,7 @@ func compute_stats() -> Dictionary:
 			"tesla":
 				weapons.append({"slot": i, "lvl": lvl_at(i), "kind": "tesla", "dmg": 9.0 * m2 * dm * (1.0 + pf("chain_dmg")), "rate": 0.8 * rate_m, "range": (3.0 + rng_c) * px * ring_m, "chains": 3 + int(pf("chain")), "chain_frac": 0.7})
 			"flak":
-				weapons.append({"slot": i, "lvl": lvl_at(i), "kind": "flak", "dmg": 8.0 * m2 * dm, "rate": 1.5 * rate_m, "range": (3.5 + rng_c) * px * ring_m, "prey": 2.5})
+				weapons.append({"slot": i, "lvl": lvl_at(i), "kind": "flak", "dmg": 8.0 * m2 * dm, "rate": 1.5 * rate_m * (TuneRef.num("mass_flame_rate", 0.5) if mass else 1.0), "range": (3.5 + rng_c) * px * ring_m, "prey": 2.5})
 			"railgun":
 				weapons.append({"slot": i, "lvl": lvl_at(i), "kind": "railgun", "dmg": 60.0 * m2 * dm, "rate": 0.25 * rate_m, "range": (7.0 + rng_c) * px * ring_m, "pierce": 14.0})
 			"frost":
@@ -1316,6 +1317,10 @@ func _queue_drafts(cleared: int) -> void:
 func _advance_wave(ev: Array) -> void:
 	if mass:
 		ev.append({"t": "wave_kills", "wave": wave, "n": int(mass_kills_wave.get(wave, 0)), "peak": mass_wave_peak})
+		if wave == RUN_GOAL_WAVE and tier == 1 and mode == "normal" and Tiers.best_in(save, 1) < RUN_GOAL_WAVE:
+			# §D7: the short first run's soft goal (the second boss). The view
+			# offers "keep going" (to the wave-50 tide) or "bank now".
+			ev.append({"t": "run_goal", "wave": wave, "kills": kills, "time": time_alive})
 		if mass_wave_peak >= 10000:
 			ev.append({"t": "tide", "wave": wave, "peak": mass_wave_peak})
 		mass_wave_peak = 0
@@ -2332,6 +2337,14 @@ func _fire(dt: float, ev: Array) -> void:
 		var tgt: int = pick_target(from, float(wd["range"]), String(target_modes[si]) if si < target_modes.size() else "nearest", kind == "flak" and not mass)
 		if kind == "mortar" and tgt >= 0 and from.distance_to(en.pos[tgt]) < float(wd.get("min_range", 0.0)):
 			tgt = -1
+			if mass:
+				# A crowd at the wall must not silence the mortar: lob at the
+				# nearest body beyond the minimum range instead.
+				var mr2: float = float(wd["min_range"]) * float(wd["min_range"])
+				for cand in eh.nearest_n(from, 96, float(wd["range"])):
+					if from.distance_squared_to(en.pos[cand]) >= mr2:
+						tgt = cand
+						break
 		if tgt < 0:
 			cooldowns[si] = 0.0
 			continue
@@ -2439,21 +2452,21 @@ func _fire_mass(kind: String, wd: Dictionary, from: Vector2, te: int, dmg: float
 			_blockable = false
 			ev.append({"t": "shot", "kind": kind, "from": from, "to": tip})
 		"flak":
-			# Flamer: a 40 deg cone (2.2 cells, +10%/lv): an instant lick plus a
-			# 2 s burn that spreads to bodies touching a burning one.
+			# Flamer: a gout every ~1.3 s into a 40 deg cone (1.4 cells, +10%/lv):
+			# a light lick plus a 2 s burn that spreads to touching bodies.
 			var dir2: Vector2 = (tpos - from).normalized()
-			var cl: float = minf(float(wd["range"]), TuneRef.num("mass_flame_len", 2.2) * cpx() * (1.0 + 0.1 * float(lvl - 1)))
-			var bdps: float = dmg * TuneRef.num("mass_flame_burn", 0.5)
+			var cl: float = minf(float(wd["range"]), TuneRef.num("mass_flame_len", 1.4) * cpx() * (1.0 + 0.1 * float(lvl - 1)))
+			var bdps: float = dmg * TuneRef.num("mass_flame_burn", 0.3)
 			for ed in eh.cone(from, dir2, deg_to_rad(20.0), cl):
 				if en.hp[ed] <= 0.0:
 					continue
-				_hit(ed, dmg * TuneRef.num("mass_flame_hit", 0.6), ev, crit)
+				_hit(ed, dmg * TuneRef.num("mass_flame_hit", 0.15), ev, crit)
 				_ignite(ed, TuneRef.num("mass_burn_s", 2.0), bdps)
 			ev.append({"t": "shot", "kind": kind, "from": from, "to": from + dir2 * cl, "cone": 40.0})
 		"mortar":
-			# AoE r 1 cell (+20%/lv); the outer ring is a knockback blast that
+			# AoE r 0.75 cell (~60 px, +20%/lv); the outer ring is a knockback blast that
 			# parts the sea (impulse / mass); 500+ pushed = Parting the Sea.
-			var rad: float = float(wd["splash"]) * (1.0 + 0.2 * float(lvl - 1))
+			var rad: float = TuneRef.num("mass_mortar_r", 0.75) * cpx() * (1.0 + 0.2 * float(lvl - 1))
 			for ed in eh.candidates(tpos, rad):
 				if en.hp[ed] > 0.0 and en.pos[ed].distance_to(tpos) <= rad:
 					_hit(ed, dmg, ev, crit)
@@ -2464,55 +2477,82 @@ func _fire_mass(kind: String, wd: Dictionary, from: Vector2, te: int, dmg: float
 		"tesla":
 			# Chain 6 (+3/lv, + chain parts, cap 20), 70 px jumps, x0.9 per jump;
 			# stuns elites / bosses for 0.2 s.
+			# Each discharge forks into 3 arcs (the nearest 3 bodies), each one
+			# chaining on to bodies no arc has hit yet.
 			var n: int = mini(TuneRef.int_of("mass_chain_cap", 20), TuneRef.int_of("mass_chain", 6) + 3 * (lvl - 1) + int(pf("chain")))
-			var d2: float = dmg
-			var prev: Vector2 = from
-			for ce in eh.chain(te, n, TuneRef.num("mass_chain_r", 70.0)):
-				if en.hp[ce] <= 0.0:
-					continue
-				var cpos: Vector2 = en.pos[ce]
-				_hit(ce, d2, ev, crit)
-				en.set_shock(ce, 1.5)
-				en.shock_src[ce] = int(wd["slot"])
-				if BOSSY.has(en.kind[ce]):
-					en.apply_slow(ce, 0.2, 0.0)
-				ev.append({"t": "shot", "kind": kind, "from": prev, "to": cpos})
-				prev = cpos
-				d2 *= TuneRef.num("mass_chain_frac", 0.9)
+			var jr: float = TuneRef.num("mass_chain_r", 70.0)
+			var hit: Dictionary = {}
+			var starts: Array = [te]
+			for st in eh.nearest_n(from, TuneRef.int_of("mass_tesla_arcs", 3) + 1, float(wd["range"])):
+				if starts.size() >= TuneRef.int_of("mass_tesla_arcs", 3):
+					break
+				if st != te:
+					starts.append(st)
+			for s0 in starts:
+				var ce: int = s0
+				var d2: float = dmg
+				var prev: Vector2 = from
+				var jumps: int = 0
+				while ce >= 0 and jumps < n:
+					jumps += 1
+					hit[ce] = true
+					var cpos: Vector2 = en.pos[ce]
+					if en.hp[ce] > 0.0:
+						_hit(ce, d2, ev, crit)
+						en.set_shock(ce, 1.5)
+						en.shock_src[ce] = int(wd["slot"])
+						if BOSSY.has(en.kind[ce]):
+							en.apply_slow(ce, 0.2, 0.0)
+					ev.append({"t": "shot", "kind": kind, "from": prev, "to": cpos})
+					prev = cpos
+					d2 *= TuneRef.num("mass_chain_frac", 0.9)
+					ce = _nearest(cpos, jr, hit)
 		_:
 			# Gun: rounds pierce 3 bodies (+2/lv, cap 12), x0.85 per body;
 			# a Shieldbearer's front stops the round.
 			var pn: int = mini(12, 3 + 2 * (lvl - 1))
-			var dir3: Vector2 = (tpos - from).normalized()
 			var reach3: float = float(wd["range"])
-			var on3: Array = []
-			for ed in eh.line(from, from + dir3 * reach3, en.max_size * 0.5 + 2.0):
-				if en.hp[ed] <= 0.0:
-					continue
-				var rel3: Vector2 = en.pos[ed] - from
-				var al: float = rel3.dot(dir3)
-				if al < 0.0 or al > reach3 or absf(rel3.cross(dir3)) > en.size[ed] * 0.5 + 2.0:
-					continue
-				on3.append([al, ed])
-			on3.sort_custom(func(x: Array, y: Array) -> bool: return float(x[0]) < float(y[0]) or (float(x[0]) == float(y[0]) and int(x[1]) < int(y[1])))
-			var d3: float = dmg
-			var hitn: int = 0
-			var last: Vector2 = tpos
-			_blockable = true
-			for x in on3:
-				if hitn >= pn:
-					break
-				var ed3: int = int((x as Array)[1])
-				_hit(ed3, d3, ev, crit)
-				last = en.pos[ed3]
-				hitn += 1
-				if _blocked:
-					break
-				d3 *= TuneRef.num("mass_pierce_fall", 0.85)
-			_blockable = false
-			if hitn == 0:
-				_hit(te, dmg, ev, crit)
-			ev.append({"t": "shot", "kind": kind, "from": from, "to": last})
+			# Two rounds per shot against a crowd: the target and the next nearest.
+			var aims: Array = [te]
+			for t2 in eh.nearest_n(from, 2, reach3):
+				if aims.size() < TuneRef.int_of("mass_gun_rounds", 2) and t2 != te:
+					aims.append(t2)
+			for ai in aims:
+				_gun_round(from, en.pos[int(ai)], int(ai), pn, reach3, dmg, crit, ev)
+
+
+## One Gun round (§D4): pierces up to `pn` bodies along the line, x0.85 each;
+## a Shieldbearer's front stops it.
+func _gun_round(from: Vector2, tpos: Vector2, te: int, pn: int, reach3: float, dmg: float, crit: bool, ev: Array) -> void:
+	var dir3: Vector2 = (tpos - from).normalized()
+	var on3: Array = []
+	for ed in eh.line(from, from + dir3 * reach3, en.max_size * 0.5 + 2.0):
+		if en.hp[ed] <= 0.0:
+			continue
+		var rel3: Vector2 = en.pos[ed] - from
+		var al: float = rel3.dot(dir3)
+		if al < 0.0 or al > reach3 or absf(rel3.cross(dir3)) > en.size[ed] * 0.5 + 2.0:
+			continue
+		on3.append([al, ed])
+	on3.sort_custom(func(x: Array, y: Array) -> bool: return float(x[0]) < float(y[0]) or (float(x[0]) == float(y[0]) and int(x[1]) < int(y[1])))
+	var d3: float = dmg
+	var hitn: int = 0
+	var last: Vector2 = tpos
+	_blockable = true
+	for x in on3:
+		if hitn >= pn:
+			break
+		var ed3: int = int((x as Array)[1])
+		_hit(ed3, d3, ev, crit)
+		last = en.pos[ed3]
+		hitn += 1
+		if _blocked:
+			break
+		d3 *= TuneRef.num("mass_pierce_fall", 0.85)
+	_blockable = false
+	if hitn == 0 and en.hp[te] > 0.0:
+		_hit(te, dmg, ev, crit)
+	ev.append({"t": "shot", "kind": "gun", "from": from, "to": last})
 
 
 ## Flamer burn (§D4): `t` seconds at `dps`, refreshed to the longer burn.
@@ -2902,7 +2942,7 @@ func _reap_mass(alive: PackedInt32Array, dead_in: PackedInt32Array, ev: Array, c
 				coins_run += g
 				horde_loot_total += g
 				horde_loot_wave_val += g
-				ev.append({"t": "loot_drop", "pos": pos, "coins": g})
+				ev.append({"t": "loot_drop", "pos": pos, "coins": g, "wave": w})
 		if kind == "boss":
 			_boss_bounty(pos, ev)
 		elif kind == "splitter":

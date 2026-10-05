@@ -988,18 +988,19 @@ func _mass_content_stages() -> void:
 	for sl in SG.en.order:
 		if SG.en.hp[sl] < 999.0:
 			gh += 1
-	_check("MASS Gun: a round pierces 3 bodies in line at Lv1 (x0.85 falloff)", gh == 3 and absf(SG.en.hp[SG.en.order[2]] - (999.0 - 10.0 * 0.85 * 0.85)) < 1e-6, "hit %d" % gh)
+	# two rounds per shot (target + next nearest, here on the same line): each pierces 3
+	_check("MASS Gun: 2 rounds, each pierces 3 bodies at Lv1 (x0.85 falloff)", gh == 3 and absf(SG.en.hp[SG.en.order[2]] - (999.0 - 2.0 * 10.0 * 0.85 * 0.85)) < 1e-6, "hit %d" % gh)
 	var ST = _mfresh()
 	ST.spawn_hold = true
-	for i in 10:
-		ST.add_enemy({"kind": "mite", "pos": TowerState.CENTER + Vector2(-300 + 50 * i, -200), "hp": 999.0, "max_hp": 999.0, "size": 10.0})
+	for i in 25:
+		ST.add_enemy({"kind": "mite", "pos": TowerState.CENTER + Vector2(-600 + 50 * i, -200), "hp": 999.0, "max_hp": 999.0, "size": 10.0})
 	ST.eh.rebuild()
 	ST._fire_mass("tesla", {"slot": 0, "lvl": 1, "range": 300.0}, TowerState.CENTER, ST.en.order[0], 10.0, false, [])
 	var th: int = 0
 	for sl in ST.en.order:
 		if ST.en.hp[sl] < 999.0:
 			th += 1
-	_check("MASS Tesla: chains 6 bodies at Lv1 (70 px jumps)", th == 6, "hit %d" % th)
+	_check("MASS Tesla: 3 arcs x chain 6 = 18 distinct bodies at Lv1 (70 px jumps)", th == 18, "hit %d" % th)
 	var SF = _mfresh()
 	SF.spawn_hold = true
 	SF.add_enemy({"kind": "mite", "pos": TowerState.CENTER + Vector2(0, -100), "hp": 999.0, "max_hp": 999.0, "size": 10.0})
