@@ -1,24 +1,22 @@
 extends SceneTree
 # Screenshot harness for Corehold PC (real renderer, native 1920x1080 view).
-# Captures every screen: menu, away modal, hub tabs (Play, Core Bay, Crates +
-# reveal, Outpost new / developed / hover / plot, Research, Cards, Missions,
-# Reforge + confirm), settings / remap / modes / records, and the run (early
-# battle, draft, Insight draft, place mode, late battle, aim, pause, results)
-# plus 1280x720 checks.
+# Captures every screen: menu, away modal, hub tabs (Outpost home new /
+# developed / armed ghost / plot, Core, Research, Missions, Reforge +
+# confirm), settings / remap / modes / records, and the run (early battle,
+# draft, Insight draft, place mode, late battle, aim, pause, results) plus
+# 1280x720 checks.
 #   godot --path games/towerdef-pc-0001/ --script res://_shots.gd -- <outdir>
+# Headless containers: xvfb-run -a -s "-screen 0 1920x1080x24" <godot>
+#   --path . --rendering-method gl_compatibility --rendering-driver opengl3
+#   --script res://_shots.gd -- <outdir>
 const BaseMeta := preload("res://BaseMeta.gd")
 const MetaSave := preload("res://MetaSave.gd")
 const Labs := preload("res://Labs.gd")
 const Outpost := preload("res://Outpost.gd")
-const Factory := preload("res://Factory.gd")
-const Cards := preload("res://Cards.gd")
 const Missions := preload("res://Missions.gd")
-const Parts := preload("res://Parts.gd")
 const Cores := preload("res://Cores.gd")
-const Crates := preload("res://Crates.gd")
 const Reforge := preload("res://Reforge.gd")
 const TowerState := preload("res://TowerState.gd")
-const PartDB := preload("res://data/PartDB.gd")
 const Bot := preload("res://playtest.gd")
 const T0: int = 1800000000
 var live_S = null   # run kept alive between staged shots
@@ -39,17 +37,13 @@ func _initialize() -> void:
 	var save: Dictionary = BaseMeta.default_save()
 	save["coins"] = 60000
 	save["scrap"] = 900
-	save["keys"] = 3
-	save["core_cores"] = 6
 	save["best_wave_by_tier"] = {"1": 42, "2": 31}
 	save["best_wave"] = 42
 	save["tier"] = 2
 	save["runs"] = 14
-	Outpost.place(save, "mill", 4, 4, 0, T0 - 3 * 3600 - 200)   # a legacy Outpost: migrated + refunded at boot
-	save["factory"] = Factory.default_block()
-	Factory.add_starter(save["factory"])
-	save["factory"]["migrated"] = false
-	save["factory"]["t"] = T0 - 3 * 3600
+	save["core"]["lvl"] = 13
+	Outpost.place(save, "mill", 4, 4, 0, T0 - 3 * 3600 - 200)
+	Outpost.tick(save, T0 - 3 * 3600)
 	save["last_seen"] = T0 - 3 * 3600
 	save["research"]["lvls"]["speed"] = 2
 	main.now_override = T0
@@ -58,156 +52,38 @@ func _initialize() -> void:
 	main.claim_offline()
 	_quiet()
 	var s: Dictionary = main.save
-	# Core levels + parts for the bay
-	(s["cores"]["levels"] as Dictionary)["bastion"] = 13
-	(s["cores"]["owned"] as Array).append("foundry")
-	(s["cores"]["levels"] as Dictionary)["foundry"] = 3
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 11
-	for id in ["f_plating", "f_bulkhead", "f_regenmesh", "b_longbore", "b_bounty", "c_interest", "c_scope", "e_bastionheart", "e_dynamo", "f_lightweave", "b_scatter", "c_battery", "e_railcore", "f_mirror", "b_hollow", "c_quickcap", "e_turbine", "f_ledgerframe"]:
-		if PartDB.has(id):
-			Parts.grant(s, id, "shots")
-	Parts.grant(s, "f_plating", "shots")
-	for id in ["f_bulkhead", "b_longbore", "e_bastionheart", "f_regenmesh"]:
-		var uid: String = Parts.uid_of(s, id)
-		if uid != "":
-			var k: int = -1
-			for j in Parts.N_SLOTS:
-				if k < 0 and Parts.slot_open(13, j) and Parts.fits(s, uid, j) and String(Parts.preset(s, "bastion")[j]) == "":
-					k = j
-			if k >= 0:
-				Parts.equip(s, "bastion", k, uid)
-	(Parts.item(s, Parts.uid_of(s, "f_bulkhead")) as Dictionary)["lvl"] = 4
-	_quiet()
 	main.set_tab("play")
-	await _shot("%s/02_play.png" % outdir)
-	main.set_tab("bay")
-	main.bay_part = Parts.uid_of(s, "f_plating")
-	main._rebuild_ui()
-	await _shot("%s/03_bay.png" % outdir)
-	main.drag_part = Parts.uid_of(s, "c_scope")
-	main.drag_start = Vector2(100, 100)
-	main.mouse_pos = load("res://ui/CoreBay.gd").slot_pos(main, 2)
-	await _shot("%s/03b_bay_drag.png" % outdir)
-	main.drag_part = ""
-	main.bay_core = "tempest"
-	main.bay_part = ""
-	main._rebuild_ui()
-	await _shot("%s/03c_bay_locked.png" % outdir)
-	main.bay_core = "bastion"
-	# crates
-	_quiet()
-	main.set_tab("crates")
-	await _shot("%s/04_crates.png" % outdir)
-	main.meta_rng.seed = 77
-	s["keys"] = 8
-	load("res://ui/CrateView.gd").open(main, "vault", "keys")
-	main.crate_anim["t"] = 1.55
-	_quiet()
-	await _shot("%s/04b_crate_open.png" % outdir, false)
-	main.crate_anim["t"] = 9.0
-	main._rebuild_ui()
-	await _shot("%s/04c_crate_done.png" % outdir)
-	main.crate_anim = {}
-	# factory: fresh (starter line), armed ghost, developed, zoomed, panels
-	var FV = load("res://ui/FactoryView.gd")
-	main.set_tab("outpost")
-	Factory.simulate(s, 20.0)
-	await _shot("%s/05_factory_new.png" % outdir)
-	main.op_arm = "miner"
-	main.op_rot = 1
-	main.mouse_pos = FV.cell_rect(main, 52, 26).get_center()
-	main._rebuild_ui()
-	await _shot("%s/05c_factory_ghost.png" % outdir)
-	main.op_arm = "smelter"
-	main.op_rot = 0
-	main.mouse_pos = FV.cell_rect(main, 47, 22).get_center()
-	await _shot("%s/05c2_factory_ghost_bad.png" % outdir)
-	main.op_arm = ""
+	await _shot("%s/02_home_outpost.png" % outdir)
+	main.set_tab("core")
+	await _shot("%s/03_core.png" % outdir)
+	# Outpost: developed (the bot's build plan over a few sessions), armed ghost, plot
 	s["coins"] = 400000
 	var t: int = T0
-	for k in 14:
-		Bot.factory_spend(s, t)
+	for k in 10:
+		Bot.outpost_spend(s, t)
 		t += 3 * 3600
-	Factory.research(s, "electronics")
-	Factory.research(s, "underground")
-	Factory.unlock_chunk(s, 7)
-	Factory.unlock_chunk(s, 10)
-	# a wire -> circuit assembler pair fed from a chest (shows recipes + inserters)
-	var src: String = String(Factory.place(s, "chest", 54, 21, 0)[0]["uid"])
-	Factory.ent(s, src)["inv"] = {"copper_plate": 30, "iron_plate": 20}
-	Factory.place(s, "inserter", 55, 21, 0)
-	var asm_a: String = String(Factory.place(s, "assembler", 56, 20, 0)[0]["uid"])
-	Factory.set_recipe(s, asm_a, "wire")
-	Factory.place(s, "pole", 55, 23, 0)
-	Factory.place(s, "windmill", 56, 23, 0)
-	Factory.place(s, "inserter", 57, 19, 3)
-	Factory.place(s, "chest", 57, 18, 0)
-	Factory.simulate(s, 45.0)
+	Outpost.tick(s, t)
 	main.now_override = t
-	Factory.settle(s, t)
 	s["coins"] = 52000
 	_quiet()
-	main.fc_zoom = 34.0
-	main.fc_center = Vector2(47.0, 23.0)
-	main.op_sel = asm_a
+	main.set_tab("outpost")
+	await _shot("%s/05_outpost_dev.png" % outdir)
+	var OV = load("res://ui/OutpostView.gd")
+	main.op_arm = "mill"
+	main.mouse_pos = OV.cell_rect(main, 8, 8).get_center()
 	main._rebuild_ui()
-	await _shot("%s/05b_factory_dev.png" % outdir)
-	main.op_sel = ""
-	main.fc_zoom = 64.0
-	main.fc_center = Vector2(46.0, 21.0)
-	main.mouse_pos = FV.cell_rect(main, 46, 20).get_center()
-	main._rebuild_ui()
-	await _shot("%s/05g_factory_zoom_items.png" % outdir)
-	main.fc_zoom = 11.0
-	main.fc_center = Vector2(48.0, 32.0)
-	main.mouse_pos = Vector2(-1, -1)
-	main._rebuild_ui()
-	await _shot("%s/05h_factory_zoom_out.png" % outdir)
-	# corner toast over the factory
-	main.fc_zoom = 34.0
-	main.fc_center = Vector2(47.0, 23.0)
-	main.toast_text = "Land bought: found Iron Ore, Crystal"
-	main.toast_t = 30.0
-	main.queue_redraw()
-	await _shot("%s/05f_factory_toast.png" % outdir, false)
-	_quiet()
-	main.op_sel = Factory.uid_at(s, Vector2i(47, 23))
-	main._rebuild_ui()
-	await _shot("%s/05i_factory_relay.png" % outdir)
-	main.op_sel = Factory.uid_at(s, Vector2i(60, 18))
-	main._rebuild_ui()
-	await _shot("%s/05j_factory_research_hub.png" % outdir)
-	main.op_sel = "chunk:3"
-	main.fc_center = Vector2(56.0, 14.0)
-	main._rebuild_ui()
-	await _shot("%s/05d_factory_land.png" % outdir)
-	main.op_sel = ""
-	main.fc_center = Vector2(47.0, 23.0)
-	main.op_arm = "belt"
-	main.fc_line = Vector2i(38, 25)
-	main.mouse_pos = FV.cell_rect(main, 44, 30).get_center()
-	main._rebuild_ui()
-	await _shot("%s/05e_factory_belt_drag.png" % outdir)
-	main.fc_line = FV.NONE
+	await _shot("%s/05b_outpost_ghost.png" % outdir, false)
 	main.op_arm = ""
-	main.mouse_pos = FV.cell_rect(main, 48, 19).get_center()
-	main._rebuild_ui()
-	await _shot("%s/05k_factory_tooltip.png" % outdir, false)
+	main.op_sel = "plot:1"
 	main.mouse_pos = Vector2(-1, -1)
-	# research / cards / missions
+	main._rebuild_ui()
+	await _shot("%s/05c_outpost_plot.png" % outdir)
+	main.op_sel = ""
+	# research / missions
 	Labs.start(s, "dmg", main.now_override - 120)
 	_quiet()
 	main.set_tab("research")
 	await _shot("%s/06_research.png" % outdir)
-	s["coins"] = int(s["coins"]) + 4000
-	for k in 9:
-		Cards.open_chest(s, rng)
-	for id in Cards.owned(s).keys().slice(0, 2):
-		Cards.equip(s, String(id))
-	_quiet()
-	main.set_tab("cards")
-	await _shot("%s/07_cards.png" % outdir)
 	var lst: Array = Missions.list(s)
 	(lst[0] as Dictionary)["prog"] = int((lst[0] as Dictionary)["target"])
 	(lst[1] as Dictionary)["prog"] = int((lst[1] as Dictionary)["target"]) / 2
@@ -245,7 +121,7 @@ func _initialize() -> void:
 	s["stats"]["runs"] = 8
 	s["stats"]["kills"] = 18450
 	s["stats"]["kills_by_kind"] = {"drone": 9000, "skitter": 5200, "hauler": 2100, "elite": 900, "boss": 21}
-	s["achievements"] = {"unlocked": {"ACH_FIRST_RUN": T0, "ACH_WAVE_25": T0, "ACH_FIRST_BOSS": T0, "ACH_FIRST_PART": T0}, "missions_claimed": 0}
+	s["achievements"] = {"unlocked": {"ACH_FIRST_RUN": T0, "ACH_WAVE_25": T0, "ACH_FIRST_BOSS": T0, "ACH_COURIER": T0}, "missions_claimed": 0}
 	for ov in ["stats", "history", "achievements"]:
 		main.set_overlay(ov)
 		await _shot("%s/12_%s.png" % [outdir, ov])
@@ -370,8 +246,8 @@ func _initialize() -> void:
 	get_root().size = Vector2i(1280, 720)
 	await _wait(6)
 	await _shot("%s/20b_720p_outpost.png" % outdir)
-	main.set_tab("bay")
-	await _shot("%s/20c_720p_bay.png" % outdir)
+	main.set_tab("core")
+	await _shot("%s/20c_720p_core.png" % outdir)
 	get_root().size = Vector2i(1920, 1080)
 	await _wait(6)
 	main.go_menu()

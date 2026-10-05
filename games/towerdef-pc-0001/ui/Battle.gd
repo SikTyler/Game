@@ -9,7 +9,6 @@ extends RefCounted
 const TowerState := preload("res://TowerState.gd")
 const PickDB := preload("res://data/PickDB.gd")
 const CoreDB := preload("res://data/CoreDB.gd")
-const PartDB := preload("res://data/PartDB.gd")
 const Tiers := preload("res://Tiers.gd")
 const Kit := preload("res://ui/Kit.gd")
 const DraftPanel := preload("res://ui/DraftPanel.gd")
@@ -176,7 +175,7 @@ static func cell_text(m, i: int) -> String:
 	var ring: int = TowerState.ring_of(i)
 	if i == TowerState.CORE_SLOT:
 		var cd: Dictionary = CoreDB.get_def(S.core_id)
-		return "%s Core  Lv%d\n%s: %s\nTrait %s: %s" % [String(cd["name"]), int(S.core_lvl), String(cd["attack_name"]), String(cd["attack_desc"]), String(cd["trait_name"]), String(cd["trait_desc"])]
+		return "The Core  Lv%d\n%s: %s" % [int(S.core_lvl), String(cd["attack_name"]), String(cd["attack_desc"])]
 	if not bool(S.unlocked[i]):
 		return "Outside your grid\nResearch Grid Expansion to build here"
 	var id: String = S.id_at(i)
@@ -348,7 +347,7 @@ static func _draw_grid(m) -> void:
 	var pulse: float = 0.5 + 0.5 * sin(m.t_anim * 3.0)
 	var cr: float = c * 0.78
 	m.draw_circle(C, cr + 8.0 + 4.0 * pulse, Color(1, 1, 1, 0.06))
-	if not Kit.icon(m, "core_" + String(S.core_id), Rect2(C - Vector2(cr, cr), Vector2(cr, cr) * 2.0)):
+	if not Kit.icon(m, "core_bastion", Rect2(C - Vector2(cr, cr), Vector2(cr, cr) * 2.0)):
 		m.draw_circle(C, cr, Kit.RUST)
 	if float(S.shield) > 0.0:
 		var smax: float = maxf(1.0, float(S.stats.get("shield_max", 1.0)))
@@ -358,7 +357,7 @@ static func _draw_grid(m) -> void:
 static func _draw_world(m) -> void:
 	var S = m.S
 	# Lance beam
-	if S.core_id == "lance" and int(S.beam_eid) >= 0:
+	if int(S.beam_eid) >= 0:
 		var bp: Variant = m.enemy_pos(int(S.beam_eid))
 		if bp != null:
 			var ramp: float = clampf(float(S.beam_t) / 6.0, 0.0, 1.0)
@@ -658,11 +657,11 @@ static func _draw_right(m) -> void:
 	var cd: Dictionary = CoreDB.get_def(S.core_id)
 	# portrait
 	Kit.panel(m, Rect2(x, y, 96, 96), Kit.RUST, Color("12161b"))
-	Kit.icon(m, "core_" + String(S.core_id), Rect2(x + 6, y + 6, 84, 84))
-	Kit.t(m, "%s Core" % String(cd["name"]), Vector2(x + 110, y + 26), 22, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w - 110)
-	Kit.t(m, "Lv %d  ·  %s" % [int(S.core_lvl), String(cd["arch"]).capitalize()], Vector2(x + 110, y + 50), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w - 110)
+	Kit.icon(m, "core_bastion", Rect2(x + 6, y + 6, 84, 84))
+	Kit.t(m, "The Core", Vector2(x + 110, y + 26), 22, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w - 110)
+	Kit.t(m, "Lv %d" % int(S.core_lvl), Vector2(x + 110, y + 50), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w - 110)
 	Kit.t(m, String(cd["attack_name"]), Vector2(x + 110, y + 74), 16, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, w - 110)
-	m.stat_tips.append([Rect2(x, y, w, 96), "%s: %s\nTrait %s: %s" % [String(cd["attack_name"]), String(cd["attack_desc"]), String(cd["trait_name"]), String(cd["trait_desc"])]])
+	m.stat_tips.append([Rect2(x, y, w, 96), "%s\n%s" % [String(cd["attack_name"]), String(cd["attack_desc"])]])
 	y += 108.0
 	# HP + shield
 	var mhp: float = maxf(1.0, float(S.stats["max_hp"]))
@@ -766,10 +765,6 @@ static func _draw_results(m) -> void:
 			var bits: Array = []
 			if int(ev.get("scrap", 0)) > 0:
 				bits.append("+%d Scrap" % int(ev["scrap"]))
-			if int(ev.get("keys", 0)) > 0:
-				bits.append("+%d Keys" % int(ev["keys"]))
-			if int(ev.get("core_cores", 0)) > 0:
-				bits.append("+%d Core Cores" % int(ev["core_cores"]))
 			if not bits.is_empty():
 				Kit.t(m, "  ·  ".join(bits), Vector2(lx, ly + 22), 17, Kit.SCRAP, HORIZONTAL_ALIGNMENT_LEFT, w)
 				ly += 30.0
@@ -781,15 +776,6 @@ static func _draw_results(m) -> void:
 		var label: String = ""
 		var col: Color = Kit.TEXT
 		match et:
-			"part_new":
-				label = "NEW  " + String(PartDB.get_def(icon_id).get("name", icon_id))
-				col = Kit.rarity_col(PartDB.rarity_of(icon_id))
-			"part_star":
-				label = "%s  star %d" % [String(PartDB.get_def(icon_id).get("name", icon_id)), int(ev["stars"])]
-				col = Kit.GOLD
-			"part_dup_salvaged":
-				label = "%s  -> %d Scrap" % [String(PartDB.get_def(icon_id).get("name", icon_id)), int(ev["scrap"])]
-				col = Kit.SCRAP
 			"insight_banked":
 				label = "%s banked" % pick_name(icon_id)
 				col = Kit.RARITY["insight"]
@@ -800,5 +786,5 @@ static func _draw_results(m) -> void:
 		ly += 42.0
 		any = true
 	if not any:
-		Kit.t(m, "No parts this run — bosses, marked elites and Couriers drop them.", Vector2(lx, ly + 22), 15, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w)
-	Kit.t(m, "Spend loot in the Core Bay, Crates and Outpost", Vector2(cx, r.end.y - 96), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
+		Kit.t(m, "No loot this run — bosses, marked elites and Couriers drop it.", Vector2(lx, ly + 22), 15, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w)
+	Kit.t(m, "Spend coins on the Core, the Outpost and Research", Vector2(cx, r.end.y - 96), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)

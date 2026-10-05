@@ -3,17 +3,17 @@ extends SceneTree
 ## Boots Main.tscn headless at 1920x1080 and drives the native desktop view
 ## with REAL mouse clicks, drags, wheel, keys and pad events, asserting ENGINE
 ## / SAVE state after every action: main menu + slots, the "while you were
-## away" modal, the hub (Play / tier select / modes), Core Bay (select, level,
-## drag-install, equip / unequip, presets, filters, level / lock / salvage),
-## Crates (open + reveal), the Factory (WP3: palette click + drag place,
-## ghost preview, rotate, drag-laid belts, pipette, deconstruct, recipes,
-## facilities, land, bank Collect, pan / zoom / WASD, hub buildings), Research, Cards, Missions, Reforge (two-step + tree),
+## away" modal, the hub (Outpost home / tier select / modes), the Core tab
+## (level), the Outpost (palette click + drag place, ghost preview, rotate,
+## move, upgrade, demolish, collect, plots, pan / zoom, blueprints),
+## Research, Missions, Reforge (two-step + tree),
 ## settings + remapping, records, and the run (draft cards, reroll, banish,
 ## drag-to-place, Core tracks, specials + aim, targeting, pause, retry,
 ## abandon -> results). Layout, tooltip, press-mode and focus checks on every
 ## screen. Prints "UITEST OK" (exit 0) or "UITEST FAIL: <n> checks failed".
 ## REDESIGN (deliberate rewrite): the permanent base grid, perm-building hotbar,
-## info popover and mobile column are gone (Outpost / Core Bay replace them).
+## info popover and mobile column are gone. V2 (deliberate): Core Bay, Crates,
+## Cards and the Factory are gone (Core tab + the restored Outpost).
 ## Run: godot --headless --path games/towerdef-pc-0001/ --script res://uitest.gd
 
 const Hub := preload("res://ui/Hub.gd")
@@ -22,22 +22,16 @@ const TowerState := preload("res://TowerState.gd")
 const BaseMeta := preload("res://BaseMeta.gd")
 const MetaSave := preload("res://MetaSave.gd")
 const Labs := preload("res://Labs.gd")
-const Cards := preload("res://Cards.gd")
 const Missions := preload("res://Missions.gd")
 const Outpost := preload("res://Outpost.gd")
-const Parts := preload("res://Parts.gd")
 const Cores := preload("res://Cores.gd")
-const Crates := preload("res://Crates.gd")
 const Reforge := preload("res://Reforge.gd")
 const Specials := preload("res://Specials.gd")
-const PartDB := preload("res://data/PartDB.gd")
 const OutpostDB := preload("res://data/OutpostDB.gd")
-const Factory := preload("res://Factory.gd")
-const FactoryDB := preload("res://data/FactoryDB.gd")
 const Settings := preload("res://Settings.gd")
 const Keybinds := preload("res://Keybinds.gd")
-const CoreBay := preload("res://ui/CoreBay.gd")
-const FactoryView := preload("res://ui/FactoryView.gd")
+const OutpostView := preload("res://ui/OutpostView.gd")
+const CoreView := preload("res://ui/CoreView.gd")
 const Hotbar := preload("res://ui/Hotbar.gd")
 const BattleUI := preload("res://ui/Battle.gd")
 const T0: int = 1800000000
@@ -180,7 +174,7 @@ func _cell_scr(i: int) -> Vector2:
 
 
 func _op_scr(x: int, y: int) -> Vector2:
-	return FactoryView.cell_rect(main, x, y).get_center()
+	return OutpostView.cell_rect(main, x, y).get_center()
 
 
 func _no_overlap(rects: Array) -> bool:
@@ -235,35 +229,26 @@ func _run() -> void:
 	main.save = BaseMeta.default_save()
 	main.save["coins"] = 50000
 	main.save["scrap"] = 2000
-	main.save["keys"] = 5
-	main.save["core_cores"] = 10
 	main.now_override = T0
 	main._rebuild_ui()
 	await _frames()
 	_audit("play")
 
 	# ---- BOOT: AWAY MODAL ------------------------------------------------------
-	# WP3 (deliberate): the away pay is the factory's measured rate x time
-	# (a legacy Outpost Mill is refunded at boot instead of paying storage).
+	# V2 (deliberate): the Factory is gone; the away pay is the Outpost's
+	# stored production again (pre-Factory behaviour).
 	var boot_save: Dictionary = main.save.duplicate(true)
 	Outpost.place(boot_save, "mill", 4, 4, 0, T0 - 7200 - 120)
-	boot_save["factory"] = Factory.default_block()
-	Factory.add_starter(boot_save["factory"])
-	boot_save["factory"]["t"] = T0 - 7200
+	Outpost.tick(boot_save, T0 - 7200)
 	boot_save["last_seen"] = T0 - 7200
-	var es: Dictionary = BaseMeta.normalize(boot_save)
-	Factory.migrate_outpost(es)
-	Factory.away_report(es, T0)
-	var ec0: int = int(es["coins"])
-	Factory.claim_bank(es)
-	var expect_off: int = int(es["coins"]) - ec0
+	var expect_off: int = int(Outpost.away_report(BaseMeta.normalize(boot_save), T0)["coins"])
 	main.boot(boot_save, T0)
 	await _frames()
 	_check("away modal shown at boot (only Collect clickable)", not main.offline_offer.is_empty() and _find("Collect") != null and _find("DSTART") == null)
 	var c_before: int = int(main.save["coins"])
 	_press("Collect")
 	await _frames()
-	_check("Collect pays the factory's banked coins (measured rate x 2 h)", expect_off > 0 and int(main.save["coins"]) == c_before + expect_off and main.offline_offer.is_empty(), "%d" % expect_off)
+	_check("Collect pays the Outpost's stored coins", expect_off > 0 and int(main.save["coins"]) == c_before + expect_off and main.offline_offer.is_empty(), "%d" % expect_off)
 	_check("missions rolled at boot", Missions.list(main.save).size() == 3)
 
 	# ---- TIER SELECT --------------------------------------------------------------
@@ -282,11 +267,10 @@ func _run() -> void:
 	await _frames()
 	_check("tier < back to tier 1", int(main.save["tier"]) == 1)
 
-	await _core_bay()
-	await _crates()
+	await _core_tab()
 	await _outpost()
-	await _research_cards_missions()
-	await _fb1_home()
+	await _research_missions()
+	await _home()
 	await _reforge()
 	await _settings_records()
 	await _run_screen()
@@ -301,471 +285,165 @@ func _run() -> void:
 		quit(1)
 
 
-# ============================================================== CORE BAY
-func _core_bay() -> void:
-	var s: Dictionary = main.save
-	for id in ["f_plating", "f_lightweave", "b_longbore", "b_shortbore", "c_scope", "e_dynamo", "f_bulkhead"]:
-		Parts.grant(s, id, "test")
+# ================================================================== CORE (V2)
+## V2 (deliberate): the Core Bay (4 Cores, parts, presets) is gone; the Core
+## tab shows the one Core's level + sheet (P4: Weapon / Modules / Look).
+func _core_tab() -> void:
 	_key(KEY_K)
 	await _frames()
-	_check("BAY: K opens the Core Bay", main.tab == "bay")
-	_audit("bay")
-	_press("BAY CORE foundry")
+	_check("CORE: K opens the Core tab", main.tab == "core" and _find("CORE LEVEL") != null)
+	_audit("core")
+	var c0: int = int(main.save["coins"])
+	var lv0: int = Cores.level(main.save)
+	var lc: int = int(Cores.level_cost(lv0)["coins"])
+	_press("CORE LEVEL")
 	await _frames()
-	_check("BAY: clicking a locked Core shows it (cannot be activated)", main.bay_core == "foundry" and _find("BAY ACTIVE").disabled)
-	_press("BAY CORE bastion")
-	await _frames()
-	var c0: int = int(s["coins"])
-	var lc: Dictionary = Cores.level_cost(1)
-	_press("BAY LEVEL")
-	await _frames()
-	_check("BAY: Level up spends coins and raises the Core level", Cores.level(main.save, "bastion") == 2 and int(main.save["coins"]) == c0 - int(lc["coins"]))
-	_key(KEY_U)
-	await _frames()
-	_check("BAY: U levels the viewed Core", Cores.level(main.save, "bastion") == 3)
-	# drag a Frame part from the inventory onto Frame slot 0
-	var uid: String = Parts.uid_of(s, "f_plating")
-	var cell: Button = null
-	for c in _all_buttons():
-		if (c as Button).has_meta("uid") and String((c as Button).get_meta("uid")) == uid:
-			cell = c
-	_check("BAY: inventory shows owned parts", cell != null and _findp("PART ") != null)
-	if cell != null:
-		await _drag(cell.get_global_rect().get_center(), CoreBay.slot_pos(main, 0))
-	_check("BAY: dragging a part onto its slot installs it", String(Parts.preset(main.save, "bastion")[0]) == uid, str(Parts.preset(main.save, "bastion")))
-	# wrong slot type is refused
-	var bar_uid: String = Parts.uid_of(s, "b_longbore")
-	var bcell: Button = null
-	for c in _all_buttons():
-		if (c as Button).has_meta("uid") and String((c as Button).get_meta("uid")) == bar_uid:
-			bcell = c
-	if bcell != null:
-		await _drag(bcell.get_global_rect().get_center(), CoreBay.slot_pos(main, 0))
-	_check("BAY: a Barrel dropped on a Frame slot is refused", String(Parts.preset(main.save, "bastion")[0]) == uid)
-	# select + Equip button
-	main.bay_part = bar_uid
+	_check("CORE: Level up spends coins and raises the Core level", Cores.level(main.save) == lv0 + 1 and int(main.save["coins"]) == c0 - lc)
+	_check("CORE: the Level button tooltip shows the cost and per-level gains", _find("CORE LEVEL").tooltip_text.contains("coins") and _find("CORE LEVEL").tooltip_text.contains("dmg"))
+	main.save["coins"] = 0
 	main._rebuild_ui()
 	await _frames()
-	_press("BAY EQUIP")
-	await _frames()
-	_check("BAY: Equip installs into the open Barrel slot", Parts.preset(main.save, "bastion").has(bar_uid))
-	_press("BAY UNEQUIP")
-	await _frames()
-	_check("BAY: Unequip removes it", not Parts.preset(main.save, "bastion").has(bar_uid))
-	# presets
-	_press("PRESET 2")
-	await _frames()
-	_check("BAY: preset tab 2 switches loadouts (empty)", Parts.preset_idx(main.save, "bastion") == 1 and String(Parts.preset(main.save, "bastion")[0]) == "")
-	_key(KEY_1)
-	await _frames()
-	_check("BAY: key 1 returns to loadout 1", Parts.preset_idx(main.save, "bastion") == 0 and String(Parts.preset(main.save, "bastion")[0]) == uid)
-	# filters
-	_press("FILTER SLOT B")
-	await _frames()
-	var only_b: bool = true
-	var n_parts: int = 0
-	for c in _all_buttons():
-		if (c as Button).has_meta("uid"):
-			n_parts += 1
-			if PartDB.slot_of(String(Parts.item(main.save, String((c as Button).get_meta("uid")))["id"])) != "B":
-				only_b = false
-	_check("BAY: slot filter shows only Barrels", only_b and n_parts == 2, str(n_parts))
-	_press("FILTER SLOT ALL")
-	await _frames()
-	# level / lock / salvage
-	main.bay_part = uid
-	main._rebuild_ui()
-	await _frames()
-	var sc0: int = int(main.save["scrap"])
-	_press("BAY PART LEVEL")
-	await _frames()
-	_check("BAY: part Lv up spends Scrap", int(Parts.item(main.save, uid)["lvl"]) == 2 and int(main.save["scrap"]) < sc0)
-	var sal_uid: String = Parts.uid_of(s, "f_lightweave")
-	main.bay_part = sal_uid
-	main._rebuild_ui()
-	await _frames()
-	_press("BAY LOCK")
-	await _frames()
-	_check("BAY: Lock protects a part (Salvage disabled)", bool(Parts.item(main.save, sal_uid)["locked"]) and _find("BAY SALVAGE").disabled)
-	_press("BAY LOCK")
-	await _frames()
-	var sc1: int = int(main.save["scrap"])
-	_press("BAY SALVAGE")
-	await _frames()
-	_check("BAY: Salvage turns a part into Scrap", Parts.item(main.save, sal_uid).is_empty() and int(main.save["scrap"]) > sc1)
-	# make another Core active once owned
-	(main.save["cores"]["owned"] as Array).append("foundry")
-	main.bay_core = "foundry"
-	main._rebuild_ui()
-	await _frames()
-	_press("BAY ACTIVE")
-	await _frames()
-	_check("BAY: Make active switches the run Core", Cores.active(main.save) == "foundry")
-	_press("BAY CORE bastion")
-	await _frames()
-	_press("BAY ACTIVE")
-	await _frames()
-	_check("BAY: back to Bastion", Cores.active(main.save) == "bastion")
-	_motion(CoreBay.slot_pos(main, 0))
-	await _frames(3)
-	_check("BAY: hovering a slot shows the part tooltip with + and - lines", main.tipbox.visible and main.tip_label.text.contains("\n+") and main.tip_label.text.contains("\n-"), main.tip_label.text)
+	_check("CORE: Level up is disabled when broke", _find("CORE LEVEL").disabled)
+	main.save["coins"] = 50000
 
 
-# ================================================================= CRATES
-func _crates() -> void:
-	var s: Dictionary = main.save
-	_key(KEY_J)
-	await _frames()
-	_check("CRATE: J opens Crates", main.tab == "crates")
-	_audit("crates")
-	var n0: int = Parts.items(s).size() + 0
-	var stars0: int = 0
-	for it in Parts.items(s).values():
-		stars0 += int((it as Dictionary)["stars"])
-	var c0: int = int(s["coins"])
-	var cost: int = Crates.coin_cost(s, "field")
-	main.meta_rng.seed = 3
-	_press("CRATE FIELD COINS")
-	await _frames()
-	var stars1: int = 0
-	for it in Parts.items(main.save).values():
-		stars1 += int((it as Dictionary)["stars"])
-	_check("CRATE: Field Crate costs its coin price and yields a part", int(main.save["coins"]) == c0 - cost and (Parts.items(main.save).size() > n0 or stars1 > stars0 or int(main.save["scrap"]) > 0))
-	_check("CRATE: the reveal plays from the open events", not main.crate_anim.is_empty() and (main.crate_anim["items"] as Array).size() == 1 and _find("CRATE SKIP") != null)
-	_press("CRATE SKIP")
-	await _frames()
-	_check("CRATE: Skip reveals all (Close shown)", _find("CRATE CLOSE") != null)
-	_press("CRATE CLOSE")
-	await _frames()
-	_check("CRATE: Close clears the stage", main.crate_anim.is_empty())
-	var k0: int = int(main.save["keys"])
-	_press("CRATE SUPPLY KEYS")
-	await _frames()
-	_check("CRATE: Supply Crate with a Key opens 2 parts", int(main.save["keys"]) == k0 - 1 and (main.crate_anim["items"] as Array).size() == 2)
-	main.crate_anim = {}
-
-
-# ============================================================ FB1 HOME
-## PLAYTEST_FEEDBACK_1 home: the Outpost IS the hub; plaza buildings open the
-## meta screens; Play / Missions / Reforge are small buttons; land chunks hide
-## their resources; upgrades show before -> after; crate items open the bay;
-## double-click equips / unequips / replaces; SVGs rasterise crisp.
-func _fb1_home() -> void:
-	var s: Dictionary = main.save
-	main.set_tab("play")
-	await _frames()
-	# WP3 (deliberate): the home is the Factory: FCAT / FBUILD palette keys,
-	# a 96x64 chunked map, Crate Depot naming, facility levels at the Relay.
-	# FB2 (deliberate): Core Bay / Crates / Research / Cards are back in the top
-	# menu (they are ALSO buildings on the Outpost), so the "no Core Bay tab" literal flipped.
-	_check("FB1/FB2: home is the Factory (build palette + top menu Core Bay/Crates/Research/Cards/Missions/Reforge)", _find("FCAT logistics") != null and _find("DSTART") != null and _find("DTAB Missions") != null and _find("DTAB Reforge") != null and _find("DTAB Core Bay") != null and _find("DTAB Crates") != null and _find("DTAB Research") != null and _find("DTAB Cards") != null)
-	for nv in [["DTAB Core Bay", "bay"], ["DTAB Crates", "crates"], ["DTAB Research", "research"], ["DTAB Cards", "cards"]]:
-		_press(String(nv[0]))
-		await _frames()
-		_check("FB2: top menu %s opens its screen" % String(nv[0]), main.tab == String(nv[1]) and _find(String(nv[0])) != null, main.tab)
-	var r6: Rect2 = Hub.nav_rect(main, 6)
-	_check("FB2: top menu clears the deploy cluster", r6.end.x <= Hub.start_rect(main).position.x - 330.0, str(r6))
-	main.set_tab("play")
-	await _frames()
-	_audit("home")
-	_check("FB1/WP3: the factory map is large (>= 96x64 in 24 land chunks)", FactoryDB.W >= 96 and FactoryDB.H >= 64 and FactoryDB.CW * FactoryDB.CH == 24)
-	var cat: Button = _find("FCAT logistics")
-	_check("FB1: build categories carry icons", cat != null and cat.icon != null and _find("FCAT storage") != null and _find("FCAT storage").icon != null)
-	for lm in [["bay", "Core Bay"], ["crates", "Crate"], ["research", "Research"], ["cards", "Card"]]:
-		main.set_tab("play")
-		await _frames()
-		var lr: Rect2 = FactoryView.landmark_rect(main, String(lm[0]))
-		_motion(lr.get_center())
-		await _frames(3)
-		var tip: String = main.tip_label.text
-		_click(lr.get_center())
-		await _frames()
-		_check("FB1: clicking the %s building opens it" % String(lm[1]), main.tab == String(lm[0]) and tip.contains(String(lm[1])), "%s / %s" % [main.tab, tip])
-	_press("DTAB Outpost")
-	await _frames()
-	_check("FB1: Back to Outpost returns home", main.tab == "play")
-	# hidden resources in locked land
-	var hid := Vector2i(-1, -1)
-	var ck: Rect2i = FactoryDB.chunk_rect(10)   # east of the start (chunk 7 is bought in the factory section)
-	for yy in range(ck.position.y, ck.end.y):
-		for xx in range(ck.position.x, ck.end.x):
-			if hid.x < 0 and Factory.deposit_at(Vector2i(xx, yy)) != "":
-				hid = Vector2i(xx, yy)
-	var htip: String = FactoryView.map_tip(main, FactoryView.cell_rect(main, hid.x, hid.y).get_center())
-	_check("FB1: a deposit inside locked land is hidden", hid.x >= 0 and not Factory.is_open(s, hid) and htip.begins_with("Locked land") and not htip.contains("deposit"), htip)
-	# facility upgrades show before -> after (Core Relay panel)
-	_click(_op_scr(47, 23))
-	await _frames()
-	var ub: Button = _find("FFAC barracks")
-	_check("FB1/WP3: facility upgrade shows before -> after (Barracks LvN -> N+1)", main.op_sel == Factory.uid_at(s, Vector2i(47, 23)) and ub != null and ub.text.contains("->"), str(ub.text if ub != null else ""))
-	_check("WP3: the Relay tooltip reports its measured output", FactoryView.entity_tip(s, main.op_sel).contains("coins/min"))
-	main.op_sel = ""
-	# crate item -> Core Bay focused on it
-	s["coins"] = maxi(int(s["coins"]), 100000)
-	main.set_tab("crates")
-	await _frames()
-	main.meta_rng.seed = 11
-	_press("CRATE FIELD COINS")
-	await _frames()
-	_press("CRATE SKIP")
-	await _frames()
-	var it0: Dictionary = (main.crate_anim.get("items", []) as Array)[0] if not (main.crate_anim.get("items", []) as Array).is_empty() else {}
-	var cuid: String = String(it0.get("uid", ""))
-	_press("CRATE ITEM 0")
-	await _frames()
-	_check("FB1: clicking a revealed crate part opens the Core Bay on it", cuid != "" and main.tab == "bay" and main.bay_part == cuid, "%s %s" % [cuid, main.bay_part])
-	# double-click equip / unequip / replace
-	var core: String = Cores.active(s)
-	main.bay_core = core
-	for row_k in Parts.N_SLOTS:
-		Parts.unequip(s, core, row_k)
-	Parts.grant(s, "b_longbore", "test")
-	Parts.grant(s, "b_shortbore", "test")
-	var u1: String = Parts.uid_of(s, "b_longbore")
-	var u2: String = Parts.uid_of(s, "b_shortbore")
-	main.bay_filter = {"slot": "B", "rarity": "", "set": ""}
-	main.bay_page = 0
-	main._rebuild_ui()
-	await _frames()
-	var dbl: Callable = func(uid: String) -> void:
-		for n in 2:
-			for c in _all_buttons():
-				if (c as Button).has_meta("uid") and String((c as Button).get_meta("uid")) == uid:
-					_click((c as Button).get_global_rect().get_center())
-					break
-			await _frames()
-	await dbl.call(u1)
-	var at1: int = Parts.preset(s, core).find(u1)
-	_check("FB1: double-click equips a part", at1 >= 0, str(Parts.preset(s, core)))
-	await dbl.call(u2)
-	var row2: Array = Parts.preset(s, core)
-	_check("FB1: double-click replaces the equipped part in that slot", at1 >= 0 and String(row2[at1]) == u2 and not row2.has(u1), str(row2))
-	await dbl.call(u2)
-	_check("FB1: double-click an equipped part unequips it", not Parts.preset(s, core).has(u2), str(Parts.preset(s, core)))
-	main.bay_filter = {"slot": "", "rarity": "", "set": ""}
-	# crisp SVG raster
-	var tx: Texture2D = load("res://art/aegis.svg") as Texture2D
-	_check("FB1: SVG art rasterises at >= 256 px (not upscaled blur)", tx != null and tx.get_width() >= 256, str(tx.get_width() if tx != null else 0))
-	main.set_tab("play")
-	await _frames()
-
-
-# ================================================================= FACTORY (WP3)
-## WP3 (deliberate rewrite): the plot/generator Outpost builder became the
-## Factory. Same coverage, factory semantics: palette arm + click place,
-## ghost validity, drag-from-palette, Esc, select, R rotate (armed + placed),
-## drag-laid belts, Q pipette, X / right-click deconstruct, recipes,
-## facilities, land purchase, bank Collect, pan (right drag / left drag on
-## empty ground / WASD), wheel zoom, research tech row.
+# ================================================================= OUTPOST
+## V2 (deliberate): the Factory is gone; this is the pre-Factory plot / building
+## Outpost again (restored from 5b10ce8; no Command Plaza, no Key Forge).
 func _outpost() -> void:
 	var s: Dictionary = main.save
 	s["coins"] = 200000
 	_key(KEY_O)
 	await _frames()
-	_check("OP: O opens the Factory", main.tab == "outpost")
-	_audit("factory")
-	main.fc_center = Vector2(48.0, 24.0)
-	main.fc_zoom = 34.0
-	var miners0: int = Factory.count_of(s, "miner")
+	_check("OP: O opens the Outpost", main.tab == "outpost")
+	_audit("outpost")
+	var o: Dictionary = s["outpost"]
+	var mills0: int = Outpost.count_of(o, "mill")
 	var c0: int = int(s["coins"])
-	_press("FCAT production")
+	# palette click arms, map click places (a 2x2 Mill next to the Relay)
+	_press("OPBUILD mill")
 	await _frames()
-	_press("FBUILD miner")
-	await _frames()
-	_check("OP: palette click arms the building", main.op_arm == "miner")
-	_motion(_op_scr(52, 26))
+	_check("OP: palette click arms the building", main.op_arm == "mill")
+	_motion(_op_scr(4, 6))
 	await _frames(2)
 	var gh: Dictionary = main.get_meta("op_ghost", {})
-	_check("OP: hover ghost validates the footprint (miner on copper)", gh.has("err") and String(gh["err"]) == "", str(gh))
-	_motion(_op_scr(47, 23))
+	_check("OP: hover preview validates the footprint and the Relay link", gh.has("err") and String(gh["err"]) == "" and bool(gh.get("linked", false)), str(gh))
+	_motion(_op_scr(0, 2))
 	await _frames(2)
 	gh = main.get_meta("op_ghost", {})
-	_check("OP: hover over the Core Relay shows the refusal", String(gh.get("err", "")) == "occupied", str(gh))
-	_motion(_op_scr(56, 22))
-	await _frames(2)
-	gh = main.get_meta("op_ghost", {})
-	_check("OP: a miner off any deposit is refused", String(gh.get("err", "")) == "no_deposit", str(gh))
-	_click(_op_scr(52, 26))
+	_check("OP: hover over the Research Hall shows the refusal", String(gh.get("err", "")) == "occupied", str(gh))
+	_click(_op_scr(4, 6))
 	await _frames()
-	var mu: String = Factory.uid_at(main.save, Vector2i(52, 26))
-	_check("OP: click on the map places it (coins spent, built at once)", Factory.count_of(main.save, "miner") == miners0 + 1 and int(main.save["coins"]) == c0 - Factory.cost("miner") and mu != "")
-	_check("OP: the build stays armed for the next one", main.op_arm == "miner")
+	var o2: Dictionary = main.save["outpost"]
+	# FEEDBACK-1 (deliberate): builds are instant — no builder is held.
+	_check("OP: click on the map places it (coins spent, built at once)", Outpost.count_of(o2, "mill") == mills0 + 1 and int(main.save["coins"]) == c0 - Outpost.cost("mill", 1) and Outpost.busy(main.save) == 0)
+	var new_uid: String = main.op_sel
+	_check("OP: the new building is selected", new_uid != "" and (o2["buildings"] as Dictionary).has(new_uid))
+	# FEEDBACK-1: no build timers, so no gem Skip button either.
+	_check("OP: the build is finished at once (no Skip)", bool((o2["buildings"][new_uid] as Dictionary)["built"]) and _find("OP SKIP 0") == null and not main.save.has("gems"))
+	# drag a Conduit from the palette onto the map
+	_press("OPCAT infra")
+	await _frames()
+	var b: Button = _find("OPBUILD conduit")
+	if b != null:
+		await _drag(b.get_global_rect().get_center(), _op_scr(1, 4))
+	_check("OP: dragging a Conduit from the palette places it", Outpost.occupancy(main.save["outpost"]).has(Vector2i(1, 4)))
 	_key(KEY_ESCAPE)
 	await _frames()
 	_check("OP: Esc disarms", main.op_arm == "")
-	# drag a Smelter from the palette onto the map
-	var b: Button = _find("FBUILD smelter")
-	if b != null:
-		await _drag(b.get_global_rect().get_center(), _op_scr(56, 22))
-	_check("OP: dragging a Smelter from the palette places it", String(Factory.ent(main.save, Factory.uid_at(main.save, Vector2i(56, 22))).get("id", "")) == "smelter")
-	_key(KEY_ESCAPE)
+	# select + upgrade (U) + move (M) + rotate (R) + demolish (Del)
+	_click(_op_scr(4, 6))
 	await _frames()
-	# select
-	_click(_op_scr(52, 26))
+	_check("OP: clicking a building selects it", main.op_sel == new_uid)
+	_key(KEY_U)
 	await _frames()
-	_check("OP: clicking a building selects it", main.op_sel == mu)
-	_check("OP: the selection panel offers Rotate + Deconstruct", _find("FROTATE") != null and _find("FREMOVE") != null)
-	# R rotates the armed piece and a placed one
-	_press("FCAT logistics")
+	_check("OP: U upgrades instantly", not Outpost.has_job(main.save, new_uid) and int((o2["buildings"][new_uid] as Dictionary)["lvl"]) == 2)
+	_check("OP: the upgrade is complete (no Skip needed)", int((o2["buildings"][new_uid] as Dictionary)["lvl"]) == 2 and _find("OP SKIP 0") == null)
+	_key(KEY_M)
 	await _frames()
-	_press("FBUILD inserter")
+	_check("OP: M picks the building up", main.op_moving)
+	_click(_op_scr(0, 6))
+	await _frames()
+	_check("OP: click drops it at the new spot", int((o2["buildings"][new_uid] as Dictionary)["x"]) == 0 and int((o2["buildings"][new_uid] as Dictionary)["y"]) == 6 and not main.op_moving)
+	_press("OPCAT support")
+	await _frames()
+	_press("OPBUILD scrapyard")
 	await _frames()
 	var r0: int = main.op_rot
 	_key(KEY_R)
 	await _frames()
-	_check("OP: R rotates the armed piece (4 directions)", main.op_rot == (r0 + 1) % 4)
+	_check("OP: R rotates the armed footprint", main.op_rot == (r0 + 1) % 2)
 	_key(KEY_ESCAPE)
 	await _frames()
-	_motion(_op_scr(52, 26))
+	main.op_sel = new_uid
+	_key(KEY_DELETE)
 	await _frames()
-	_key(KEY_R)
-	await _frames()
-	_check("OP: R rotates the placed piece under the cursor", int(Factory.ent(main.save, mu)["rot"]) == 1)
-	# drag-to-lay belts
-	_press("FBUILD belt")
-	await _frames()
-	var nb0: int = Factory.count_of(main.save, "belt")
-	await _drag(_op_scr(50, 29), _op_scr(55, 29))
-	var line_ok: bool = true
-	for x in range(50, 56):
-		var e: Dictionary = Factory.ent(main.save, Factory.uid_at(main.save, Vector2i(x, 29)))
-		line_ok = line_ok and String(e.get("id", "")) == "belt" and int(e.get("rot", -1)) == 0
-	_check("OP: dragging lays a straight belt line facing the drag", line_ok and Factory.count_of(main.save, "belt") == nb0 + 6)
-	await _drag(_op_scr(57, 25), _op_scr(58, 28))
-	var corner: Dictionary = Factory.ent(main.save, Factory.uid_at(main.save, Vector2i(58, 25)))
-	_check("OP: an L drag turns the corner (corner belt faces south)", String(corner.get("id", "")) == "belt" and int(corner["rot"]) == 1)
-	_key(KEY_ESCAPE)
-	await _frames()
-	# Q pipette
-	_motion(_op_scr(52, 26))
-	await _frames()
-	_key(KEY_Q)
-	await _frames()
-	_check("OP: Q copies the piece under the cursor (id + direction)", main.op_arm == "miner" and main.op_rot == 1)
-	_key(KEY_ESCAPE)
-	await _frames()
-	# X / right click deconstruct (full refund)
-	var cx: int = int(main.save["coins"])
-	_motion(_op_scr(55, 29))
-	await _frames()
-	_key(KEY_X)
-	await _frames()
-	_check("OP: X deconstructs the piece under the cursor (refund)", Factory.uid_at(main.save, Vector2i(55, 29)) == "" and int(main.save["coins"]) == cx + Factory.cost("belt"))
-	_mouse(_op_scr(54, 29), MOUSE_BUTTON_RIGHT, true)
-	_mouse(_op_scr(54, 29), MOUSE_BUTTON_RIGHT, false)
-	await _frames()
-	_check("OP: a right click deconstructs too", Factory.uid_at(main.save, Vector2i(54, 29)) == "")
-	# assembler recipe
-	_press("FCAT production")
-	await _frames()
-	_press("FBUILD assembler")
-	await _frames()
-	_click(_op_scr(38, 22))
-	await _frames()
-	_key(KEY_ESCAPE)
-	await _frames()
-	var au: String = Factory.uid_at(main.save, Vector2i(38, 22))
-	_click(_op_scr(39, 23))
-	await _frames()
-	_check("OP: an Assembler lists its recipes; circuits need research", main.op_sel == au and _find("FREC gear") != null and _find("FREC circuit") != null and _find("FREC circuit").disabled)
-	_press("FREC gear")
-	await _frames()
-	_check("OP: choosing a recipe sets it", String(Factory.ent(main.save, au)["rec"]) == "gear")
-	main.op_sel = ""
-	# facilities at the Relay
-	_click(_op_scr(47, 23))
-	await _frames()
-	var bl0: int = Factory.fac_level(main.save, "barracks")
-	_press("FFAC barracks")
-	await _frames()
-	_check("OP: a facility upgrade at the Relay raises its level (feeds run mods)", Factory.fac_level(main.save, "barracks") == bl0 + 1 and Outpost.level_of(main.save, "barracks") == bl0 + 1)
-	# bank Collect
-	(Factory._f(main.save)["bank"] as Dictionary)["coins"] = 500.0
+	_check("OP: Delete demolishes the selection", not (o2["buildings"] as Dictionary).has(new_uid))
+	# collect: click a full generator; Collect all at Relay 3
+	var mill_uid: String = ""
+	Outpost.place(main.save, "mill", 4, 4, 0, T0 - 4000)
+	Outpost.tick(main.save, T0)
+	for u in o2["buildings"].keys():
+		if String((o2["buildings"][u] as Dictionary)["id"]) == "mill" and bool((o2["buildings"][u] as Dictionary)["built"]):
+			mill_uid = String(u)
+	if mill_uid != "":
+		(o2["buildings"][mill_uid] as Dictionary)["stored"] = 120.0
 	main._rebuild_ui()
 	await _frames()
 	var cb: int = int(main.save["coins"])
-	_press("FCOLLECT")
+	var mb: Dictionary = o2["buildings"].get(mill_uid, {})
+	_click(_op_scr(int(mb.get("x", 4)), int(mb.get("y", 4))))
 	await _frames()
-	_check("OP: Collect pays the factory bank", int(main.save["coins"]) == cb + 500 and float(Factory._f(main.save)["bank"]["coins"]) < 1.0)
-	# land
-	main.op_sel = ""
-	main.fc_center = Vector2(30.0, 24.0)
+	_check("OP: clicking a stocked generator collects it", int(main.save["coins"]) >= cb + 120)
+	_check("OP: Collect all is locked below Relay Lv3", _find("OP COLLECT ALL").disabled)
+	o2["relay_lvl"] = 3
+	if mill_uid != "":
+		(o2["buildings"][mill_uid] as Dictionary)["stored"] = 50.0
 	main._rebuild_ui()
 	await _frames()
-	_click(_op_scr(26, 24))
+	var cc: int = int(main.save["coins"])
+	_press("OP COLLECT ALL")
 	await _frames()
-	_check("OP: clicking locked land selects the chunk", main.op_sel == "chunk:7")
-	_press("FBUY LAND")
+	_check("OP: Collect all collects every building", int(main.save["coins"]) >= cc + 50)
+	# plots
+	var pk: int = -1
+	for k in OutpostDB.PLOTS.size():
+		if pk < 0 and Outpost.plot_adjacent(o2, k) and not (o2["plots"] as Array).has(k):
+			pk = k
+	var pr: Rect2i = OutpostDB.PLOTS[pk]
+	_click(_op_scr(pr.position.x, pr.position.y))
 	await _frames()
-	_check("OP: buying land opens it and reveals its deposits", (Factory._f(main.save)["chunks"] as Array).has(7) and Factory.deposit_visible(main.save, hid_cell(7)))
-	main.fc_center = Vector2(48.0, 24.0)
+	_check("OP: clicking locked land selects the plot", main.op_sel == "plot:%d" % pk)
+	_press("OP PLOT COINS")
+	await _frames()
+	_check("OP: buying a plot opens the land", (o2["plots"] as Array).has(pk))
 	# pan + zoom
-	var cam0: Vector2 = main.fc_center
-	await _drag(_op_scr(60, 22), _op_scr(60, 22) + Vector2(120, 60), MOUSE_BUTTON_RIGHT)
-	_check("OP: right-drag pans the map", main.fc_center.distance_to(cam0) > 1.5, str(main.fc_center))
-	var cam1: Vector2 = main.fc_center
-	await _drag(_op_scr(int(cam1.x) + 4, int(cam1.y) - 6), _op_scr(int(cam1.x) + 4, int(cam1.y) - 6) + Vector2(-150, 0))
-	_check("OP: left-drag on empty ground pans too", main.fc_center.x > cam1.x + 2.0, "%s -> %s" % [cam1, main.fc_center])
-	var cam2: Vector2 = main.fc_center
-	var kd := InputEventKey.new()
-	kd.physical_keycode = KEY_D
-	kd.keycode = KEY_D
-	kd.pressed = true
-	Input.parse_input_event(kd)
-	await _frames(12)
-	kd = kd.duplicate()
-	kd.pressed = false
-	Input.parse_input_event(kd)
+	var cam0: Vector2 = main.op_cam
+	await _drag(_op_scr(6, 1), _op_scr(6, 1) + Vector2(120, 60), MOUSE_BUTTON_RIGHT)
+	_check("OP: right-drag pans the map", main.op_cam.distance_to(cam0) > 50.0, str(main.op_cam))
+	var z0: float = main.op_zoom
+	_mouse(_op_scr(5, 5), MOUSE_BUTTON_WHEEL_UP, true)
 	await _frames()
-	_check("OP: WASD pans (D moves the camera east)", main.fc_center.x > cam2.x, "%s -> %s" % [cam2, main.fc_center])
-	var z0: float = main.fc_zoom
-	_mouse(_op_scr(48, 24), MOUSE_BUTTON_WHEEL_UP, true)
+	_check("OP: wheel zooms the map", main.op_zoom > z0)
+	main.op_cam = Vector2.ZERO
+	main.op_zoom = 1.0
+	# blueprints
+	var nb: int = (o2["blueprints"] as Array).size()
+	_press("BP SAVE")
 	await _frames()
-	_check("OP: wheel zooms the map", main.fc_zoom > z0)
-	_mouse(_op_scr(48, 24), MOUSE_BUTTON_WHEEL_DOWN, true)
-	_mouse(_op_scr(48, 24), MOUSE_BUTTON_WHEEL_DOWN, true)
+	_check("OP: blueprint Save stores the layout", (o2["blueprints"] as Array).size() == nb + 1)
+	_press("BP EXPORT")
 	await _frames()
-	_check("OP: wheel zooms back out", main.fc_zoom < z0)
-	main.fc_center = Vector2(48.0, 24.0)
-	main.fc_zoom = 34.0
-	# the factory runs live while open (fixed steps)
-	var made0: int = int(main.save["coins"])
-	Factory._f(main.save)["acc"] = 0.0
-	await _frames(30)
-	_check("OP: the factory ticks live on its screen (items move, coins arrive)", int(main.save["coins"]) >= made0 and _any_items_on_belts(main.save))
-	# factory technology in the Research Lab
-	main.set_tab("research")
+	_check("OP: Export produces a layout code", main.op_bp_text != "" and Outpost.import_layout(main.op_bp_text).size() > 0)
+	_press("BP LOAD 0")
 	await _frames()
-	var tb: Button = _find("FTECH electronics")
-	_check("OP: the Research Lab lists factory technology", tb != null and not tb.disabled)
-	_press("FTECH electronics")
-	await _frames()
-	_check("OP: researching Electronics unlocks circuits", Factory.has_tech(main.save, "electronics"))
-	_audit("research + factory tech")
-	main.set_tab("play")
+	_check("OP: Load rebuilds the saved blueprint", main.toast_queue.any(func(t: Variant) -> bool: return String(t).begins_with("Blueprint rebuilt")) or main.toast_text.begins_with("Blueprint rebuilt"))
 	main.op_sel = ""
 	main._rebuild_ui()
 
 
-func hid_cell(k: int) -> Vector2i:
-	var r: Rect2i = FactoryDB.chunk_rect(k)
-	for yy in range(r.position.y, r.end.y):
-		for xx in range(r.position.x, r.end.x):
-			if Factory.deposit_at(Vector2i(xx, yy)) != "":
-				return Vector2i(xx, yy)
-	return Vector2i(-1, -1)
-
-
-func _any_items_on_belts(sv: Dictionary) -> bool:
-	for k in (Factory._f(sv)["ents"] as Dictionary).keys():
-		var e: Dictionary = Factory._f(sv)["ents"][k]
-		if e.has("it") and not (e["it"] as Array).is_empty():
-			return true
-	return false
-
-
-# ================================================= RESEARCH / CARDS / MISSIONS
-func _research_cards_missions() -> void:
+# ======================================================= RESEARCH / MISSIONS
+func _research_missions() -> void:
 	var s: Dictionary = main.save
 	_key(KEY_L)
 	await _frames()
@@ -777,22 +455,7 @@ func _research_cards_missions() -> void:
 	# FEEDBACK-1 (deliberate): research is instant — no queue, no Rush.
 	_check("RES: click a project researches it instantly", Labs.level(main.save, "dmg") == 1 and not Labs.is_running(main.save, "dmg") and int(main.save["coins"]) == lc - Labs.cost("dmg", 0))
 	_check("RES: no Rush button (no timers, no gems)", _find("Rush") == null)
-	_key(KEY_C)
-	await _frames()
-	_check("CARDS: C opens Cards", main.tab == "cards" and _find("Open Chest") != null)
-	_audit("cards")
-	var g1: int = int(main.save["coins"])
-	main.sfx.clear_log()
-	_press("Open Chest")
-	await _frames()
-	_check("CARDS: Open Chest for coins (sfx card_open)", Cards.owned(main.save).size() == 1 and int(main.save["coins"]) == g1 - Cards.chest_cost() and main.sfx.played("card_open"))
-	var cid: String = String(Cards.owned(main.save).keys()[0])
-	_press("CARD " + cid)
-	await _frames()
-	_check("CARDS: click a card equips it", Cards.equipped(main.save).has(cid))
-	_press("EQ " + cid)
-	await _frames()
-	_check("CARDS: click an equipped slot unequips", not Cards.equipped(main.save).has(cid))
+	_check("V2: no Cards / Crates / Core Bay / Factory tech left", _findp("CARD ") == null and _find("Open Chest") == null and _findp("FTECH") == null)
 	_key(KEY_M)
 	await _frames()
 	_check("MIS: M opens Missions", main.tab == "missions")
@@ -814,6 +477,30 @@ func _research_cards_missions() -> void:
 	_press("BONUS")
 	await _frames()
 	_check("MIS: all-clear bonus (coins)", bool(main.save["missions"]["bonus_claimed"]) and int(main.save["coins"]) > g3)
+
+
+# ================================================================ HOME (V2)
+## V2 home: the Outpost is the hub; the top menu holds Core / Research /
+## Missions / Reforge (no plaza buildings, no Crate Depot / Card Hall).
+func _home() -> void:
+	main.set_tab("play")
+	await _frames()
+	_check("V2 home: Outpost map + top menu Core / Research / Missions / Reforge", _findp("OPBUILD ") != null and _find("DSTART") != null and _find("DTAB Core") != null and _find("DTAB Research") != null and _find("DTAB Missions") != null and _find("DTAB Reforge") != null and _find("DTAB Core Bay") == null and _find("DTAB Crates") == null and _find("DTAB Cards") == null)
+	for nv in [["DTAB Core", "core"], ["DTAB Research", "research"], ["DTAB Missions", "missions"], ["DTAB Reforge", "reforge"]]:
+		_press(String(nv[0]))
+		await _frames()
+		_check("V2 top menu %s opens its screen" % String(nv[0]), main.tab == String(nv[1]), main.tab)
+	var r4: Rect2 = Hub.nav_rect(main, Hub.NAV.size())
+	_check("V2 top menu clears the deploy cluster", r4.end.x <= Hub.start_rect(main).position.x - 330.0, str(r4))
+	_press("DTAB Outpost")
+	await _frames()
+	_check("V2 Back to Outpost returns home", main.tab == "play")
+	_audit("home")
+	var cat: Button = _find("OPCAT prod")
+	_check("FB1: build categories carry icons", cat != null and cat.icon != null)
+	_check("V2: no plaza landmarks on the Outpost map", OutpostView.LANDMARKS.is_empty() and OutpostView.landmark_at(Vector2i(-2, 1)) == "")
+	var tx: Texture2D = load("res://art/aegis.svg") as Texture2D
+	_check("FB1: SVG art rasterises at >= 256 px (not upscaled blur)", tx != null and tx.get_width() >= 256, str(tx.get_width() if tx != null else 0))
 
 
 # ================================================================= REFORGE
@@ -840,7 +527,7 @@ func _reforge() -> void:
 	_press("REFORGE CONFIRM")
 	await _frames()
 	_check("RF: confirmed Reforge banks shards and resets coins", Reforge.count(main.save) == 1 and int(main.save["shards"]) == want and int(main.save["coins"]) == 0, "%d" % want)
-	_check("RF: Reforge keeps owned parts", Parts.items(main.save).size() > 0)
+	_check("RF: Reforge keeps Scrap", int(main.save["scrap"]) > 0)
 	_press("RF might")
 	await _frames()
 	_check("RF: a branch node needs the root first", Reforge.node(main.save, "might") == 0)
@@ -993,13 +680,14 @@ func _run_screen() -> void:
 	_check("RUN: hovering a track shows its tooltip", main.tipbox.visible and main.tip_label.text.begins_with("Eco enhancement"), main.tip_label.text)
 	_check("FB1: tooltips render a bold header + icon stat lines, no hotkey callouts", main.tip_rich.text.begins_with("[b]") and main.tip_rich.text.contains("[img") and not main.tip_label.text.contains("Shift"), main.tip_rich.text)
 	# FB2 right panel: Loot Drops feed aggregates kill loot; Core-hit flash is capped
-	main._handle([{"t": "drop", "kind": "scrap", "n": 3, "source": "kill", "pos": Vector2.ZERO}, {"t": "drop", "kind": "scrap", "n": 2, "source": "kill", "pos": Vector2.ZERO}, {"t": "drop", "kind": "key", "n": 1, "source": "kill", "pos": Vector2.ZERO}])
+	main._handle([{"t": "drop", "kind": "scrap", "n": 3, "source": "kill", "pos": Vector2.ZERO}, {"t": "drop", "kind": "scrap", "n": 2, "source": "kill", "pos": Vector2.ZERO}, {"t": "boss_bounty", "coins": 7, "pos": Vector2.ZERO}])
 	var lf0: Dictionary = main.loot_feed[0] if not main.loot_feed.is_empty() else {}
 	var scrap_n: float = 0.0
 	for f in main.loot_feed:
 		if String((f as Dictionary)["k"]) == "scrap":
 			scrap_n = float((f as Dictionary)["n"])
-	_check("FB2: Loot Drops feed aggregates drops (scrap 3+2 = 5, newest first)", is_equal_approx(scrap_n, 5.0) and String(lf0.get("k", "")) == "key", str(main.loot_feed))
+	# V2 (deliberate): Keys are gone; the newest row is a boss bounty instead.
+	_check("FB2: Loot Drops feed aggregates drops (scrap 3+2 = 5, newest first)", is_equal_approx(scrap_n, 5.0) and String(lf0.get("k", "")) == "bounty", str(main.loot_feed))
 	var hz: Array = []
 	for q in 60:
 		hz.append({"t": "core_hits", "n": 40, "dmg": 1.0, "shots": 0, "pos_sample": [Vector2.ZERO]})
@@ -1012,7 +700,8 @@ func _run_screen() -> void:
 	_check("FB2: Enemy intel lists this round's types (alive or queued) with 1-5 stars", not ro.is_empty() and Intel.stars(S, String(ro.keys()[0])) >= 1 and Intel.stars(S, "boss") <= 5 and main.intel_seen.size() >= ro.size(), str(ro.keys()))
 	_motion(_cell_scr(TowerState.CORE_SLOT))
 	await _frames(3)
-	_check("RUN: hovering the Core shows its attack + trait", main.tipbox.visible and main.tip_label.text.contains("Core") and main.tip_label.text.contains("Trait"), main.tip_label.text)
+	# V2 (deliberate): one Core, no traits — the tooltip names the Core and its attack.
+	_check("RUN: hovering the Core shows its level + attack", main.tipbox.visible and main.tip_label.text.contains("Core") and main.tip_label.text.contains("Cannon"), main.tip_label.text)
 	# draft: cards, reroll, banish, Q pick, place
 	S.grant_draft()
 	S.draft[0] = load("res://Draft.gd").card_for("gun", S._draft_ctx(""))
@@ -1165,7 +854,7 @@ func _pad_and_slots() -> void:
 	await _frames()
 	_check("PC-U5: pad input switches glyphs", main.last_device == "pad")
 	main.screen = "base"
-	for tb in ["play", "bay", "crates", "outpost", "research", "reforge"]:
+	for tb in ["play", "core", "outpost", "research", "reforge"]:
 		main.set_tab(tb)
 		await _frames()
 		var dead: Array = []

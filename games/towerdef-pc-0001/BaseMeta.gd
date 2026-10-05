@@ -1,227 +1,75 @@
 extends RefCounted
-## Permanent base (the meta layer, The Tower's "workshop" as buildings).
-## Pure static functions over the save Dictionary — the view writes it to disk
-## via MetaSave (3 slots). Save v3 (PC_SPEC §4) = the v2 shape below on the
-## 7x7 board (cell keys 0..48, core 24) plus stats{} / history[] (Stats.gd),
-## endless{best}. v2 -> v3 maps 5x5 (r,c) to 7x7 (r+1,c+1). v2 shape
-## (SPEC A1 / SYSTEMS §12):
-##   {version:2, coins, gems, core:{dmg,hp,regen}, slots:{"<idx>":{id,lvl}},
-##    unlocked:[idx], runs, best_wave, tier, best_wave_by_tier:{"N":w},
-##    tiers_rewarded:[N], best_coin_rate:float, speed:float,
-##    labs:{lvls,slots,running}, cards:{owned,equipped,slots},
-##    missions:{day,list,bonus_claimed}, streak:{day_idx,last_day,loops},
-##    last_seen:int, stats:{kills,bosses}}
-## Owner feedback #1: gems (premium currency) are gone. normalize() converts a
-## legacy gem balance into coins at GEM_COINS each and drops gem_log /
-## boss_gems_today.
+## Permanent meta layer (save v5, Corehold V2). Pure static functions over the
+## save Dictionary — the view writes it to disk via MetaSave (3 slots).
+## V2 is a HARD RESET (owner decision): any save older than v5 normalizes to
+## fresh v5 defaults with reset_v2 = true (the view shows a one-time banner).
+## Shape:
+##   {version: 5, coins, scrap, shards, runs, best_wave, tier,
+##    best_wave_by_tier: {"N": w}, tiers_rewarded: [N], best_coin_rate, speed,
+##    core: {lvl, ...}  (Cores.gd; P4 adds look / loadout),
+##    research: {lvls, running} (Labs.gd), outpost (Outpost.gd),
+##    reforge (Reforge.gd), insight: {id: n} (PickDB),
+##    missions, streak, last_seen, stats, history, settings, endless,
+##    achievements}
 
-const BuildingDB := preload("res://data/BuildingDB.gd")
 const LabDB := preload("res://data/LabDB.gd")
-const CardDB := preload("res://data/CardDB.gd")
 const MissionDB := preload("res://data/MissionDB.gd")
 const Tiers := preload("res://Tiers.gd")
 const Labs := preload("res://Labs.gd")
-const Cards := preload("res://Cards.gd")
 const Missions := preload("res://Missions.gd")
 const TuneRef := preload("res://Tune.gd")
 const Stats := preload("res://Stats.gd")
 const Cores := preload("res://Cores.gd")
 const PickDB := preload("res://data/PickDB.gd")
-const Parts := preload("res://Parts.gd")
-const Crates := preload("res://Crates.gd")
 const Outpost := preload("res://Outpost.gd")
-const Factory := preload("res://Factory.gd")
 const Reforge := preload("res://Reforge.gd")
 
-const VERSION: int = 4
-## PC 7x7 base (PC_SPEC §2.1): rings by Chebyshev distance from the core cell
-## (3,3). Ring 1 (8 cells) starts unlocked; ring 2 / ring 3 are bought per cell.
-const SIDE: int = 7
-const N: int = 49
-const CORE_SLOT: int = 24
-const CORE_STATS: Array = ["dmg", "hp", "regen"]
-const MAX_LVL: int = 15
-## Hard ceiling for migrated core levels; the live cap is core_cap(s).
-const CORE_HARD_MAX: int = 60
-const GEM_COINS: int = 25   # legacy gem -> coins conversion
+const VERSION: int = 5
 
 
 static func default_save() -> Dictionary:
 	return {
-		"version": VERSION, "coins": 0,
-		"core": {"dmg": 0, "hp": 0, "regen": 0}, "slots": {}, "unlocked": [],
+		"version": VERSION, "coins": 0, "scrap": 0, "shards": 0,
 		"runs": 0, "best_wave": 0, "tier": 1, "best_wave_by_tier": {"1": 0},
 		"tiers_rewarded": [], "best_coin_rate": 0.0, "speed": 1.0,
+		"core": Cores.default_block(),
 		"research": Labs.default_block(),
-		"cards": {"owned": {}, "equipped": [], "slots": Cards.MIN_SLOTS},
 		"missions": {"day": -1, "list": [], "bonus_claimed": false},
 		"streak": {"day_idx": 0, "last_day": -1, "loops": 0},
 		"last_seen": 0, "stats": Stats.default_stats(), "history": [],
 		"settings": {"music": 0.8, "sfx": 1.0, "mute": false},
 		"endless": {"best": 0},
 		"achievements": {"unlocked": {}, "missions_claimed": 0},
-		# Redesign ENGINE-RUN blocks (additive; save v4 folds them in).
-		"cores": Cores.default_block(), "core_cores": 0, "insight": {},
-		"scrap": 0, "keys": 0, "part_drops": [],
-		"parts": Parts.default_block(), "crates": Crates.default_block(),
+		"insight": {},
 		"outpost": Outpost.default_block(),
-		"reforge": Reforge.default_block(), "shards": 0,
+		"reforge": Reforge.default_block(),
 	}
 
 
-## Mobile 5x5 index -> PC 7x7 index: (r, c) -> (r+1, c+1). The 5x5 inner ring
-## lands on 7x7 ring 1 and the 5x5 outer ring on ring 2.
-static func idx5_to_7(i: int) -> int:
-	return (i / 5 + 1) * SIDE + (i % 5 + 1)
-
-
-## v1 (no `version`) -> v2 -> v3 -> v4. Pure; returns a new Dictionary.
-## `to` stops early (tests of a single step); idempotent at the target.
-static func migrate(s: Dictionary, to: int = VERSION) -> Dictionary:
-	var d: Dictionary = s.duplicate(true)
-	var v: int = int(d.get("version", 1))
-	if v >= to:
-		return d
-	if v < 2:
-		d = _migrate_v1(d)
-	if int(d.get("version", 2)) < 3 and to >= 3:
-		d = _migrate_v2(d)
-	if int(d.get("version", 3)) < 4 and to >= 4:
-		d = _migrate_v3(d)
-	return d
-
-
-## Coins a v3 permanent base cost: every slot's purchase + upgrades, plus
-## 500 per bought (unlocked) cell (SYSTEMS §8 step 1).
-static func v3_base_refund(d: Dictionary) -> int:
-	var refund: int = 0
-	var sl: Variant = d.get("slots", {})
-	if sl is Dictionary:
-		for k in (sl as Dictionary).keys():
-			var e: Variant = (sl as Dictionary)[k]
-			if not (e is Dictionary):
-				continue
-			var id: String = String((e as Dictionary).get("id", ""))
-			if not BuildingDB.DEFS.has(id):
-				continue
-			refund += place_cost(id)
-			for l in range(1, maxi(1, int((e as Dictionary).get("lvl", 1)))):
-				refund += upgrade_cost(l)
-	var un: Variant = d.get("unlocked", [])
-	if un is Array:
-		refund += 500 * (un as Array).size()
-	return refund
-
-
-## v3 -> v4 (REDESIGN_SYSTEMS §8 / REDESIGN_SPEC §3.5): permanent base ->
-## coin refund + Outpost starter (connected Coin Mill + 25% build credit, cap
-## 50k); Core stat levels -> Bastion level 1 + floor(sum/3) (cap 20), leftover
-## levels refunded at the old curve; labs -> research (slots 1/2/3+ -> Hall
-## L1/L4/L8); 1 free Field Crate. Outpost clocks start at 0, so the first
-## tick after migration only stamps the time (no double offline pay).
-static func _migrate_v3(d: Dictionary) -> Dictionary:
-	var refund: int = v3_base_refund(d)
-	var core: Dictionary = d.get("core", {}) if d.get("core", {}) is Dictionary else {}
-	var sum: int = 0
-	for k in CORE_STATS:
-		sum += maxi(0, int(core.get(k, 0)))
-	var blvl: int = mini(20, 1 + sum / 3)
-	var core_refund: int = 0
-	for k in CORE_STATS:
-		for l in range(blvl - 1, maxi(0, int(core.get(k, 0)))):
-			core_refund += core_cost(l)
-	d["coins"] = maxi(0, int(d.get("coins", 0))) + refund + core_refund
-	d["core"] = {"dmg": 0, "hp": 0, "regen": 0}
-	d["slots"] = {}
-	d["unlocked"] = []
-	var cb: Dictionary = d.get("cores", {}) if d.get("cores", {}) is Dictionary else Cores.default_block()
-	var lv: Dictionary = cb.get("levels", {}) if cb.get("levels", {}) is Dictionary else {}
-	lv["bastion"] = maxi(int(lv.get("bastion", 1)), blvl)
-	cb["levels"] = lv
-	d["cores"] = cb
-	# Outpost: Relay + Research Hall (default) + a placed, connected Coin Mill.
-	var o: Dictionary = Outpost.default_block()
-	Outpost._add_building(o, "mill", 4, 4, 0, true)
-	o["credit"] = mini(50000, refund / 4)
-	var labs: Dictionary = d.get("labs", {}) if d.get("labs", {}) is Dictionary else {}
-	var slots: int = int(labs.get("slots", 1))
-	var hall: int = 8 if slots >= 3 else (4 if slots == 2 else 1)
-	for k in o["buildings"].keys():
-		if String((o["buildings"][k] as Dictionary)["id"]) == "research":
-			(o["buildings"][k] as Dictionary)["lvl"] = hall
-			(o["buildings"][k] as Dictionary)["spent"] = Outpost.cost("research", 1)
-	d["outpost"] = o
-	d["research"] = {"lvls": (labs.get("lvls", {}) as Dictionary).duplicate(true) if labs.get("lvls", {}) is Dictionary else {}, "running": (labs.get("running", []) as Array).duplicate(true) if labs.get("running", []) is Array else []}
-	d.erase("labs")
-	d.erase("target_modes")
-	var cr: Dictionary = d.get("crates", {}) if d.get("crates", {}) is Dictionary else {}
-	var tk: Dictionary = cr.get("tokens", {}) if cr.get("tokens", {}) is Dictionary else {}
-	tk["field"] = int(tk.get("field", 0)) + 1
-	cr["tokens"] = tk
-	d["crates"] = cr
-	d["v4_refund"] = refund + core_refund
-	d["version"] = 4
-	return d
-
-
-## v2 -> v3: remap every 5x5 cell key onto the 7x7 board; new v3 blocks are
-## filled with defaults by normalize().
-static func _migrate_v2(d: Dictionary) -> Dictionary:
-	var slots_in: Dictionary = d.get("slots", {})
-	var slots: Dictionary = {}
-	for key in slots_in.keys():
-		var i5: int = int(key)
-		if i5 >= 0 and i5 < 25:
-			slots[str(idx5_to_7(i5))] = slots_in[key]
-	d["slots"] = slots
-	var un: Array = []
-	for v in d.get("unlocked", []):
-		var i5b: int = int(v)
-		if i5b >= 0 and i5b < 25:
-			un.append(idx5_to_7(i5b))
-	d["unlocked"] = un
-	if d.get("target_modes", null) is Dictionary:
-		var tm_in: Dictionary = d["target_modes"]
-		var tm: Dictionary = {}
-		for key in tm_in.keys():
-			var i5c: int = int(key)
-			if i5c >= 0 and i5c < 25:
-				tm[str(idx5_to_7(i5c))] = tm_in[key]
-		d["target_modes"] = tm
-	d["version"] = 3
-	return d
-
-
-static func _migrate_v1(d: Dictionary) -> Dictionary:
-	var bw: int = int(d.get("best_wave", 0))
-	d["best_wave_by_tier"] = {"1": bw}
-	d["gems"] = 0
-	d["tier"] = 1
-	d["last_seen"] = 0
-	var labs: Dictionary = d.get("labs", {})
-	var lv: Dictionary = labs.get("lvls", {})
-	lv.erase("armor")
-	d["version"] = 2
-	return d
-
-
-static func _int_dict(src: Dictionary, keys: Array) -> Dictionary:
-	var o: Dictionary = {}
-	for k in keys:
-		o[k] = int(src.get(k, 0))
-	return o
+## True for a save written before V2 (anything with data but version < 5).
+static func is_pre_v2(raw: Dictionary) -> bool:
+	return not raw.is_empty() and int(raw.get("version", 1)) < VERSION
 
 
 ## Coerce JSON floats to ints, fill missing keys, clamp levels, drop unknowns.
+## Pre-V2 saves are not migrated: they become fresh defaults (+ reset_v2).
 static func normalize(s_in: Dictionary) -> Dictionary:
-	var s: Dictionary = s_in
-	if int(s_in.get("version", 1)) < VERSION:
-		s = migrate(s_in)
 	var d: Dictionary = default_save()
-	d["coins"] = maxi(0, int(s.get("coins", 0))) + GEM_COINS * maxi(0, int(s.get("gems", 0)))
+	if is_pre_v2(s_in):
+		d["reset_v2"] = true
+		var se_old: Variant = s_in.get("settings", {})
+		if se_old is Dictionary:
+			d["settings"] = _settings(se_old)   # audio settings survive the reset
+		return d
+	var s: Dictionary = s_in
+	if bool(s.get("reset_v2", false)):
+		d["reset_v2"] = true
+	d["coins"] = maxi(0, int(s.get("coins", 0)))
+	d["scrap"] = maxi(0, int(s.get("scrap", 0)))
+	d["shards"] = maxi(0, int(s.get("shards", 0)))
 	d["runs"] = maxi(0, int(s.get("runs", 0)))
 	# tiers
-	var bw_in: Dictionary = s.get("best_wave_by_tier", {})
+	var bw_in: Dictionary = s.get("best_wave_by_tier", {}) if s.get("best_wave_by_tier", {}) is Dictionary else {}
 	var bw: Dictionary = {}
 	for t in range(1, Tiers.tier_max() + 1):
 		if bw_in.has(str(t)):
@@ -244,111 +92,39 @@ static func normalize(s_in: Dictionary) -> Dictionary:
 	d["tiers_rewarded"] = tr
 	d["best_coin_rate"] = maxf(0.0, float(s.get("best_coin_rate", 0.0)))
 	d["last_seen"] = maxi(0, int(s.get("last_seen", 0)))
-	# base
-	var core_in: Dictionary = s.get("core", {})
-	var core: Dictionary = {}
-	for k in CORE_STATS:
-		core[k] = clampi(int(core_in.get(k, 0)), 0, CORE_HARD_MAX)
-	d["core"] = core
-	var cap: int = perm_lvl_cap(d)
-	var slots_in: Dictionary = s.get("slots", {})
-	var slots: Dictionary = {}
-	for key in slots_in.keys():
-		var e: Dictionary = slots_in[key]
-		var id: String = String(e.get("id", ""))
-		var idx: int = int(key)
-		if BuildingDB.DEFS.has(id) and idx >= 0 and idx < N and idx != CORE_SLOT and place_ok(idx, id):
-			slots[str(idx)] = {"id": id, "lvl": clampi(int(e.get("lvl", 1)), 1, cap)}
-	d["slots"] = slots
-	var un: Array = []
-	for v in s.get("unlocked", []):
-		var n2: int = int(v)
-		if n2 >= 0 and n2 < N and cell_ring(n2) >= 2 and not un.has(n2):
-			un.append(n2)
-	d["unlocked"] = un
-	# research (Research Hall projects; v3 "labs" is read when present)
 	d["outpost"] = Outpost.normalize_block(s.get("outpost", null))
-	d["factory"] = Factory.normalize_block(s.get("factory", null))
-	var labs_in: Dictionary = {}
-	if s.get("research", null) is Dictionary:
-		labs_in = s["research"]
-	elif s.get("labs", null) is Dictionary:
-		labs_in = s["labs"]
+	d["reforge"] = Reforge.normalize_block(s.get("reforge", null))
+	d["core"] = Cores.normalize_block(s.get("core", null), Cores.max_level(d))
+	# research
+	var labs_in: Dictionary = s.get("research", {}) if s.get("research", {}) is Dictionary else {}
 	var lv_in: Dictionary = labs_in.get("lvls", {}) if labs_in.get("lvls", {}) is Dictionary else {}
-	var labs: Dictionary = d["research"]
-	var lv: Dictionary = labs["lvls"]
+	var lv: Dictionary = (d["research"] as Dictionary)["lvls"]
 	for id in LabDB.IDS:
 		lv[id] = clampi(int(lv_in.get(id, 0)), 0, LabDB.max_of(String(id)))
-	var qn: int = Outpost.research_queues(d)
-	var run: Array = []
-	for r in labs_in.get("running", []):
-		var e2: Dictionary = r
-		var tid: String = String(e2.get("track", ""))
-		if not LabDB.DEFS.has(tid) or run.size() >= qn:
-			continue
-		var dup: bool = false
-		for q in run:
-			if String((q as Dictionary)["track"]) == tid:
-				dup = true
-		if dup or int(lv[tid]) >= LabDB.max_of(tid):
-			continue
-		run.append({"track": tid, "to_lvl": int(lv[tid]) + 1, "start": int(e2.get("start", 0)), "end": int(e2.get("end", 0))})
-	labs["running"] = run
-	# cards
-	var cards_in: Dictionary = s.get("cards", {})
-	var cards: Dictionary = d["cards"]
-	cards["slots"] = clampi(int(cards_in.get("slots", Cards.MIN_SLOTS)), Cards.MIN_SLOTS, Cards.MAX_SLOTS)
-	var own_in: Dictionary = cards_in.get("owned", {})
-	var own: Dictionary = {}
-	for cid in CardDB.IDS:
-		if own_in.has(cid):
-			var oe: Dictionary = own_in[cid]
-			var cl: int = clampi(int(oe.get("lvl", 1)), 1, CardDB.MAX_LVL)
-			own[cid] = {"lvl": cl, "copies": 0 if cl >= CardDB.MAX_LVL else maxi(0, int(oe.get("copies", 0)))}
-	cards["owned"] = own
-	var eq: Array = []
-	for v in cards_in.get("equipped", []):
-		var ce: String = String(v)
-		if own.has(ce) and not eq.has(ce) and eq.size() < int(cards["slots"]):
-			eq.append(ce)
-	cards["equipped"] = eq
 	# missions + streak
-	var m_in: Dictionary = s.get("missions", {})
+	var m_in: Dictionary = s.get("missions", {}) if s.get("missions", {}) is Dictionary else {}
 	var m: Dictionary = d["missions"]
 	m["day"] = int(m_in.get("day", -1))
 	m["bonus_claimed"] = bool(m_in.get("bonus_claimed", false))
 	var ml: Array = []
 	for x in m_in.get("list", []):
+		if not (x is Dictionary):
+			continue
 		var me: Dictionary = x
 		var tpl: String = String(me.get("tpl", ""))
 		if MissionDB.DEFS.has(tpl) and ml.size() < Missions.PER_DAY:
 			var tg: int = maxi(1, int(me.get("target", 1)))
 			ml.append({"tpl": tpl, "target": tg, "prog": clampi(int(me.get("prog", 0)), 0, tg), "claimed": bool(me.get("claimed", false)), "coins": MissionDB.reward(tpl)})
 	m["list"] = ml
-	var st_in: Dictionary = s.get("streak", {})
+	var st_in: Dictionary = s.get("streak", {}) if s.get("streak", {}) is Dictionary else {}
 	d["streak"] = {"day_idx": clampi(int(st_in.get("day_idx", 0)), 0, 7), "last_day": int(st_in.get("last_day", -1)), "loops": maxi(0, int(st_in.get("loops", 0)))}
 	d["stats"] = Stats.normalize_stats(s.get("stats", {}))
 	d["history"] = Stats.normalize_history(s.get("history", []))
-	var se_in: Dictionary = s.get("settings", {})
 	var en_in: Dictionary = s.get("endless", {}) if s.get("endless", {}) is Dictionary else {}
 	d["endless"] = {"best": maxi(0, int(en_in.get("best", 0)))}
 	d["achievements"] = _achievements(s.get("achievements", {}))
-	d["cores"] = Cores.normalize_block(s.get("cores", null), Cores.max_level(s))
-	d["parts"] = Parts.normalize_block(s.get("parts", null))
-	Parts.sanitize_presets(d)
-	d["crates"] = Crates.normalize_block(s.get("crates", null))
-	d["core_cores"] = maxi(0, int(s.get("core_cores", 0)))
 	d["insight"] = PickDB.normalize_insight(s.get("insight", {}))
-	d["scrap"] = maxi(0, int(s.get("scrap", 0)))
-	d["keys"] = maxi(0, int(s.get("keys", 0)))
-	var pd: Array = []
-	for x in s.get("part_drops", []):
-		if x is Dictionary and pd.size() < 200:
-			pd.append({"rarity": String((x as Dictionary).get("rarity", "common")), "source": String((x as Dictionary).get("source", "kill"))})
-	d["part_drops"] = pd
-	d["reforge"] = Reforge.normalize_block(s.get("reforge", null))
-	d["shards"] = maxi(0, int(s.get("shards", 0)))
-	d["settings"] = {"music": clampf(float(se_in.get("music", 0.8)), 0.0, 1.0), "sfx": clampf(float(se_in.get("sfx", 1.0)), 0.0, 1.0), "mute": bool(se_in.get("mute", false))}
+	d["settings"] = _settings(s.get("settings", {}))
 	# speed snaps to an unlocked step
 	var steps: Array = Labs.speed_steps(d)
 	var sp: float = float(s.get("speed", 1.0))
@@ -360,24 +136,9 @@ static func normalize(s_in: Dictionary) -> Dictionary:
 	return d
 
 
-## Late coin sink (fix round): every tier above 1 lifts the core stat cap by
-## core_cap_step levels, so banked coins keep converting into HP / damage /
-## regen after the base grid is saturated.
-static func core_cap(s: Dictionary) -> int:
-	return mini(CORE_HARD_MAX, MAX_LVL + TuneRef.int_of("core_cap_step", 5) * (Tiers.highest(s) - 1))
-
-
-static func perm_lvl_cap(s: Dictionary) -> int:
-	return TuneRef.int_of("perm_lvl_cap", 10) + 5 * (Tiers.highest(s) - 1) + land_bonus(s)
-
-
-## PC land development: every pc_land_cells outer cells bought (ring 2/3) lift
-## every building's permanent level cap by 1 (max pc_land_max). The build cap
-## keeps the board scarce, so this is what makes the 48-cell base a real late
-## coin sink instead of dead land.
-static func land_bonus(s: Dictionary) -> int:
-	var un: Array = s.get("unlocked", [])
-	return mini(TuneRef.int_of("pc_land_max", 10), un.size() / maxi(1, TuneRef.int_of("pc_land_cells", 4)))
+static func _settings(src: Variant) -> Dictionary:
+	var se: Dictionary = src if src is Dictionary else {}
+	return {"music": clampf(float(se.get("music", 0.8)), 0.0, 1.0), "sfx": clampf(float(se.get("sfx", 1.0)), 0.0, 1.0), "mute": bool(se.get("mute", false))}
 
 
 ## The single hand-off to TowerState (SPEC A8).
@@ -400,184 +161,9 @@ static func run_mods(s: Dictionary) -> Dictionary:
 		"lab_dmg": float(lm["dmg"]), "lab_hp": float(lm["hp"]),
 		"lab_coin": float(lm["coin"]), "lab_xp": float(lm["xp"]),
 		"start_cash": int(lm["start_cash"]) + int(rm["rf_start_cash"]), "rerolls": int(lm["rerolls"]),
-		"cards": Cards.mods(s), "speed": sp, "grid_lvl": Labs.level(s, "grid"),
+		"speed": sp, "grid_lvl": Labs.level(s, "grid"),
 		"allow_new_bldg": int(s.get("runs", 0)) >= 2,
 	}
-
-
-## Chebyshev ring of (r, c) around the core cell (3,3): 0 core, 1..3 rings.
-static func cell_ring_rc(r: int, c: int) -> int:
-	return maxi(absi(r - SIDE / 2), absi(c - SIDE / 2))
-
-
-static func cell_ring(i: int) -> int:
-	return cell_ring_rc(i / SIDE, i % SIDE)
-
-
-static func is_corner(i: int) -> bool:
-	var rg: int = cell_ring(i)
-	return rg > 0 and absi(i / SIDE - SIDE / 2) == rg and absi(i % SIDE - SIDE / 2) == rg
-
-
-static func is_inner(i: int) -> bool:
-	return i >= 0 and i < N and cell_ring(i) == 1
-
-
-## Railgun is outer-ring only (ring >= 2); every other building fits anywhere.
-static func place_ok(i: int, id: String) -> bool:
-	if id == "railgun":
-		return cell_ring(i) >= 2
-	return true
-
-
-## PC_SPEC §2.1 run build cap: 12 + 2*(highest_tier-1), capped at 40.
-static func build_cap(s: Dictionary) -> int:
-	var c: int = TuneRef.int_of("pc_build_cap_base", 12) + TuneRef.int_of("pc_build_cap_step", 2) * (Tiers.highest(s) - 1)
-	return mini(TuneRef.int_of("pc_build_cap_max", 40), c)
-
-
-static func building_count(s: Dictionary) -> int:
-	return (s["slots"] as Dictionary).size()
-
-
-## Ring 3 cells need best tier >= 3.
-static func ring_open(s: Dictionary, i: int) -> bool:
-	var rg: int = cell_ring(i)
-	if rg <= 2:
-		return true
-	return Tiers.highest(s) >= TuneRef.int_of("pc_ring3_tier", 3)
-
-
-static func is_unlocked(s: Dictionary, i: int) -> bool:
-	if i == CORE_SLOT:
-		return false
-	if is_inner(i):
-		return true
-	var un: Array = s["unlocked"]
-	return un.has(i)
-
-
-static func slot_of(s: Dictionary, i: int) -> Dictionary:
-	var slots: Dictionary = s["slots"]
-	return slots.get(str(i), {})
-
-
-## Per-cell permanent unlock price (PC_SPEC §2.1): ring 2 = 400*1.18^n, ring 3
-## = 2500*1.22^n (n = cells of that ring already unlocked), corners +50%.
-static func unlock_cost(s: Dictionary, i: int) -> int:
-	var rg: int = cell_ring(i)
-	if rg < 2:
-		return 0
-	var n: int = 0
-	for v in s["unlocked"]:
-		if cell_ring(int(v)) == rg:
-			n += 1
-	var c: float = 0.0
-	if rg == 2:
-		c = TuneRef.num("pc_cell_cost_r2", 400.0) * pow(TuneRef.num("pc_cell_growth_r2", 1.18), float(n))
-	else:
-		c = TuneRef.num("pc_cell_cost_r3", 2500.0) * pow(TuneRef.num("pc_cell_growth_r3", 1.22), float(n))
-	if is_corner(i):
-		c *= TuneRef.num("pc_corner_mult", 1.5)
-	return int(c)
-
-
-static func place_cost(id: String) -> int:
-	var d: Dictionary = BuildingDB.get_def(id)
-	return int(d.get("coin", 15))
-
-
-static func upgrade_cost(lvl: int) -> int:
-	return int(TuneRef.num("perm_upgrade_base", 45.0) * pow(1.55, lvl))
-
-
-static func core_cost(lvl: int) -> int:
-	return int(TuneRef.num("perm_core_base", 30.0) * pow(1.5, lvl))
-
-
-static func try_unlock(s: Dictionary, i: int) -> bool:
-	if i < 0 or i >= N or is_unlocked(s, i) or i == CORE_SLOT or not ring_open(s, i):
-		return false
-	var c: int = unlock_cost(s, i)
-	if int(s["coins"]) < c:
-		return false
-	s["coins"] = int(s["coins"]) - c
-	Stats.on_event(s, {"t": "coins_spent", "n": c})
-	(s["unlocked"] as Array).append(i)
-	return true
-
-
-static func try_place(s: Dictionary, i: int, id: String) -> bool:
-	if not is_unlocked(s, i) or not slot_of(s, i).is_empty() or not BuildingDB.DEFS.has(id) or not place_ok(i, id):
-		return false
-	if building_count(s) >= build_cap(s):
-		return false
-	var c: int = place_cost(id)
-	if int(s["coins"]) < c:
-		return false
-	s["coins"] = int(s["coins"]) - c
-	Stats.on_event(s, {"t": "coins_spent", "n": c})
-	(s["slots"] as Dictionary)[str(i)] = {"id": id, "lvl": 1}
-	return true
-
-
-static func try_upgrade(s: Dictionary, i: int) -> bool:
-	var e: Dictionary = slot_of(s, i)
-	if e.is_empty():
-		return false
-	var lvl: int = int(e["lvl"])
-	if lvl >= perm_lvl_cap(s):
-		return false
-	var c: int = upgrade_cost(lvl)
-	if int(s["coins"]) < c:
-		return false
-	s["coins"] = int(s["coins"]) - c
-	Stats.on_event(s, {"t": "coins_spent", "n": c})
-	e["lvl"] = lvl + 1
-	Missions.progress(s, "upgrade", 1)
-	return true
-
-
-## Base-screen rearrange (free): move a permanent building to an empty
-## unlocked cell, or swap two buildings. Respects the Railgun ring rule.
-static func try_move(s: Dictionary, a: int, b: int) -> bool:
-	if a == b or a < 0 or b < 0 or a >= N or b >= N or a == CORE_SLOT or b == CORE_SLOT:
-		return false
-	var ea: Dictionary = slot_of(s, a)
-	var eb: Dictionary = slot_of(s, b)
-	if ea.is_empty() or not is_unlocked(s, b) or not place_ok(b, String(ea["id"])):
-		return false
-	if not eb.is_empty() and not place_ok(a, String(eb["id"])):
-		return false
-	var slots: Dictionary = s["slots"]
-	slots.erase(str(a))
-	slots.erase(str(b))
-	slots[str(b)] = ea
-	if not eb.is_empty():
-		slots[str(a)] = eb
-	return true
-
-
-static func demolish(s: Dictionary, i: int) -> bool:
-	var slots: Dictionary = s["slots"]
-	return slots.erase(str(i))
-
-
-static func try_core(s: Dictionary, stat: String) -> bool:
-	var core: Dictionary = s["core"]
-	if not core.has(stat):
-		return false
-	var lvl: int = int(core[stat])
-	if lvl >= core_cap(s):
-		return false
-	var c: int = core_cost(lvl)
-	if int(s["coins"]) < c:
-		return false
-	s["coins"] = int(s["coins"]) - c
-	Stats.on_event(s, {"t": "coins_spent", "n": c})
-	core[stat] = lvl + 1
-	Missions.progress(s, "upgrade", 1)
-	return true
 
 
 ## Bank a finished run: coins, per-tier record, best coin rate,
@@ -608,35 +194,23 @@ static func bank(s: Dictionary, coins: int, wave: int, tier: int = 1, run_minute
 			tr.append(n)
 			var g: int = TuneRef.int_of("tier_coins", 500)
 			s["coins"] = int(s["coins"]) + g
-			# Redesign: every tier clear also pays Core Cores (Core level gates).
-			var ccs: int = TuneRef.int_of("pc_tier_corecores", 2)
-			s["core_cores"] = int(s.get("core_cores", 0)) + ccs
-			ev.append({"t": "tier_unlocked", "tier": n, "coins": g, "core_cores": ccs})
+			ev.append({"t": "tier_unlocked", "tier": n, "coins": g})
 	return ev
 
 
-## Bank a run's loot (REDESIGN §2.6): Scrap and Keys into the wallet; part
-## drops wait in save.part_drops for the Parts module to resolve into parts.
-static func bank_loot(s: Dictionary, loot: Dictionary, rng: RandomNumberGenerator = null) -> Array:
+## Bank a run's loot: Scrap into the wallet (P5: items and caches too).
+static func bank_loot(s: Dictionary, loot: Dictionary, _rng: RandomNumberGenerator = null) -> Array:
 	var ev: Array = []
-	var sc: int = int(round(float(maxi(0, int(loot.get("scrap", 0)))) * Parts.scrap_mult(s)))
-	var ky: int = maxi(0, int(loot.get("keys", 0)))
-	var cc: int = maxi(0, int(loot.get("core_cores", 0)))
+	var sc: int = int(round(float(maxi(0, int(loot.get("scrap", 0)))) * scrap_mult(s)))
 	s["scrap"] = int(s.get("scrap", 0)) + sc
-	s["keys"] = int(s.get("keys", 0)) + ky
-	s["core_cores"] = int(s.get("core_cores", 0)) + cc
-	if not (s.get("part_drops", null) is Array):
-		s["part_drops"] = []
-	var pd: Array = s["part_drops"]
-	for p in loot.get("parts", []):
-		pd.append((p as Dictionary).duplicate())
-	if sc > 0 or ky > 0 or cc > 0 or not (loot.get("parts", []) as Array).is_empty():
-		ev.append({"t": "loot_banked", "scrap": sc, "keys": ky, "core_cores": cc, "parts": (loot.get("parts", []) as Array).size()})
-	# ENGINE-META: generic part drops resolve into concrete parts (seeded).
-	if rng != null:
-		ev.append_array(Parts.resolve_drops(s, rng))
-	ev.append_array(Cores.check_unlocks(s, {"set2": Parts.any_set2(s)}))
+	if sc > 0:
+		ev.append({"t": "loot_banked", "scrap": sc})
 	return ev
+
+
+## Scrap multiplier on banked loot (Reforge Scrapper +10%/L).
+static func scrap_mult(s: Dictionary) -> float:
+	return 1.0 + 0.1 * float(Reforge.node(s, "scrap_p"))
 
 
 ## PC_SPEC §3.1: endless unlocks once any run reached wave 50.
@@ -651,7 +225,7 @@ static func record_endless(s: Dictionary, wave: int) -> void:
 	e["best"] = maxi(int(e.get("best", 0)), wave)
 
 
-## Tier selector (Base screen): only unlocked tiers may be chosen.
+## Tier selector (hub): only unlocked tiers may be chosen.
 static func select_tier(s: Dictionary, n: int) -> bool:
 	if not Tiers.is_unlocked(s, n):
 		return false

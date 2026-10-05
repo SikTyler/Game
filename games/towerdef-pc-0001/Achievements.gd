@@ -8,16 +8,14 @@ extends RefCounted
 ## Run-scoped facts (core damage before wave 11, time at wave 40, active
 ## synergies) live in a caller-owned `run` Dictionary from new_run().
 
-const FactoryDB := preload("res://data/FactoryDB.gd")
 const AchievementDB := preload("res://data/AchievementDB.gd")
+const OutpostDB := preload("res://data/OutpostDB.gd")
+const BaseMeta := preload("res://BaseMeta.gd")
 const SteamService := preload("res://SteamService.gd")
 const BuildingDB := preload("res://data/BuildingDB.gd")
-const BaseMeta := preload("res://BaseMeta.gd")
 const Tiers := preload("res://Tiers.gd")
 const LabDB := preload("res://data/LabDB.gd")
 const Labs := preload("res://Labs.gd")
-const CardDB := preload("res://data/CardDB.gd")
-const Cards := preload("res://Cards.gd")
 
 
 ## Per-frame combat events that never change a save-based achievement.
@@ -219,29 +217,10 @@ static func check_save(save: Dictionary, now: int = 0) -> Array:
 			out.append_array(unlock(save, "ACH_TIER_8", now))
 	if BaseMeta.endless_unlocked(save):
 		out.append_array(unlock(save, "ACH_ENDLESS", now))
-	if save.get("unlocked", null) is Array:
-		var ring3: bool = false
-		var cells: int = 0
-		for i in BaseMeta.N:
-			if i == BaseMeta.CORE_SLOT:
-				continue
-			if BaseMeta.is_unlocked(save, i):
-				cells += 1
-				if BaseMeta.cell_ring(i) >= 3:
-					ring3 = true
-		if ring3:
-			out.append_array(unlock(save, "ACH_RING_3", now))
-		if cells >= AchievementDB.FULL_BASE_CELLS:
-			out.append_array(unlock(save, "ACH_FULL_BASE", now))
 	if save.get("research", null) is Dictionary:
 		for id in LabDB.DEFS.keys():
 			if Labs.level(save, String(id)) >= int((LabDB.DEFS[id] as Dictionary)["max"]):
 				out.append_array(unlock(save, "ACH_LABS_MAX", now))
-				break
-	if save.get("cards", null) is Dictionary:
-		for id in Cards.owned(save).keys():
-			if Cards.level(save, String(id)) >= CardDB.MAX_LVL:
-				out.append_array(unlock(save, "ACH_CARD_MAX", now))
 				break
 	out.append_array(_redesign_checks(save, st, now))
 	var sk: Dictionary = save.get("streak", {}) if save.get("streak", {}) is Dictionary else {}
@@ -252,15 +231,9 @@ static func check_save(save: Dictionary, now: int = 0) -> Array:
 	return out
 
 
-## Redesign achievements (REDESIGN_SPEC §3.6): parts, sets, Reforge, Outpost,
-## Courier, Cores, Insight, specials — all read from the persistent save.
+## Redesign achievements: Reforge, Outpost, Courier, Insight, specials — all read from the persistent save.
 static func _redesign_checks(save: Dictionary, st: Dictionary, now: int) -> Array:
 	var out: Array = []
-	var pb: Dictionary = save.get("parts", {}) if save.get("parts", {}) is Dictionary else {}
-	if int(st.get("parts_found", 0)) >= 1 or (pb.get("items", {}) is Dictionary and not (pb.get("items", {}) as Dictionary).is_empty()):
-		out.append_array(unlock(save, "ACH_FIRST_PART", now))
-	if pb.get("sets_completed", []) is Array and not (pb.get("sets_completed", []) as Array).is_empty():
-		out.append_array(unlock(save, "ACH_FULL_SET", now))
 	var rf: Dictionary = save.get("reforge", {}) if save.get("reforge", {}) is Dictionary else {}
 	var nrf: int = maxi(int(rf.get("count", 0)), int(st.get("reforges", 0)))
 	if nrf >= 1:
@@ -274,15 +247,10 @@ static func _redesign_checks(save: Dictionary, st: Dictionary, now: int) -> Arra
 		if String(b.get("id", "")) == "gemmine" and bool(b.get("built", false)):
 			out.append_array(unlock(save, "ACH_GEM_MINE", now))
 			break
-	# FB2: "fully settled" = every land chunk of the factory map (was 8 plots).
-	var fc: Dictionary = save.get("factory", {}) if save.get("factory", {}) is Dictionary else {}
-	if fc.get("chunks", []) is Array and (fc.get("chunks", []) as Array).size() >= FactoryDB.CW * FactoryDB.CH:
+	if op.get("plots", []) is Array and (op.get("plots", []) as Array).size() >= OutpostDB.PLOTS.size():
 		out.append_array(unlock(save, "ACH_OUTPOST_FULL", now))
 	if int(st.get("couriers", 0)) >= 1:
 		out.append_array(unlock(save, "ACH_COURIER", now))
-	var cb: Dictionary = save.get("cores", {}) if save.get("cores", {}) is Dictionary else {}
-	if cb.get("owned", []) is Array and (cb.get("owned", []) as Array).size() >= 4:
-		out.append_array(unlock(save, "ACH_CORES_4", now))
 	var ins: Dictionary = save.get("insight", {}) if save.get("insight", {}) is Dictionary else {}
 	var ni: int = 0
 	for k in ins.keys():

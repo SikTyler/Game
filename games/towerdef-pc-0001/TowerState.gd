@@ -33,7 +33,6 @@ const Specials := preload("res://Specials.gd")
 const Troops := preload("res://Troops.gd")
 const Drops := preload("res://Drops.gd")
 const PowerModel := preload("res://PowerModel.gd")
-const Parts := preload("res://Parts.gd")
 const EnemyStore := preload("res://EnemyStore.gd")
 const EnemyHash := preload("res://EnemyHash.gd")
 
@@ -64,7 +63,6 @@ const CORE_RING: Array = [48, 49, 50, 59, 61, 70, 71, 72]
 const TARGET_MODES: Array = ["nearest", "first", "strongest", "weakest"]
 const HIT_FLASH: float = 0.12   # view reads e["hit_t"] for the white hit flash
 const ECO_IDS: Array = ["mine", "oilmill", "bounty", "vault", "refinery"]
-const FLYERS: Array = ["drone", "mite"]     # Flak prey; Flak cannot hit ground
 const BOSSY: Array = ["boss", "elite"]
 ## Core cash tracks (REDESIGN_SPEC §2.2). cost(next) = base * growth^lvl.
 ## Growth tuned up from the spec's 1.16-1.20 (playtest pacing: with kill
@@ -255,7 +253,7 @@ var pending_upgrade: String = ""  # a "plus" pick waiting to be applied onto a b
 var over: bool = false
 
 # Core (REDESIGN §2.1) + cash tracks (§2.2).
-var core_id: String = "bastion"
+var core_id: String = CoreDB.ID
 var core_def: Dictionary = {}
 var core_lvl: int = 1
 var tracks: Dictionary = {}
@@ -284,8 +282,9 @@ var buffs: Dictionary = {}        # overdrive_t, magnet_t, repair_t, repair_rate
 var orbitals: Array = []          # pending Orbital Strikes [{pos, t, dmg, r}]
 var special_casts: int = 0
 var couriers: int = 0
+var couriers_caught: int = 0
 var ins: Dictionary = {}          # Insight values {in_dmg: 0.01, ...}
-var pfx: Dictionary = {}          # Parts.run_fx of the active Core (ENGINE-META)
+var pfx: Dictionary = {}          # summed gear fx (V2 P4: Gear.run_fx; {} until then)
 var last_stand_used: bool = false # Bulwark 4-piece: once per wave
 var immune_t: float = 0.0         # Bulwark 4-piece immunity timer
 var interest_t: float = 0.0       # Mint 4-piece: interest every 15 s
@@ -359,16 +358,12 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	min_spawn = TuneRef.num("min_spawn", min_spawn)
 	xp_base = TuneRef.num("xp_base", xp_base)
 	xp_growth = TuneRef.num("xp_growth", xp_growth)
-	# Core: the active Core (or opts.core when owned) at its permanent level.
-	core_id = Cores.active(save)
-	var oc: String = String(opts.get("core", ""))
-	if oc != "" and Cores.is_owned(save, oc):
-		core_id = oc
-	core_def = CoreDB.get_def(core_id)
-	core_lvl = Cores.level(save, core_id)
-	# Parts (ENGINE-META): the equipped preset's summed fx; specials fold into
-	# the meta bundle the Specials code already reads.
-	pfx = Parts.run_fx(save, core_id)
+	# Core (V2: one Core) at its permanent level; gear fx arrive in P4
+	# (Gear.run_fx: the equipped Weapon + Modules).
+	core_id = CoreDB.ID
+	core_def = CoreDB.get_def()
+	core_lvl = Cores.level(save)
+	pfx = {}
 	mods["special_dmg"] = float(mods.get("special_dmg", 1.0)) * maxf(0.1, 1.0 + pf("special_dmg"))
 	mods["special_cd"] = float(mods.get("special_cd", 1.0)) * maxf(0.2, 1.0 + pf("special_cd"))
 	last_stand_used = false
@@ -473,6 +468,7 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	orbitals = []
 	special_casts = 0
 	couriers = 0
+	couriers_caught = 0
 	stats = {}
 	recompute()
 	hp = float(stats["max_hp"])
@@ -543,22 +539,21 @@ func _refresh_enemy_mods() -> void:
 ## labs or cards directly.
 func _apply_mods(m: Dictionary) -> void:
 	mods = m
-	var cards: Dictionary = m.get("cards", {})
 	tier = int(m.get("tier", 1))
 	hp_mult = float(m.get("hp_mult", 1.0))
 	tier_coin_mult = float(m.get("coin_mult", 1.0))
-	coin_mult = tier_coin_mult * (1.0 + float(m.get("lab_coin", 0.0)) + float(cards.get("coin", 0.0))) * (1.0 + float(m.get("rf_coin", 0.0)))
+	coin_mult = tier_coin_mult * (1.0 + float(m.get("lab_coin", 0.0))) * (1.0 + float(m.get("rf_coin", 0.0)))
 	# Reforge tree (might / bulwark_p / prosperity) multiply the meta bundle.
-	dmg_mult = (1.0 + float(m.get("lab_dmg", 0.0))) * (1.0 + float(cards.get("dmg", 0.0))) * (1.0 + float(m.get("rf_dmg", 0.0)))
-	max_hp_mult = (1.0 + float(m.get("lab_hp", 0.0))) * (1.0 + float(cards.get("hp", 0.0))) * (1.0 + float(m.get("rf_hp", 0.0)))
-	cash_mult = 1.0 + float(cards.get("cash", 0.0))
-	xp_mod = 1.0 + float(m.get("lab_xp", 0.0)) + float(cards.get("xp", 0.0))
+	dmg_mult = (1.0 + float(m.get("lab_dmg", 0.0))) * (1.0 + float(m.get("rf_dmg", 0.0)))
+	max_hp_mult = (1.0 + float(m.get("lab_hp", 0.0))) * (1.0 + float(m.get("rf_hp", 0.0)))
+	cash_mult = 1.0 + float(m.get("cash", 0.0))
+	xp_mod = 1.0 + float(m.get("lab_xp", 0.0))
 	boss_every = maxi(1, int(m.get("boss_every", 10)))
 	allow_new_bldg = true
 	speed = maxf(0.1, float(m.get("speed", 1.0)))
-	rerolls_left = int(m.get("rerolls", 0)) + int(cards.get("reroll", 0))
-	wind_hp = float(cards.get("wind_hp", 0.0))
-	skip_chance = float(cards.get("skip_chance", 0.0))
+	rerolls_left = int(m.get("rerolls", 0))
+	wind_hp = float(m.get("wind_hp", 0.0))
+	skip_chance = float(m.get("skip_chance", 0.0))
 
 
 # ---------------------------------------------------------------- geometry
@@ -696,23 +691,15 @@ func track_total() -> int:
 func compute_stats() -> Dictionary:
 	var cd: Dictionary = core_def
 	var L: int = core_lvl
-	var tm: float = CoreDB.trait_mult(L)
-	var legacy: Dictionary = save.get("core", {}) if save.get("core", {}) is Dictionary else {}
 	var e: float = cash_index()
 	var px: float = cpx()
 	var nb: int = 0
 	for i in N:
 		if i != CORE_SLOT and id_at(i) != "":
 			nb += 1
-	# Bastion Steadfast: +1% dmg and cash/s per building (max 20), x trait strength.
-	var steadfast: float = 1.0
-	if String(cd.get("trait", "")) == "steadfast":
-		steadfast = 1.0 + 0.01 * float(mini(20, nb)) * tm
-	# Legacy v3 Core workshop levels (save.core) stay a small additive bonus
-	# (Core-level-sized steps) until save v4 migrates them into Core levels.
 	var st: Dictionary = {
-		"max_hp": float(cd["hp"]) * CoreDB.lvl_mult("hp", L) * (1.0 + TuneRef.num("pc_legacy_hp", 0.03) * float(legacy.get("hp", 0))),
-		"regen": float(cd["regen"]) * CoreDB.lvl_mult("regen", L) * (1.0 + TuneRef.num("pc_legacy_regen", 0.03) * float(legacy.get("regen", 0))),
+		"max_hp": float(cd["hp"]) * CoreDB.lvl_mult("hp", L),
+		"regen": float(cd["regen"]) * CoreDB.lvl_mult("regen", L),
 		"armor": float(cd["armor"]),
 		"cash_ps": float(cd["cash"]) * CoreDB.lvl_mult("cash", L),
 		"xp_mult": 1.0,
@@ -734,14 +721,10 @@ func compute_stats() -> Dictionary:
 		"core_lvl": L,
 	}
 	var links: Array = st["links"]
-	# Global multipliers: meta (labs/cards) x packs x Insight x Damage track.
-	var od_dmg: float = pow(TuneRef.num("overdrive_mult", 1.1), float(maxi(0, int(legacy.get("dmg", 0)) - BaseMeta.MAX_LVL)))
-	var od_hp: float = pow(TuneRef.num("overdrive_mult", 1.1), float(maxi(0, int(legacy.get("hp", 0)) - BaseMeta.MAX_LVL)))
+	# Global multipliers: meta (research / Reforge) x packs x Insight x Damage track.
 	var dmg_track: float = pow(TuneRef.num("pc_track_dmg_step", TRACK_DMG), float(tracks["dmg"]))
-	# Legacy Core DMG levels lift every weapon (interim meta until Parts land).
-	var legacy_dmg: float = 1.0 + TuneRef.num("pc_legacy_dmg", 0.03) * float(legacy.get("dmg", 0))
-	var dmg_all: float = dmg_mult * od_dmg * legacy_dmg * dmg_track * (1.0 + 0.12 * float(pack_n("pk_arsenal"))) * (1.0 + 0.40 * float(pack_n("pk_gambit"))) * (1.0 + float(ins.get("in_dmg", 0.0)))
-	# Parts: all-damage (+ Bastion Heart per building, max 12 buildings).
+	var dmg_all: float = dmg_mult * dmg_track * (1.0 + 0.12 * float(pack_n("pk_arsenal"))) * (1.0 + 0.40 * float(pack_n("pk_gambit"))) * (1.0 + float(ins.get("in_dmg", 0.0)))
+	# Gear: all-damage (+ per building, max 12 buildings).
 	dmg_all *= maxf(0.1, 1.0 + pf("dmg") + pf("dmg_per_bld") * float(mini(12, nb)))
 	# Mint 4-piece Dividend: the Eco track pays out as damage (full at Eco 50).
 	dmg_all *= 1.0 + pf("dividend") * float(mini(track_cap("eco"), int(tracks["eco"]))) / float(maxi(1, track_cap("eco")))
@@ -779,10 +762,9 @@ func compute_stats() -> Dictionary:
 					if id_at(n) != "":
 						adj_rate[n] = float(adj_rate[n]) - 0.10
 						links.append([i, n, "OIL"])
-	# Core attack range (cells) first: Lance Focus taxes buildings inside it.
+	# Core attack range (cells).
 	var core_range_c: float = maxf(1.0, float(cd["range"]) + TRACK_RANGE * float(tracks["range"]) + range_add + float(adj_range[CORE_SLOT]) + pf("range"))
 	var core_range: float = core_range_c * px
-	var focus: bool = String(cd.get("trait", "")) == "focus"
 	var weapons: Array = st["weapons"]
 	var rr: float = TuneRef.num("pc_ring_range", 0.08)
 	var hp_add: float = 0.0
@@ -794,8 +776,6 @@ func compute_stats() -> Dictionary:
 		var m2: float = pow(1.35, float(lvl_at(i) - 1))
 		var ring_m: float = 1.0 + rr * float(maxi(0, ring_of(i) - 1))
 		var rate_m: float = rate_all * float(adj_rate[i]) * maxf(0.1, 1.0 + pf("bld_rate"))
-		if focus and slot_pos(i).distance_to(CENTER) <= core_range:
-			rate_m *= 1.0 - 0.10 * tm
 		var dm: float = dmg_all * float(adj_dmg[i]) * bld_dmg() * maxf(0.1, 1.0 + pf("bld_dmg"))
 		var rng_c: float = float(adj_range[i]) + range_add
 		match id:
@@ -806,7 +786,7 @@ func compute_stats() -> Dictionary:
 			"tesla":
 				weapons.append({"slot": i, "lvl": lvl_at(i), "kind": "tesla", "dmg": 9.0 * m2 * dm * (1.0 + pf("chain_dmg")), "rate": 0.8 * rate_m, "range": (3.0 + rng_c) * px * ring_m, "chains": 3 + int(pf("chain")), "chain_frac": 0.7})
 			"flak":
-				weapons.append({"slot": i, "lvl": lvl_at(i), "kind": "flak", "dmg": 8.0 * m2 * dm, "rate": 1.5 * rate_m * (TuneRef.num("mass_flame_rate", 0.5) if mass else 1.0), "range": (3.5 + rng_c) * px * ring_m, "prey": 2.5})
+				weapons.append({"slot": i, "lvl": lvl_at(i), "kind": "flak", "dmg": 8.0 * m2 * dm, "rate": 1.5 * rate_m * (TuneRef.num("mass_flame_rate", 0.5) if mass else 1.0), "range": (3.5 + rng_c) * px * ring_m})
 			"railgun":
 				weapons.append({"slot": i, "lvl": lvl_at(i), "kind": "railgun", "dmg": 60.0 * m2 * dm, "rate": 0.25 * rate_m, "range": (7.0 + rng_c) * px * ring_m, "pierce": 14.0})
 			"frost":
@@ -833,7 +813,7 @@ func compute_stats() -> Dictionary:
 				st["interest_cap"] = float(st["interest_cap"]) + 100.0 * m2
 			"obelisk":
 				st["lifesteal"] = float(st["lifesteal"]) + 0.01 * m2
-			"hut_infantry", "hut_sapper", "hut_drone":
+			"hut_infantry", "hut_sapper":
 				var dir: Vector2 = (slot_pos(i) - CENTER).normalized()
 				var post: Vector2 = CENTER + dir * (grid_half_px() + 0.6 * px)
 				var hut: Dictionary = {"slot": i, "id": id, "lvl": lvl_at(i), "home": slot_pos(i), "anchor": post}
@@ -859,20 +839,18 @@ func compute_stats() -> Dictionary:
 		bmax[i] = base_hp * pow(1.35, float(lvl_at(i) - 1)) * hp_w * maxf(0.1, 1.0 + pf("bld_hp"))
 	# Core sheet with tracks, packs, legacy core levels, Insight.
 	var arm_n: int = tracks["armor"]
-	st["max_hp"] = (float(st["max_hp"]) + hp_add) * (1.0 + TRACK_ARMOR_HP * float(arm_n)) * pow(TRACK_ECO_HP, float(tracks["eco"])) * (1.0 + 0.20 * float(pack_n("pk_fort"))) * maxf(0.5, 1.0 - 0.05 * float(pack_n("pk_overclock"))) * max_hp_mult * (1.0 + float(ins.get("in_hp", 0.0))) * od_hp * maxf(0.1, 1.0 + pf("core_hp"))
+	st["max_hp"] = (float(st["max_hp"]) + hp_add) * (1.0 + TRACK_ARMOR_HP * float(arm_n)) * pow(TRACK_ECO_HP, float(tracks["eco"])) * (1.0 + 0.20 * float(pack_n("pk_fort"))) * maxf(0.5, 1.0 - 0.05 * float(pack_n("pk_overclock"))) * max_hp_mult * (1.0 + float(ins.get("in_hp", 0.0))) * maxf(0.1, 1.0 + pf("core_hp"))
 	st["regen"] = (float(st["regen"]) + 1.0 * float(arm_n)) * maxf(0.0, 1.0 + pf("regen"))
 	st["armor"] = float(st["armor"]) + 2.0 * float(arm_n) + float(pack_n("pk_fort")) + pf("armor")
 	var eco_lv: int = tracks["eco"]
 	var cash_w1: float = maxf(0.0, float(st["cash_ps"]) + TRACK_ECO_CASH * float(eco_lv) + 0.6 * float(pack_n("pk_ledger")) + cash_add + pf("cash_flat"))
-	st["cash_ps"] = cash_w1 * e * cash_mult * (1.0 + float(ins.get("in_cash", 0.0))) * steadfast * maxf(0.1, 1.0 + pf("cash"))
+	st["cash_ps"] = cash_w1 * e * cash_mult * (1.0 + float(ins.get("in_cash", 0.0))) * maxf(0.1, 1.0 + pf("cash"))
 	st["kill_cash"] = (1.0 + 0.05 * float(pack_n("pk_ledger"))) * (1.0 + float(ins.get("in_cash", 0.0))) * maxf(0.1, 1.0 + pf("kill_cash"))
 	st["interest_rate"] = float(st["interest_rate"]) + pf("interest")
 	var icap_w1: float = float(st["interest_cap"]) + TRACK_ECO_ICAP * float(eco_lv) + (50.0 if pf("interest") > 0.0 else 0.0)
-	if String(cd.get("trait", "")) == "compound":
-		icap_w1 += 50.0 * float(eco_lv) * tm
 	st["interest_cap"] = icap_w1 * e
 	# The Core's own weapon (always last in `weapons`; the view reads .back()).
-	var core_dmg: float = float(cd["dmg"]) * CoreDB.lvl_mult("dmg", L) * dmg_all * steadfast * float(adj_dmg[CORE_SLOT]) * (1.0 + TuneRef.num("pc_core_surge_dmg", 0.15) * float(pack_n("pk_core"))) * maxf(0.1, 1.0 + pf("core_dmg")) * pow(TRACK_RATE_DMG, float(tracks["rate"])) * pow(TRACK_ARMOR_DMG, float(arm_n))
+	var core_dmg: float = float(cd["dmg"]) * CoreDB.lvl_mult("dmg", L) * dmg_all * float(adj_dmg[CORE_SLOT]) * (1.0 + TuneRef.num("pc_core_surge_dmg", 0.15) * float(pack_n("pk_core"))) * maxf(0.1, 1.0 + pf("core_dmg")) * pow(TRACK_RATE_DMG, float(tracks["rate"])) * pow(TRACK_ARMOR_DMG, float(arm_n))
 	var core_rate: float = float(cd["rate"]) * pow(TRACK_RATE, float(tracks["rate"])) * pow(TRACK_DMG_RATE, float(tracks["dmg"])) * pow(TRACK_RANGE_RATE, float(tracks["range"])) * rate_all * float(adj_rate[CORE_SLOT]) * (1.0 + TuneRef.num("pc_core_surge_rate", 0.05) * float(pack_n("pk_core"))) * maxf(0.1, 1.0 + pf("rate"))
 	var cw: Dictionary = {"slot": CORE_SLOT, "kind": "core", "attack": String(cd["attack"]), "dmg": core_dmg, "rate": core_rate, "range": core_range, "range_cells": core_range_c}
 	# Parts on the Core attack: primary-target mult, splash, pierce, free pulse.
@@ -893,16 +871,14 @@ func compute_stats() -> Dictionary:
 		"beam":
 			cw["ramp"] = float(cd["ramp"]) * (1.0 + pf("beam_ramp"))
 			cw["ramp_max"] = 2.0 if L >= 20 else float(cd["ramp_max"])
-			cw["boss_mult"] = 1.0 + 0.25 * tm
+			cw["boss_mult"] = 1.0
 			cw["retarget"] = maxf(0.0, pf("retarget"))
 		"pulse":
 			cw["rings"] = (2 if L >= 20 else 1) + int(pf("chain"))
 			cw["knock"] = float(cd["knock"])
 			cw["chain_every"] = int(cd["chain_every"])
-			cw["chain_frac"] = float(cd["chain_frac"]) * tm * (1.0 + pf("chain_dmg"))
+			cw["chain_frac"] = float(cd.get("chain_frac", 0.4)) * (1.0 + pf("chain_dmg"))
 			cw["chain_n"] = int(cd["chain_n"])
-	if focus:
-		cw["boss_mult"] = 1.0 + 0.25 * tm
 	weapons.append(cw)
 	st["xp_mult"] = float(st["xp_mult"]) * xp_mod
 	st["crit"] = float(st["crit"]) + pf("crit")
@@ -943,7 +919,6 @@ func _troop_mods() -> Dictionary:
 		"respawn_minus": 2.0 * float(pack_n("pk_barracks")),
 		"respawn_mult": maxf(0.2, 1.0 + pf("troop_respawn")),
 		"extra": int(pf("troop_count")),
-		"extra_drone": int(pf("hut_drone")),
 		"cell_px": cpx(),
 	}
 
@@ -1401,11 +1376,7 @@ func _on_death(ev: Array) -> void:
 
 
 func _couriers_caught() -> int:
-	var n: int = 0
-	for p in loot.get("parts", []):
-		if String((p as Dictionary).get("source", "")) == "courier":
-			n += 1
-	return n
+	return couriers_caught
 
 
 ## Player quit (pause menu "Abandon run"): skips any revive and banks coins
@@ -2122,8 +2093,8 @@ func _armor_share(e: int) -> float:
 ## try_get_closest_target; first/strongest/weakest are in-house). Pure: picks
 ## a slot of `en` within `rng_lim` of `from`, or -1. Hash candidates come in
 ## spawn order, so the `<` + d^2 tie-break picks what the linear scan did.
-func pick_target(from: Vector2, rng_lim: float, mode_s: String, flyers_only: bool = false) -> int:
-	if mode_s == "nearest" and not flyers_only:
+func pick_target(from: Vector2, rng_lim: float, mode_s: String) -> int:
+	if mode_s == "nearest":
 		return _nearest(from, rng_lim, {})
 	var best: int = -1
 	var best_key: float = INF
@@ -2132,8 +2103,6 @@ func pick_target(from: Vector2, rng_lim: float, mode_s: String, flyers_only: boo
 	for k in eh.candidates(from, rng_lim):
 		var hpv: float = en.hp[k]
 		if hpv <= 0.0:
-			continue
-		if flyers_only and not FLYERS.has(en.kind[k]):
 			continue
 		var p: Vector2 = en.pos[k]
 		var d2: float = from.distance_squared_to(p)
@@ -2389,7 +2358,7 @@ func _fire(dt: float, ev: Array) -> void:
 			else:
 				cooldowns[si] = 0.0
 			continue
-		var tgt: int = pick_target(from, float(wd["range"]), String(target_modes[si]) if si < target_modes.size() else "nearest", kind == "flak" and not mass)
+		var tgt: int = pick_target(from, float(wd["range"]), String(target_modes[si]) if si < target_modes.size() else "nearest")
 		if kind == "mortar" and tgt >= 0 and from.distance_to(en.pos[tgt]) < float(wd.get("min_range", 0.0)):
 			tgt = -1
 			if mass:
@@ -2430,16 +2399,6 @@ func _fire(dt: float, ev: Array) -> void:
 					if absf(rel.cross(dir)) <= float(wd["pierce"]) + en.size[ed] * 0.5:
 						_hit(ed, dmg, ev, crit)
 				ev.append({"t": "shot", "kind": kind, "from": from, "to": from + dir * reach})
-			"flak":
-				_hit(te, dmg * float(wd.get("prey", 2.5)), ev, crit)
-				if horde_mult > 1:
-					# FB2 crowd tool: flak bursts clip the bodies packed around the target
-					var fr: float = TuneRef.num("pc_horde_flak_r", 0.45) * cpx()
-					var fk: float = TuneRef.num("pc_horde_flak_frac", 0.5)
-					for ed in eh.candidates(tpos, fr):
-						if ed != te and en.hp[ed] > 0.0 and FLYERS.has(en.kind[ed]) and en.pos[ed].distance_to(tpos) <= fr:
-							_hit(ed, dmg * fk, ev, crit)
-				ev.append({"t": "shot", "kind": kind, "from": from, "to": tpos, "radius": 20.0})
 			"mortar":
 				var rad: float = float(wd["splash"])
 				for ed in eh.candidates(tpos, rad):
@@ -3070,9 +3029,10 @@ func _roll_drops(ed: int, ev: Array, ks: float = -1.0) -> void:
 		src = "boss"
 	elif kind == "courier":
 		src = "courier"
+		couriers_caught += 1
 	elif kind == "elite" or en.is_marked(ed):
 		src = "elite"
-	var ctx: Dictionary = {"tier": tier, "drop_mult": 1.0 + float(ins.get("in_drop", 0.0)), "parts_so_far": Drops.capped_count(loot), "share": ks if ks >= 0.0 else en.share[ed]}
+	var ctx: Dictionary = {"tier": tier, "drop_mult": 1.0 + float(ins.get("in_drop", 0.0)), "share": ks if ks >= 0.0 else en.share[ed]}
 	var got: Array = Drops.add(loot, Drops.roll(drop_rng, src, ctx))
 	for x in got:
 		var d: Dictionary = (x as Dictionary).duplicate()
@@ -3170,7 +3130,7 @@ func _draft_ctx(guarantee: String) -> Dictionary:
 		"owned": owned, "copies": copies, "free": free and not at_cap(), "free_outer": free_outer and not at_cap(), "huts": hut_count(),
 		"hut_max": PickDB.HUT_MAX + int(pf("hut_max")),
 		"packs": packs, "specials": sp, "banished": banished, "luck": luck,
-		"eco_mult": 1.5 if String(core_def.get("trait", "")) == "compound" else 1.0,
+		"eco_mult": 1.0,
 		"choices": 3 + mini(1, _reforge_node("wide_draft")),
 		"insight_p": TuneRef.num("pc_insight_p", 0.01) * (1.0 + float(luck) * 0.05),
 		"insight_ok": insight_found.size() < ins_cap, "insight_blocked": blocked,
@@ -3572,8 +3532,6 @@ func power_snapshot() -> Dictionary:
 				mult = 2.0
 			"frost":
 				mult = 3.0
-			"flak":
-				mult = 0.6 * float(wd.get("prey", 2.5))
 		if mass:
 			# MASS_HORDE §D4 crowd factors: bodies a hit is worth against the
 			# horde at in-game density (about a third of the dense-field H8

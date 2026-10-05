@@ -18,7 +18,7 @@ const DEFS: Dictionary = {
 	"aegis":   {"name": "Aegis Pylon",   "cat": "support", "coin": 22, "desc": "-4%/lv core dmg; adj weapons +10%/lv rate; adj eco -15%"},
 	# PC roster (PC_SPEC §2.2).
 	"railgun":   {"name": "Railgun",       "cat": "weapon",  "coin": 28, "desc": "Piercing line shot every 2.5 s; outer rings only (ring 2+). Adj Tesla: +20% dmg per 5 Tesla lv (max +60%)"},
-	"flak":      {"name": "Flak Battery",  "cat": "weapon",  "coin": 22, "desc": "Fast splash, x1.5 vs skitter/mite/drone. Adj Gun: both +10% crit"},
+	"flak":      {"name": "Flamer",  "cat": "weapon",  "coin": 22, "desc": "40 deg cone of fire; burn spreads through the pile"},
 	"beacon":    {"name": "Signal Beacon", "cat": "support", "coin": 20, "desc": "+10%/lv rate & +0.3/lv range to buildings within 2 cells, every direction"},
 	"refinery":  {"name": "Refinery",      "cat": "eco",     "coin": 24, "desc": "Wave end: 10% of the wave's cash income -> coins (cap 2.5/lv). Adj Mine: +20% output"},
 	"barricade": {"name": "Barricade",     "cat": "support", "coin": 16, "desc": "High-HP wall; enemies within 1.5 cells on any side -30% speed"},
@@ -27,7 +27,6 @@ const DEFS: Dictionary = {
 	"obelisk":      {"name": "Siphon Obelisk", "cat": "support", "coin": 0, "desc": "1% of all damage dealt heals the Core"},
 	"hut_infantry": {"name": "Rifle Barracks", "cat": "support", "coin": 0, "desc": "3 Riflemen guard the whole perimeter and taunt"},
 	"hut_sapper":   {"name": "Sapper Den",     "cat": "support", "coin": 0, "desc": "2 Sappers charge elites and bosses and explode"},
-	"hut_drone":    {"name": "Drone Nest",     "cat": "support", "coin": 0, "desc": "4 Drones fly out and hunt flyers first"},
 }
 
 const IDS: Array = ["gun", "mortar", "tesla", "armory", "bulwark", "mine", "oilmill", "bounty"]

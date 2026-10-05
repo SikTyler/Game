@@ -9,8 +9,8 @@ extends RefCounted
 ##   state: seek | engage | retreat | dead
 ## AI: seek the nearest enemy within SEEK cells of the hut's anchor
 ## (Rifle Barracks in the horde ruleset: anchor = Core, seek/leash cover the whole perimeter)
-## (drones prefer flyers, sappers elites/bosses/marked), never straying more
-## than LEASH cells from the anchor; engage in range; sappers and drones
+## (sappers prefer elites/bosses/marked), never straying more
+## than LEASH cells from the anchor; engage in range; sappers
 ## retreat home below 25% HP (infantry never retreats); the dead respawn at
 ## the hut after a delay. Enemies within 1 cell hit troops for 50% of their
 ## contact dmg; Riflemen taunt (pin) enemies within 1 cell. Troops never block
@@ -26,9 +26,7 @@ const MELEE: float = 0.35       # cells: sapper charge contact
 const DEFS: Dictionary = {
 	"hut_infantry": {"kind": "rifleman", "count": 3, "hp": 40.0, "dmg": 5.0, "rate": 1.2, "range": 2.0, "spd": 1.2, "respawn": 8.0, "aoe": 0.0, "retreat": false, "taunt": true},
 	"hut_sapper": {"kind": "sapper", "count": 2, "hp": 25.0, "dmg": 30.0, "rate": 0.0, "range": 0.0, "spd": 1.6, "respawn": 12.0, "aoe": 1.0, "retreat": true, "taunt": false},
-	"hut_drone": {"kind": "drone", "count": 4, "hp": 12.0, "dmg": 4.0, "rate": 2.0, "range": 2.5, "spd": 2.5, "respawn": 6.0, "aoe": 0.0, "retreat": true, "taunt": false},
 }
-const FLYERS: Array = ["drone", "mite"]
 const ARMORED: Array = ["elite", "boss", "hauler"]
 const PRIORITY: Array = ["elite", "boss"]
 
@@ -65,7 +63,7 @@ static func sync(troops: Array, huts: Array, mods: Dictionary, counter: Dictiona
 	for h in huts:
 		var hd: Dictionary = h
 		var hid: String = String(hd["id"])
-		var want: int = count_for(hid, int(hd["lvl"]), int(mods.get("extra", 0)) + (int(mods.get("extra_drone", 0)) if hid == "hut_drone" else 0))
+		var want: int = count_for(hid, int(hd["lvl"]), int(mods.get("extra", 0)))
 		var st: Dictionary = troop_stats(hid, int(hd["lvl"]), mods)
 		var have: int = 0
 		for t in troops:
@@ -147,11 +145,8 @@ static func _seek(td: Dictionary, en, eh, px: float) -> int:
 			continue
 		var key: float = pos.distance_squared_to(ep)
 		var pri: bool = false
-		match String(td["kind"]):
-			"drone":
-				pri = FLYERS.has(kind)
-			"sapper":
-				pri = PRIORITY.has(kind) or en.is_marked(k)
+		if String(td["kind"]) == "sapper":
+			pri = PRIORITY.has(kind) or en.is_marked(k)
 		if pri:
 			key -= 1.0e9
 		if key < best_key:
@@ -205,7 +200,7 @@ static func step(troops: Array, en, eh, dt: float, ctx: Dictionary) -> Dictionar
 			td["tgt"] = -1
 			ev.append({"t": "troop_die", "tid": int(td["tid"]), "kind": String(td["kind"]), "pos": td["pos"]})
 			continue
-		# Retreat (sappers / drones) below 25%; heal at home, then go again.
+		# Retreat (sappers) below 25%; heal at home, then go again.
 		if bool(td.get("retreat", false)) and (st == "retreat" or float(td["hp"]) < RETREAT_FRAC * float(td["max_hp"])):
 			if st != "retreat":
 				td["state"] = "retreat"

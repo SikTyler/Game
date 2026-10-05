@@ -9,7 +9,6 @@ extends RefCounted
 ## the first Reforge (R5). Resets / keeps exactly ReforgeDB.RESETS / KEEPS (R6).
 
 const ReforgeDB := preload("res://data/ReforgeDB.gd")
-const Parts := preload("res://Parts.gd")
 const Outpost := preload("res://Outpost.gd")
 const Cores := preload("res://Cores.gd")
 const Stats := preload("res://Stats.gd")
@@ -117,13 +116,7 @@ static func reforge(s: Dictionary, now: int) -> Array:
 	var first: bool = int(r["count"]) == 0
 	# Resets.
 	s["coins"] = 0
-	var cb: Dictionary = Cores._block(s)
-	for id in (cb["levels"] as Dictionary).keys():
-		(cb["levels"] as Dictionary)[id] = 1
-	if s.get("core", null) is Dictionary:
-		for k in (s["core"] as Dictionary).keys():
-			(s["core"] as Dictionary)[k] = 0
-	var refund: int = Parts.reforge_reset(s)
+	Cores._block(s)["lvl"] = 1
 	var retain: float = 0.1 * float(node(s, "retain"))
 	Outpost.reforge_reset(s, retain, now)
 	if s.get("research", null) is Dictionary:
@@ -139,13 +132,9 @@ static func reforge(s: Dictionary, now: int) -> Array:
 	r["count"] = int(r["count"]) + 1
 	r["coins_since"] = 0
 	r["last_at"] = now
-	var cc: int = n / 5
-	s["core_cores"] = int(s.get("core_cores", 0)) + cc
 	if s.get("stats", null) is Dictionary:
 		(s["stats"] as Dictionary)["reforges"] = int((s["stats"] as Dictionary).get("reforges", 0)) + 1
-	var ev: Array = [{"t": "reforge", "count": int(r["count"]), "shards": n, "first": first, "scrap_refund": refund, "core_cores": cc}]
-	ev.append_array(Cores.check_unlocks(s, {"set2": Parts.any_set2(s)}))
-	return ev
+	return [{"t": "reforge", "count": int(r["count"]), "shards": n, "first": first}]
 
 
 static func can_buy(s: Dictionary, id: String) -> bool:

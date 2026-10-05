@@ -38,7 +38,6 @@ const DEFS: Dictionary = {
 	"mill": {"name": "Coin Mill", "size": [2, 2], "power": 2, "coins": 500, "time": 0, "res": "coins", "rate": MILL_RATE, "storage_h": 8.0},
 	"refinery": {"name": "Scrap Refinery", "size": [2, 2], "power": 3, "coins": 1500, "time": 0, "res": "scrap", "rate": 6.0, "storage_h": 6.0},
 	"gemmine": {"name": "Deep Mine", "size": [2, 2], "power": 4, "coins": 10000, "time": 0, "res": "coins", "rate": MILL_RATE * 3.0, "storage_h": 8.0},
-	"keyforge": {"name": "Key Forge", "size": [2, 1], "power": 3, "coins": 8000, "time": 0, "res": "keys", "rate": 1.0 / 24.0, "storage_h": 0.0, "hard_cap": 3.0},
 	"research": {"name": "Research Hall", "size": [3, 2], "power": 3, "coins": 1000, "time": 0, "res": "", "rate": 0.0, "storage_h": 0.0},
 	"barracks": {"name": "Barracks", "size": [2, 2], "power": 2, "coins": 3000, "time": 0, "res": "", "rate": 0.0, "storage_h": 0.0},
 	"archive": {"name": "Archive", "size": [2, 2], "power": 1, "coins": 6000, "time": 0, "res": "", "rate": 0.0, "storage_h": 0.0},
@@ -47,13 +46,13 @@ const DEFS: Dictionary = {
 	"conduit": {"name": "Conduit", "size": [1, 1], "power": 0, "coins": 10, "time": 0, "res": "", "rate": 0.0, "storage_h": 0.0, "max_lvl": 1},
 	"beaconpost": {"name": "Outpost Beacon", "size": [1, 1], "power": 1, "coins": 2500, "time": 0, "res": "", "rate": 0.0, "storage_h": 0.0},
 }
-const IDS: Array = ["mill", "refinery", "gemmine", "keyforge", "research", "barracks", "archive", "warehouse", "scrapyard", "conduit", "beaconpost"]
-const GENERATORS: Array = ["mill", "refinery", "gemmine", "keyforge"]
-## Quantity limits by Relay level (Mill / Refinery / Gem Mine / Key Forge).
-const LIMITS: Array = [[1, {"mill": 2, "refinery": 1, "gemmine": 1, "keyforge": 0}],
-	[3, {"mill": 3, "refinery": 1, "gemmine": 1, "keyforge": 1}],
-	[5, {"mill": 4, "refinery": 2, "gemmine": 2, "keyforge": 1}],
-	[8, {"mill": 5, "refinery": 2, "gemmine": 3, "keyforge": 1}]]
+const IDS: Array = ["mill", "refinery", "gemmine", "research", "barracks", "archive", "warehouse", "scrapyard", "conduit", "beaconpost"]
+const GENERATORS: Array = ["mill", "refinery", "gemmine"]
+## Quantity limits by Relay level (Mill / Refinery / Deep Mine).
+const LIMITS: Array = [[1, {"mill": 2, "refinery": 1, "gemmine": 1}],
+	[3, {"mill": 3, "refinery": 1, "gemmine": 1}],
+	[5, {"mill": 4, "refinery": 2, "gemmine": 2}],
+	[8, {"mill": 5, "refinery": 2, "gemmine": 3}]]
 
 ## Decor (SYSTEMS §5.5): 1x1 or 2x1, coins, tags drive adjacency.
 const DECOR: Dictionary = {

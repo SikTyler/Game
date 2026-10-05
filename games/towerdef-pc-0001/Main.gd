@@ -2,10 +2,10 @@ extends Node2D
 ## Corehold PC — native 1920x1080 desktop view (REDESIGN_SPEC §5).
 ## One unscaled Control layer (`ui`) holds every button; everything else is
 ## drawn in _draw() by the screen modules under ui/. The view owns no rules:
-## every action calls a pure module (TowerState, Cores, Parts, Crates,
-## Outpost, Reforge, Labs, Cards, Missions) and replays the returned events.
-## Screens: menu (save slots) | base (the hub: Play, Core Bay, Crates, Outpost,
-## Research, Cards, Missions, Reforge) | run (battlefield) | results.
+## every action calls a pure module (TowerState, Cores, Outpost, Reforge,
+## Labs, Missions) and replays the returned events.
+## Screens: menu (save slots) | base (the hub: Outpost home, Core, Research,
+## Missions, Reforge) | run (battlefield) | results.
 ## Layout: top bar 56 px; run = left panel | centred field | right panel over a
 ## 96 px specials hotbar. Resizable: everything is laid out from vw/vh.
 
@@ -18,15 +18,11 @@ const Missions := preload("res://Missions.gd")
 const Outpost := preload("res://Outpost.gd")
 const Tiers := preload("res://Tiers.gd")
 const Cores := preload("res://Cores.gd")
-const Parts := preload("res://Parts.gd")
 const Specials := preload("res://Specials.gd")
 const PickDB := preload("res://data/PickDB.gd")
 const LabDB := preload("res://data/LabDB.gd")
-const CardDB := preload("res://data/CardDB.gd")
-const PartDB := preload("res://data/PartDB.gd")
 const CoreDB := preload("res://data/CoreDB.gd")
 const OutpostDB := preload("res://data/OutpostDB.gd")
-const SetDB := preload("res://data/SetDB.gd")
 const ReforgeDB := preload("res://data/ReforgeDB.gd")
 const SfxScript := preload("res://Sfx.gd")
 const FxPool := preload("res://vfx/FxPool.gd")
@@ -43,10 +39,7 @@ const Desktop := preload("res://ui/Desktop.gd")
 const Battle := preload("res://ui/Battle.gd")
 const Intel := preload("res://ui/Intel.gd")
 const Hub := preload("res://ui/Hub.gd")
-const FactoryView := preload("res://ui/FactoryView.gd")
-const Factory := preload("res://Factory.gd")
-const CoreBay := preload("res://ui/CoreBay.gd")
-const CrateView := preload("res://ui/CrateView.gd")
+const OutpostView := preload("res://ui/OutpostView.gd")
 
 const GOLD: Color = Color("f2c94c")
 const GEM: Color = Color("5ad1f0")
@@ -89,7 +82,7 @@ var run_missions: int = 0
 var intel_seen: Dictionary = {}       # FB2 right panel: enemy kind -> first wave seen
 var loot_feed: Array = []             # FB2 right panel: aggregated loot-drop feed
 var loot_coin_seen: float = 0.0
-var run_loot: Array = []             # meta events banked at run end (parts, insight)
+var run_loot: Array = []             # meta events banked at run end (loot, insight)
 var meta_rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var sfx: Node = null                 # Sfx.gd (owned child, not an autoload)
 var fader: ColorRect
@@ -140,17 +133,9 @@ var run_opts: Dictionary = {"mode": "normal", "modifiers": []}
 var last_seed: int = 0
 var menu_msg: String = ""
 var drag_card: int = -1              # run: draft card being dragged onto the grid
-var drag_part: String = ""           # bay: part uid being dragged onto a slot
 var drag_start: Vector2 = Vector2.ZERO
 var aim_special: int = -1            # run: targeted special waiting for a field click
 var banish_mode: bool = false        # run: next card click banishes
-# Core Bay
-var bay_core: String = ""
-var bay_part: String = ""
-var bay_filter: Dictionary = {"slot": "", "rarity": "", "set": ""}
-var bay_page: int = 0
-# Crates
-var crate_anim: Dictionary = {}      # {crate, t, items: [{id, rarity, kind, stars}]}
 # Outpost builder
 var op_cam: Vector2 = Vector2.ZERO   # map pan offset (screen px)
 var op_zoom: float = 1.0
@@ -158,20 +143,14 @@ var op_arm: String = ""              # building / decor id armed for placement
 var op_rot: int = 0
 var op_sel: String = ""              # selected uid ("relay", "<uid>", "d<uid>")
 var op_moving: bool = false
-var op_cat: String = "logistics"
+var op_cat: String = "prod"
 var op_pan: bool = false
 var op_pan_from: Vector2 = Vector2.ZERO
 var op_pan_moved: bool = false
 var op_drag: bool = false            # palette -> map drag in progress
 var op_msg: String = ""
 var op_bp_text: String = ""
-var op_focus: Vector2i = Vector2i(47, 26)   # keyboard / pad map cursor
-# Factory camera / build state (FactoryView)
-var fc_center: Vector2 = Vector2(48.0, 24.0)   # camera centre (cells)
-var fc_zoom: float = 34.0                      # px per cell
-var fc_line: Vector2i = Vector2i(-9999, -9999) # belt drag start (NONE = not dragging)
-var fc_pan_left: bool = false
-var fc_save_t: float = 0.0
+var op_focus: Vector2i = Vector2i(4, 4)   # keyboard / pad map cursor
 # Reforge
 var rf_confirm: int = 0              # two-step confirm
 var credits_scroll: float = 0.0
@@ -316,35 +295,32 @@ func slot_at(pos: Vector2) -> int:
 
 
 # ------------------------------------------------------------------ boot
-## SPEC boot: migrate -> normalize -> Outpost tick -> Labs.claim -> Missions.roll
+## Boot: normalize (V2 hard reset) -> Outpost tick -> Labs.claim -> Missions.roll
 ## -> "while you were away" modal (the Outpost's stored production).
 func boot(raw: Dictionary, t: int) -> void:
 	save = BaseMeta.normalize(raw)
 	var ev: Array = []
-	# WP3: the plot/generator Outpost becomes the Factory (refunds, once)
-	var ref: Dictionary = Factory.migrate_outpost(save)
-	if int(ref["coins"]) + int(ref["scrap"]) + int(ref["keys"]) > 0:
-		ev.append({"t": "factory_migrated", "coins": int(ref["coins"]), "scrap": int(ref["scrap"]), "keys": int(ref["keys"])})
+	if bool(save.get("reset_v2", false)):
+		save.erase("reset_v2")
+		ev.append({"t": "msg", "text": "Corehold V2: a fresh start. Your old save was reset for the redesign."})
+	ev.append_array(Outpost.tick(save, t))
 	ev.append_array(Labs.claim(save, t))
 	ev.append_array(Missions.roll(save, t))
-	var off: Dictionary = Factory.away_report(save, t)
+	var off: Dictionary = Outpost.away_report(save, t)
 	var any: bool = false
-	for k in ["coins", "scrap", "keys", "data"]:
+	for k in ["coins", "scrap"]:
 		if int(off[k]) > 0:
 			any = true
-	if any and int(off["minutes"]) * 60 >= TuneRef.int_of("offline_min", 300):
+	if any:
 		offline_offer = off
 	else:
 		offline_offer = {}
-		ev.append_array(Factory.claim_bank(save))
 		save["last_seen"] = t
 	view_tier = int(save["tier"])
-	bay_core = Cores.active(save)
 	screen = "base"
 	tab = "play"
 	sel = -1
 	overlay = ""
-	crate_anim = {}
 	_queue_toasts(ev)
 	MetaSave.write(save)
 	if sfx != null:
@@ -386,7 +362,6 @@ func start_run(seed_override: int = 0) -> void:
 	if String(opts.get("mode", "normal")) == "endless" and not BaseMeta.endless_unlocked(save):
 		opts["mode"] = "normal"
 	ach_run = Achievements.new_run()
-	Factory.settle(save, now())   # stamp the factory clock: the run's time is banked on return
 	_handle(S.setup(sd, save, now(), opts))
 	screen = "run"
 	sel = -1
@@ -408,12 +383,7 @@ func go_base() -> void:
 	_clear_fx()
 	view_tier = int(save["tier"])
 	var lev: Array = Labs.claim(save, now())
-	# the factory kept producing during the run (measured rate, storage cap)
-	Factory.settle(save, now())
-	var fev: Array = Factory.claim_bank(save)
-	for e in fev:
-		(e as Dictionary)["t"] = "factory_run"
-	lev.append_array(fev)
+	lev.append_array(Outpost.tick(save, now()))
 	_queue_toasts(lev)
 	_meta_sfx(lev)
 	_rebuild_ui()
@@ -493,13 +463,6 @@ func abandon_run() -> void:
 	_rebuild_ui()
 
 
-## FB1: a revealed crate part opens the Core Bay focused on it.
-func open_part_in_bay(uid: String) -> void:
-	set_tab("bay")
-	CoreBay.focus_part(self, uid)
-	_rebuild_ui()
-
-
 func set_tab(id: String) -> void:
 	if screen != "base":
 		return
@@ -507,7 +470,6 @@ func set_tab(id: String) -> void:
 	op_arm = ""
 	op_moving = false
 	rf_confirm = 0
-	crate_anim = {}
 	_rebuild_ui()
 
 
@@ -528,8 +490,7 @@ func meta_act(ev: Array) -> void:
 
 
 func claim_offline() -> void:
-	var ev: Array = Factory.claim_bank(save)
-	save["last_seen"] = now()
+	var ev: Array = Outpost.claim_away(save, now())
 	offline_offer = {}
 	meta_act(ev)
 
@@ -721,19 +682,6 @@ func ev_text(e: Dictionary) -> String:
 			return "Research done: %s Lv%d" % [String((LabDB.DEFS[String(e["track"])] as Dictionary)["name"]), int(e["lvl"])]
 		"lab_started":
 			return "Researching %s" % String((LabDB.DEFS[String(e["track"])] as Dictionary)["name"])
-		"card_slot":
-			return "Card slot %d unlocked" % int(e["n"])
-		"chest_opened":
-			var cn: String = String((CardDB.DEFS[String(e["card"])] as Dictionary)["name"])
-			if bool(e["new"]):
-				return "New card: %s!" % cn
-			if bool(e["lvl_up"]):
-				return "%s card -> Lv%d" % [cn, int(e["lvl"])]
-			return "%s card copy +1" % cn
-		"card_equipped":
-			return "Equipped %s" % String((CardDB.DEFS[String(e["card"])] as Dictionary)["name"])
-		"card_unequipped":
-			return "Unequipped %s" % String((CardDB.DEFS[String(e["card"])] as Dictionary)["name"])
 		"achievement":
 			return "Achievement: " + String(e.get("name", ""))
 		"mission_claimed":
@@ -746,47 +694,12 @@ func ev_text(e: Dictionary) -> String:
 			return "Day %d reward: +%d coins" % [int(e["day"]), int(e["coins"])]
 		"offline":
 			return "Collected the Outpost: +%s coins" % fmt_num(int(e["coins"]))
-		"factory_bank", "factory_run":
-			var parts: Array = []
-			for c in ["coins", "scrap", "keys", "data"]:
-				if int(e.get(c, 0)) > 0:
-					parts.append("+%s %s" % [fmt_num(int(e[c])), c])
-			return ("Factory output during the run: " if String(e["t"]) == "factory_run" else "Factory collected: ") + ", ".join(parts)
-		"factory_migrated":
-			return "The Outpost became a Factory: buildings refunded +%s coins" % fmt_num(int(e["coins"]))
-		"factory_chunk":
-			var dn: Array = []
-			for k in (e["deposits"] as Dictionary).keys():
-				dn.append(Factory.DB.item_name(String(k)))
-			return "Land bought%s" % ((": found " + ", ".join(dn)) if not dn.is_empty() else "")
-		"factory_tech":
-			return "Researched: %s" % String((Factory.DB.TECH[String(e["id"])] as Dictionary)["name"])
-		"factory_fac":
-			return "%s -> Lv%d" % [String((Factory.DB.FACILITIES[String(e["id"])] as Dictionary)["name"]), int(e["lvl"])]
 		"tier_unlocked":
 			return "Tier %d unlocked! +%d coins" % [int(e["tier"]), int(e.get("coins", 0))]
 		"missions_rolled":
 			return "New daily missions"
 		"core_level":
-			return "%s Core -> Lv%d" % [String(CoreDB.get_def(String(e["core"]))["name"]), int(e["level"])]
-		"core_selected":
-			return "%s Core selected" % String(CoreDB.get_def(String(e["core"]))["name"])
-		"core_unlocked":
-			return "New Core unlocked: %s!" % String(CoreDB.get_def(String(e["core"]))["name"])
-		"part_new":
-			return "New part: %s" % String(PartDB.get_def(String(e["id"])).get("name", ""))
-		"part_star":
-			return "%s star %d" % [String(PartDB.get_def(String(e["id"])).get("name", "")), int(e["stars"])]
-		"part_dup_salvaged":
-			return "Duplicate %s -> %d Scrap" % [String(PartDB.get_def(String(e["id"])).get("name", "")), int(e["scrap"])]
-		"part_level":
-			return "%s -> Lv%d" % [String(PartDB.get_def(String(e["id"])).get("name", "")), int(e["lvl"])]
-		"part_salvaged":
-			return "Salvaged for %d Scrap" % int(e["scrap"])
-		"set_complete":
-			return "Full %s set completed!" % String(SetDB.get_def(String(e["set"]))["name"])
-		"special_part_unlocked":
-			return "Special part unlocked: %s" % String(PartDB.get_def(String(e["id"])).get("name", ""))
+			return "Core -> Lv%d" % int(e["level"])
 		"op_placed":
 			return "%s placed" % String(OutpostDB.get_def(String(e["id"])).get("name", ""))
 		"build_done":
@@ -1034,11 +947,11 @@ func _handle(events: Array) -> void:
 				rebuild = true
 			"place_mode":
 				rebuild = true
-			"tier_unlocked", "core_unlocked":
+			"tier_unlocked":
 				_queue_toasts([ev])
 			"game_over":
 				last_breakdown = ev
-			"part_new", "part_star", "part_dup_salvaged", "insight_banked", "loot_banked":
+			"insight_banked", "loot_banked":
 				run_loot.append(ev)
 			"dead":
 				last_result = ev
@@ -1075,24 +988,21 @@ func _input(event: InputEvent) -> void:
 			var dlt: Vector2 = (event as InputEventMouseMotion).relative
 			if mouse_pos.distance_to(op_pan_from) > 6.0:
 				op_pan_moved = true
-			FactoryView.pan_by(self, dlt)
+			op_cam += dlt
 		return
 	if not (event is InputEventMouseButton):
 		return
 	var mb: InputEventMouseButton = event
 	mouse_pos = mb.position
 	if mb.button_index == MOUSE_BUTTON_LEFT and not mb.pressed:
-		if drag_card >= 0 or drag_part != "" or op_drag:
+		if drag_card >= 0 or op_drag:
 			_end_drag(mb.position)
-			get_viewport().set_input_as_handled()
-		elif fc_line != FactoryView.NONE or fc_pan_left:
-			FactoryView.release(self, mb.position)
 			get_viewport().set_input_as_handled()
 		return
 	if overlay != "" or screen == "menu":
 		return
-	if screen == "base" and Hub.is_home(tab) and offline_offer.is_empty() and FactoryView.map_rect(self).has_point(mb.position):
-		if FactoryView.mouse(self, mb):
+	if screen == "base" and Hub.is_home(tab) and offline_offer.is_empty() and OutpostView.map_rect(self).has_point(mb.position):
+		if OutpostView.mouse(self, mb):
 			get_viewport().set_input_as_handled()
 		return
 	var in_field: bool = screen == "run" and field_rect().has_point(mb.position)
@@ -1169,20 +1079,12 @@ func begin_drag_card(idx: int) -> void:
 	drag_start = mouse_pos
 
 
-func begin_drag_part(uid: String) -> void:
-	drag_part = uid
-	bay_part = uid
-	drag_start = mouse_pos
-
-
-## Drag release: draft card -> grid cell (choose + place); part -> Core slot
-## (equip); Outpost palette -> map (place).
+## Drag release: draft card -> grid cell (choose + place); Outpost palette ->
+## map (place).
 func _end_drag(pos: Vector2) -> void:
 	var card: int = drag_card
-	var part: String = drag_part
 	var opd: bool = op_drag
 	drag_card = -1
-	drag_part = ""
 	op_drag = false
 	var moved: bool = pos.distance_to(drag_start) > 12.0
 	if card >= 0 and screen == "run" and S != null:
@@ -1205,15 +1107,9 @@ func _end_drag(pos: Vector2) -> void:
 		elif not moved:
 			pick_card(card)
 			return
-	elif part != "" and screen == "base" and tab == "bay":
-		if moved:
-			var k: int = CoreBay.slot_at(self, pos)
-			if k >= 0:
-				meta_act(Parts.equip(save, bay_core, k, part))
-				return
 	elif opd and screen == "base" and Hub.is_home(tab):
-		if moved and FactoryView.map_rect(self).has_point(pos):
-			FactoryView.place_at(self, FactoryView.cell_at(self, pos))
+		if moved and OutpostView.map_rect(self).has_point(pos):
+			OutpostView.place_at(self, OutpostView.cell_at(self, pos))
 			return
 	_rebuild_ui()
 
@@ -1253,14 +1149,6 @@ func _process(delta: float) -> void:
 			ui_t = 0.0
 			_rebuild_ui()   # refresh affordability (buttons fire on PRESS, so safe)
 	elif screen == "base" and overlay == "" and offline_offer.is_empty():
-		if Hub.is_home(tab):
-			# WP3: the factory runs live (fixed steps) while its screen is open
-			Factory.live(save, delta, now())
-			FactoryView.pan_keys(self, delta)
-			fc_save_t += delta
-			if fc_save_t >= 10.0:
-				fc_save_t = 0.0
-				_save()
 		poll_t += delta
 		if poll_t >= 1.0:
 			poll_t = 0.0
@@ -1269,10 +1157,8 @@ func _process(delta: float) -> void:
 			ev.append_array(Missions.roll(save, t))
 			if not ev.is_empty():
 				meta_act(ev)
-			elif drag_part == "" and not op_drag and not op_pan:
+			elif not op_drag and not op_pan:
 				_rebuild_ui()   # live timers / affordability
-	if not crate_anim.is_empty():
-		crate_anim["t"] = float(crate_anim["t"]) + delta
 	if toast_t > 0.0:
 		toast_t -= delta
 	elif not toast_queue.is_empty():

@@ -5,7 +5,6 @@ extends RefCounted
 
 const MissionDB := preload("res://data/MissionDB.gd")
 const BuildingDB := preload("res://data/BuildingDB.gd")
-const Cards := preload("res://Cards.gd")
 const TuneRef := preload("res://Tune.gd")
 const Stats := preload("res://Stats.gd")
 
@@ -183,10 +182,9 @@ static func streak_claim(s: Dictionary, now: int, tz_offset: int = 0) -> Array:
 	var coins: int = int(floor(float(r["coins"]) * mult))
 	s["coins"] = int(s["coins"]) + coins
 	var ev: Array = [{"t": "streak_claimed", "day": idx, "coins": coins}]
-	if bool(r.get("chest", false)):
-		var rng := RandomNumberGenerator.new()
-		rng.seed = hash(day * 7 + 3)
-		ev.append_array(Cards.open_chest(s, rng, true))
+	if int(r.get("scrap", 0)) > 0:
+		s["scrap"] = int(s.get("scrap", 0)) + int(r["scrap"])
+		ev[0]["scrap"] = int(r["scrap"])
 	return ev
 
 

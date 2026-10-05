@@ -21,7 +21,7 @@ const DEFS: Dictionary = {
 	"gun":       {"fam": "building", "name": "Gatling", "rarity": "common", "tags": ["dps"], "max": 5, "desc": "6 dmg, 2.0/s, range 3"},
 	"mortar":    {"fam": "building", "name": "Mortar", "rarity": "common", "tags": ["aoe", "dps"], "max": 5, "desc": "18 dmg, 0.4/s, range 4.5, 1-cell splash (min range 1.5)"},
 	"tesla":     {"fam": "building", "name": "Tesla Coil", "rarity": "rare", "tags": ["aoe", "control"], "max": 5, "desc": "9 dmg, 0.8/s, chains 3 at 70%"},
-	"flak":      {"fam": "building", "name": "Flak", "rarity": "common", "tags": ["dps"], "max": 5, "desc": "8 dmg, 1.5/s, x2.5 vs flyers; cannot hit ground"},
+	"flak":      {"fam": "building", "name": "Flamer", "rarity": "common", "tags": ["dps", "aoe"], "max": 5, "desc": "40 deg cone of fire; burn spreads through the pile"},
 	"railgun":   {"fam": "building", "name": "Railgun", "rarity": "epic", "tags": ["dps"], "max": 5, "desc": "60 dmg, 0.25/s, pierces a line (range 7); ring 2+"},
 	"armory":    {"fam": "building", "name": "Armory", "rarity": "rare", "tags": ["dps"], "max": 5, "desc": "Adjacent buildings +15% dmg"},
 	"beacon":    {"fam": "building", "name": "Beacon", "rarity": "rare", "tags": ["dps"], "max": 5, "desc": "Radius 2: +10% rate, +0.3 range"},
@@ -38,7 +38,6 @@ const DEFS: Dictionary = {
 	# ---- troop huts (3) ------------------------------------------------------
 	"hut_infantry": {"fam": "hut", "name": "Rifle Barracks", "rarity": "common", "tags": ["troop"], "max": 5, "desc": "3 Riflemen guard the whole perimeter from their post; they taunt nearby enemies"},
 	"hut_sapper":   {"fam": "hut", "name": "Sapper Den", "rarity": "rare", "tags": ["troop", "aoe"], "max": 5, "desc": "2 Sappers charge elites and bosses first and explode (x2 vs armored)"},
-	"hut_drone":    {"fam": "hut", "name": "Drone Nest", "rarity": "epic", "tags": ["troop"], "max": 5, "desc": "4 Drones fly out and hunt flyers first"},
 	# ---- upgrade packs (10; one-shot, last the run) --------------------------
 	"pk_arsenal":   {"fam": "pack", "name": "Arsenal Pack", "rarity": "common", "tags": ["dps"], "max": 5, "desc": "+12% dmg (all)"},
 	"pk_overclock": {"fam": "pack", "name": "Overclock Pack", "rarity": "common", "tags": ["dps"], "max": 3, "desc": "+8% rate (all), -5% Core HP"},
@@ -64,14 +63,13 @@ const DEFS: Dictionary = {
 	"in_rate":  {"fam": "insight", "name": "Insight: Tempo", "rarity": "insight", "tags": [], "step": 0.003, "cap": 0.10, "desc": "+0.3% attack rate, permanently (cap 10%)"},
 	"in_luck":  {"fam": "insight", "name": "Insight: Fortune", "rarity": "insight", "tags": [], "step": 1.0, "cap": 10.0, "desc": "+1 draft Luck, permanently (cap 10)"},
 	"in_drop":  {"fam": "insight", "name": "Insight: Scavenger", "rarity": "insight", "tags": [], "step": 0.01, "cap": 0.15, "desc": "+1% part drop chance, permanently (cap 15%)"},
-	"in_crate": {"fam": "insight", "name": "Insight: Appraiser", "rarity": "insight", "tags": [], "step": 0.005, "cap": 0.10, "desc": "+0.5% crate Epic+ odds, permanently (cap 10%)"},
 }
 
 const BUILDINGS: Array = ["gun", "mortar", "tesla", "flak", "railgun", "armory", "beacon", "bulwark", "aegis", "barricade", "mine", "oilmill", "bounty", "vault", "refinery", "frost", "obelisk"]
-const HUTS: Array = ["hut_infantry", "hut_sapper", "hut_drone"]
+const HUTS: Array = ["hut_infantry", "hut_sapper"]
 const PACKS: Array = ["pk_arsenal", "pk_overclock", "pk_fort", "pk_ledger", "pk_optics", "pk_crit", "pk_logistics", "pk_core", "pk_barracks", "pk_gambit"]
 const SPECIALS: Array = ["sp_orbital", "sp_emp", "sp_repair", "sp_overdrive", "sp_magnet", "sp_timewarp"]
-const INSIGHT: Array = ["in_dmg", "in_hp", "in_cash", "in_rate", "in_luck", "in_drop", "in_crate"]
+const INSIGHT: Array = ["in_dmg", "in_hp", "in_cash", "in_rate", "in_luck", "in_drop"]
 
 
 static func ids() -> Array:

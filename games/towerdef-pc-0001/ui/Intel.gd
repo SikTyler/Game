@@ -3,7 +3,7 @@ extends RefCounted
 ## round — alive now or still queued in the wave plan — with threat stars, HP
 ## and traits; a type seen for the first time this run is tagged NEW) and LOOT
 ## DROPS (a live, aggregated feed of everything looted from kills: coins from
-## horde bodies and bounties, scrap, keys, parts by rarity, Core Cores).
+## horde bodies and bounties, scrap; P5 adds items and caches).
 
 const TowerState := preload("res://TowerState.gd")
 const EnemyDB := preload("res://data/EnemyDB.gd")
@@ -139,13 +139,6 @@ static func on_event(m, ev: Dictionary) -> void:
 			match String(ev["kind"]):
 				"scrap":
 					loot_add(m, "scrap", "Scrap", "cur_scrap", float(ev["n"]), Kit.SCRAP)
-				"key":
-					loot_add(m, "key", "Keys", "cur_key", float(ev["n"]), Kit.KEYC)
-				"core_core":
-					loot_add(m, "core_core", "Core Cores", "cur_corecore", float(ev["n"]), Kit.CORECORE)
-				"part":
-					var r: String = String(ev.get("rarity", "common"))
-					loot_add(m, "part_" + r, "%s part" % r.capitalize(), "it_part_kit", 1.0, Kit.RARITY.get(r, Kit.TEXT))
 		"boss_bounty":
 			loot_add(m, "bounty", "Boss bounty coins", "cur_coin", float(ev["coins"]), Kit.GOLD)
 

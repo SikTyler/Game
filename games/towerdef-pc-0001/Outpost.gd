@@ -21,7 +21,6 @@ const Tiers := preload("res://Tiers.gd")
 const Missions := preload("res://Missions.gd")
 const Stats := preload("res://Stats.gd")
 const TuneRef := preload("res://Tune.gd")
-const Factory := preload("res://Factory.gd")
 
 const HALL_POS: Vector2i = Vector2i(0, 2)
 const DIRS: Array = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
@@ -405,9 +404,6 @@ static func layout_bonus(o: Dictionary, uid: String, con: Dictionary = {}) -> Di
 			"refinery":
 				if nid == "mill":
 					parts["noise"] = -0.10
-			"keyforge":
-				if nid == "gemmine":
-					parts["gemmine"] = 0.10
 	if mills > 0:
 		parts["mills"] = minf(0.30, 0.10 * float(mills))
 	if id == "gemmine" and lamps > 0:
@@ -485,8 +481,6 @@ static func nominal_rate(s: Dictionary, uid: String, con: Dictionary = {}) -> fl
 			# Deep Mine (was the Gem Mine; gems are gone): a big coin generator
 			# on a vein; only Lamps boost its layout.
 			return float(d["rate"]) * (1.0 + 0.25 * float(L - 1)) * (1.0 + lay) * global_mult(s)
-		"keyforge":
-			return (1.0 / 24.0 + (1.0 / 10.0 - 1.0 / 24.0) * float(L - 1) / 9.0) * (1.0 + lay) * global_mult(s)
 		"mill":
 			var tm: float = 1.0 + TuneRef.num("pc_mill_tier", OutpostDB.MILL_TIER) * float(Tiers.highest(s) - 1)
 			return TuneRef.num("pc_mill_rate", float(d["rate"])) * (1.0 + 0.25 * float(L - 1)) * (1.0 + lay) * global_mult(s) * tm
@@ -505,7 +499,7 @@ static func rate(s: Dictionary, uid: String, con: Dictionary = {}) -> float:
 
 
 ## Storage cap: storage_h hours of nominal output x Warehouse x Storage Tech
-## (+10%/L); Key Forge 3 is a hard cap.
+## (+4%/L).
 static func cap(s: Dictionary, uid: String, con: Dictionary = {}) -> float:
 	var o: Dictionary = _o(s)
 	var b: Dictionary = o["buildings"][uid]
@@ -576,11 +570,11 @@ static func _complete(s: Dictionary, job: Dictionary) -> Array:
 	return [{"t": "upgrade_done", "uid": uid, "id": String(b["id"]), "lvl": int(b["lvl"])}]
 
 
-## Preview of what is stored at `now` (no mutation): {coins, scrap, keys}.
+## Preview of what is stored at `now` (no mutation): {coins, scrap}.
 static func pending(s: Dictionary, now: int) -> Dictionary:
 	var c: Dictionary = s.duplicate(true)
 	tick(c, now)
-	var out: Dictionary = {"coins": 0.0, "scrap": 0.0, "keys": 0.0}
+	var out: Dictionary = {"coins": 0.0, "scrap": 0.0}
 	var o: Dictionary = _o(c)
 	for k in o["buildings"].keys():
 		var b: Dictionary = o["buildings"][k]
@@ -594,7 +588,7 @@ static func pending(s: Dictionary, now: int) -> Dictionary:
 static func production(s: Dictionary) -> Dictionary:
 	var o: Dictionary = _o(s)
 	var con: Dictionary = connected(o)
-	var out: Dictionary = {"coins": 0.0, "scrap": 0.0, "keys": 0.0}
+	var out: Dictionary = {"coins": 0.0, "scrap": 0.0}
 	for k in o["buildings"].keys():
 		var res: String = String(OutpostDB.get_def(String((o["buildings"][k] as Dictionary)["id"])).get("res", ""))
 		if res != "":
@@ -612,8 +606,6 @@ static func _pay_res(s: Dictionary, res: String, n: int) -> void:
 				(s["reforge"] as Dictionary)["coins_since"] = int((s["reforge"] as Dictionary).get("coins_since", 0)) + n
 		"scrap":
 			s["scrap"] = int(s.get("scrap", 0)) + n
-		"keys":
-			s["keys"] = int(s.get("keys", 0)) + n
 
 
 ## Collect one building's whole units (fractions stay).
@@ -636,14 +628,14 @@ static func collect(s: Dictionary, uid: String, now: int) -> Array:
 
 
 ## "While you were away" (replaces Offline.gd): what the Outpost stored since
-## last_seen. {coins, scrap, keys, minutes}; zero under 5 minutes or on
+## last_seen. {coins, scrap, minutes}; zero under 5 minutes or on
 ## a first boot (last_seen 0) — the Outpost accrual itself is the offline pay.
 static func away_report(s: Dictionary, now: int) -> Dictionary:
 	var last: int = int(s.get("last_seen", 0))
 	var out: Dictionary = pending(s, now)
 	out["minutes"] = 0 if last <= 0 or now < last else (now - last) / 60
 	if last <= 0 or now - last < TuneRef.int_of("offline_min", 300):
-		for k in ["coins", "scrap", "keys"]:
+		for k in ["coins", "scrap"]:
 			out[k] = 0.0
 	return out
 
@@ -652,12 +644,12 @@ static func away_report(s: Dictionary, now: int) -> Dictionary:
 static func claim_away(s: Dictionary, now: int) -> Array:
 	var ev: Array = collect_all(s, now, true)
 	s["last_seen"] = now
-	var tot: Dictionary = {"coins": 0, "scrap": 0, "keys": 0}
+	var tot: Dictionary = {"coins": 0, "scrap": 0}
 	for e in ev:
 		if String((e as Dictionary)["t"]) == "collect":
 			tot[String(e["res"])] = int(tot[String(e["res"])]) + int(e["n"])
-	if int(tot["coins"]) + int(tot["scrap"]) + int(tot["keys"]) > 0:
-		ev.append({"t": "offline", "coins": int(tot["coins"]), "scrap": int(tot["scrap"]), "keys": int(tot["keys"])})
+	if int(tot["coins"]) + int(tot["scrap"]) > 0:
+		ev.append({"t": "offline", "coins": int(tot["coins"]), "scrap": int(tot["scrap"])})
 	return ev
 
 
@@ -987,9 +979,6 @@ static func level_of(s: Dictionary, id: String) -> int:
 		var b: Dictionary = o["buildings"][k]
 		if String(b["id"]) == id and bool(b["built"]) and int(b["x"]) >= 0:
 			best = maxi(best, int(b["lvl"]))
-	# FB2 / WP3: facility levels now live on the Factory (Research Lab, Barracks, Archive, Salvage Yard)
-	if (Factory.DB.FAC_IDS as Array).has(id):
-		best = maxi(best, Factory.fac_level(s, id))
 	return best
 
 

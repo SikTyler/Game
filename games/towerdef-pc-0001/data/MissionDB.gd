@@ -20,7 +20,7 @@ const IDS: Array = ["kill", "wave", "boss", "eco", "cash", "perk", "lab", "upgra
 const STREAK: Array = [
 	{"coins": 50}, {"coins": 80}, {"coins": 100},
 	{"coins": 120}, {"coins": 200}, {"coins": 160},
-	{"coins": 400, "chest": true},
+	{"coins": 400, "scrap": 60},
 ]
 
 const TRADEOFF_PERKS: Array = ["p_glass", "p_greed", "p_fort", "p_frenzy", "p_miser", "p_bloodmoon"]

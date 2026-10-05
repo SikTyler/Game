@@ -25,8 +25,7 @@ const Outpost := preload("res://Outpost.gd")
 const Kit := preload("res://ui/Kit.gd")
 const Battle := preload("res://ui/Battle.gd")
 const Hub := preload("res://ui/Hub.gd")
-const FactoryView := preload("res://ui/FactoryView.gd")
-const CoreBay := preload("res://ui/CoreBay.gd")
+const OutpostView := preload("res://ui/OutpostView.gd")
 
 const OVERLAYS: Array = ["pause", "settings", "credits", "stats", "history", "achievements", "modes", "goal"]
 const SET_TABS: Array = ["video", "audio", "controls", "gameplay"]
@@ -48,7 +47,7 @@ static func modal_rect(m, w: float, h: float) -> Rect2:
 ## The boot "while you were away" modal grows with the number of resources.
 static func offline_rect(m) -> Rect2:
 	var n: int = 0
-	for k in ["coins", "scrap", "keys"]:
+	for k in ["coins", "scrap"]:
 		if int(m.offline_offer.get(k, 0)) > 0:
 			n += 1
 	return modal_rect(m, 760, 300.0 + 66.0 * float(maxi(1, n)))
@@ -91,7 +90,7 @@ static func build(m) -> void:
 		return
 	if m.screen == "base" and not m.offline_offer.is_empty():
 		var r: Rect2 = offline_rect(m)
-		Kit.btn(m, "Collect", Rect2(r.position.x + 230, r.end.y - 92, 300, 60), m.claim_offline, "Collect everything the factory banked while you were away", true, Kit.GOLD, "Collect", "ui_collect", 24)
+		Kit.btn(m, "Collect", Rect2(r.position.x + 230, r.end.y - 92, 300, 60), m.claim_offline, "Collect everything the Outpost stored while you were away", true, Kit.GOLD, "Collect", "ui_collect", 24)
 		_focus_first(m)
 		return
 	_build_topbar(m)
@@ -488,9 +487,7 @@ static func _hub_action(m, event: InputEvent) -> bool:
 	if _pressed(m, event, "confirm") and m.tab == "play" and m.op_arm == "" and m.op_sel == "" and String(m.last_device) != "pad":
 		m.start_run()
 		return true
-	if Hub.is_home(m.tab) and FactoryView.action(m, event):
-		return true
-	if m.tab == "bay" and CoreBay.action(m, event):
+	if Hub.is_home(m.tab) and OutpostView.action(m, event):
 		return true
 	for t in Hub.TAB_KEYS:
 		if _pressed(m, event, String(t[0])):
@@ -524,10 +521,7 @@ static func _cancel(m) -> void:
 			m.set_overlay("pause")
 	elif m.screen == "base":
 		if Hub.is_home(m.tab) and (m.op_arm != "" or m.op_moving or m.op_sel != ""):
-			FactoryView.cancel(m)
-		elif m.tab == "bay" and m.bay_part != "":
-			m.bay_part = ""
-			m._rebuild_ui()
+			OutpostView.cancel(m)
 		elif not Hub.is_home(m.tab):
 			m.set_tab("play")
 		else:
@@ -560,7 +554,7 @@ static func update_tip(m, delta: float) -> void:
 	else:
 		m.tip_t += delta
 	var delay: float = float((Settings.normalize(m.settings)["controls"] as Dictionary)["tooltip_delay"])
-	var show: bool = t != "" and m.tip_t >= delay and m.drag_card < 0 and m.drag_part == "" and not m.op_drag and not m.op_pan
+	var show: bool = t != "" and m.tip_t >= delay and m.drag_card < 0 and not m.op_drag and not m.op_pan
 	m.tipbox.visible = show
 	if show:
 		if m.tip_label.text != t:
@@ -590,8 +584,8 @@ static func tip_at(m, p: Vector2) -> String:
 		var w: String = Battle.world_tip(m, p)
 		if w != "":
 			return w
-	if m.screen == "base" and Hub.is_home(m.tab) and FactoryView.map_rect(m).has_point(p):
-		var o: String = FactoryView.map_tip(m, p)
+	if m.screen == "base" and Hub.is_home(m.tab) and OutpostView.map_rect(m).has_point(p):
+		var o: String = OutpostView.map_tip(m, p)
 		if o != "":
 			return o
 	for st in m.stat_tips:
@@ -606,24 +600,20 @@ static func draw_topbar(m) -> void:
 	var r := Rect2(0, 0, m.vw, m.TOP_H)
 	m.draw_rect(r, Kit.PANEL)
 	m.draw_line(Vector2(0, m.TOP_H), Vector2(m.vw, m.TOP_H), Kit.RUST, 2.0)
-	Kit.icon(m, "core_" + Cores.active(m.save), Rect2(12, 8, 40, 40))
+	Kit.icon(m, "core_bastion", Rect2(12, 8, 40, 40))
 	Kit.t(m, "COREHOLD", Vector2(58, 37), 22, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, 150.0)
 	var s: Dictionary = m.save
 	var x: float = 200.0
 	# Owner feedback #1: during a run the bar counts this run's coins / loot live.
 	var live_c: int = 0
 	var live_sc: int = 0
-	var live_k: int = 0
 	if m.screen == "run" and m.S != null and not m.S.over:
 		live_c = int(m.S.coins_run)
 		live_sc = int((m.S.loot as Dictionary).get("scrap", 0))
-		live_k = int((m.S.loot as Dictionary).get("keys", 0))
 	var cur: Array = [
-		["cur_coin", Kit.fmt(float(int(s["coins"]) + live_c)), Kit.GOLD, "Coins — Core levels, crates, the Outpost and research (live during a run)", 128.0],
-		["cur_scrap", Kit.fmt(float(int(s.get("scrap", 0)) + live_sc)), Kit.SCRAP, "Scrap — levels up parts (salvage parts, Scrap Refinery)", 100.0],
-		["cur_key", str(int(s.get("keys", 0)) + live_k), Kit.KEYC, "Keys — open Supply and Vault crates (Key Forge, drops)", 76.0],
-		["cur_corecore", str(int(s.get("core_cores", 0))), Kit.CORECORE, "Core Cores — rare boss drops; needed for Core levels 5+", 76.0],
-		["cur_shard", str(int(s.get("shards", 0))), Kit.SHARD, "Reforge shards — spend on the permanent Reforge tree", 76.0],
+		["cur_coin", Kit.fmt(float(int(s["coins"]) + live_c)), Kit.GOLD, "Coins — Core levels, the Outpost, research and forging (live during a run)", 128.0],
+		["cur_scrap", Kit.fmt(float(int(s.get("scrap", 0)) + live_sc)), Kit.SCRAP, "Scrap — the Forge's material: reroll, lock and upgrade gear (drops, salvage, Scrap Refinery)", 110.0],
+		["cur_shard", str(int(s.get("shards", 0))), Kit.SHARD, "Reforge Shards — spend on the permanent Reforge tree", 90.0],
 	]
 	var compact: bool = m.vw < 1500.0
 	for c in cur:
@@ -665,7 +655,7 @@ static func draw_menu(m) -> void:
 	for k in 6:
 		var a: float = m.t_anim * 0.2 + float(k) * TAU / 6.0
 		m.draw_arc(Vector2(c.x, 180), 120.0 + 24.0 * float(k), a, a + 1.2, 24, Color(Kit.RUST, 0.08 + 0.02 * float(k)), 3.0)
-	Kit.icon(m, "core_" + Cores.active(m.save), Rect2(c.x - 64, 92, 128, 128))
+	Kit.icon(m, "core_bastion", Rect2(c.x - 64, 92, 128, 128))
 	Kit.t(m, "COREHOLD", Vector2(c.x, 280), 64, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, 900.0)
 	Kit.t(m, "PC EDITION  ·  choose a save slot", Vector2(c.x, 314), 20, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, 900.0)
 	var cw: float = 440.0
@@ -761,8 +751,8 @@ static func _draw_offline(m) -> void:
 	var r: Rect2 = offline_rect(m)
 	Kit.panel(m, r, Kit.GOLD, Kit.PANEL2, 3)
 	Kit.t(m, "WHILE YOU WERE AWAY", Vector2(r.get_center().x, r.position.y + 70), 36, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
-	Kit.t(m, "Away %s — your factory kept producing at its measured rate" % Kit.dur(int(off.get("minutes", 0)) * 60), Vector2(r.get_center().x, r.position.y + 108), 19, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
-	var rows: Array = [["cur_coin", "coins", "coins", Kit.GOLD], ["cur_scrap", "scrap", "Scrap", Kit.SCRAP], ["cur_key", "keys", "Keys", Kit.KEYC], ["it_data_card", "data", "research data", Kit.LAB]]
+	Kit.t(m, "Away %s — your Outpost kept producing (each building stores up to its cap)" % Kit.dur(int(off.get("minutes", 0)) * 60), Vector2(r.get_center().x, r.position.y + 108), 19, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
+	var rows: Array = [["cur_coin", "coins", "coins", Kit.GOLD], ["cur_scrap", "scrap", "Scrap", Kit.SCRAP]]
 	var y: float = r.position.y + 150.0
 	for rw in rows:
 		var a: Array = rw
@@ -772,7 +762,7 @@ static func _draw_offline(m) -> void:
 		Kit.icon(m, String(a[0]), Rect2(r.position.x + 220, y, 52, 52))
 		Kit.t(m, "+%s %s" % [Kit.fmt(float(n)), String(a[2])], Vector2(r.position.x + 290, y + 40), 34, a[3], HORIZONTAL_ALIGNMENT_LEFT, 400.0)
 		y += 66.0
-	Kit.t(m, "Production banks for up to %.1f h — build Chests and Vaults to extend it." % float(off.get("hours_cap", 4.0)), Vector2(r.get_center().x, r.end.y - 112), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 40.0)
+	Kit.t(m, "Warehouses and Storage Tech research raise each building's storage.", Vector2(r.get_center().x, r.end.y - 112), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 40.0)
 
 
 static func _draw_stats(m, r: Rect2) -> void:
@@ -787,7 +777,6 @@ static func _draw_stats(m, r: Rect2) -> void:
 		["Coins earned", Kit.fmt(float(st["coins_earned"]))], ["Coins spent", Kit.fmt(float(st["coins_spent"]))],
 		["Play time", "%dh %02dm" % [ps / 3600, (ps % 3600) / 60]], ["Best DPS", str(int(float(st.get("dps_best", 0.0))))],
 		["Best wave (normal)", str(int(bm.get("normal", 0)))], ["Best wave (endless)", str(int(bm.get("endless", 0)))],
-		["Parts found", str(int(st.get("parts_found", 0)))], ["Crates opened", str(int(st.get("crates_opened", 0)))],
 		["Reforges", str(int(st.get("reforges", 0)))], ["Outpost collects", str(int(st.get("outpost_collects", 0)))],
 	]
 	for k in rows.size():

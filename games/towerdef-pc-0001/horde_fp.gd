@@ -1,13 +1,23 @@
 extends SceneTree
-## HORDE Phase-1 determinism golden: 120 s seeded sims (one per Core attack,
-## a full weapon/hut/wall board, waves 12+) fingerprinted with SHA-256 over
+## HORDE Phase-1 determinism golden: 120 s seeded sims (one per Core attack —
+## V2: the one Core plus the Slag / Beam / Pulse attack sheets that become
+## Weapon frames in P4 — a full weapon/hut/wall board, waves 12+) fingerprinted with SHA-256 over
 ## (wave, kills, cash, hp, every enemy eid/pos/hp) once per sim second, plus
 ## Orbital auto-aim (_densest). Prints HORDE FP <core> <hash> and a combined
 ## hash. selftest.gd embeds the combined value recorded from the Dict
 ## implementation (pre-SoA), so the SoA port must reproduce it bit-for-bit.
 ## Usage: godot --headless --path games/towerdef-pc-0001 --script res://horde_fp.gd
 
-const BOARD: Dictionary = {16: "gun", 17: "mortar", 18: "tesla", 23: "frost", 25: "flak", 30: "hut_infantry", 31: "hut_sapper", 32: "hut_drone", 10: "railgun", 38: "barricade"}
+const BOARD: Dictionary = {16: "gun", 17: "mortar", 18: "tesla", 23: "frost", 25: "flak", 30: "hut_infantry", 31: "hut_sapper", 10: "railgun", 38: "barricade"}
+## Attack sheets swapped onto the Core (V2: one Core; these are P4 frames).
+const SHEETS: Dictionary = {
+	"slag": {"name": "Foundry", "dmg": 5.0, "rate": 1.0, "range": 3.5, "hp": 100.0, "regen": 0.8, "armor": 1.0, "cash": 4.0, "irate": 0.05, "icap": 150.0,
+		"attack": "slag", "splash": 1.0, "slow": 0.2, "slow_t": 2.0, "attack_name": "Slag", "attack_desc": ""},
+	"beam": {"name": "Lance", "dmg": 28.0, "rate": 0.5, "range": 5.5, "hp": 90.0, "regen": 0.6, "armor": 1.0, "cash": 1.5, "irate": 0.01, "icap": 30.0,
+		"attack": "beam", "ramp": 0.15, "ramp_max": 1.5, "attack_name": "Beam", "attack_desc": ""},
+	"pulse": {"name": "Tempest", "dmg": 6.0, "rate": 0.8, "range": 3.0, "hp": 140.0, "regen": 1.2, "armor": 3.0, "cash": 1.8, "irate": 0.02, "icap": 40.0,
+		"attack": "pulse", "knock": 0.3, "chain_every": 5, "chain_frac": 0.4, "chain_n": 3, "attack_name": "Pulse", "attack_desc": ""},
+}
 
 
 func _initialize() -> void:
@@ -19,7 +29,7 @@ func _initialize() -> void:
 static func run_all() -> String:
 	var ctx := HashingContext.new()
 	ctx.start(HashingContext.HASH_SHA256)
-	for core in ["bastion", "foundry", "lance", "tempest"]:
+	for core in ["cannon", "slag", "beam", "pulse"]:
 		var h: String = run_one(String(core))
 		print("HORDE FP %s %s" % [core, h])
 		ctx.update(h.to_utf8_buffer())
@@ -36,10 +46,12 @@ static func run_one(core: String) -> String:
 	var BM = load("res://BaseMeta.gd")
 	var TS = load("res://TowerState.gd")
 	var save: Dictionary = BM.default_save()
-	save["cores"] = {"active": core, "owned": ["bastion", "foundry", "lance", "tempest"], "levels": {"bastion": 3, "foundry": 3, "lance": 3, "tempest": 3}}
+	save["core"] = {"lvl": 3}
 	save = BM.normalize(save)
 	var S = TS.new()
 	S.setup(4242, save, 1_700_000_000)
+	if SHEETS.has(core):
+		S.core_def = SHEETS[core]
 	for i in BOARD.keys():
 		S.slots[int(i)] = {"id": String(BOARD[i]), "perm": 0, "run": 2}
 		S.unlocked[int(i)] = true
