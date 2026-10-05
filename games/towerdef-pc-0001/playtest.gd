@@ -226,22 +226,22 @@ static func job_mass(seed0: int) -> Dictionary:
 	(out["h1"] as Dictionary)["t3_w1"] = S3.mass_bodies(1)
 	(out["h1"] as Dictionary)["t3_w30"] = S3.mass_bodies(30)
 	out["h1_ok"] = w1_spawned >= 100 and S1.mass_bodies(25) >= 1000 and S1.mass_bodies(45) >= 10000
-	# ---- H2 / H3 / H4 / H11: a forced T1 wave 50 (19,800 bodies) with no
-	# defence: the alive count climbs to the 16,384 cap, the queue holds, no
-	# planned body is dropped, every body is a designed one.
+	# ---- H2 / H3 / H4 / H11: forced T1 waves 49 + 50 (12,000 bodies each, the
+	# per-wave cap) with no defence: the alive count climbs to the 16,384 cap,
+	# the queue holds, no planned body is dropped, every body is designed.
 	var S2 = _mass_S(seed0 + 1)
 	S2.max_hp_mult = 1.0e9
 	S2.recompute()
 	S2.hp = float(S2.stats["max_hp"])
 	S2.plan = []
 	S2.plan_idx = 0
-	S2.wave = 50
+	S2.wave = 49
 	S2.wave_t = 0.0
 	var peak: int = 0
 	var ms_peak: float = 0.0
 	var t0: int = Time.get_ticks_usec()
 	var ticks: int = 0
-	for i in int(24.0 / DT):
+	for i in int(49.0 / DT):
 		S2.stats["weapons"] = []
 		var u0: int = Time.get_ticks_usec()
 		S2.tick(DT)
@@ -250,10 +250,14 @@ static func job_mass(seed0: int) -> Dictionary:
 		if S2.en.count() >= peak:
 			peak = S2.en.count()
 			ms_peak = float(u1 - u0) / 1000.0 / maxf(1.0, DT / TowerState.SUBSTEP)
-	var planned: int = (S2.plan as Array).size()
-	var a50: Dictionary = S2.wave_acct.get(50, {})
-	var queued: int = planned - S2.plan_idx
-	var spawned50: int = int(a50.get("spawned", 0))
+	var queued: int = (S2.plan as Array).size() - S2.plan_idx
+	var spawned50: int = 0
+	var planned: int = queued
+	for aw in [49, 50]:
+		var aa: Dictionary = S2.wave_acct.get(aw, {})
+		spawned50 += int(aa.get("spawned", 0))
+		planned += int(aa.get("spawned", 0))
+	var planned_by_curve: int = S2.mass_bodies(49) + S2.mass_bodies(50) + 49 / 5 + 50 / 5 + 1   # + elites + the wave-50 boss
 	var share_ok: bool = TuneRef.horde_mult() == 1 and S2.horde_mult == 1
 	var hp_ok: bool = S2.en.count() > 0
 	var n_chk: int = 0
@@ -263,12 +267,12 @@ static func job_mass(seed0: int) -> Dictionary:
 		var k: String = S2.en.kind[sl]
 		if n_chk < 2000 and not S2.en.is_marked(sl) and not ["boss", "elite", "courier"].has(k):
 			n_chk += 1
-			var want: float = float(EnemyDB.mass_def(k)["hp"]) * S2.mass_hp_scale(k, 50)
+			var want: float = float(EnemyDB.mass_def(k)["hp"]) * S2.mass_hp_scale(k, int(S2.en.wv[sl]))
 			if absf(S2.en.max_hp[sl] - want) > 1e-6 * want:
 				hp_ok = false
-	out["h2"] = {"planned": planned, "spawned": spawned50, "queued": queued, "peak_alive": peak, "cap": TowerState.MASS_CAP,
+	out["h2"] = {"planned": planned, "planned_by_curve": planned_by_curve, "spawned": spawned50, "queued": queued, "peak_alive": peak, "cap": TowerState.MASS_CAP,
 		"ms_per_substep_at_peak": snappedf(ms_peak, 0.01), "wall_s": snappedf(float(Time.get_ticks_usec() - t0) / 1.0e6, 0.1)}
-	out["h2_ok"] = peak >= 10000 and peak <= TowerState.MASS_CAP and spawned50 + queued == planned and queued > 0
+	out["h2_ok"] = peak >= 10000 and peak <= TowerState.MASS_CAP and planned == planned_by_curve and queued > 0
 	out["h3_ok"] = share_ok
 	out["h4_ok"] = hp_ok and n_chk > 100
 	say("MASS H2 forced wave 50: " + JSON.stringify(out["h2"]))

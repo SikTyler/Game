@@ -40,7 +40,7 @@ const MASS: Dictionary = {
 	"drone":    {"hp": 5.0,   "spd": 50.0,  "dmg": 0.5,  "bld": 0.5,  "cash": 2.0,  "xp": 2.0,  "coin": 0.0,  "size": 14.0, "grow": "f"},
 	"skitter":  {"hp": 3.0,   "spd": 120.0, "dmg": 0.4,  "bld": 0.4,  "cash": 2.0,  "xp": 2.0,  "coin": 0.0,  "size": 12.0, "grow": "f"},
 	"hauler":   {"hp": 60.0,  "spd": 30.0,  "dmg": 3.0,  "bld": 3.0,  "cash": 20.0, "xp": 20.0, "coin": 1.0,  "size": 26.0, "grow": "h"},
-	"ranged":   {"hp": 8.0,   "spd": 42.0,  "dmg": 1.0,  "bld": 1.5,  "cash": 6.0,  "xp": 6.0,  "coin": 0.0,  "size": 14.0, "grow": "f"},
+	"ranged":   {"hp": 8.0,   "spd": 42.0,  "dmg": 1.0,  "bld": 0.5,  "cash": 6.0,  "xp": 6.0,  "coin": 0.0,  "size": 14.0, "grow": "f"},
 	"sapper":   {"hp": 12.0,  "spd": 55.0,  "dmg": 2.0,  "bld": 25.0, "cash": 8.0,  "xp": 8.0,  "coin": 0.0,  "size": 16.0, "grow": "f"},
 	"shield":   {"hp": 40.0,  "spd": 38.0,  "dmg": 1.0,  "bld": 1.0,  "cash": 15.0, "xp": 15.0, "coin": 1.0,  "size": 20.0, "grow": "h", "guard": 30.0},
 	"splitter": {"hp": 25.0,  "spd": 40.0,  "dmg": 1.0,  "bld": 1.0,  "cash": 10.0, "xp": 10.0, "coin": 0.0,  "size": 22.0, "grow": "h"},

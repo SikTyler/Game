@@ -1465,7 +1465,7 @@ func _telegraph_event(p: Dictionary) -> Dictionary:
 func mass_bodies(w: int) -> int:
 	var b: float = TuneRef.num("mass_b0", 120.0) * pow(TuneRef.num("mass_b_growth", 1.11), float(maxi(1, w) - 1)) * EnemyDB.tier_b(tier)
 	b *= TuneRef.num("mass_body_mult", 1.0) * count_mult / maxf(0.1, float(stats.get("perk_spawn", 1.0)))
-	return clampi(int(round(b)), 1, TuneRef.int_of("mass_b_cap", 20000))
+	return clampi(int(round(b)), 1, TuneRef.int_of("mass_b_cap", 12000))
 
 
 ## Harness LOD factor for a wave of `b` bodies (1 = every body spawns).
@@ -1845,6 +1845,18 @@ static func mass_hp_growth(t: int) -> float:
 	return PowerModel.hp_growth(t) / TuneRef.num("mass_b_growth", 1.11) * TuneRef.num("mass_hp_track", 1.006)
 
 
+## Kept units (Warlord / Behemoth) in mass runs: the classic HP curve up to
+## wave 10 (the first boss is unchanged), then the mass heavy growth. The
+## classic x1.17 / wave made the wave-40 boss ~50x the swarm's growth (a
+## 690k HP boss at T1 wave 40 walled every bot for days).
+func mass_bossy_scale(w: int) -> float:
+	var w0: int = mini(w, 10)
+	var sc: float = pow(hp_growth, float(w0 - 1))
+	if w > 10:
+		sc *= pow(mass_hp_growth(tier) * TuneRef.num("mass_hp_heavy", 1.015), float(w - 10))
+	return sc
+
+
 ## One designed mass body (§D1/§D2). `lod` > 1 only under the harness LOD.
 func _spawn_mass(kind: String, ev: Array, at: Vector2, marked: bool, pw: int, lod: int) -> bool:
 	var md: Dictionary = EnemyDB.mass_def(kind)
@@ -1871,7 +1883,7 @@ func _spawn_mass(kind: String, ev: Array, at: Vector2, marked: bool, pw: int, lo
 	if bossy:
 		# Kept units: classic HP curve (boss ramps below), designed contact damage.
 		var cd: Dictionary = EnemyDB.get_def(kind)
-		var sc: float = scale() * hp_mult * float(stats.get("perk_enemy_hp", 1.0)) * enemy_hp_mod * (1.0 + 0.15 * float(pack_n("pk_gambit"))) * difficulty_hp()
+		var sc: float = mass_bossy_scale(pw) * hp_mult * float(stats.get("perk_enemy_hp", 1.0)) * enemy_hp_mod * (1.0 + 0.15 * float(pack_n("pk_gambit"))) * difficulty_hp()
 		en.hp[e] = float(cd["hp"]) * sc * TuneRef.num("mass_" + kind + "_hp", 1.0)
 	else:
 		en.hp[e] = float(md["hp"]) * mass_hp_scale(kind, pw) * lw
@@ -1882,7 +1894,7 @@ func _spawn_mass(kind: String, ev: Array, at: Vector2, marked: bool, pw: int, lo
 		# Core's HP track; §D2's 40 per hit walled the first boss).
 		en.dmg[e] = float(EnemyDB.get_def(kind)["dmg"]) * pow(dmg_growth, float(wave - 1)) * hp_mult * enemy_dmg_mod * difficulty_dmg()
 	else:
-		en.dmg[e] = float(md["dmg"]) * pow(TuneRef.num("mass_dmg_g", dmg_growth), float(pw - 1)) * mass_tier_hp() * enemy_dmg_mod * difficulty_dmg() * TuneRef.num("mass_dmg_k", 0.4) * lw
+		en.dmg[e] = float(md["dmg"]) * pow(TuneRef.num("mass_dmg_g", dmg_growth), float(pw - 1)) * mass_tier_hp() * enemy_dmg_mod * difficulty_dmg() * TuneRef.num("mass_dmg_k", 0.45) * lw
 		if kind == "elite":
 			en.dmg[e] *= TuneRef.num("mass_elite_dmg", 1.0)
 	en.cash[e] = float(a["pool"]) * float(md["cash"]) / float(a["W"]) * lw
@@ -2065,7 +2077,7 @@ func _move_enemies(dt: float, ev: Array) -> void:
 				# in reach (a siege on the defence); the Core only when none is.
 				var tb: int = _spit_target(en.pos[e], r_stop + CELL) if mass else -1
 				if tb >= 0:
-					var sa: float = en.dmg[e] * float(EnemyDB.mass_def("ranged")["bld"]) / float(EnemyDB.mass_def("ranged")["dmg"])
+					var sa: float = en.dmg[e] * TuneRef.num("mass_spit_bld", float(EnemyDB.mass_def("ranged")["bld"]) / float(EnemyDB.mass_def("ranged")["dmg"]))
 					bld_hp[tb] = float(bld_hp[tb]) - sa
 					ev.append({"t": "bld_hit", "slot": tb, "dmg": sa, "n": 1, "pos": slot_pos(tb), "spit": true})
 					if float(bld_hp[tb]) <= 0.0:
