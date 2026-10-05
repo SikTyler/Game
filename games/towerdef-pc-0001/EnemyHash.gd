@@ -17,6 +17,7 @@ var oy: float = 0.0
 var gw: int = 32
 var keys: PackedInt64Array = PackedInt64Array()        # (cell << 20) | rank, sorted
 var rebuilds: int = 0
+var last_us: int = 0      # view-only profile of the last rebuild (debug overlay)
 ## Below this many stored bodies the whole `order` is the candidate set (no
 ## rebuild, no gather): the hash only pays for itself in a crowd.
 const SMALL_N: int = 64
@@ -46,6 +47,7 @@ func ensure() -> void:
 ## row is then one contiguous, rank-ordered run found by bsearch.
 func rebuild() -> void:
 	rebuilds += 1
+	var t0: int = Time.get_ticks_usec()
 	var order: PackedInt32Array = st.order
 	var pos: PackedVector2Array = st.pos
 	var n: int = order.size()
@@ -55,6 +57,19 @@ func rebuild() -> void:
 		keys[r] = ((_cy(p.y) * gw + _cx(p.x)) << 20) | r
 	keys.sort()
 	st.dirty = false
+	last_us = Time.get_ticks_usec() - t0
+
+
+## Distinct occupied cells (debug overlay only; O(n) over the sorted keys).
+func cell_count() -> int:
+	var c: int = 0
+	var prev: int = -1
+	for k in keys:
+		var cell: int = k >> 20
+		if cell != prev:
+			c += 1
+			prev = cell
+	return c
 
 
 ## Slots of every body whose position lies in the AABB [a, b] (spawn order).

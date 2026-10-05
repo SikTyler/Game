@@ -19,6 +19,7 @@ const RESOLUTIONS: Array = [Vector2i(1280, 720), Vector2i(1280, 800), Vector2i(1
 	Vector2i(1920, 1080), Vector2i(2560, 1440), Vector2i(3840, 2160)]
 const BUSES: Array = ["Master", "Music", "SFX", "UI"]
 const DMG_NUMBERS: Array = ["off", "compact", "full"]
+const GORE: Array = ["off", "low", "full"]
 const GLYPHS: Array = ["auto", "xbox", "ps5", "steamdeck"]
 const COLORBLIND: Array = ["off", "deuteranopia", "protanopia", "tritanopia"]
 const MIN_WINDOW: Vector2i = Vector2i(1280, 720)
@@ -27,7 +28,7 @@ const UI_SCALE_MAX: float = 1.5
 
 const DEFAULTS: Dictionary = {
 	"video": {"mode": "windowed", "resolution": Vector2i(1920, 1080), "monitor": -1, "vsync": "on", "fps_cap": 0,
-		"ui_scale": 1.0, "shake": true, "dmg_numbers": "full", "reduce_motion": false},
+		"ui_scale": 1.0, "shake": true, "dmg_numbers": "full", "reduce_motion": false, "gore": "low"},
 	"audio": {"Master": 0.8, "Music": 0.7, "SFX": 0.9, "UI": 0.8, "mute": false, "mute_unfocused": true},
 	"controls": {"deadzone": 0.5, "tooltip_delay": 0.4, "edge_pan": false, "invert_zoom": false, "glyphs": "auto"},
 	"gameplay": {"pause_on_draft": true, "pause_on_focus_loss": true, "confirm_sell": false, "default_speed": 1.0,
@@ -62,6 +63,7 @@ static func normalize(src: Dictionary) -> Dictionary:
 	v["shake"] = bool(v_in.get("shake", true))
 	v["dmg_numbers"] = _pick(String(v_in.get("dmg_numbers", "full")), DMG_NUMBERS, "full")
 	v["reduce_motion"] = bool(v_in.get("reduce_motion", false))
+	v["gore"] = _pick(String(v_in.get("gore", "low")), GORE, "low")
 	var a_in: Dictionary = src.get("audio", {}) if src.get("audio", {}) is Dictionary else {}
 	var a: Dictionary = d["audio"]
 	for b in BUSES:

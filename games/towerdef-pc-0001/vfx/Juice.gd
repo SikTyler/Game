@@ -10,10 +10,19 @@ const MAX_OFFSET: float = 16.0
 const DECAY: float = 1.6         # trauma per second
 const FREQ: float = 30.0         # noise samples per second
 const PAUSE_SCALE: float = 0.05  # engine time scale while hit-paused
+# HORDE P6 caps: a horde fires hundreds of impacts a second; trauma added per
+# frame is budgeted and hit-stop is short with a cooldown, so feedback stays
+# readable instead of a permanent shake / slow-motion.
+const TRAUMA_PER_FRAME: float = 0.35
+const TRAUMA_MAX: float = 0.8
+const PAUSE_MAX: float = 0.08
+const PAUSE_COOLDOWN: float = 0.6
 
 var trauma: float = 0.0
 var pause_t: float = 0.0
 var _time: float = 0.0
+var _frame_trauma: float = 0.0
+var _pause_cd: float = 0.0
 var _noise: FastNoiseLite = FastNoiseLite.new()
 
 
@@ -24,11 +33,17 @@ func _init() -> void:
 
 
 func add_trauma(amount: float) -> void:
-	trauma = clampf(trauma + amount, 0.0, 1.0)
+	var add: float = clampf(amount, 0.0, maxf(0.0, TRAUMA_PER_FRAME - _frame_trauma))
+	_frame_trauma += add
+	trauma = clampf(trauma + add, 0.0, TRAUMA_MAX)
 
 
 func hit_pause(secs: float) -> void:
-	pause_t = maxf(pause_t, secs)
+	if _pause_cd > 0.0 and pause_t <= 0.0:
+		return
+	if pause_t <= 0.0:
+		_pause_cd = PAUSE_COOLDOWN
+	pause_t = maxf(pause_t, minf(secs, PAUSE_MAX))
 
 
 ## Engine delta to use this frame (dilated during hit-pause).
@@ -40,6 +55,8 @@ func update(delta: float) -> void:
 	_time += delta
 	trauma = maxf(0.0, trauma - DECAY * delta)
 	pause_t = maxf(0.0, pause_t - delta)
+	_pause_cd = maxf(0.0, _pause_cd - delta)
+	_frame_trauma = 0.0
 
 
 func offset() -> Vector2:
@@ -53,3 +70,5 @@ func offset() -> Vector2:
 func reset() -> void:
 	trauma = 0.0
 	pause_t = 0.0
+	_pause_cd = 0.0
+	_frame_trauma = 0.0

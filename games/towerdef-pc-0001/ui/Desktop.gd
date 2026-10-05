@@ -219,6 +219,7 @@ static func _build_settings(m) -> void:
 				["UI scale", "%d%%" % int(round(float(v["ui_scale"]) * 100.0)), "video", "ui_scale", [0.75, 1.0, 1.25, 1.5], "Scale every interface element"],
 				["Screen shake", "On" if bool(v["shake"]) else "Off", "video", "shake", [true, false], "Camera shake on hits"],
 				["Damage numbers", String(v["dmg_numbers"]).capitalize(), "video", "dmg_numbers", Settings.DMG_NUMBERS, "Floating damage numbers"],
+				["Gore", String(v["gore"]).capitalize(), "video", "gore", Settings.GORE, "Blood bursts and corpses on the ground"],
 			]
 		"audio":
 			var a: Dictionary = s["audio"]

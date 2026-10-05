@@ -189,6 +189,10 @@ static func draw(m, off: Vector2) -> void:
 	_draw_field_bg(m, fr)
 	if S != null:
 		m.draw_set_transform_matrix(Transform2D(0.0, off) * m.world_xform())
+		if m.gore != null and String(m.gore.get("level")) != "off":
+			var gt: Texture2D = m.gore.call("ground_texture")
+			if gt != null:
+				m.draw_texture_rect(gt, m.gore.call("ground_rect"), false)   # HORDE P5 corpse/blood layer
 		_draw_grid(m)
 		_draw_world(m)
 		_draw_fx(m)
@@ -446,7 +450,11 @@ static func _draw_fx(m) -> void:
 		var dsz: int = int(dn["size"])
 		var pun: float = 1.0 + maxf(0.0, 0.12 - age) * 3.0
 		var dc: Color = Color("fff2c0") if dsz >= 24 else Color(1, 1, 1)
-		Kit.t(m, Kit.fmt(float(dn["amt"])), (dn["pos"] as Vector2) + Vector2(float(int(dn["eid"]) * 37 % 31) - 15.0, -18.0 - age * 50.0), int(float(dsz) * pun), Color(dc, minf(1.0, dt * 3.0)), HORIZONTAL_ALIGNMENT_CENTER, 120.0)
+		var dp: Vector2 = (dn["pos"] as Vector2) + Vector2(float(int(dn["eid"]) * 37 % 31) - 15.0, -18.0 - age * 50.0)
+		var da: float = minf(1.0, dt * 3.0)
+		# HORDE P6 readability: a dark drop shadow under each aggregated number
+		Kit.t(m, Kit.fmt(float(dn["amt"])), dp + Vector2(1.5, 1.5), int(float(dsz) * pun), Color(0, 0, 0, 0.8 * da), HORIZONTAL_ALIGNMENT_CENTER, 120.0)
+		Kit.t(m, Kit.fmt(float(dn["amt"])), dp, int(float(dsz) * pun), Color(dc, da), HORIZONTAL_ALIGNMENT_CENTER, 120.0)
 	for fd3 in m.pops.items:
 		if float(fd3["t"]) <= 0.0:
 			continue

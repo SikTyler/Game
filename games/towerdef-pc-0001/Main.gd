@@ -32,6 +32,7 @@ const SfxScript := preload("res://Sfx.gd")
 const FxPool := preload("res://vfx/FxPool.gd")
 const Juice := preload("res://vfx/Juice.gd")
 const BurstsScript := preload("res://vfx/Bursts.gd")
+const GoreScript := preload("res://vfx/Gore.gd")
 const Settings := preload("res://Settings.gd")
 const SteamService := preload("res://SteamService.gd")
 const Achievements := preload("res://Achievements.gd")
@@ -96,6 +97,10 @@ var dmgnums: FxPool = FxPool.new(48)  # {pos, amt, eid, t, size}
 var bolts: FxPool = FxPool.new(24)    # {a, t}
 var juice: Juice = Juice.new()
 var bursts: Node2D = null
+var gore: Node2D = null                 # HORDE P5: blood bursts + never-cleared ground layer
+var dbg_overlay: bool = false           # HORDE P6: F3 debug overlay
+var dbg_sim_ms: float = 0.0
+var dbg_fps: float = 0.0
 var fclip: Control                   # clips kill particles to the battlefield
 var slot_pop: Dictionary = {}
 var flash: float = 0.0
@@ -170,6 +175,9 @@ func _ready() -> void:
 	add_child(fclip)    # before ui: particles under the widgets, clipped to the field
 	bursts = BurstsScript.new()
 	fclip.add_child(bursts)
+	gore = GoreScript.new()
+	fclip.add_child(gore)
+	gore.call("setup", TowerState.CENTER, gore_level())
 	ui = Control.new()
 	ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(ui)
@@ -630,6 +638,8 @@ func _clear_fx() -> void:
 	dmgnums.clear()
 	if bursts != null:
 		bursts.call("clear")
+	if gore != null:
+		gore.call("clear")
 	slot_pop.clear()
 	juice.reset()
 	flash = 0.0
@@ -826,6 +836,8 @@ func _handle(events: Array) -> void:
 				var kk: String = String(ev["kind"])
 				if bursts != null:
 					bursts.call("burst", ev["pos"], kill_color(kk), kk == "boss")
+				if gore != null:
+					gore.call("kill", ev["pos"], kill_color(kk), kk == "boss")
 				if kk == "boss":
 					juice.hit_pause(0.06)
 					juice.add_trauma(0.5)
@@ -841,10 +853,22 @@ func _handle(events: Array) -> void:
 					# merge popups by 64 px cell, not body: no stacked numbers
 					_dmg_num(-1 - (int(floor(hp2.x / 64.0)) * 4096 + int(floor(hp2.y / 64.0))), hp2, float(hd["amt"]))
 			"kills":
-				for kp in ev["pos_sample"]:
+				var ks: Array = ev["pos_sample"]
+				for kp in ks:
 					if bursts != null:
 						bursts.call("burst", kp, ENEMY, false)
 					_ring(kp, 14.0, 0.2, ENEMY)
+				if gore != null and not ks.is_empty():
+					# every body gets a corpse stamp (capped by Gore's ring buffer)
+					var kn: int = int(ev["n"])
+					for j in kn:
+						var kp2: Vector2 = ks[j % ks.size()]
+						if j < ks.size():
+							gore.call("kill", kp2, ENEMY, false)
+						else:
+							gore.call("stamp", kp2 + Vector2.from_angle(float(j) * 2.39996) * (6.0 + float(j % 5) * 4.0), 6.0, ENEMY)
+				if int(ev["n"]) >= 40:
+					juice.hit_pause(0.03)   # mass-kill hit-stop (Juice caps + cools it down)
 			"core_hits":
 				juice.add_trauma(minf(0.4, 0.22 + 0.02 * float(ev["n"])))
 				flash = minf(0.45, flash + 0.18)
@@ -1022,6 +1046,10 @@ func set_zoom(z: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and (event as InputEventKey).pressed and not (event as InputEventKey).echo and (event as InputEventKey).keycode == KEY_F3:
+		dbg_overlay = not dbg_overlay
+		get_viewport().set_input_as_handled()
+		return
 	if Desktop.handle_action(self, event):
 		get_viewport().set_input_as_handled()
 		return
@@ -1120,7 +1148,10 @@ func _process(delta: float) -> void:
 		fade = maxf(0.0, fade - delta)
 		fader.modulate = Color(1, 1, 1, 0.9 * fade / FADE_TIME)
 	if screen == "run" and S != null and overlay == "" and not _draft_hold():
-		_handle(S.tick(juice.engine_delta(delta)))
+		var t0: int = Time.get_ticks_usec()
+		var tev: Array = S.tick(juice.engine_delta(delta))
+		dbg_sim_ms = lerpf(dbg_sim_ms, float(Time.get_ticks_usec() - t0) / 1000.0, 0.2)
+		_handle(tev)
 		ui_t += delta
 		if ui_t >= 0.25 and screen == "run":
 			ui_t = 0.0
@@ -1154,6 +1185,11 @@ func _process(delta: float) -> void:
 		if float(slot_pop[k]) <= 0.0:
 			slot_pop.erase(k)
 	juice.update(delta)
+	if gore != null:
+		if String(gore.get("level")) != gore_level():
+			gore.call("set_level", gore_level())
+		gore.call("flush")
+	dbg_fps = Engine.get_frames_per_second()
 	flash = maxf(0.0, flash - 1.5 * delta)
 	heal_flash = maxf(0.0, heal_flash - delta)
 	level_burst = maxf(0.0, level_burst - delta)
@@ -1190,11 +1226,52 @@ func _draw() -> void:
 		"base":
 			Hub.draw(self)
 		"run", "results":
-			var off: Vector2 = juice.offset() * world_scale()
+			var off: Vector2 = (juice.offset() if shake_on() else Vector2.ZERO) * world_scale()
 			if bursts != null:
 				bursts.transform = Transform2D(0.0, off - fclip.position) * world_xform()
+			if gore != null:
+				gore.transform = Transform2D(0.0, off - fclip.position) * world_xform()
 			Battle.draw(self, off)
 	if screen != "menu":
 		Desktop.draw_topbar(self)
 	Desktop.draw_overlay(self)
 	Desktop.draw_toast(self)
+	if dbg_overlay:
+		_draw_debug_overlay()
+
+
+## Settings > Video "Gore" level (off / low / full; default low).
+func gore_level() -> String:
+	var v: Variant = settings.get("video", {})
+	return String((v as Dictionary).get("gore", "low")) if v is Dictionary else "low"
+
+
+## Shake honours Settings > Video "Screen shake" (and reduce motion).
+func shake_on() -> bool:
+	var v: Variant = settings.get("video", {})
+	if not (v is Dictionary):
+		return true
+	return bool((v as Dictionary).get("shake", true)) and not bool((v as Dictionary).get("reduce_motion", false))
+
+
+## HORDE P6 debug overlay (F3): bodies, FPS, sim ms, hash ms, hash cells.
+func debug_stats() -> Dictionary:
+	var out: Dictionary = {"bodies": 0, "fps": dbg_fps, "sim_ms": dbg_sim_ms, "hash_ms": 0.0, "hash_cells": 0}
+	if S != null:
+		out["bodies"] = S.en.order.size()
+		out["hash_ms"] = float(S.eh.last_us) / 1000.0
+		out["hash_cells"] = S.eh.cell_count()
+	return out
+
+
+func _draw_debug_overlay() -> void:
+	var d: Dictionary = debug_stats()
+	var lines: Array = ["Bodies  %d" % int(d["bodies"]), "FPS  %d" % int(d["fps"]), "Sim  %.2f ms" % float(d["sim_ms"]),
+		"Hash  %.2f ms" % float(d["hash_ms"]), "Hash cells  %d" % int(d["hash_cells"])]
+	if gore != null:
+		lines.append("Gore  %s  (%d queued)" % [String(gore.get("level")), int(gore.call("pending"))])
+	var fr: Rect2 = field_rect()
+	var box: Rect2 = Rect2(fr.position + Vector2(12, 64), Vector2(230, 12 + 24 * lines.size()))
+	draw_rect(box, Color(0, 0, 0, 0.72))
+	for i in lines.size():
+		draw_string(font, box.position + Vector2(10, 28 + 24 * i), String(lines[i]), HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color("b8f5c8"))
