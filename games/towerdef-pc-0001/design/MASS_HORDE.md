@@ -474,3 +474,133 @@ alone 4.8 ms); it is a logged, not asserted, target.
   split-model waves. These are balance gates for the pre-FB3 model; per D8 they are to be
   re-aimed at H1–H12 by the balance/playtest role together with the D3 waves. Not weakened
   here.
+
+---
+
+## §Content — as built (content-weapons-economy, 2026-10-05)
+
+Code: `data/EnemyDB.gd` (`MASS`, `MASS_MIX`, `TIER_B`), `TowerState.gd` (`mass`, `_build_mass_plan`,
+`_spawn_mass`, `_reap_mass`, `_mass_try_clear`, `_fire_mass`, `_burn_step`), `HordeWorld.cs`
+(`KC_SAPPER`, `ACT_BOOM`), `Troops.gd` (cleave), `data/MissionDB.gd`, `data/AchievementDB.gd`,
+`Stats.gd`, `ui/Intel.gd`, `ui/Desktop.gd` (goal overlay), `art/sapper.svg`, `art/shield.svg`.
+
+### C1. Retirement of the split (D9) — done
+- `TowerState.mass` is the shipping ruleset (Main and the playtest bot set it). `Tune.horde_mult()`
+  now reads `legacy_horde_mult`, **default 1**; nothing in shipping code raises it. `_spawn_clones`,
+  the `share < 1` branch and the `pc_horde_*` keys are reachable only through that knob (the classic
+  selftest still pins them). The crowd features that used to key off `horde_mult > 1` (big map,
+  event aggregation, omnidirectional barricade aura / riflemen, carry hops) now key off `crowd()`
+  (= mass or the legacy knob).
+- H3 is gated twice (selftest + playtest `h3_no_split`): every body `share == 1`, knob == 1.
+
+### C2. Roster (D1/D2) as built
+`EnemyDB.MASS` holds the D2 table (hp, dmg, spd, cash/xp/coin **weights**, size = 2 x radius).
+Deviations, all deliberate and re-derived from bot runs (D10):
+- **Per-body HP growth** is `hp_growth(tier) / 1.11 x 1.04` (T1 ~1.096 / wave; heavies x1.015),
+  not D2's 1.035. With 1.035 the total wave HP grew x1.149 / wave against a player whose power grows
+  on the classic curve: a fresh bot reached wave 73 (1,800 s cap) and the run never ended. The body
+  count still carries most of the growth (x1.11); the body HP carries the rest of the tier curve.
+  Global `mass_hp_k` = 0.5 (x the existing `pc_enemy_hp` 2.5).
+- **Contact damage** x `mass_dmg_k` 0.6 (and x1.02^(w-1) growth as designed): with D2's values a
+  fresh first run walled at wave 8-11; at 0.6 the fresh wall is wave 12-15 (FB2 "short first runs").
+- **Elites and bosses keep the classic HP curve** (D2 says they keep their curves); the boss also
+  keeps the classic contact damage (D2's 40 per hit walled the first boss at wave 10). Elites use
+  the designed 8 contact damage. Elites spawn `floor(w/5)` from wave 5 at every tier (+1 at T2-3,
+  +2 at T4+; x3 with Elite Guard).
+- **Sapper**: C# `KC_SAPPER` detonates on the first structure face it presses (sealed or not) and
+  is reaped with no reward and no kill credit (`F_BOOM`); the blast is `bld / dmg` (12.5) x its Core
+  hit. Its own structure-seeking flow field is **not** built (open item): it follows the shared
+  field and blows up whatever it meets on the way.
+- **Shieldbearer**: `guard` points (30 x HP scale) soak projectile hits whose shooter is within 45
+  deg of its facing (it faces the Core); AoE, chain, burn and flank fire are not blocked. A Gun round
+  stops at the shield. "Protects the bodies directly behind it" is modelled only through that stop.
+- **Broodsac** releases 6 designed swarmlings (`mass_brood`), worth 0 cash (their value is inside the
+  Broodsac's share), counted in the wave so the clear waits for them.
+- **Not built** (open items): the Warlord's +20% speed aura, Spitters aiming at buildings/walls (they
+  still fire at the Core from 230 px), per-unit separation weights / mass in C# (mass = radius^2).
+- Art: `art/sapper.svg` (bomb-carrying crawler, lit fuse) and `art/shield.svg` (front plate facing
+  the direction of travel), same 64 px outline style as the roster; Intel / tooltips use the D1 names
+  (Swarmling, Grunt, Runner, Brute, Spitter, Sapper, Shieldbearer, Broodsac, Warlord, Behemoth).
+
+### C3. Waves (D3) as built
+- `B(w) = round(120 x 1.11^(w-1) x tierB x count modifiers)`, capped at 20,000 (`mass_b_cap`).
+  T1: w1 120, w25 1,469, w45 11,841, w50 19,953. T3: w1 300, w30 6,187.
+- 3-6 surges (`3 + w/10`) spread over the 25 s wave, each a dense 60-120 deg arc 0-140 px deep at
+  the spawn ring, 35% of surges from two opposite sides; Encircled (allsides) scatters every body.
+- Alive cap 16,384 (`mass_cap`): the plan **holds** (never drops); a held remainder spawns first in
+  the next wave. Bosses, couriers and Broodsac young are never held.
+- `wave_time` stays **25 s** (not D7's 35-45 s): it is the POWER_MODEL / IDLE_MATH clock that the
+  economy, Outpost and every campaign gate are built on, and the owner's FB2 asked for 5-8 minute
+  first runs (see C6).
+
+### C4. Weapons (D4) as built — the mass verbs
+| weapon | as built (mass) | H8 kills/s vs dense swarmlings, w10, Lv1 / Lv5 |
+|---|---|---|
+| Gun | 2 rounds per shot (target + next nearest), each pierces 3 (+2/lv, cap 12) x0.85 per body; a Shieldbearer front stops it | see C7 |
+| Mortar | 0.75-cell blast (~60 px, +20%/lv), knockback ring 1.5 r; retargets past its min range when the crowd is at the wall | |
+| Tesla | 3 arcs per discharge, each chains 6 (+3/lv + parts, cap 20), 70 px jumps, x0.9 per jump; 0.2 s stun on elites/bosses | |
+| Flamer (`flak`) | a gout every ~1.3 s (rate x0.5) into a 40 deg cone 1.4 cells (+10%/lv): 0.15x lick + 0.3x/s burn for 2 s; burns tick 4x/s and spread to the nearest touching unburnt body | |
+| Railgun | infinite pierce along the line in order, x4 on the first elite/boss/marked hit | |
+| Cryo | -50% in the field (slowed bodies block the ones behind: the C# front-blocking rule = viscosity), Brittle x1.25 on chilled elites/bosses, freeze-shatter 20% max HP to up to 4 neighbours; direct damage x0.1 (it is the force multiplier) | |
+- **Overkill smash** (every weapon, mass only): a killing hit's surplus x0.6 carries into the nearest
+  touching body, up to 3 hops. Without it damage upgrades stopped buying kills once the swarm was
+  one-shot (a x60-damage bot died at wave 36, a x1 bot at 24: the run was purely throughput-bound,
+  which flattened meta progression). With it: x1 -> w13, x4 -> w26, x20 -> w40.
+- **Troops** cleave: every troop attack also hits up to 3 more bodies in a 90 deg arc in reach.
+- **Specials**: the Orbital Strike adds a shock wave (radial impulse 2r) that parts the sea; EMP /
+  Time Warp already act on every body. Tempest's Static chain uses C# nearest-N (no 10k sort).
+- **Cores**: Bastion cannon / Foundry slag / Tempest pulse are area attacks and need no change;
+  the Lance beam targets the strongest body (an elite/boss tool by construction).
+- Not built: Mortar "outer half only" knockback (the whole 1.5 r disc is pushed, falloff with
+  distance); Frost viscosity as a separate pressure term.
+
+### C5. Economy (D5) as built
+- **Per-wave pools.** `cash_pool(w)` = the classic per-wave kill income (`wave_time / interval(w)`
+  x `mass_cash_unit` 1.0, wave-1 units, paid x `cash_index` and the run multipliers), not D5's
+  `40 + 14w + 0.6w^2`: D5 itself requires "a T1 run that reaches wave 20 earns about the same meta
+  as the current one, so IDLE_MATH / POWER_MODEL stay valid", and this keeps that spine exactly.
+  XP pool = 1.25 x the cash pool (the classic XP per wave). Per-kill cash/XP = pool x unit weight /
+  sum of the planned roster's weights (boss and elites included).
+- **Leak penalty**: a body's first Core contact flags it (`F_LEAK`): it pays nothing when it dies.
+- **Clear bonus**: when every body of wave w is dead (and its plan fully spawned), the wave pays
+  `0.3 x pool x (1 - leaked share)` cash and the clear half of its coins (`wave_clear` event).
+- **Coins**: `coin_pool(w) = (2 + 0.4w) x 1.2` x the run coin multiplier; half is split over the
+  coin-weighted units (heavies, elites, boss), half paid on clear (all of it on clear when the wave
+  has no coin units). 35% of the kill half funds the wave's common-loot pool.
+- **Drops**: each kill rolls `p = drops_left / bodies_left` against the wave's cap (6 at T1, +2 per
+  tier); a drop pays `loot_pool / drops_left`. Parts / Keys odds per body = a classic plan entry's
+  odds x (classic entries / bodies), so per-wave drop rates do not grow 100x with the body count.
+- The UI shows wave-clear totals (`WAVE n CLEARED +$x`), never one popup per kill.
+
+### C6. Kill counts, missions, achievements, first run, difficulty (D6/D7)
+- Missions: "kill N" 5,000 / 15,000 (best wave 25+) / 40,000 (35+); new "kill N in one wave"
+  1,000 / 5,000 (fed by the `wave_kills` event at each wave end). Per-weapon missions are not built
+  (no per-weapon mission template existed); per-weapon kills are tracked (`kills_by_weapon` in the
+  game_over event and `stats.kills_by_weapon`).
+- Achievements (34 -> 39): Exterminator 100k (no split factor), Exterminator II 1M, III 10M, The Tide
+  (a wave survived with 10,000 alive), Wall of Flesh (one Barricade takes 2,000 body hits in a wave;
+  2,000 bodies cannot physically touch one 52 px wall, so it counts hits), Parting the Sea (500+
+  bodies pushed by one Mortar / Orbital blast).
+- Intel panel: ALIVE / IN/s / KILLS/s / LEAK/s over the last ~3 s; the roster is cached 4x a second.
+- **First run**: T1 wave 20 (the second boss) is the soft goal: the first time a T1 normal run
+  clears it, a "RUN COMPLETE" overlay offers *keep going* (to the wave-50 tide) or *bank now*.
+  Fresh first runs die at wave ~12-15 (5-6 min at 25 s waves), the owner's FB2 "short first runs
+  5-8 min" (the 300-480 s gate) rather than D7's 12-15 min; the campaign bot holds wave 20 on day 1.
+- **Difficulty settings**: the game has no difficulty selector, so D7's Easy/Hard/Brutal body-count
+  scaling is exposed only as the Tune knob `mass_body_mult` (open item for the UI owner).
+
+### C7. Playtest invariants (D8) as built — gate changes
+New job `mass` (1:1, no harness LOD) and gates `h1_wave_bodies`, `h2_peak_10k_held`, `h3_no_split`,
+`h4_designed_hp`, `h5_pool_cash`, `h6_drops`, `h8_weapons_matter`, `h10_mass_determinism`; H7 from
+the main campaign (`h7_first_goal_day1`). H9 (fluid sanity) stays in selftest (MASS-HORDE world
+checks: 70% around a wall, none through, knockback spreads); H11 is logged (`ms_per_substep_at_peak`
+in the H2 probe); H12 is the existing `no_death_spiral`.
+- **H7 re-aimed**: "the bot clears T1 wave 20 in 10-18 min" -> "the campaign bot holds T1 wave 20
+  within its first day (4 runs) and that run lasts <= 18 min" (with 25 s waves wave 20 is 8.3 min,
+  so the 10-minute floor cannot hold; see C3).
+- **H8 re-aimed**: the Cryo Spire is excluded from the kill-share rule and must instead lift a Gun's
+  kills by >= 10% (D4 makes it the force multiplier with 5-20 direct kills/s, which cannot be 25% of
+  a Mortar's). The Railgun's Lv5 exemption requires its elite/boss single-target DPS to lead.
+- **Harness LOD** (`BOT_LOD_CAP` 2500, campaign jobs only): the 30-day campaign plays hundreds of
+  runs; a wave planned above 2,500 bodies spawns one body per k carrying k x HP / damage / pool
+  share / kill count. All first runs (T1 wave <= 28) and every H-gate run at 1:1.

@@ -221,6 +221,8 @@ var mass: bool = false
 ## 0 (default, shipping, every H-gate) = every planned body spawns.
 var mass_lod_cap: int = 0
 const RUN_GOAL_WAVE: int = 20     # §D7 first-run soft goal (Run complete panel)
+## power_snapshot crowd factors for the mass verbs (see power_snapshot).
+const MASS_CROWD: Dictionary = {"gun": 3.0, "tesla": 5.0, "mortar": 4.0, "flak": 3.0, "railgun": 3.0, "frost": 1.0, "core": 1.5}
 const MASS_CAP: int = 16384       # alive cap (§D3): the spawner holds the queue, never drops
 var mass_cap: int = MASS_CAP      # (tests lower it to exercise the hold)
 var wave_acct: Dictionary = {}    # wave -> pool accounting (§D5), see _mass_acct
@@ -236,6 +238,7 @@ var kills_by_weapon: Dictionary = {}                  # MASS_HORDE §D6: source 
 var _src: String = ""                                 # damage source of the hits being applied
 var _blockable: bool = false                          # the current hit is a frontal projectile (Shieldbearer)
 var _blocked: bool = false                            # set by _hit when a Shieldbearer absorbed it
+var _carry_d: int = 0                                 # overkill-smash recursion depth
 var _hn: int = 0                                      # mass hit aggregation (no per-hit events at 10k)
 var _hsum: float = 0.0
 var _hcrit: int = 0
@@ -1813,7 +1816,15 @@ func mass_hp_scale(kind: String, w: int) -> float:
 	var sc: float = pow(gr, float(ww - 1)) * TuneRef.num("mass_hp_k", 0.5)
 	if mode == "endless" and w > cap_w:
 		sc *= pow(TuneRef.num("mass_endless_hp_exp", 1.04), float(w - cap_w))
-	return sc * hp_mult * float(stats.get("perk_enemy_hp", 1.0)) * enemy_hp_mod * (1.0 + 0.15 * float(pack_n("pk_gambit"))) * difficulty_hp()
+	return sc * mass_tier_hp() * float(stats.get("perk_enemy_hp", 1.0)) * enemy_hp_mod * (1.0 + 0.15 * float(pack_n("pk_gambit"))) * difficulty_hp()
+
+
+## §D7 "tier HP multipliers stay modest": a tier's threat is its body count
+## (tierB); the tier HP factor is only what tierB does not already carry:
+## max(1, Tiers.hp_mult / tierB) (1.0 at T1-T6), so a tier's total wave HP
+## tracks the classic tier step instead of compounding with x1.6-x6 bodies.
+func mass_tier_hp() -> float:
+	return maxf(1.0, hp_mult / EnemyDB.tier_b(tier))
 
 
 ## Per-body HP growth per wave (fodder / line). Re-derived from bot runs
@@ -1827,7 +1838,7 @@ static func mass_hp_growth(t: int) -> float:
 	var g: float = TuneRef.num("mass_hp_g_f", 0.0)
 	if g > 0.0:
 		return g
-	return PowerModel.hp_growth(t) / TuneRef.num("mass_b_growth", 1.11) * TuneRef.num("mass_hp_track", 1.04)
+	return PowerModel.hp_growth(t) / TuneRef.num("mass_b_growth", 1.11) * TuneRef.num("mass_hp_track", 1.006)
 
 
 ## One designed mass body (§D1/§D2). `lod` > 1 only under the harness LOD.
@@ -1867,7 +1878,9 @@ func _spawn_mass(kind: String, ev: Array, at: Vector2, marked: bool, pw: int, lo
 		# Core's HP track; §D2's 40 per hit walled the first boss).
 		en.dmg[e] = float(EnemyDB.get_def(kind)["dmg"]) * pow(dmg_growth, float(wave - 1)) * hp_mult * enemy_dmg_mod * difficulty_dmg()
 	else:
-		en.dmg[e] = float(md["dmg"]) * pow(TuneRef.num("mass_dmg_g", 1.02), float(pw - 1)) * hp_mult * enemy_dmg_mod * difficulty_dmg() * TuneRef.num("mass_dmg_k", 0.6) * lw
+		en.dmg[e] = float(md["dmg"]) * pow(TuneRef.num("mass_dmg_g", dmg_growth), float(pw - 1)) * mass_tier_hp() * enemy_dmg_mod * difficulty_dmg() * TuneRef.num("mass_dmg_k", 0.4) * lw
+		if kind == "elite":
+			en.dmg[e] *= TuneRef.num("mass_elite_dmg", 1.0)
 	en.cash[e] = float(a["pool"]) * float(md["cash"]) / float(a["W"]) * lw
 	en.xp[e] = float(a["xpool"]) * float(md["xp"]) / float(a["W"]) * lw
 	en.coin[e] = float(a["cpool"]) * float(md["coin"]) / float(a["CW"]) * lw if float(a["CW"]) > 0.0 else 0.0
@@ -1885,7 +1898,7 @@ func _spawn_mass(kind: String, ev: Array, at: Vector2, marked: bool, pw: int, lo
 				bm *= TuneRef.num("pc_first_boss", 0.6)
 			en.hp[e] = en.hp[e] * bm
 			en.max_hp[e] = en.hp[e]
-			en.dmg[e] = en.dmg[e] * TuneRef.num("pc_boss_dmg", 1.0)
+			en.dmg[e] = en.dmg[e] * TuneRef.num("pc_boss_dmg", 1.0) * TuneRef.num("mass_boss_dmg", 0.5)
 		"elite":
 			en.shield[e] = TuneRef.int_of("elite_shield_base", 3) + pw / 10 + elite_shield_add
 			en.max_shield[e] = en.shield[e]
@@ -2002,7 +2015,7 @@ func _move_enemies(dt: float, ev: Array) -> void:
 	# MASS_HORDE: the step runs in the C# HordeWorld (flow field, pressure,
 	# knockback, contact). It returns an ordered action log; the Core effects
 	# replay in slot order, then one aggregated row per hit building.
-	var acts: PackedInt32Array = en.move(dt, frozen, CENTER, STOP_R, r_stop, r_fire, blk, SIDE, CELL, PackedFloat64Array([TuneRef.num("horde_accel", 6.0), TuneRef.num("horde_sep", 0.5), TuneRef.num("horde_sep_cap", 0.35), TuneRef.num("horde_friction", 6.0), TuneRef.num("horde_kmax", 24.0), TuneRef.num("horde_front", 10.0), TuneRef.num("horde_bld_cost", 40.0)]))
+	var acts: PackedInt32Array = en.move(dt, frozen, CENTER, STOP_R, r_stop, r_fire, blk, SIDE, CELL, PackedFloat64Array([TuneRef.num("horde_accel", 6.0), TuneRef.num("horde_sep", 0.5), TuneRef.num("horde_sep_cap", 0.35), TuneRef.num("horde_friction", 6.0), TuneRef.num("horde_kmax", 24.0), TuneRef.num("horde_front", 10.0), TuneRef.num("horde_bld_cost", 40.0), TuneRef.num("horde_knock_max", 600.0), TuneRef.num("mass_press", 48.0) if mass else 0.0]))
 	var k: int = 0
 	var escaped: Array = []
 	var lost: bool = false
@@ -2044,7 +2057,18 @@ func _move_enemies(dt: float, ev: Array) -> void:
 					_destroy_building(bc, ev)
 					lost = true
 			EnemyStore.ACT_SHOT:
-				_core_damage(en.dmg[e], ev, "enemy_shot", en.pos[e], -1, _armor_share(e))
+				# MASS_HORDE §D1 Spitter: lobs acid at the nearest building or wall
+				# in reach (a siege on the defence); the Core only when none is.
+				var tb: int = _spit_target(en.pos[e], r_stop + CELL) if mass else -1
+				if tb >= 0:
+					var sa: float = en.dmg[e] * float(EnemyDB.mass_def("ranged")["bld"]) / float(EnemyDB.mass_def("ranged")["dmg"])
+					bld_hp[tb] = float(bld_hp[tb]) - sa
+					ev.append({"t": "bld_hit", "slot": tb, "dmg": sa, "n": 1, "pos": slot_pos(tb), "spit": true})
+					if float(bld_hp[tb]) <= 0.0:
+						_destroy_building(tb, ev)
+						lost = true
+				else:
+					_core_damage(en.dmg[e], ev, "enemy_shot", en.pos[e], -1, _armor_share(e))
 			EnemyStore.ACT_HIT:
 				if mass and (en.flags[e] & EnemyStore.F_LEAK) == 0:
 					en.flags[e] = en.flags[e] | EnemyStore.F_LEAK
@@ -2064,14 +2088,30 @@ func _move_enemies(dt: float, ev: Array) -> void:
 		en.remove(xs)
 
 
+## Nearest standing building within `r` of p (ties: lower slot), or -1.
+func _spit_target(p: Vector2, r: float) -> int:
+	var best: int = -1
+	var bd: float = r * r
+	for i in N:
+		if i == CORE_SLOT or float(bld_hp[i]) <= 0.0 or id_at(i) == "":
+			continue
+		var d2: float = p.distance_squared_to(slot_pos(i))
+		if d2 < bd:
+			bd = d2
+			best = i
+	return best
+
+
 ## Flat Core armor per contact hit (owner C4): the classic split carried
 ## `share`; a designed mass body is armored against in proportion to its hit
-## size vs the classic drone hit (4), so armor blunts the tide without making
-## a swarmling hit vanish (the 25% floor still applies).
+## vs the classic drone's hit at this wave, so armor blunts the tide exactly as
+## much as it blunted classic hits, without making a swarmling hit vanish.
 func _armor_share(e: int) -> float:
 	if not mass:
 		return en.share[e]
-	return clampf(float(EnemyDB.mass_def(en.kind[e])["dmg"]) / 4.0, 0.02, 1.0) * float(en.wt[e])
+	# armor takes the same FRACTION off a body's hit as off a classic drone's hit this wave
+	var ref: float = float(EnemyDB.get_def("drone")["dmg"]) * pow(dmg_growth, float(wave - 1)) * hp_mult * enemy_dmg_mod * difficulty_dmg()
+	return clampf(en.dmg[e] / maxf(0.001, ref), 0.0, 4.0)
 
 
 ## Targeting (pattern adapted from ape1121/Godot-4-Tower-Defense-Template, MIT:
@@ -2189,6 +2229,17 @@ func _hit(e: int, dmg_in: float, ev: Array, crit: bool = false) -> void:
 		if mass and was > 0.0:
 			var sk: String = _src if _src != "" else "other"
 			kills_by_weapon[sk] = int(kills_by_weapon.get(sk, 0)) + en.wt[e]
+			# Overkill smash (§D4 "DPS must turn into kills against a crowd"):
+			# the surplus of a killing hit carries into the nearest touching
+			# body (x0.6, up to mass_carry hops), so damage upgrades keep
+			# buying kills after the swarm is one-shot.
+			var sur: float = (dmg - was) * TuneRef.num("mass_carry_frac", 0.6)
+			if sur > 0.0 and _carry_d < TuneRef.int_of("mass_carry", 3):
+				var nb: int = eh.nearest(en.pos[e], en.size[e] + 8.0, {e: true})
+				if nb >= 0:
+					_carry_d += 1
+					_hit(nb, sur, ev, crit)
+					_carry_d -= 1
 	en.flash(e, HIT_FLASH)
 	var ls: float = float(stats.get("lifesteal", 0.0))
 	if ls > 0.0 and real > 0.0:
@@ -3480,6 +3531,8 @@ func power_snapshot() -> Dictionary:
 			targets = 3.0 * float(core_w.get("rings", 1))
 		"beam":
 			targets = 1.0 + 0.5 * float(core_w.get("ramp_max", 1.5))
+	if mass and String(core_w.get("attack", "cannon")) != "beam":
+		targets *= float(MASS_CROWD["core"])   # overkill smash + splash into a packed crowd
 	var blds: Array = []
 	for w in ws:
 		var wd: Dictionary = w
@@ -3497,6 +3550,11 @@ func power_snapshot() -> Dictionary:
 				mult = 3.0
 			"flak":
 				mult = 0.6 * float(wd.get("prey", 2.5))
+		if mass:
+			# MASS_HORDE §D4 crowd factors: bodies a hit is worth against the
+			# horde at in-game density (about a third of the dense-field H8
+			# probe), replacing the classic multi-target factors.
+			mult = float(MASS_CROWD.get(String(wd["kind"]), mult))
 		blds.append({"id": id_at(int(wd["slot"])), "kind": String(wd["kind"]), "dps": float(wd["dmg"]) * float(wd["rate"]) * mult})
 	var sps: Array = []
 	for s in specials:

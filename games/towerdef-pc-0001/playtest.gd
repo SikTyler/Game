@@ -477,6 +477,7 @@ static func _boss_dps_lv5(seed0: int) -> Dictionary:
 const FRESH_N: int = 16
 static func job_fresh(seed0: int) -> Dictionary:
 	var waves: Array = []
+	var times: Array = []
 	var re: Array = []
 	var rwl: Array = []
 	var rf: Array = []
@@ -484,11 +485,12 @@ static func job_fresh(seed0: int) -> Dictionary:
 		var save: Dictionary = BaseMeta.default_save()
 		var r: Dictionary = camp_run(save, "balanced", seed0 + 50000 + i * 7919, NOW0, "", false)
 		waves.append(int(r["wave"]))
+		times.append(float(r["real_s"]))
 		re.append(float(r["r_early"]))
 		rwl.append(float(r["r_wall"]))
 		rf.append(float(r["r_front"]))
 	say("FRESH balanced x%d: waves %s | R early %s | R wall %s" % [FRESH_N, str(waves), str(re.map(func(x: float) -> float: return snappedf(x, 0.01))), str(rwl.map(func(x: float) -> float: return snappedf(x, 0.01)))])
-	return {"waves": waves, "r_early": re, "r_wall": rwl, "r_front": rf}
+	return {"waves": waves, "times": times, "r_early": re, "r_wall": rwl, "r_front": rf}
 
 
 func run_jobs(seed0: int, serial: bool, workers: int) -> Dictionary:
@@ -1216,6 +1218,8 @@ static func camp_run(save: Dictionary, policy: String, seed_value: int, now: int
 		if acc >= 0.5:
 			acc = 0.0
 			ev.append_array(bot_step(S, policy, perk_pref))
+			if OS.get_environment("DBG2") != "" and int(t * 10.0) % 250 == 0:
+				print("   camp t=%.0f wave %d alive %d ms %d" % [t, S.wave, S.en.count(), Time.get_ticks_msec()])
 		if feed_missions:
 			Missions.on_run_events(save, ev)
 		for x in ev:
@@ -1361,6 +1365,8 @@ static func campaign_days(seed0: int, policy: String = "balanced", n_days: int =
 			var t: int = pick_tier(save, rate, run_idx)
 			BaseMeta.select_tier(save, t)
 			var r: Dictionary = camp_run(save, policy, seed0 + 1000 + run_idx * 131, now, _mission_perk(save))
+			if OS.get_environment("PT_RUNS") != "":
+				print("  run %d T%d wave %d game_s %.0f coins %d wall_ms %d" % [run_idx, t, int(r["wave"]), float(r["real_s"]), int(r["coins"]), Time.get_ticks_msec()])
 			if run_idx == 0:
 				first_s = float(r["real_s"])   # fresh save: game speed 1x
 			if goal_run < 0 and t == 1 and int(r["wave"]) > TowerState.RUN_GOAL_WAVE:
@@ -1819,7 +1825,10 @@ static func combine(R: Dictionary) -> Dictionary:
 		# FEEDBACK-1 (new gate): a brand-new player's first run is short
 		# (5-8 real minutes at 1x) so they reach the meta features sooner.
 		"first_run_s": snappedf(float(M.get("first_run_s", -1.0)), 0.1),
-		"first_run_short": float(M.get("first_run_s", -1.0)) >= 300.0 and float(M.get("first_run_s", -1.0)) <= 480.0,   # owner FB2: short first runs ~5-8 min on the larger x4 horde map (FB1 was 200-300 s, orig 300-480 s)
+		# MASS_HORDE (re-aimed, same band): the owner's 5-8 min first run is
+		# checked on the MEDIAN of the FRESH_N fresh first runs (fresh_checks),
+		# not one seed: with 100s of bodies a single run's wall varies +-5 waves.
+		"first_run_short_single": float(M.get("first_run_s", -1.0)) >= 300.0 and float(M.get("first_run_s", -1.0)) <= 480.0,
 		"tier3_by_day30": t3 > 0,
 		"no_plateau_before_t3": stall_days.is_empty(),
 		"early_3day_rise": early,
@@ -1903,12 +1912,15 @@ static func fresh_checks(Fr: Dictionary) -> Dictionary:
 	for x in w:
 		if int(x) >= 30:
 			at30 += 1
+	var tm: float = _median(Fr.get("times", []))
 	var me: float = _median(Fr["r_early"])
 	var ml: float = _median(Fr["r_wall"])
 	return {
 		"fresh_runs": {"n": w.size(), "waves": w, "median_wave": mw, "min_wave": int(w.min()), "reach_w30": at30, "r_early_median": snappedf(me, 0.01), "r_wall_median": snappedf(ml, 0.01)},
 		"ac25_fresh_wall": w.size() >= 16 and mw >= 8.0 and mw <= 15.0 and at30 * 4 <= w.size() and me >= 2.0 and ml < 0.6,   # owner FB1: fresh wall at waves 8-15 (was 12-25)
 		"fresh_median_first_goal": w.size() >= 16 and mw >= float(FIRST_GOAL_WAVE) and int(w.min()) >= FIRST_GOAL_WAVE,
+		"fresh_median_s": snappedf(tm, 0.1),
+		"first_run_short": tm >= 300.0 and tm <= 480.0,   # owner FB2: short first runs ~5-8 min (median of the fresh first runs)
 	}
 
 

@@ -45,6 +45,10 @@ public partial class HordeWorld : RefCounted
 	double accelK = 6.0, sepK = 0.5, sepCap = 0.35, friction = 6.0;
 	int kmax = 24;
 	double frontK = 10.0, bldCost = 40.0, knockMax = 600.0, bldInset = 1.0, attackDot = 0.25;
+	// MASS_HORDE §D2 pressure: melee bodies within this band beyond the Core's
+	// contact ring are part of the pile pushing on it and hit it too (0 = only
+	// the front rank, the classic rule).
+	double pressBand = 0.0;
 
 	// ---------------------------------------------------------------- flow field
 	const int FLOW_PER_CELL = 4;   // flow cells per building cell (52 / 4 = 13 px)
@@ -113,6 +117,7 @@ public partial class HordeWorld : RefCounted
 		if (prm.Length > 5) frontK = prm[5];
 		if (prm.Length > 6 && prm[6] != bldCost) { bldCost = prm[6]; RebuildFlow(); }
 		if (prm.Length > 7) knockMax = prm[7];
+		if (prm.Length > 8) pressBand = Math.Max(0.0, prm[8]);
 	}
 
 	// ================================================================ storage
@@ -155,7 +160,10 @@ public partial class HordeWorld : RefCounted
 	static int NextPow2(int v) { int p = 1; while (p < v) p <<= 1; return p; }
 
 	public void Remove(int s) { if (s < cap) { live[s] = 0; qdirty = true; } }
-	public void MarkDead(int s) { if (s < cap && live[s] != 0) { live[s] = 0; qdirty = true; } }
+	// A kill does not invalidate the query hash (positions are unchanged): every
+	// query skips dead slots, so a kill-heavy step (overkill smash: one nearest
+	// query per kill) never rebuilds the hash per kill.
+	public void MarkDead(int s) { if (s < cap && live[s] != 0) { live[s] = 0; } }
 	public bool IsLive(int s) { return s >= 0 && s < cap && live[s] != 0; }
 	public void SetSlow(int s, double t, double m) { slowT[s] = t; slowM[s] = m; }
 	public void SetHit(int s, double t) { hitT[s] = t; }
@@ -783,7 +791,7 @@ public partial class HordeWorld : RefCounted
 				}
 				continue;
 			}
-			if (nd > stop + rad[s] + 0.5) continue;
+			if (nd > stop + rad[s] + 0.5 + (ranged ? 0.0 : pressBand)) continue;
 			if (ranged)
 			{
 				fireCd[s] -= dt;
@@ -903,6 +911,7 @@ public partial class HordeWorld : RefCounted
 			for (int xx = x0; xx <= x1; xx++)
 				for (int s = qhead[yy * hgw + xx]; s >= 0; s = qlink[s])
 				{
+					if (live[s] == 0) continue;
 					double dx = px[s] - x, dy = py[s] - y;
 					double lim = r + (pad ? rad[s] : 0.0);
 					if (dx * dx + dy * dy <= lim * lim) outl.Add(s);
@@ -925,7 +934,7 @@ public partial class HordeWorld : RefCounted
 		for (int yy = HY(ay); yy <= HY(by); yy++)
 			for (int xx = HX(ax); xx <= HX(bx); xx++)
 				for (int s = qhead[yy * hgw + xx]; s >= 0; s = qlink[s])
-					if (px[s] >= ax && px[s] <= bx && py[s] >= ay && py[s] <= by) outl.Add(s);
+					if (live[s] != 0 && px[s] >= ax && px[s] <= bx && py[s] >= ay && py[s] <= by) outl.Add(s);
 		outl.Sort();
 		return outl.ToArray();
 	}
@@ -1016,6 +1025,7 @@ public partial class HordeWorld : RefCounted
 				for (int xx = Math.Max(0, hx - reach); xx <= Math.Min(hgw - 1, hx + reach); xx++)
 					for (int j = qhead[yy * hgw + xx]; j >= 0; j = qlink[j])
 					{
+						if (live[j] == 0) continue;
 						double dx = px[j] - px[s], dy = py[j] - py[s];
 						if (dx * dx + dy * dy <= rr) n++;
 					}
@@ -1081,7 +1091,7 @@ public partial class HordeWorld : RefCounted
 				for (int xx = Math.Max(0, hx - reach); xx <= Math.Min(hgw - 1, hx + reach); xx++)
 					for (int j = qhead[yy * hgw + xx]; j >= 0; j = qlink[j])
 					{
-						if (j <= s || kc[j] == KC_COURIER) continue;
+						if (j <= s || live[j] == 0 || kc[j] == KC_COURIER) continue;
 						double dx = px[j] - px[s], dy = py[j] - py[s];
 						double rr = rad[s] + rad[j];
 						double d2 = dx * dx + dy * dy;
