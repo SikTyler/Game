@@ -20,8 +20,7 @@ const WeaponDB := preload("res://data/WeaponDB.gd")
 const SupportDB := preload("res://data/SupportDB.gd")
 const COMPASS: Array = ["E", "SE", "S", "SW", "W", "NW", "N", "NE"]
 const FirePatterns := preload("res://FirePatterns.gd")
-const Gear := preload("res://Gear.gd")
-const GearVis := preload("res://GearVis.gd")
+const PartVis := preload("res://PartVis.gd")
 const Cores := preload("res://Cores.gd")
 const LootDB := preload("res://data/LootDB.gd")
 const RarityDB := preload("res://data/RarityDB.gd")
@@ -354,7 +353,7 @@ static func _draw_ranges(m) -> void:
 
 
 # ===================================================================== draw
-## The world canvas transform of this frame (GearVis draws through it).
+## The world canvas transform of this frame (PartVis draws through it).
 static var _base: Transform2D = Transform2D.IDENTITY
 
 
@@ -488,15 +487,11 @@ static func _draw_grid(m) -> void:
 	var cr: float = c * 1.45   # the 3x3 Core footprint
 	Kit.glow(m, C, cr * 2.2, Kit.CYAN, 0.12 + 0.06 * pulse)
 	m.draw_circle(C, cr + 6.0 + 3.0 * pulse, Color(1, 1, 1, 0.05))
-	# V2 P4: the player's Core (look, socketed Modules) with the forged Weapon
-	# as a turret that turns to where it fires (or to the cursor while aiming)
+	# V3: the player's Core drawn from its parts, with the Weapon turret (its
+	# barrels fanned) turning to where barrel 0 fires (or to the cursor)
 	var want: float = ((S.aim_pos - C) if bool(S.aim_on) else (S.core_aim_dir as Vector2)).angle()
 	m.turret_ang = lerp_angle(float(m.turret_ang), want, 0.35)
-	var pods: Array = []
-	var mods: Array = Gear.modules(m.save)
-	for k in Gear.sockets_for(Cores.level(m.save)):
-		pods.append(mods[k] if k < mods.size() else {})
-	GearVis.draw_core(m, Cores.look(m.save), pods, Gear.weapon(m.save), C, cr, float(m.turret_ang), m.t_anim, _base)
+	PartVis.draw_assembly(m, m.save, Cores.look(m.save), C, cr, float(m.turret_ang), m.t_anim, _base)
 	if float(S.shield) > 0.0:
 		var smax: float = maxf(1.0, float(S.stats.get("shield_max", 1.0)))
 		m.draw_arc(C, cr + 6.0, -PI * 0.5, -PI * 0.5 + TAU * clampf(float(S.shield) / smax, 0.0, 1.0), 48, SHIELD, 3.0)
@@ -872,11 +867,7 @@ static func _draw_right(m) -> void:
 	# portrait
 	Kit.panel(m, Rect2(x, y, 96, 96), Kit.RUST, Kit.BG2)
 	# V2 P9 audit: the portrait is the player's own procedural Core (was the V1 sprite)
-	var mods_p: Array = []
-	var so_p: Array = (Gear.block(m.save)["equipped"] as Dictionary)["sockets"]
-	for k in mini(so_p.size(), Gear.sockets_for(Cores.level(m.save))):
-		mods_p.append(Gear.item(m.save, int(so_p[k])))
-	GearVis.draw_core(m, Cores.look(m.save), mods_p, Gear.weapon(m.save), Vector2(x + 48, y + 48), 30.0, -PI * 0.5, m.t_anim)
+	PartVis.draw_assembly(m, m.save, Cores.look(m.save), Vector2(x + 48, y + 48), 30.0, -PI * 0.5, m.t_anim)
 	Kit.t(m, "The Core", Vector2(x + 110, y + 26), 22, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w - 110)
 	Kit.t(m, "Lv %d" % int(S.core_lvl), Vector2(x + 110, y + 50), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w - 110)
 	Kit.t(m, Kit.fit(m, String(cd["attack_name"]), 16, w - 114), Vector2(x + 110, y + 74), 16, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, w - 110)

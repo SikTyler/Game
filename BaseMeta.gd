@@ -23,7 +23,6 @@ const Cores := preload("res://Cores.gd")
 const PickDB := preload("res://data/PickDB.gd")
 const Outpost := preload("res://Outpost.gd")
 const Reforge := preload("res://Reforge.gd")
-const Gear := preload("res://Gear.gd")
 const Parts := preload("res://Parts.gd")
 const Loot := preload("res://Loot.gd")
 

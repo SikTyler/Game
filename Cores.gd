@@ -15,7 +15,7 @@ const Labs := preload("res://Labs.gd")
 const LabDB := preload("res://data/LabDB.gd")
 
 
-## Core look (CoreView "Look" tab, GearVis): shell silhouette, inner ring,
+## Core look (CoreView "Look" tab; V3 PartVis paints the parts with it): shell silhouette, inner ring,
 ## paint pattern and three colours (primary, secondary, glow; hex rgb).
 const SHELLS: int = 8
 const TRIMS: int = 5

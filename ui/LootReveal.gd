@@ -1,16 +1,18 @@
 extends RefCounted
-## The loot reveal (V2 P5, an overlay on the results screen): the run's
-## banked items, one card at a time, casino style. Each card starts face
+## The loot reveal (V2 P5, an overlay on the results screen; V3: also after
+## a Scrap crate): the banked parts, one card at a time, casino style. Each card starts face
 ## down while a beam climbs from white to its rarity colour, then flips with
 ## a rising-pitch sting and a shake scaled to the rarity, and its perks tick
 ## in one by one. Caches reveal worst to best (Loot.realize order). REVEAL
 ## ALL skips the show; the Fast Reveal research halves it. Visible pity bars
-## and the disclosed odds sit at the bottom; EQUIP works from a revealed card.
-## Button keys (uitest): loot:all, loot:done, loot:page:+, loot:equip:<uid>.
+## and the disclosed odds sit at the bottom; INSTALL works from a revealed
+## card. Button keys (uitest): loot:all, loot:done, loot:page:+, loot:equip:<uid>.
 ## State on Main: reveal_uids, reveal_t0, reveal_fired, reveal_skip, reveal_page.
 
-const Gear := preload("res://Gear.gd")
-const GearVis := preload("res://GearVis.gd")
+const Parts := preload("res://Parts.gd")
+const PartDB := preload("res://data/PartDB.gd")
+const PartVis := preload("res://PartVis.gd")
+const Cores := preload("res://Cores.gd")
 const RarityDB := preload("res://data/RarityDB.gd")
 const AffixDB := preload("res://data/AffixDB.gd")
 const LootDB := preload("res://data/LootDB.gd")
@@ -87,7 +89,7 @@ static func tick(m) -> void:
 			n = k + 1
 	if n > int(m.reveal_fired):
 		for k in range(int(m.reveal_fired), n):
-			var it: Dictionary = Gear.item(m.save, int(lst[k]))
+			var it: Dictionary = Parts.item(m.save, int(lst[k]))
 			var rk: int = maxi(0, RarityDB.rank(String(it.get("rar", "common"))))
 			if not bool(m.reveal_skip):
 				m.sfx_play("card_open" if rk < 3 else "levelup", Sfx.seq_pitch(k + rk))
@@ -105,14 +107,15 @@ static func build(m) -> void:
 		if not flipped(m, k):
 			continue
 		var uid: int = int(lst[k])
-		var it: Dictionary = Gear.item(m.save, uid)
+		var it: Dictionary = Parts.item(m.save, uid)
 		if it.is_empty():
 			continue
 		var cr: Rect2 = card_rect(m, k)
-		var eq: bool = Gear.is_equipped(m.save, uid)
-		var why: String = Gear.why_equip(m.save, uid)
-		Kit.btn(m, "EQUIPPED" if eq else "EQUIP", Rect2(cr.position.x, cr.end.y + 10.0, cr.size.x, 44.0), func() -> void: m.meta_act(Gear.equip(m.save, uid)),
-			("Mount on the Core" if String(it["kind"]) == "weapon" else "Socket into a free Module slot") + ("" if why == "" else "\n" + why), not eq and why == "", Kit.GREEN, "loot:equip:%d" % uid, "", 16)
+		var eq: bool = Parts.is_equipped(m.save, uid)
+		var why: String = Parts.why_equip(m.save, uid)
+		var side: String = "Weapon" if PartDB.side_of(String(it["slot"])) == "weapon" else "Core"
+		Kit.btn(m, "INSTALLED" if eq else "INSTALL", Rect2(cr.position.x, cr.end.y + 10.0, cr.size.x, 44.0), func() -> void: m.meta_act(Parts.equip(m.save, uid)),
+			("Install on the %s (a free %s position, else it replaces the first)" % [side, String(PartDB.SLOTS[String(it["slot"])]["name"])]) + ("" if why == "" else "\n" + why), not eq and why == "", Kit.GREEN, "loot:equip:%d" % uid, "", 16)
 	var bw: float = 260.0
 	if not done(m):
 		Kit.btn(m, "REVEAL ALL", Rect2(r.end.x - 2.0 * bw - 40.0, r.end.y - 70.0, bw, 54.0), func() -> void:
@@ -127,8 +130,7 @@ static func build(m) -> void:
 			m.reveal_skip = false
 			m._rebuild_ui(), "The next items", true, Kit.GOLD, "loot:page:+", "", 18)
 	Kit.btn(m, "DONE", Rect2(r.end.x - bw - 24.0, r.end.y - 70.0, bw, 54.0), func() -> void:
-		Gear.block(m.save)   # items stay NEW until seen in the Forge
-		m.set_overlay(""), "Close (everything is already in your inventory)", true, Kit.GOLD, "loot:done", "", 20)
+		m.set_overlay(""), "Close (everything is already in your parts; NEW until seen on the Weapon / Core screens)", true, Kit.GOLD, "loot:done", "", 20)
 
 
 # ------------------------------------------------------------------ draw
@@ -139,14 +141,14 @@ static func draw(m) -> void:
 	var all: Array = m.reveal_uids
 	Kit.th(m, "LOOT", Vector2(r.position.x + 28, r.position.y + 54), 34, Kit.GOLD)
 	# V2 P9 audit: no "best: Legendary" spoiler before the cards flip
-	Kit.t(m, "%d items  ·  everything is already in your inventory" % all.size(), Vector2(r.position.x + 140, r.position.y + 50), 17, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 400.0)
+	Kit.t(m, "%d parts  ·  everything is already in your inventory" % all.size(), Vector2(r.position.x + 140, r.position.y + 50), 17, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 400.0)
 	var lst: Array = _page_uids(m)
 	for k in lst.size():
-		_card(m, k, Gear.item(m.save, int(lst[k])))
+		_card(m, k, Parts.item(m.save, int(lst[k])))
 	if all.is_empty():
-		Kit.t(m, "No items this run - elites, bosses, Couriers and every 5th wave drop them.", Vector2(r.get_center().x, r.get_center().y), 20, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
+		Kit.t(m, "No parts this run - elites, bosses, Couriers and every 5th wave drop them.", Vector2(r.get_center().x, r.get_center().y), 20, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
 	# visible pity + disclosed odds
-	var pity: Dictionary = Gear.block(m.save)["pity"]
+	var pity: Dictionary = Parts.block(m.save)["pity"]
 	var px: float = r.position.x + 28.0
 	var py: float = r.end.y - 64.0
 	var pw: float = (r.size.x - 640.0) / 3.0
@@ -196,19 +198,22 @@ static func _card(m, k: int, it: Dictionary) -> void:
 	Kit.card_frame(m, r, rar, m.t_anim, since < 0.4)
 	if since < 0.6:
 		Kit.glow(m, r.get_center(), r.size.x * (0.9 + since), col, 0.45 * (1.0 - since / 0.6))
-	var art: Vector2 = Vector2(r.get_center().x, r.position.y + 80.0)
-	if String(it["kind"]) == "weapon":
-		GearVis.draw_weapon(m, it, art, r.size.x * 0.78, 0.0, m.t_anim)
-	else:
-		GearVis.draw_module(m, it, art, 84.0, m.t_anim)
-	Kit.th(m, String(RarityDB.get_def(rar)["name"]).to_upper(), Vector2(r.get_center().x, r.position.y + 150.0), 16, Kit.rarity_text(rar), HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 16.0)
+	var art: Vector2 = Vector2(r.get_center().x, r.position.y + 78.0)
+	PartVis.draw_part(m, it, Cores.look(m.save), art, 116.0, m.t_anim)
+	Kit.th(m, "%s %s" % [String(RarityDB.get_def(rar)["name"]).to_upper(), String(PartDB.SLOTS[String(it["slot"])]["name"]).to_upper()], Vector2(r.get_center().x, r.position.y + 150.0), 16, Kit.rarity_text(rar), HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 16.0)
 	Kit.wrap(m, String(it["name"]), Vector2(r.position.x + 12.0, r.position.y + 158.0), 15, Kit.TEXT, r.size.x - 24.0, 2, HORIZONTAL_ALIGNMENT_CENTER)
+	var fl: Array = Parts.fx_lines(Parts.base_fx(it))
+	var y0: float = r.position.y + 222.0
+	for ln in fl.slice(0, 2):
+		Kit.t(m, Kit.fit(m, String(ln), 14, r.size.x - 24.0), Vector2(r.position.x + 12.0, y0), 14, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 24.0)
+		y0 += 19.0
 	var ps: Array = it["perks"]
 	for i in ps.size():
 		if since < PERK_S * float(i + 1) and not bool(m.reveal_skip):
 			break
 		var p: Dictionary = ps[i]
-		var y: float = r.position.y + 222.0 + float(i) * 19.0
+		var y: float = y0 + float(i) * 19.0
 		if y > r.end.y - 6.0:
 			break
-		Kit.t(m, Kit.fit(m, "T%d %s" % [int(p["t"]), AffixDB.text(String(p["id"]), int(p["t"]), float(p["q"]))], 14, r.size.x - 24.0), Vector2(r.position.x + 12.0, y), 14, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 24.0)
+		var tr: String = String(RarityDB.IDS[clampi(int(p["t"]) - 1, 0, RarityDB.IDS.size() - 1)])
+		Kit.t(m, Kit.fit(m, "T%d %s" % [int(p["t"]), AffixDB.text(String(p["id"]), int(p["t"]), float(p["q"]))], 14, r.size.x - 24.0), Vector2(r.position.x + 12.0, y), 14, Kit.rarity_text(tr) if int(p["t"]) >= 3 else Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 24.0)

@@ -18,6 +18,8 @@ const Outpost := preload("res://Outpost.gd")
 const OutpostDB := preload("res://data/OutpostDB.gd")
 const Settings := preload("res://Settings.gd")
 const Art := preload("res://ArtDB.gd")
+const PartVis := preload("res://PartVis.gd")
+const Cores := preload("res://Cores.gd")
 const Kit := preload("res://ui/Kit.gd")
 const OutpostArt := preload("res://ui/OutpostArt.gd")
 const AdjDB := preload("res://data/AdjDB.gd")
@@ -33,7 +35,7 @@ const LM_SIZE: int = 3
 const CAT_IDS: Dictionary = {
 	"prod": ["mill", "refinery", "gemmine"],
 	"core": ["arsenal", "reactor", "bulwark_w", "aegis_a", "optics", "rangefinder", "treasury", "training", "shrine", "forgeworks"],
-	"scav": ["scav_post", "scav_den", "scav_deep"],
+	"scav": ["scav_post", "scav_den", "scav_deep", "fabricator", "smelter"],
 	"support": ["research", "barracks", "archive", "warehouse", "scrapyard", "beaconpost", "pylon"],
 	"infra": ["conduit"],
 	"decor": ["dc_lamp", "dc_brazier", "dc_tree", "dc_shrub", "dc_pond", "dc_crates", "dc_smelter", "dc_bookshelf", "dc_orrery", "dc_yard", "dc_dummy", "dc_banner", "dc_trophy"],
@@ -41,7 +43,7 @@ const CAT_IDS: Dictionary = {
 const DESC: Dictionary = {
 	"relay": "The heart of the Outpost. Its level sets power, building limits and max levels; Lv3 unlocks Collect all.",
 	"mill": "Mints coins. +10% per adjacent Mill (max +30%), +15% next to a Warehouse.",
-	"refinery": "Refines Scrap for the Forge. -10% next to a Mill; a Smelter next to it adds +20%.",
+	"refinery": "Refines Scrap for parts. -10% next to a Mill; a Slag Kiln (decor) next to it adds +20%.",
 	"gemmine": "Deep Mine: a big coin generator. Crystal Vein only; lit Lamps next to it +10% each.",
 	"research": "Runs research projects; queues at Hall Lv1 / 4 / 8. Scholar decor speeds it.",
 	"barracks": "Each level: +10% troop HP and damage in runs. Training decor adds more.",
@@ -59,8 +61,10 @@ const DESC: Dictionary = {
 	"treasury": "Core building: +2% run cash per second per level. +5% to Mills within 2 cells.",
 	"training": "Core building: +3% run XP per level. Drills a touching Barracks (+10%).",
 	"shrine": "Core building: +1 loot luck per level when a run banks. Guides scavengers within 2 cells (+10%).",
-	"forgeworks": "Core building: -2% Forge costs per level. A touching Refinery: +10%.",
-	"scav_post": "Finds an item every 6 h while you are away (stores 4, +1 per 3 levels). Scavengers within 2 cells compete (-15%).",
+	"forgeworks": "Core building: -2% Fabricator prices per level. A touching Refinery: +10%.",
+	"scav_post": "Finds a part every 6 h while you are away (stores 4, +1 per 3 levels). Scavengers within 2 cells compete (-15%).",
+	"fabricator": "Builds parts to order: a rotating stock you buy with Scrap. Each level: more offers (3 -> 6), a faster restock (8 h -> 2.6 h), -4% prices and rarer stock.",
+	"smelter": "Melts parts you don't need into Scrap (send them from the Weapon / Core screens). Each level: more furnaces, -6% melt time, +6% Scrap.",
 	"scav_den": "Finds a Field Cache every 12 h (stores 2).",
 	"scav_deep": "Finds an Elite Cache (Rare+) every 24 h (stores 2).",
 	"pylon": "+5% to buildings exactly 2 cells away, -5% to anything touching it.",
@@ -70,7 +74,7 @@ const CORE_FMT: Dictionary = {
 	"dmg": ["Damage", "+%.1f%%", 100.0], "rate": ["Attack rate", "+%.1f%%", 100.0], "core_hp": ["Core HP", "+%.1f%%", 100.0],
 	"dr": ["Damage taken", "-%.1f%%", 100.0], "crit": ["Crit chance", "+%.1f%%", 100.0], "range": ["Range", "+%.2f", 1.0],
 	"cash": ["Run cash", "+%.1f%%", 100.0], "xp": ["Run XP", "+%.1f%%", 100.0], "loot_luck": ["Loot luck", "+%.1f", 1.0],
-	"forge_disc": ["Forge costs", "-%.1f%%", 100.0],
+	"forge_disc": ["Fabricator prices", "-%.1f%%", 100.0], "run_cash": ["Run cash", "+%.1f%%", 100.0],
 }
 ## Short names of layout parts (AdjDB keys + decor).
 const PART_NAME: Dictionary = {
@@ -559,6 +563,8 @@ static func build(m) -> void:
 			Kit.btn(m, "Upgrade  %s" % Kit.fmt(float(uc)), Rect2(sr.position.x + 20 + bw, by - 50, bw * 2.0, 44), func() -> void: upgrade(m), "Lv%d -> %d: %s coins (max Lv%d at this Relay level)\n%s" % [int(b["lvl"]), int(b["lvl"]) + 1, Kit.fmt(float(uc)), Outpost.max_lvl(s, bid), _delta_text(upgrade_delta(s, who))], Outpost.can_upgrade(s, who), Kit.GREEN, "OP UPGRADE", "cur_coin", 15)
 			if bid == "research":
 				Kit.btn(m, "Open", Rect2(sr.position.x + 10, by - 50, bw, 44), func() -> void: m.set_tab("research"), "Open the Research Lab", true, Kit.LAB, "OP OPEN RESEARCH", "icon_lab", 15)
+			elif bid == "fabricator" or bid == "smelter":
+				Kit.btn(m, "Open", Rect2(sr.position.x + 10, by - 50, bw, 44), func() -> void: m.set_overlay(bid), "Open the %s" % ("Fabricator: buy parts for Scrap" if bid == "fabricator" else "Smelter: melt parts into Scrap"), bool(b["built"]), Kit.CYAN, "OP OPEN " + bid.to_upper(), "", 15)
 		Kit.btn(m, "Move", Rect2(sr.position.x + 10, by, bw, 44), func() -> void: begin_move(m), "Pick it up and click a new spot (R rotates)", true, Kit.GEM if m.op_moving else Kit.NEUTRAL, "OP MOVE", "ui_move", 15)
 		Kit.btn(m, "Rotate", Rect2(sr.position.x + 15 + bw, by, bw, 44), func() -> void: _rotate_selected(m), "Rotate in place (where it fits)", true, Kit.NEUTRAL, "OP ROTATE", "ui_rotate", 15)
 		Kit.btn(m, "Demolish", Rect2(sr.position.x + 20 + bw * 2.0, by, bw, 44), func() -> void: demolish(m), "Remove it: refunds half (all if still queued)", true, Kit.ENEMY, "OP DEMOLISH", "ui_demolish", 15)
@@ -786,6 +792,8 @@ static func _draw_map(m, s: Dictionary, o: Dictionary, mr: Rect2) -> void:
 	var rl: int = int(o["relay_lvl"])
 	var rrr: Rect2 = cell_rect(m, OutpostDB.RELAY.x, OutpostDB.RELAY.y, 3, 3)
 	_bld(m, "relay", rl, rrr.grow(-2))
+	# V3: the player's own Core + Weapon (built from parts) stands on the Relay
+	PartVis.draw_assembly(m, m.save, Cores.look(m.save), rrr.get_center(), rrr.size.x * 0.28, -PI * 0.5 + 0.4 * sin(m.t_anim * 0.4), m.t_anim)
 	if m.op_sel == "relay":
 		Kit.outline(m, rrr, Kit.GOLD)
 	# buildings

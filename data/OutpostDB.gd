@@ -109,7 +109,7 @@ const LIMITS: Array = [[1, {"mill": 2, "refinery": 1, "gemmine": 1, "scav_post":
 
 ## Decor: 1x1 or 2x1, coins, tags drive adjacency (AdjDB).
 const DECOR: Dictionary = {
-	"dc_smelter": {"name": "Smelter", "size": [2, 1], "coins": 800, "tag": "industrial"},
+	"dc_smelter": {"name": "Slag Kiln", "size": [2, 1], "coins": 800, "tag": "industrial"},
 	"dc_crates": {"name": "Crate Stack", "size": [1, 1], "coins": 150, "tag": "industrial"},
 	"dc_bookshelf": {"name": "Bookshelf", "size": [1, 1], "coins": 300, "tag": "scholar"},
 	"dc_orrery": {"name": "Orrery", "size": [1, 1], "coins": 2000, "tag": "scholar"},

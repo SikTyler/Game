@@ -43,7 +43,6 @@ const DirectiveDB := preload("res://data/DirectiveDB.gd")
 const EvoDB := preload("res://data/EvoDB.gd")
 const SupportDB := preload("res://data/SupportDB.gd")
 const FirePatterns := preload("res://FirePatterns.gd")
-const Gear := preload("res://Gear.gd")
 const Parts := preload("res://Parts.gd")
 
 const CENTER: Vector2 = Vector2(360, 470)
@@ -325,7 +324,7 @@ var special_casts: int = 0
 var couriers: int = 0
 var couriers_caught: int = 0
 var ins: Dictionary = {}          # Insight values {in_dmg: 0.01, ...}
-var pfx: Dictionary = {}          # summed gear fx (V2 P4: Gear.run_fx of the save's loadout)
+var pfx: Dictionary = {}          # summed part fx (V3: Parts.run_fx of the installed parts)
 var tfx: Dictionary = {}          # V2 P7b: Core Enhancement fx (TrackDB steps x levels)
 ## V2 P4 manual aim: while the player holds fire on a point, the Core's Weapon
 ## takes the body nearest the cursor (within AIM_R, in range) with +15% crit,

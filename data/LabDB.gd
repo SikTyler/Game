@@ -12,7 +12,7 @@ extends RefCounted
 ## cut by Lab Discount (Labs.price). Ids of the V1 projects are kept for saves:
 ## offcap = Storage Tech, offrate = Logistics Tech.
 
-const CATS: Array = [["core", "Core"], ["enemy", "Enemy"], ["economy", "Economy"], ["loot", "Loot"], ["forge", "Forge"], ["run", "Run"], ["qol", "QOL"]]
+const CATS: Array = [["core", "Core"], ["enemy", "Enemy"], ["economy", "Economy"], ["loot", "Loot"], ["forge", "Parts"], ["run", "Run"], ["qol", "QOL"]]
 ## Research Hall levels that open each row of projects.
 const HALL_ROWS: Array = [1, 3, 5, 8]
 

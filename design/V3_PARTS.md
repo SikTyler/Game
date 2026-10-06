@@ -2,89 +2,113 @@
 
 Owner playtest 2 (2026-10-06): "The forge and core confuse me. Bring back core parts … I wanted a part system where weapons are built: ammo, barrels, power, etc. These combinations make a weapon artwork that is procedurally generated and unique … The core with its parts system is meant to do the same thing, focused on defense and eco, while the weapon is focused on attack."
 
-V3 replaces the V2 gear engine (one Weapon item + up to 8 generic Modules, `Gear.gd`) with two **assemblies** built from typed **parts**. What a part does follows from its slot, so it is clear what you are installing and why.
+V3 replaces the V2 gear engine (one Weapon item, up to 8 generic Modules, the Forge; `Gear.gd`) with two **assemblies** built from typed **parts**. A part's slot says what it does, so it is clear what you install and why.
+
+Code: `Parts.gd` (rules), `data/PartDB.gd` (bases, slots, layouts), `PartVis.gd` (art), `ui/ArmoryView.gd` (WEAPON and CORE tabs), `ui/WorkshopView.gd` (Fabricator and Smelter), tests in `tests/st_parts.gd`, `tests/st_partvis.gd` and `tests/st_core_weapon.gd`.
 
 ## 1. Assemblies
 
-### Weapon (attack), mounted in the Core
+### Weapon (attack), mounted on the Core
 | Slot | Count | Role |
 |---|---|---|
-| **Receiver** (chassis) | 1 | Its rarity sets the layout: how many barrels, which attachment slots open, and how many perk slots. It also sets the base damage / rate scale. |
-| **Barrel** | 1–4 | **The archetype**, i.e. how it fires. Each barrel fires on its own. With several barrels, each one covers its own sector around the Core (multi-directional fire). |
-| **Ammo** | 1 | On-hit effects: burn, poison, armor-piercing, explosive, cryo, shock … |
-| **Scope** | 0–1 | Range, crit, precision vs elites / bosses. |
-| **Power cell** | 0–1 | Fire rate, damage, overcharge trade-offs. |
-| **Magazine** | 0–1 | Burst, reload, echo (a free repeat volley). |
-
-Receiver layouts:
+| **Receiver** (chassis) | 1 | Its rarity sets the layout. It also scales damage and rate (Heavy ×1.2 / ×0.85, Rapid ×0.85 / ×1.2 …), and half its power is added to every barrel. |
+| **Barrel** | 1–4 | **The archetype**: how the Weapon fires. With several barrels, barrel 0 aims and each extra barrel fires on its own cooldown at the nearest body in its own sector (2 barrels opposite each other, 3 at 120°, 4 at 90°). An extra barrel with nothing in its sector holds fire. |
+| **Ammo** | 1–2 | On-hit effects. |
+| **Scope** | 0–1 | Range and precision. |
+| **Power cell** | 0–1 | Attack rate and damage, with trade-offs. |
+| **Muzzle** | 0–1 | Shot shaping: knockback, pierce, splash, chain. |
+| **Magazine** | 0–1 | Rate, echo and shred. |
 
 | Receiver rarity | Barrels | Attachments | Perk slots |
 |---|---|---|---|
 | Common | 1 | Ammo | 1 |
 | Uncommon | 1 | Ammo, Scope | 1 |
-| Rare | 1 | Ammo, Scope, Power | 2 |
-| Epic | 1 | Ammo, Scope, Power, Magazine | 2 |
-| Legendary | 2 (opposed) | all | 3 |
-| Mythic | 3 (120°) | all | 3 |
-| Exotic | 4 (90°) | all | 4 |
+| Rare | 1 | + Power, Muzzle | 2 |
+| Epic | 1 | + Magazine | 2 |
+| Legendary | 2 | all | 3 |
+| Mythic | 3 | all | 3 |
+| Exotic | 4 | all, 2 Ammo | 4 |
 
-**Barrel archetypes** (the run's fire patterns; each has a distinct feel):
+**Barrels**: 23 on 11 fire patterns. Each variant re-tunes its frame with a `sheet` (damage / rate / range multipliers and overrides).
 
 | Barrel | Fires |
 |---|---|
-| Autocannon | Balanced single shells with a small blast. |
-| Minigun | Many projectiles, very high rate, low damage per hit, slight spread. |
-| Sniper Rail | Huge damage, pierces the whole lane, slow reload, long range. |
-| Blast Emitter | A pulse in all directions around the Core (nova). |
+| Autocannon | Balanced shells with a small blast. |
+| **Minigun** (new frame) | 6 light rounds a second, each at a random body among the nearest 3 around the target. |
+| Sniper Rail | Huge damage that pierces the whole line, slow, long range. |
+| Blast Emitter | A pulse in all directions around the Core. |
 | Scattergun | A short cone of pellets. |
-| Slag Lobber | Lobbed shells with a big blast radius. |
+| Slag Lobber | Lobbed shells with a burning, slowing blast. |
 | Arc Coil | Chain lightning between bodies. |
 | Flame Nozzle | A cone that sets bodies on fire. |
-| Missile Rack | Homing missiles with small blasts. |
-| Saw Launcher | Ricochet blades that bounce through the crowd. |
+| Missile Rack | Homing missiles. |
+| Saw Launcher | Ricochet blades that shred. |
+| Lance Emitter | A ramping beam. |
+| Siege Mortar · Burst Carbine · Flechette Gun · Coilgun · Storm Coil · Plasma Caster · Frost Projector · Quake Hammer · Hornet Pod · Disc Thrower · Pulse Laser · Vulcan Cannon | Variants: huge slow craters, 3-round bursts, 10 piercing darts, rapid 4-pierce slugs, 9-body lightning, heavy burning bolts, a slowing no-burn cone, a crushing shockwave, 7 seekers, 9-body discs, fast ramping pulses, heavier rotary rounds. |
 
-**Ammo**: Standard (+damage), Incendiary (burn), Toxic (stacking poison; ignores armor), Armor-Piercing (+pierce), Explosive (+splash), Cryo (slow; crowd-scaled), Shock (+1 chain jump), Hollow Point (+crit damage).
-
-**Scope**: Long Optic (+range), Red Dot (+crit), Hunter Sight (+damage vs elites / bosses), Thermal (+range and +crit).
-
-**Power cell**: Overclock Cell (+rate), Dense Cell (+damage), Surge Cell (+rate and +damage, −max HP), Capacitor Bank (every 5th volley is a big one).
-
-**Magazine**: Drum (+burst), Echo Chamber (+echo chance), Quickload (+rate after a kill streak).
+**Ammo** (14): Standard, Incendiary, Toxic, Armor-Piercing, Explosive, Cryo, Shock, Hollow Point, Ricochet, Reaper, Heavy Slugs, Siphon, Bounty, Seeker. **Scopes** (7), **power cells** (7), **muzzles** (6), **magazines** (6). See `PartDB.BASES` for the numbers.
 
 ### Core (defense and economy)
 | Slot | Count | Role |
 |---|---|---|
-| **Heart** (chassis) | 1 | Its rarity sets the layout and perk slots, and the base HP / regen scale. |
-| **Plating** | 1–2 | Max HP, armor, thorns. |
-| **Generator** | 1 | Regen, shield. |
-| **Capacitor** | 0–1 | Economy: cash per second, interest, kill cash. |
-| **Reactor** | 0–1 | Economy: XP, coins from runs. |
-| **Antenna** | 0–1 | Loot: loot luck, Scrap find, draft luck. |
-| **Shield Emitter** | 0–1 | Shield, damage reduction (capped). |
+| **Heart** (chassis) | 1 | Its rarity sets the layout. It scales max HP and regen (Fortress ×1.25 / ×0.8, Dynamo ×0.9 / ×1.35 …); HP also gains 15% of its power. |
+| **Plating** | 1–2 | Max HP, armor, thorns, damage reduction. |
+| **Generator** | 1–2 | Regen, shield, lifesteal. |
+| **Capacitor** | 0–1 | Run cash, interest, kill cash. |
+| **Reactor** | 0–1 | XP, coins and run cash. |
+| **Uplink** | 0–2 | Building damage and rate, troops, specials. |
+| **Antenna** | 0–1 | Loot luck, draft luck, Scrap find. |
+| **Shield Emitter** | 0–1 | Shield, damage reduction, thorns, slow. |
 
-Heart layouts: Common = Plating + Generator; Uncommon = + Capacitor; Rare = + Reactor; Epic = + Antenna; Legendary = + Shield Emitter and a 2nd Plating; Mythic and Exotic add perk slots.
+Heart layouts:
+- Common: Plating + Generator.
+- Uncommon: adds a Capacitor.
+- Rare: adds a Reactor and an Uplink.
+- Epic: adds an Antenna.
+- Legendary: adds a Shield Emitter and a 2nd Plating.
+- Mythic: adds a 2nd Generator.
+- Exotic: adds a 2nd Uplink.
+
+**A fresh save** has a Common Receiver, an Autocannon Barrel and a Heart, with no perks. That is exactly the base Core sheet. The other slots start empty, and the first drops and crates fill them.
 
 ## 2. Parts
-`{uid, slot, base, rar, lvl, perks: [{id, tier, q, lock}], seed, name, fav, new, src}`
-- **Base stats** come from the base (for example "Minigun Barrel") × rarity mult × level.
-- **Perks**: each perk has its **own rarity tier** (Common … Mythic), rolled independently and shifted by the part's rarity and luck. The tier scales its value (×1.0 / 1.4 / 1.9 / 2.6 / 3.5 / 4.6). Perk slots by part rarity: 1 / 1 / 2 / 2 / 3 / 3 / 4. Perk pools are per slot family: attack perks on weapon parts, defense / eco perks on core parts.
-- **Reroll** a perk for Scrap: it re-rolls the id and the tier (pick 1 of 2, or 3 with Enchanter's Eye) or keeps the current one. **Lock** up to the Stabilizer slots. Cost ×4 per locked perk.
-- **Upgrade** with coins up to the rarity's max level; every 5th level is a masterwork (+1 tier on a random perk).
-- **Merge** three of a slot type and rarity into the next rarity (kept from V2).
+`{uid, slot, base, rar, lvl, mw, seed, rr, perks: [{id, t, q, lock}], name, fav, new, src}`
+
+- **Own effect**: the base's fx × power. Power = rarity base × (1 + 5% per level) × 1.06 per masterwork. Negative trade-offs never scale. Count keys (pierce, chain, luck …) gain +1 per 2 masterworks.
+- **Perks**: a part has 1 / 1 / 2 / 2 / 3 / 3 / 4 perk slots by rarity. Weapon parts roll attack perks and Core parts roll defense / eco perks; Twin Feed never rolls.
+- **Perk tiers**: **each perk has its own rarity tier** (T1 Common … T7 Exotic). The tier is rolled around the part's rarity: −1 25%, same 50%, +1 20%, +2 5%. Luck and a deep drop's item level (wave) push it up. The tier scales the value (×1 / 1.5 / 2.1 / 2.8 / 3.6 / 4.6 / 6.0).
+- **Reroll** a perk for Scrap: `10 × RM × 1.25^rerolls × 4^locks`. Both the perk and its tier re-roll; pick 1 of 2 (3 with Enchanter's Eye) or keep the current one.
+- **Lock**: 1 slot, up to 3 with Stabilizer. **Ban**: Blacklist research, per assembly.
+- **Upgrade** for coins: `60 × RM × 1.17^(L−1)`, up to the rarity's max level. Every 5th level is a masterwork: +6% power and +1 tier on a random perk (jackpot +2).
+- **Merge** 3 of one part type and rarity into the next rarity. The base keeps its look and perks, new slots roll, and the level halves.
+- Names: Common and Uncommon parts carry their base name ("Minigun Barrel"). Rare and above get a seeded epithet and mark ("'Stormjaw' Minigun Barrel Mk II").
 
 ## 3. Getting parts
-1. **Run loot**: elites, bosses and couriers drop parts and caches (the V2 loot pipeline, with parts instead of items).
-2. **Scrap crates**: spend Scrap to open crates (Standard / Advanced / Elite) with disclosed odds and visible pity.
-3. **Fabricator** (new Outpost building): a **rotating shop** of parts for large amounts of Scrap. Upgrades add offers (3 → 6), refresh faster (8 h → 2 h), lower prices and raise the rarity odds. A manual reroll of the shop costs Scrap.
-4. **Smelter** (new Outpost building): a queue where parts melt into Scrap over time. Its level adds slots, speed and yield. It replaces instant Salvage; Auto-Salvage feeds the Smelter queue.
+1. **Run loot**: elites, bosses, Couriers and caches drop parts (the V2 loot pipeline, with visible pity).
+2. **Scrap crates**: Standard (120 Scrap, 1 part), Advanced (600, 3 parts, the first Uncommon+, +4 luck), Elite (2500, 5 parts, the first Rare+, +10 luck). Odds are disclosed live, and every crate counts toward pity. The **Part Contracts** research picks the part type at ×1.5 price.
+3. **Fabricator** (Outpost building, Scavenge category, Relay 2, 6000 coins): a rotating shop paid in Scrap. At Lv1 it shows 3 offers every 8 h. Each level adds an offer every 2 levels (max 6), cuts 0.6 h from the restock (min 2 h) and 4% from prices, and adds 1.5 rarity luck. Forge Works buildings cut prices 2% per level. A manual restock costs 200 Scrap.
+4. **Smelter** (Outpost building, Relay 1, 2500 coins): parts melt into Scrap (their salvage value) over 20 minutes, in parallel furnaces. It has 2 furnaces at Lv1 and +1 per 2 levels; each level is −6% time and +6% Scrap. A finished melt frees its furnace and pays out on its own. **Auto-Smelt** (research) melts low-rarity drops on arrival.
 
-## 4. Looks
-- **Weapon art** is drawn procedurally from its parts: receiver body (by rarity), barrels (the archetype's silhouette, 1–4, fanned), ammo canister / belt, scope, power cell, magazine; paint, and a rarity rim.
-- **Core art** is drawn from its parts: plating shell (shape per base, spikes for thorns), generator rings, capacitor coils, reactor glow, antenna masts, shield dome.
-- The combined Core + Weapon shows in the run (turret on the Core) and on the Outpost (on the Relay).
+## 4. Looks (`PartVis.gd`)
+- **Weapon** (a top-down turret):
+  - the Receiver hub: shape by base, size by rarity;
+  - 1–4 barrels fanned around it: each archetype has its own silhouette, and variants re-shape it;
+  - a muzzle on every barrel tip;
+  - the scope on top, the power cell behind, the magazine below, and ammo canisters coloured by ammo type.
+- **Core**:
+  - the Heart glow;
+  - the plating shell: octagon, hex, spiked star, round, layered decagon or faceted crystal, and a second shell for the 2nd plating;
+  - generator rings;
+  - capacitor coils;
+  - a reactor ring;
+  - uplink dishes;
+  - antenna masts;
+  - a shield dome.
+- The Core Look (pattern and three colours) paints the parts.
+- The combined build appears in the run (turret on the Core), on the WEAPON and CORE screens, and on the Outpost Relay.
 
 ## 5. Migration
-Save v6: a V2 gear block is refunded as Scrap (the salvage value of every item). A starter kit is added: a Common Receiver + Autocannon Barrel + Standard Ammo, and a Common Heart + Basic Plating + Basic Generator. Outpost, research, coins and progress are kept.
+A V2 gear block is refunded as Scrap: the salvage value of every item. Then the starter kit is installed. Outpost, research, coins and progress are kept. The refund happens once; the save keeps `parts_refund` for a notice.
 
-## 6. Build order
-B1 data and pure engine (PartDB, Parts.gd, perks with tiers, crates, Fabricator, Smelter, migration) + tests → B2 run integration (core_def / run_fx, multi-barrel fire, ammo fx) + golden → B3 procedural visuals → B4 screens (Weapon and Core builders, crates, Fabricator / Smelter panels, loot reveal) → B5 retire `Gear*` / Forge, bot and docs.
+## 6. Build order (done)
+B1 data and pure engine with tests → B2 run integration (multi-barrel fire, the Minigun, Heart-scaled HP) and the golden → B3 procedural visuals → B4 screens (Weapon and Core builders, crates, Fabricator and Smelter modals, the loot reveal) → B5 retire `Gear*`, ModuleDB, BrandDB and ForgeView, then the bot and the docs.

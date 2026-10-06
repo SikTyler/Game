@@ -1,13 +1,13 @@
 extends RefCounted
 ## Core Weapon frames (V2 P4): the Weapon the player forges and mounts in the
 ## Core's centre slot. A frame fixes the attack (TowerState._core_fire /
-## FirePatterns), its L1 numbers and its silhouette (GearVis); rarity, level,
+## FirePatterns), its L1 numbers and its silhouette (PartVis barrel); rarity, level,
 ## brand and perks scale and modify it. The first four are the old Core
 ## attacks; the other six are new patterns.
 ##   attack   core attack code (cannon slag beam pulse scatter rail arc flame missiles saw)
 ##   dmg, rate, range: L1 Common sheet (range in cpx() cells)
 ##   p        attack parameters (splash in cells, slows, ramps, counts ...)
-##   look     GearVis silhouette: body, barrel, muzzle, and the perk parts it favours
+##   look     V2 silhouette data (V3 barrels draw from their PartDB look)
 ##   affinity perk ids this frame rolls more often (x2 weight)
 
 const IDS: Array = ["autocannon", "slag", "lance", "pulse", "scatter", "rail", "arc", "flame", "missiles", "saw"]

@@ -3,13 +3,13 @@ extends SceneTree
 # (TowerState is the whole game; Main.gd is a view) at a fixed dt with a
 # deterministic competent bot, in runs (drafts, merges, placement facing away
 # from the Core, specials, Core Enhancements) and between runs (MetaBot: the
-# Outpost build plan, research by weighted priority, Core levels, gear: merge
-# / equip / upgrade / forge / salvage). Jobs fan out over worker processes:
+# Outpost build plan, research by weighted priority, Core levels, parts: merge
+# / install / upgrade / crates / Fabricator / melt). Jobs fan out over worker processes:
 #   main       a DAYS-day campaign (4 runs a day on the SESSION_H clock) with
 #              day rows; writes the day-3 / day-8 snapshots for phase B
 #   fresh      FRESH_N brand-new first runs (first-run length, early wall)
 #   mass       the MASS_HORDE H1-H10 engine gates
-#   gear       day 8: the save's gear vs a Common Autocannon loadout
+#   gear       day 8: the save's parts vs the starter kit
 #   corebld    day 8: with vs without the Outpost's Core buildings
 #   xp         day 3: XP-focus vs balanced levels by wave 12 (Core held up)
 #   dir        day 8: radial-only vs directional-only weapon drafts
@@ -35,7 +35,8 @@ const Cores := preload("res://Cores.gd")
 const OutpostDB := preload("res://data/OutpostDB.gd")
 const PowerModel := preload("res://PowerModel.gd")
 const WeaponDB := preload("res://data/WeaponDB.gd")
-const Gear := preload("res://Gear.gd")
+const Parts := preload("res://Parts.gd")
+const PartDB := preload("res://data/PartDB.gd")
 const RarityDB := preload("res://data/RarityDB.gd")
 const Labs := preload("res://Labs.gd")
 const Missions := preload("res://Missions.gd")
@@ -877,10 +878,10 @@ const OP_PLAN: Array = [
 	["up", "mill"], ["up", "relay"], ["up", "research"],
 	["place", "arsenal", 9, 10, 0], ["place", "treasury", 7, 12, 0], ["place", "reactor", 9, 12, 0],
 	["place", "conduit", 3, 9, 0], ["place", "refinery", 1, 9, 0], ["place", "conduit", 1, 11, 0], ["place", "conduit", 1, 12, 0], ["place", "gemmine", 1, 13, 0],
-	["place", "bulwark_w", 7, 5, 0], ["place", "scav_post", 9, 5, 0],
+	["place", "bulwark_w", 7, 5, 0], ["place", "scav_post", 9, 5, 0], ["more", "smelter"],
 	["plot", 0], ["place", "conduit", 11, 8, 0], ["place", "mill", 12, 8, 0], ["place", "archive", 12, 6, 0], ["place", "barracks", 12, 10, 0],
 	["place", "optics", 14, 8, 0], ["place", "rangefinder", 14, 10, 0], ["place", "aegis_a", 14, 6, 0],
-	["place", "training", 16, 10, 0], ["place", "shrine", 16, 6, 0], ["place", "forgeworks", 16, 8, 0],
+	["place", "training", 16, 10, 0], ["place", "shrine", 16, 6, 0], ["place", "forgeworks", 16, 8, 0], ["more", "fabricator"],
 	["up", "arsenal"], ["up", "reactor"], ["up", "warehouse"], ["up", "refinery"], ["up", "gemmine"], ["up", "treasury"],
 	["up", "bulwark_w"], ["up", "optics"], ["up", "rangefinder"], ["up", "aegis_a"], ["up", "scav_post"],
 	["up", "archive"], ["up", "barracks"], ["up", "training"], ["up", "shrine"], ["up", "forgeworks"],
@@ -1053,73 +1054,97 @@ static func research_spend(save: Dictionary, now: int, budget: int) -> void:
 		spent += pr
 
 
-## Gear: weapons by estimated DPS, modules by power x perks.
-static func _gear_score(save: Dictionary, uid: int) -> float:
-	var it: Dictionary = Gear.item(save, uid)
+## Parts (V3): barrels by DPS on the installed Receiver, chassis by rarity
+## then power, other parts by power x perks.
+static func _part_score(save: Dictionary, uid: int) -> float:
+	var it: Dictionary = Parts.item(save, uid)
 	if it.is_empty():
 		return 0.0
-	if String(it["kind"]) == "weapon":
-		return Gear.est_dps(it)
-	return Gear.power(it) * (1.0 + 0.35 * float((it["perks"] as Array).size()))
+	var slot: String = String(it["slot"])
+	if slot == "barrel":
+		return Parts.barrel_dps(save, it) * (1.0 + 0.15 * float((it["perks"] as Array).size()))
+	if PartDB.is_chassis(slot):
+		return float(RarityDB.rank(String(it["rar"]))) * 10.0 + Parts.power(it)
+	return Parts.power(it) * (1.0 + 0.35 * float((it["perks"] as Array).size()))
 
 
 static func _by_score(save: Dictionary, uids: Array) -> Array:
 	var a: Array = uids.duplicate()
 	a.sort_custom(func(x: Variant, y: Variant) -> bool:
-		var sx: float = _gear_score(save, int(x))
-		var sy: float = _gear_score(save, int(y))
+		var sx: float = _part_score(save, int(x))
+		var sy: float = _part_score(save, int(y))
 		return sx > sy if sx != sy else int(x) < int(y))
 	return a
 
 
-## Merge spare Commons / Uncommons (best three into the next rarity), equip the
-## best Weapon and Modules, salvage the weakest past 150 items, level the
-## equipped gear, forge a little when rich.
+## Merge spare Commons / Uncommons (best three of a part type into the next
+## rarity), install the best chassis and the best part in every open
+## position, open crates / buy rare Fabricator stock with spare Scrap, melt
+## the weakest past 150 parts (instantly - the bot doesn't wait on the
+## Smelter), level the installed parts.
 static func gear_manage(save: Dictionary) -> void:
-	for kind in ["weapon", "module"]:
+	for slot in PartDB.SLOTS.keys():
 		for rar in ["common", "uncommon"]:
 			for guard in 20:
 				var pool: Array = []
-				for u in Gear.uids(save, String(kind)):
-					var it: Dictionary = Gear.item(save, int(u))
-					if String(it["rar"]) == rar and not Gear.is_equipped(save, int(u)) and not bool(it.get("fav", false)):
+				for u in Parts.uids(save, String(slot)):
+					var it: Dictionary = Parts.item(save, int(u))
+					if String(it["rar"]) == rar and not Parts.is_equipped(save, int(u)) and not bool(it.get("fav", false)):
 						pool.append(int(u))
 				if pool.size() < 3:
 					break
 				var set3: Array = _by_score(save, pool).slice(0, 3)
-				if Gear.why_merge(save, set3, int(set3[0])) != "" or Gear.merge(save, set3, int(set3[0]), 0).is_empty():
+				if Parts.why_merge(save, set3, int(set3[0])) != "" or Parts.merge(save, set3, int(set3[0])).is_empty():
 					break
-	var ws: Array = _by_score(save, Gear.uids(save, "weapon"))
-	if not ws.is_empty() and not Gear.is_equipped(save, int(ws[0])):
-		Gear.equip(save, int(ws[0]))
-	var ms: Array = _by_score(save, Gear.uids(save, "module"))
-	var n: int = Gear.sockets_for(Cores.level(save))
-	for k in mini(n, ms.size()):
-		Gear.equip(save, int(ms[k]), k)
-	if Gear.count(save) > 150:
-		var all: Array = _by_score(save, Gear.uids(save))
+	# spare Scrap: crates first, then Rare+ Fabricator stock
+	var now: int = int(save.get("last_seen", 0))
+	for guard in 6:
+		if Parts.count(save) >= 150:
+			break
+		if int(save["scrap"]) >= 3 * int(Parts.CRATES["elite"]["scrap"]):
+			Parts.open_crate(save, "elite")
+		elif int(save["scrap"]) >= 2 * int(Parts.CRATES["advanced"]["scrap"]):
+			Parts.open_crate(save, "advanced")
+		else:
+			break
+	var of: Array = Parts.fab_offers(save, now)
+	for k in of.size():
+		var o: Dictionary = of[k]
+		if RarityDB.rank(String(o["rar"])) >= RarityDB.rank("rare") and int(save["scrap"]) >= Parts.fab_price(save, o) + 600:
+			Parts.fab_buy(save, k, now)
+	# install: chassis first (they open the slots), then every position
+	for cs in ["receiver", "heart"]:
+		var best_c: Array = _by_score(save, Parts.uids(save, cs))
+		if not best_c.is_empty() and not Parts.is_equipped(save, int(best_c[0])):
+			Parts.equip(save, int(best_c[0]))
+	for side in ["weapon", "core"]:
+		var lo: Dictionary = Parts.layout(save, side)
+		for slot2 in (PartDB.WEAPON_SLOTS if side == "weapon" else PartDB.CORE_SLOTS):
+			if PartDB.is_chassis(String(slot2)):
+				continue
+			var n: int = int(lo.get(slot2, 0))
+			var best: Array = _by_score(save, Parts.uids(save, String(slot2)))
+			for k in mini(n, best.size()):
+				var cur: Array = (Parts.block(save)["equipped"] as Dictionary).get(slot2, [])
+				if k < cur.size() and int(cur[k]) == int(best[k]):
+					continue
+				Parts.equip(save, int(best[k]), k)
+	if Parts.count(save) > 150:
+		var all: Array = _by_score(save, Parts.uids(save))
 		all.reverse()
 		for u in all:
-			if Gear.count(save) <= 120:
+			if Parts.count(save) <= 120:
 				break
-			if not Gear.is_equipped(save, int(u)):
-				Gear.salvage(save, int(u))
-	var w: Dictionary = Gear.weapon(save)
-	if not w.is_empty():
-		for guard in 60:
-			if Gear.why_upgrade(save, int(w["uid"])) != "" or float(Gear.upgrade_cost(w, save)) > 0.15 * float(save["coins"]):
-				break
-			Gear.upgrade(save, int(w["uid"]))
-	for m in Gear.modules(save):
-		for guard in 40:
-			if Gear.why_upgrade(save, int(m["uid"])) != "" or float(Gear.upgrade_cost(m, save)) > 0.04 * float(save["coins"]):
-				break
-			Gear.upgrade(save, int(m["uid"]))
-	for k in 2:
-		var fc: Dictionary = Gear.forge_cost(save)
-		if w.is_empty() or int(save["coins"]) < 8 * int(fc["coins"]) or int(save["scrap"]) < int(fc["scrap"]) + 100 or Gear.count(save) >= 150:
-			break
-		Gear.forge_new(save, "weapon", String(w["base"]))
+			if not Parts.is_equipped(save, int(u)):
+				Parts.salvage(save, int(u))
+	# level the installed parts: the weapon's chassis and barrels get more
+	for side3 in ["weapon", "core"]:
+		for it2 in Parts.side_parts(save, side3):
+			var big: bool = String(it2["slot"]) == "barrel" or PartDB.is_chassis(String(it2["slot"]))
+			for guard in 40:
+				if Parts.why_upgrade(save, int(it2["uid"])) != "" or float(Parts.upgrade_cost(it2, save)) > (0.12 if big else 0.03) * float(save["coins"]):
+					break
+				Parts.upgrade(save, int(it2["uid"]))
 
 
 ## Core levels with what the session has left (requirements permitting).
@@ -1235,7 +1260,7 @@ static func campaign(seed0: int, n_days: int) -> Dictionary:
 			best_at[t] = maxi(bt, int(r["wave"]))
 			for k in (r["rar"] as Dictionary).keys():
 				rar[k] = int(rar.get(k, 0)) + int(r["rar"][k])
-			var pity: Dictionary = Gear.block(save)["pity"]
+			var pity: Dictionary = Parts.block(save)["pity"]
 			for g in pity_max.keys():
 				pity_max[g] = maxi(int(pity_max[g]), int(pity.get(g, 0)))
 			var mins: float = maxf(0.1, float(r["real_s"]) / 60.0)
@@ -1257,12 +1282,13 @@ static func campaign(seed0: int, n_days: int) -> Dictionary:
 		var lab_sum: int = 0
 		for id in LabDB.IDS:
 			lab_sum += Labs.level(save, String(id))
-		var w: Dictionary = Gear.weapon(save)
+		var rc: Array = Parts.equipped(save, "receiver")
+		var w: Dictionary = rc[0] if not rc.is_empty() else {}
 		var row: Dictionary = {
 			"day": d + 1, "tier": hi, "best_wave_hi_tier": Tiers.best_in(save, hi), "best_wave": int(save["best_wave"]),
 			"progress_key": hi * 1000 + Tiers.best_in(save, hi), "core_lvl": Cores.level(save), "labs": lab_sum,
-			"speed": float(steps[steps.size() - 1]), "weapon_rar": String(w.get("rar", "")), "weapon_dps": snappedf(Gear.est_dps(w), 0.1) if not w.is_empty() else 0.0,
-			"items": Gear.count(save), "coins_gross": int(led["gross_coins"]), "bank": int(save["coins"]), "scrap": int(save["scrap"]),
+			"speed": float(steps[steps.size() - 1]), "weapon_rar": String(w.get("rar", "")), "weapon_dps": snappedf(Parts.est_dps(save), 0.1),
+			"items": Parts.count(save), "coins_gross": int(led["gross_coins"]), "bank": int(save["coins"]), "scrap": int(save["scrap"]),
 			"outpost_h": snappedf(outpost_coins_h(save), 1.0), "relay": int(save["outpost"]["relay_lvl"]), "hall": Outpost.level_of(save, "research"),
 		}
 		days.append(row)
@@ -1345,16 +1371,17 @@ static func ab_waves(save: Dictionary, policy: String, seeds: Array, perk_pref: 
 	return {"waves": waves, "mean": tot / maxf(1.0, float(seeds.size()))}
 
 
-## The snapshot's gear vs a fresh Common Autocannon loadout.
+## The snapshot's parts vs a fresh starter kit (Common Receiver + Autocannon
+## Barrel + Heart).
 static func job_gear(seed0: int, snap: Dictionary) -> Dictionary:
 	if snap.is_empty():
 		return {}
 	var a: Dictionary = ab_waves(snap, "balanced", AB_SEEDS6.map(func(x: Variant) -> int: return seed0 + int(x)))
 	var bare: Dictionary = snap.duplicate(true)
-	bare["gear"] = Gear.default_block()
+	bare["parts"] = Parts.default_block()
 	var b: Dictionary = ab_waves(bare, "balanced", AB_SEEDS.map(func(x: Variant) -> int: return seed0 + int(x)))
 	var ratio: float = float(a["mean"]) / maxf(0.1, float(b["mean"]))
-	say("GEAR day 8: own gear %s vs Common Autocannon %s -> x%.2f" % [str(a["waves"]), str(b["waves"]), ratio])
+	say("GEAR day 8: own parts %s vs the starter kit %s -> x%.2f" % [str(a["waves"]), str(b["waves"]), ratio])
 	return {"with": a, "without": b, "ratio": ratio}
 
 

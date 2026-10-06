@@ -1271,28 +1271,112 @@ static func core_def(s: Dictionary) -> Dictionary:
 	return d
 
 
+## Average bodies a volley of `bs` hits (readouts only).
+static func _hits(bs: Dictionary) -> float:
+	match String(bs["attack"]):
+		"scatter":
+			return float(bs.get("pellets", 6)) * 0.5
+		"missiles":
+			return float(bs.get("missiles", 4))
+		"arc":
+			return 1.0 + float(bs.get("chain", 5)) * 0.6
+		"saw":
+			return 1.0 + float(bs.get("bounces", 4)) * 0.7
+		"rail":
+			return minf(3.0, float(bs.get("pierce", 10)) * 0.5)
+		"pulse":
+			return 4.0
+		"slag":
+			return 1.0 + 2.0 * float(bs.get("splash", 0.6))
+		"cannon":
+			return float(bs.get("barrels", 1)) + float(bs.get("splash", 0.4)) * float(bs.get("splash_frac", 0.4)) * 2.0
+		"flame":
+			return 2.5
+	return 1.0
+
+
 ## Rough weapon DPS for readouts (sum of barrels; hit-weighted).
 static func est_dps(s: Dictionary) -> float:
 	var d: Dictionary = core_def(s)
 	var fx: Dictionary = run_fx(s)
 	var tot: float = 0.0
 	for b in d["barrels"]:
-		var bs: Dictionary = b
-		var hits: float = 1.0
-		match String(bs["attack"]):
-			"scatter":
-				hits = float(bs.get("pellets", 6)) * 0.5
-			"missiles":
-				hits = float(bs.get("missiles", 4))
-			"arc":
-				hits = 1.0 + float(bs.get("chain", 5)) * 0.6
-			"saw":
-				hits = 1.0 + float(bs.get("bounces", 4)) * 0.7
-			"rail":
-				hits = 3.0
-			"pulse":
-				hits = 4.0
-			"minigun":
-				hits = 1.0
-		tot += float(bs["dmg"]) * float(bs["rate"]) * hits
-	return tot * (1.0 + float(fx.get("core_dmg", 0.0)) + float(fx.get("dmg", 0.0))) * (1.0 + float(fx.get("rate", 0.0)))
+		tot += float((b as Dictionary)["dmg"]) * float((b as Dictionary)["rate"]) * _hits(b)
+	return tot * (1.0 + float(fx.get("core_dmg", 0.0)) + float(fx.get("dmg", 0.0))) * maxf(0.1, 1.0 + float(fx.get("rate", 0.0)))
+
+
+## One barrel part's DPS on the equipped Receiver (before other parts' fx).
+static func barrel_dps(s: Dictionary, barrel: Dictionary) -> float:
+	var rc: Array = equipped(s, "receiver")
+	var bs: Dictionary = barrel_sheet(barrel, rc[0] if not rc.is_empty() else starter("rcv_standard"))
+	return float(bs["dmg"]) * float(bs["rate"]) * _hits(bs)
+
+
+# ------------------------------------------------------------------ readouts
+
+const FX_TEXT: Dictionary = {
+	"core_dmg": ["Weapon damage", "pct"], "dmg": ["All damage", "pct"], "rate": ["Weapon attack rate", "pct"],
+	"range": ["Weapon range", "cells"], "crit": ["Crit chance", "pct"], "crit_dmg": ["Crit damage", "pct"],
+	"pierce": ["Pierce", "int"], "splash": ["Splash radius", "cells"], "chain": ["Chain jumps / rings", "int"],
+	"chain_dmg": ["Chain damage", "pct"], "bounce": ["Ricochets", "int"],
+	"burn": ["Burn per second (of hit)", "pct"], "slow_hit": ["Slow on hit", "pct"], "knock": ["Knockback", "pct"],
+	"boss": ["Damage vs elites / bosses", "pct"], "normal_dmg": ["Damage vs the horde", "pct"], "execute": ["Execute below HP", "pct"],
+	"shred": ["Shred per hit", "pct"], "echo": ["Echo chance", "pct"], "core_single": ["Main-target damage", "pct"],
+	"beam_ramp": ["Beam ramp", "pct"], "pulse_dmg": ["Pulse damage", "pct"], "core_hp": ["Core max HP", "pct"],
+	"regen": ["Core regen", "pct"], "armor": ["Core armor", "flat"], "shield": ["Core shield", "flat"],
+	"lifesteal": ["Lifesteal", "pct"], "reflect": ["Thorns", "pct"], "dr": ["Damage reduction", "pct"],
+	"kill_cash": ["Kill cash", "pct"], "cash_flat": ["Cash per second", "flat"], "cash": ["Cash per second", "pct"],
+	"interest": ["Interest", "pct"], "icap": ["Interest cap", "pct"], "xp": ["Run XP", "pct"], "luck": ["Luck", "int"],
+	"loot_luck": ["Loot luck", "int"], "draft_luck": ["Draft luck", "int"], "bld_dmg": ["Building damage", "pct"],
+	"bld_rate": ["Building attack rate", "pct"], "troop_dmg": ["Troop damage", "pct"], "troop_hp": ["Troop HP", "pct"],
+	"special_dmg": ["Special damage", "pct"], "scrap_find": ["Scrap from runs", "pct"], "coin_run": ["Coins from runs", "pct"],
+	"run_cash": ["Run cash", "pct"],
+}
+
+
+## "+12% Weapon damage" / "-15% Core max HP" / "+0.40 cells Weapon range" / "+2 Pierce".
+static func fx_text(key: String, v: float) -> String:
+	var d: Array = FX_TEXT.get(key, [key, "flat"])
+	var sg: String = "+" if v >= 0.0 else "-"
+	var a: float = absf(v)
+	match String(d[1]):
+		"pct":
+			var p: float = a * 100.0
+			return "%s%s%% %s" % [sg, ("%.1f" % p) if p < 10.0 else str(int(round(p))), String(d[0])]
+		"int":
+			return "%s%d %s" % [sg, int(round(a)), String(d[0])]
+		"cells":
+			return "%s%.2f %s (cells)" % [sg, a, String(d[0])]
+	return "%s%s %s" % [sg, ("%.1f" % a) if a < 100.0 else str(int(round(a))), String(d[0])]
+
+
+## Sorted readout lines of an fx dict (zeros dropped).
+static func fx_lines(fx: Dictionary) -> Array:
+	var keys: Array = fx.keys().filter(func(k: Variant) -> bool: return absf(float(fx[k])) > 1e-6)
+	keys.sort_custom(func(a: Variant, b: Variant) -> bool: return String(a) < String(b))
+	var out: Array = []
+	for k in keys:
+		out.append(fx_text(String(k), float(fx[k])))
+	return out
+
+
+## What a chassis of this rarity opens ("2 Barrels, Ammo, Scope ...").
+static func layout_text(chassis_slot: String, rar: String) -> String:
+	var lo: Dictionary = PartDB.layout(chassis_slot, rar)
+	var out: Array = []
+	for sl in (PartDB.WEAPON_SLOTS if chassis_slot == "receiver" else PartDB.CORE_SLOTS):
+		var n: int = int(lo.get(sl, 0))
+		if n <= 0 or PartDB.is_chassis(String(sl)):
+			continue
+		var nm: String = String(PartDB.SLOTS[sl]["name"])
+		out.append(("%d %ss" % [n, nm]) if n > 1 else nm)
+	return ", ".join(out)
+
+
+## The lowest chassis rarity that opens position `idx` of `slot` ("" if none).
+static func opens_at(slot: String, idx: int) -> String:
+	var cs: String = "receiver" if PartDB.side_of(slot) == "weapon" else "heart"
+	for r in RarityDB.IDS:
+		if int(PartDB.layout(cs, String(r)).get(slot, 0)) > idx:
+			return String(r)
+	return ""
