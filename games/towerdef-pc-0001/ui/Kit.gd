@@ -27,9 +27,9 @@ const EDGE2: Color = Color("2c3a5e")
 const CYAN: Color = Color("39e6ff")
 const MAGENTA: Color = Color("ff3ea5")
 const RUST: Color = CYAN                 # V1 accent name: the V2 primary accent
-const ENEMY: Color = Color("ff4d6d")
+const ENEMY: Color = Color("ff6680")   # V2 P9 audit: lighter so red text clears 4.5:1 at small sizes
 const TEXT: Color = Color("e8f0ff")
-const DIM: Color = Color("8a9bbd")
+const DIM: Color = Color("a9b8d6")     # V2 P9 audit: secondary text (was 8a9bbd, ~3.9:1 when anti-aliased)
 const GOLD: Color = Color("ffd34d")
 const GEM: Color = Color("5b8cff")
 const GREEN: Color = Color("4ade80")
@@ -96,6 +96,12 @@ static func contrast(a: Color, b: Color) -> float:
 
 static func rarity_col(r: String) -> Color:
 	return RARITY.get(r, DIM)
+
+
+## V2 P9 audit: a rarity colour lifted toward white for TEXT (the full colour
+## stays for rims and fills); small Epic / Mythic words read >= 4.5:1.
+static func rarity_text(r: String) -> Color:
+	return rarity_col(r).lerp(TEXT, 0.3)
 
 
 ## Rarity colour with the Exotic prismatic cycle (t = animation clock).
@@ -204,6 +210,36 @@ static func hit(m, rect: Rect2, cb: Callable, tip: String, key: String, enabled:
 	b.add_theme_stylebox_override("hover", sb(Color(col, 0.95), Color(1, 1, 1, 0.04), 2, 8, 1.0))
 	b.add_theme_stylebox_override("pressed", sb(Color(col, 0.95), Color(1, 1, 1, 0.08), 2, 8, 1.4))
 	return b
+
+
+## V2 P9 audit: `s` shortened with an ellipsis so it fits `width` px at
+## `size` (body font; heading faces run a little wider, so pass a margin).
+static func fit(m, s: String, size: int, width: float, f: Font = null) -> String:
+	var fo: Font = f if f != null else m.font
+	if width <= 0.0 or fo.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x <= width:
+		return s
+	var lo: int = 0
+	var hi: int = s.length()
+	while lo < hi:
+		var mid: int = (lo + hi + 1) / 2
+		if fo.get_string_size(s.left(mid).strip_edges() + "…", HORIZONTAL_ALIGNMENT_LEFT, -1, size).x <= width:
+			lo = mid
+		else:
+			hi = mid - 1
+	return s.left(lo).strip_edges() + "…"
+
+
+## V2 P9 audit: text with a 1 px dark outline (numbers on bright bars).
+static func t_outline(m, s: String, pos: Vector2, size: int, col: Color, align: int = HORIZONTAL_ALIGNMENT_LEFT, width: float = 400.0) -> void:
+	var f: Font = Fonts.bold() if size >= 22 else m.font
+	_note_size(s, size, col)
+	var p: Vector2 = pos
+	if align == HORIZONTAL_ALIGNMENT_CENTER:
+		p.x -= width * 0.5
+	elif align == HORIZONTAL_ALIGNMENT_RIGHT:
+		p.x -= width
+	m.draw_string_outline(f, p, s, align, width, size, 4, Color(0.02, 0.03, 0.07, 0.95 * col.a))
+	m.draw_string(f, p, s, align, width, size, col)
 
 
 ## Text whose baseline sits at pos.y. Sizes >= 22 use Chakra Petch Bold.
@@ -359,8 +395,20 @@ static func beam_col(m, base: Vector2, col: Color, h: float, w: float, t: float,
 ## met, red when not. Key: "req:<kind>:<id>".
 static func req_chip(m, rect: Rect2, kind: String, id: String, label: String, met: bool, cb: Callable, tip: String = "", icon_id: String = "") -> Button:
 	var col: Color = GREEN if met else ENEMY
-	var b: Button = btn(m, label, rect, cb, tip if tip != "" else ("%s — done" % label if met else "%s — click to go there" % label), true, col, "req:%s:%s" % [kind, id], icon_id, 15)
+	# V2 P9 audit: state is not hue-only (unmet = a lock icon, met = "DONE"),
+	# the chip is an outline (quieter than a buyable card's price) and
+	# its text is inset from the border.
+	var b: Button = btn(m, ("DONE  " if met else "") + label, rect, cb, tip if tip != "" else ("%s — done" % label if met else "%s — click to go there" % label), true, col, "req:%s:%s" % [kind, id], icon_id if icon_id != "" else ("" if met else "icon_lock"), 15)
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	for st in ["normal", "hover", "pressed"]:
+		var sbx: StyleBoxFlat = (b.get_theme_stylebox(st) as StyleBoxFlat).duplicate()
+		sbx.content_margin_left = 10.0
+		sbx.content_margin_right = 8.0
+		if st == "normal":
+			sbx.bg_color = Color(BG2, 0.85)
+			sbx.border_color = Color(col, 0.7)
+		b.add_theme_stylebox_override(st, sbx)
+	b.add_theme_constant_override("h_separation", 8)
 	return b
 
 

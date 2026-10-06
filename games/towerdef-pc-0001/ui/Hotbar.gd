@@ -44,6 +44,9 @@ static func draw(m) -> void:
 		m.draw_circle(c + Vector2(0, 4), rad, Color(0, 0, 0, 0.45))
 		m.draw_circle(c, rad, Kit.BG2 if has else Color(Kit.BG2, 0.55))
 		m.draw_arc(c, rad, 0, TAU, 48, Kit.GOLD if armed else (Kit.GEM if has else Color(Kit.EDGE, 0.6)), 4.0 if armed else 2.5)
+		if not has:
+			# V2 P9 audit: an empty slot reads as a socket (its key number), not missing art
+			Kit.th(m, "%d" % (k + 1), c + Vector2(0, 7), 18, Color(Kit.DIM, 0.8), HORIZONTAL_ALIGNMENT_CENTER, SLOT)
 		if has:
 			var sd: Dictionary = S.specials[k]
 			var id: String = String(sd["id"])

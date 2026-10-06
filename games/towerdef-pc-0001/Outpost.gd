@@ -716,7 +716,8 @@ static func claim_away(s: Dictionary, now: int) -> Array:
 	s["last_seen"] = now
 	var tot: Dictionary = {"coins": 0, "scrap": 0}
 	for e in ev:
-		if String((e as Dictionary)["t"]) == "collect":
+		# Scavengers collect items / caches (their own events), not coins or Scrap
+		if String((e as Dictionary)["t"]) == "collect" and tot.has(String(e["res"])):
 			tot[String(e["res"])] = int(tot[String(e["res"])]) + int(e["n"])
 	if int(tot["coins"]) + int(tot["scrap"]) > 0:
 		ev.append({"t": "offline", "coins": int(tot["coins"]), "scrap": int(tot["scrap"])})

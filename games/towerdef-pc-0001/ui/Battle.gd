@@ -341,7 +341,9 @@ static func draw(m, off: Vector2) -> void:
 		if m.gore != null and String(m.gore.get("level")) != "off":
 			var gt: Texture2D = m.gore.call("ground_texture")
 			if gt != null:
-				m.draw_texture_rect(gt, m.gore.call("ground_rect"), false)   # HORDE P5 corpse/blood layer
+				# HORDE P5 corpse/blood layer; V2 P9 audit: muted (cool tint, ~45% alpha) so the
+				# floor never outshouts the enemies or the Core
+				m.draw_texture_rect(gt, m.gore.call("ground_rect"), false, Color(0.62, 0.5, 0.72, 0.45))
 		_draw_grid(m)
 		_draw_ranges(m)
 		_draw_world(m)
@@ -353,7 +355,8 @@ static func draw(m, off: Vector2) -> void:
 	if m.heal_flash > 0.0:
 		m.draw_rect(fr, Color(0.4, 0.9, 0.4, m.heal_flash * 0.3))
 	if S != null:
-		Hotbar.draw(m)
+		if m.screen != "results":
+			Hotbar.draw(m)
 		DraftPanel.draw(m)
 		_draw_right(m)
 		_draw_ghost(m)
@@ -682,11 +685,14 @@ static func _draw_fx(m) -> void:
 		var dsz: int = int(dn["size"])
 		var pun: float = 1.0 + maxf(0.0, 0.12 - age) * 3.0
 		var dc: Color = Color("fff2c0") if dsz >= 24 else Color(1, 1, 1)
-		var dp: Vector2 = (dn["pos"] as Vector2) + Vector2(float(int(dn["eid"]) * 37 % 31) - 15.0, -18.0 - age * 50.0)
+		# V2 P9 audit: spread numbers of neighbouring bodies on both axes, outline
+		# them (no translucent shadow) and drop them once they fade past half
+		# alpha, so the pile reads as numbers instead of noise.
+		var dp: Vector2 = (dn["pos"] as Vector2) + Vector2(float(int(dn["eid"]) * 37 % 31) - 15.0, -18.0 - age * 50.0 + float(int(dn["eid"]) * 53 % 23) - 11.0)
 		var da: float = minf(1.0, dt * 3.0)
-		# HORDE P6 readability: a dark drop shadow under each aggregated number
-		Kit.t(m, Kit.fmt(float(dn["amt"])), dp + Vector2(1.5, 1.5), int(float(dsz) * pun), Color(0, 0, 0, 0.8 * da), HORIZONTAL_ALIGNMENT_CENTER, 120.0)
-		Kit.t(m, Kit.fmt(float(dn["amt"])), dp, int(float(dsz) * pun), Color(dc, da), HORIZONTAL_ALIGNMENT_CENTER, 120.0)
+		if da < 0.5:
+			continue
+		Kit.t_outline(m, Kit.fmt(float(dn["amt"])), dp, int(float(dsz) * pun), Color(dc, da), HORIZONTAL_ALIGNMENT_CENTER, 120.0)
 	for fd3 in m.pops.items:
 		if float(fd3["t"]) <= 0.0:
 			continue
@@ -817,7 +823,7 @@ static func _draw_ghost(m) -> void:
 static func _draw_right(m) -> void:
 	var S = m.S
 	var rr: Rect2 = m.right_rect()
-	m.draw_rect(rr, Kit.PANEL)
+	m.draw_rect(rr, Color(Kit.PANEL, 1.0))   # V2 P9 audit: opaque, the horde never shows through HUD text
 	m.draw_line(rr.position, Vector2(rr.position.x, rr.end.y), Kit.EDGE, 2.0)
 	var x: float = rr.position.x + 16.0
 	var w: float = rr.size.x - 32.0
@@ -825,16 +831,21 @@ static func _draw_right(m) -> void:
 	var cd: Dictionary = S.core_def if not (S.core_def as Dictionary).is_empty() else CoreDB.get_def(S.core_id)
 	# portrait
 	Kit.panel(m, Rect2(x, y, 96, 96), Kit.RUST, Kit.BG2)
-	Kit.icon(m, "core_bastion", Rect2(x + 6, y + 6, 84, 84))
+	# V2 P9 audit: the portrait is the player's own procedural Core (was the V1 sprite)
+	var mods_p: Array = []
+	var so_p: Array = (Gear.block(m.save)["equipped"] as Dictionary)["sockets"]
+	for k in mini(so_p.size(), Gear.sockets_for(Cores.level(m.save))):
+		mods_p.append(Gear.item(m.save, int(so_p[k])))
+	GearVis.draw_core(m, Cores.look(m.save), mods_p, Gear.weapon(m.save), Vector2(x + 48, y + 48), 30.0, -PI * 0.5, m.t_anim)
 	Kit.t(m, "The Core", Vector2(x + 110, y + 26), 22, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w - 110)
 	Kit.t(m, "Lv %d" % int(S.core_lvl), Vector2(x + 110, y + 50), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w - 110)
-	Kit.t(m, String(cd["attack_name"]), Vector2(x + 110, y + 74), 16, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, w - 110)
+	Kit.t(m, Kit.fit(m, String(cd["attack_name"]), 16, w - 114), Vector2(x + 110, y + 74), 16, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, w - 110)
 	m.stat_tips.append([Rect2(x, y, w, 96), "%s\n%s" % [String(cd["attack_name"]), String(cd["attack_desc"])]])
 	y += 108.0
 	# HP + shield
 	var mhp: float = maxf(1.0, float(S.stats["max_hp"]))
 	Kit.bar_glow(m, Rect2(x, y, w, 24), float(S.hp) / mhp, Kit.ENEMY, 10)
-	Kit.t(m, "HP %d / %d" % [clampi(int(ceil(float(S.hp))), 0, int(mhp)), int(mhp)], Vector2(x + w * 0.5, y + 19), 16, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, w)
+	Kit.t_outline(m, "HP %d / %d" % [clampi(int(ceil(float(S.hp))), 0, int(mhp)), int(mhp)], Vector2(x + w * 0.5, y + 19), 16, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, w)
 	m.stat_tips.append([Rect2(x, y, w, 24), "Core HP. The run ends at 0."])
 	y += 28.0
 	var smax: float = float(S.stats.get("shield_max", 0.0))
@@ -1021,7 +1032,7 @@ static func _draw_supply(m, fr: Rect2) -> void:
 	var r := Rect2(cx - 220, fr.position.y + 110, 440, 190)
 	var rim: Color = Kit.GOLD if jp else Kit.MAGENTA
 	Kit.glow(m, r.get_center(), 260.0, rim, 0.18 * a)
-	Kit.panel_glow(m, r, Color(rim, a), Color(0.06, 0.04, 0.10, 0.95 * a), 1.4, 3)
+	Kit.panel_glow(m, r, Color(rim, a), Color(0.06, 0.04, 0.10, a), 1.4, 3)
 	Kit.th(m, "SUPPLY DROP", Vector2(cx, r.position.y + 30), 22, Color(Kit.GOLD, a), HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
 	var reels: Array = sd.get("reels", [])
 	var keys: Array = SUPPLY_SYM.keys()

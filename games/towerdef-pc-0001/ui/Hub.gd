@@ -163,7 +163,8 @@ static func draw(m) -> void:
 	# PLAY: pulsing magenta halo behind the button (the button draws on top)
 	var sr: Rect2 = start_rect(m)
 	var pulse: float = 0.5 + 0.5 * sin(m.t_anim * 2.4)
-	if Tiers.is_unlocked(m.save, m.view_tier):
+	# V2 P9 audit: no halo under a modal (the hidden button left a hollow slab)
+	if Tiers.is_unlocked(m.save, m.view_tier) and m.overlay == "" and m.offline_offer.is_empty():
 		Kit.panel_glow(m, sr.grow(1.0 + 2.0 * pulse), Color(Kit.MAGENTA, 0.5 + 0.4 * pulse), Color(0, 0, 0, 0), 0.8 + 1.0 * pulse, 1)
 	# tier readout between < and >
 	var tx: float = sr.position.x - 239.0

@@ -13,9 +13,9 @@ const GROUND_PX: int = 2048          # texture size (square)
 const GROUND_WORLD: float = 2600.0   # world units covered, centred on CENTER
 const RING_CAP: int = 512            # pending stamp commands (oldest dropped)
 ## Slow periodic fade so a long run's floor never goes solid: every
-## FADE_PERIOD s the whole layer is multiplied by FADE_MULT (half-life ~70 s).
+## FADE_PERIOD s the whole layer is multiplied by FADE_MULT (half-life ~30 s).
 const FADE_PERIOD: float = 3.0
-const FADE_MULT: float = 0.97
+const FADE_MULT: float = 0.93   # V2 P9 audit: half-life ~30 s (was ~70 s)
 
 var level: String = "low"
 var center: Vector2 = Vector2.ZERO
@@ -191,7 +191,7 @@ func _paint() -> void:
 		var s: int = int(d["s"])
 		# MASS_HORDE §View: swarm corpses soak in dark and translucent so ten
 		# thousand of them build a maroon floor, not a flat red sheet
-		var a0: float = 0.7 if float(d["r"]) >= 14.0 else 0.22
+		var a0: float = 0.5 if float(d["r"]) >= 14.0 else 0.2
 		if a0 < 0.5:
 			c = c.darkened(0.55)
 		_painter.draw_circle(g, r, Color(c, a0))   # corpse / pool

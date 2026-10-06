@@ -107,6 +107,8 @@ static func build(m) -> void:
 
 static func draw(m) -> void:
 	var S = m.S
+	if m.screen == "results":
+		return   # V2 P9 audit: nothing to buy once the run is over
 	var a: Rect2 = area(m)
 	Kit.head(m, "CORE ENHANCEMENTS  (cash, this run)", Vector2(a.position.x, a.position.y - 12), a.size.x)
 	var li: Array = ids(m)
@@ -119,15 +121,19 @@ static func draw(m) -> void:
 		var can: bool = c >= 0 and S.cash >= float(c) and S.track_unlocked(tid)
 		var od: bool = TrackDB.is_od(tid)
 		var locked: bool = not S.track_unlocked(tid)
-		var rim: Color = Kit.MAGENTA if od else (Kit.GREEN if can else Kit.EDGE)
+		# V2 P9 audit: affordability shows on every tile (Overdrives too); an
+		# Overdrive is marked by its "OD" tag, not by hue alone
+		var rim: Color = Kit.GREEN if can else (Color(Kit.MAGENTA, 0.55) if od else Kit.EDGE)
 		Kit.panel(m, r, rim, Kit.tint(Kit.GREEN, 0.12) if can else (Kit.tint(Kit.MAGENTA, 0.08) if od else Kit.PANEL), 1)
 		# level bar along the bottom edge
 		var cap: int = maxi(1, TowerState.track_cap(tid))
 		var fr: float = float(lv) / float(cap)
 		m.draw_rect(Rect2(r.position.x + 3, r.end.y - 4, (r.size.x - 6) * fr, 2), Kit.MAGENTA if od else Kit.CYAN)
-		var ty: float = r.position.y + maxf(16.0, r.size.y * 0.46)
-		Kit.t(m, String(d["name"]), Vector2(r.position.x + 7, ty), 14, Kit.TEXT if (can or lv > 0) else Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 14)
-		var ly: float = r.end.y - 6.0
+		var ty: float = r.position.y + maxf(16.0, r.size.y * 0.40)
+		Kit.t(m, String(d["name"]), Vector2(r.position.x + 7, ty), 14, Kit.TEXT if (can or lv > 0) else Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - (40.0 if od else 14.0))
+		if od:
+			Kit.th(m, "OD", Vector2(r.end.x - 7, ty), 14, Kit.MAGENTA.lerp(Kit.TEXT, 0.3), HORIZONTAL_ALIGNMENT_RIGHT, 30.0)
+		var ly: float = r.end.y - 9.0
 		if locked:
 			# V2 P8: research-gated track - the Theory that opens it
 			Kit.t(m, TrackDB.unlock_label(tid).replace("Enhancement Theory", "Needs Theory"), Vector2(r.position.x + 7, ly), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 14)

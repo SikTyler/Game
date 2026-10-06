@@ -1,37 +1,25 @@
 extends SceneTree
-# BALANCE / PLAYABILITY audit for Corehold. Drives the REAL loop (TowerState is
-# the whole game; Main.gd is a replay view) at a fixed dt with a deterministic
-# COMPETENT bot across a multi-run campaign, spending coins on the permanent
-# base between runs exactly as a player would on the Base screen. Asserts:
-#   - SOLVENT:        a fresh first run banks enough coins to buy something,
-#   - FIRST GOAL:     a fresh first run (no meta) reaches wave FIRST_GOAL_WAVE,
-#   - PROGRESSABLE:   the campaign's best wave climbs >= PROGRESS_GAIN over run 1,
-#   - NO DEATH SPIRAL: no run regresses badly vs the previous one,
-#   - NO TRIVIAL DOMINANT: neither a pure-eco nor a pure-weapon policy beats
-#     the balanced policy by > 15% — the eco-vs-defense split is a real decision.
-# Campaign gates (ECONOMY.md / BRIEF AC-38..41): eco-mix >= 1.10x pure weapon
-# waves (AC-38), mono-building permanent boards < 70% of balanced (AC-39; the
-# probe may still place drafted run-only buildings, which makes it stricter),
-# T2 on day 3-5 + day-1 best wave 18-32 (AC-40), no post-T3 plateau, and the
-# week-1 checks repeated on EXTRA_SEEDS.
-# PC (7x7 board, build cap, multi-lane waves): the bot places weapons as close
-# to the core as the ring rules allow, keeps the Beacon lane focus on an active
-# lane, cancels cards with no legal cell, buys outer cells for land development
-# once saturated, and picks the mildest endless mutation. PC gates: swapping
-# Mines for Refineries never out-earns the same board by > 15% (PC-E14), every challenge modifier reaches
-# wave 25 on the day-20 save and endless plays past its first mutation (PC-E16);
-# modifier coin rewards are fair vs a same-seed baseline and endless pays
-# 0.8-1.15x a normal run (PC_BALANCE.md).
-# REDESIGN (ENGINE-RUN): the bot drafts every pick family (buildings, huts,
-# packs, specials, Insight), casts specials, buys the 5 Core cash tracks and,
-# between runs, Core levels (+ legacy Core stats). Adapted invariants (design
-# change, documented): AC-38 -> REDESIGN_BRIEF AC-30 (mixed beats zero-eco and
-# all-eco frontier, no coin premium); AC-39 -> a one-building run stays below
-# the mixed run (no permanent mono boards exist); PC-E14 refinery probe now
-# compares the same save (Refinery is a run pick; permanent slots no longer
-# enter runs, ratio reported). Nothing else loosened.
-# Prints per-run lines + "PLAYTEST METRICS {json}" + exactly "PLAYTEST OK" (exit 0)
-# or "PLAYTEST FAIL: ..." (exit 1). Clears user:// saves at start and end.
+# V2 BALANCE / PLAYABILITY audit for Corehold (V2 P9). Drives the real loop
+# (TowerState is the whole game; Main.gd is a view) at a fixed dt with a
+# deterministic competent bot, in runs (drafts, merges, placement facing away
+# from the Core, specials, Core Enhancements) and between runs (MetaBot: the
+# Outpost build plan, research by weighted priority, Core levels, gear: merge
+# / equip / upgrade / forge / salvage). Jobs fan out over worker processes:
+#   main       a DAYS-day campaign (4 runs a day on the SESSION_H clock) with
+#              day rows; writes the day-3 / day-8 snapshots for phase B
+#   fresh      FRESH_N brand-new first runs (first-run length, early wall)
+#   mass       the MASS_HORDE H1-H10 engine gates
+#   gear       day 8: the save's gear vs a Common Autocannon loadout
+#   corebld    day 8: with vs without the Outpost's Core buildings
+#   xp         day 3: XP-focus vs balanced levels by wave 12 (Core held up)
+#   dir        day 8: radial-only vs directional-only weapon drafts
+#   weapons_*  day 8: each weapon as the only weapon vs the balanced mix
+#   perks      day 8: each gold-perk family preferred vs balanced
+# Gates: GATES + MASS_GATES (V2_PROGRESS §P9 documents each threshold).
+# Prints per-run / per-day lines, "PLAYTEST METRICS {json}" and exactly
+# "PLAYTEST OK" (exit 0) or "PLAYTEST FAIL: <gate>" lines (exit 1).
+# Debug: `-- only=<job>` runs one job in-process (verbose, no gates);
+# `-- serial` runs every job in-process. Clears user:// saves at start / end.
 
 const TowerState := preload("res://TowerState.gd")
 const TrackDB := preload("res://data/TrackDB.gd")
@@ -44,34 +32,39 @@ const PickDB := preload("res://data/PickDB.gd")
 const Specials := preload("res://Specials.gd")
 const Cores := preload("res://Cores.gd")
 const OutpostDB := preload("res://data/OutpostDB.gd")
-const Reforge := preload("res://Reforge.gd")
 const PowerModel := preload("res://PowerModel.gd")
-const ReforgeDB := preload("res://data/ReforgeDB.gd")
+const WeaponDB := preload("res://data/WeaponDB.gd")
+const Gear := preload("res://Gear.gd")
+const RarityDB := preload("res://data/RarityDB.gd")
+const Labs := preload("res://Labs.gd")
+const Missions := preload("res://Missions.gd")
+const Outpost := preload("res://Outpost.gd")
+const Tiers := preload("res://Tiers.gd")
+const LabDB := preload("res://data/LabDB.gd")
 
 const DT: float = 0.1
 const MAX_SIM_S: float = 3600.0
-const RUNS: int = 8
-const FIRST_GOAL_WAVE: int = 5
-## MASS_HORDE harness fidelity (documented in MASS_HORDE §Content): the 30-day
-## campaign plays hundreds of runs, so a wave planned above this many bodies
-## spawns one body per k = ceil(B / cap) carrying k x HP / damage / pool share
-## / kill count. Waves up to the cap (every T1 wave <= 21, i.e. every first
-## run, H7) are simulated 1:1; the H1/H2/H8 mass gates always run at 1:1.
+## MASS_HORDE harness fidelity (MASS_HORDE §Content): a wave planned above this
+## many bodies spawns one body per k = ceil(B / cap) carrying k x HP / damage /
+## pool share / kill count. Every first-session wave stays under it.
 const BOT_LOD_CAP: int = 1200
-const PROGRESS_GAIN: int = 5
 const SEED_DEFAULT: int = 4242
-const MIX_ECO_UNTIL: int = 15
+## V2 P9 day-1 goal: the campaign's best wave on day 1 (4 runs).
+const FIRST_GOAL_WAVE: int = 10
+const DAYS: int = 10
+const SESSION_H: Array = [8, 8, 16, 16]        # 2 sessions x 2 runs; 8 h / 16 h offline gaps
+const NOW0: int = 1767225600                   # 2026-01-01 00:00 UTC (a day boundary)
+const SNAP_DAYS: Array = [3, 8]
+const AB_SEEDS: Array = [101, 202, 303]
 
 var fail_count: int = 0
-const GATES: Array = ["solvent", "first_goal_reachable", "progressable", "no_death_spiral", "no_trivial_dominant",
-	"t2_by_day5", "tier3_by_day30", "no_plateau_before_t3", "early_3day_rise",
-	"gems_per_day_ok", "gem_sources_ok", "offline_below_active", "mix_beats_weapon", "mix_beats_eco", "no_dominant_perk",
-	"ac38_eco_mix", "ac39_no_mono", "day1_band", "first_run_short", "no_plateau_after_t3", "seeds_ok",
-	"pc_refinery_not_dominant", "pc_modifiers_reach_w25", "pc_modifiers_fair", "pc_endless_runs"]
-const EXTRA_SEEDS: Array = [5151, 6262]   # AC-38/AC-40 re-checked on more seeds (thin margins)
+const GATES: Array = ["solvent", "first_goal_day1", "first_run_short", "fresh_median_first_goal", "progressable", "no_death_spiral",
+	"t2_by_day3_6", "speed2_by_day4_8", "gear_matters", "corebld_matters", "xp_drafts", "dir_parity",
+	"no_dominant_weapon", "no_dominant_perk", "pity_holds"]
 
 
 static var QUIET: bool = false      # child jobs buffer their log instead of printing
+static var DAYS_RUN: int = DAYS     # `-- only=main days=N` (debug) shortens the campaign
 static var LOGBUF: Array = []
 
 
@@ -99,13 +92,11 @@ func _initialize() -> void:
 		f.close()
 		quit(0)
 		return
+	if args.has("days"):
+		DAYS_RUN = int(args["days"])
 	if args.has("only"):
-		# Debug: one job in-process, verbose (no gates).
-		FORGE_DUMP = String(args.get("dump", ""))
-		FORGE_RESUME = String(args.get("resume", ""))
 		var o: Dictionary = run_job(String(args["only"]), seed0, OS.get_user_data_dir())
-		if not String(args["only"]).begins_with("main"):
-			print("ONLY " + JSON.stringify(o))
+		print("ONLY " + JSON.stringify(o))
 		quit(0)
 		return
 	MetaSave.clear()
@@ -130,59 +121,121 @@ func _initialize() -> void:
 
 
 # ------------------------------------------------------------- job runner
-# The audit is split into independent deterministic jobs (each one owns its
-# saves and RNG seeds) so it can fan out over CPU cores: the parent re-launches
-# this script headless once per job (`-- job=<name> dir=<tmp>`), at most
-# `workers` at a time, and merges the results. Phase-B jobs replay the day-7 /
-# day-20 snapshots the "main" job writes (var_to_bytes: exact). `-- serial`
-# runs every job in-process (same results; for debugging).
-const JOBS_A: Array = ["main", "forge:balanced", "forge:eco", "forge:single", "forge:damage", "strat", "seed:0", "seed:1", "pol", "fresh", "mass"]
-const JOBS_B: Array = ["perks", "mods", "mono", "specs", "sets"]
+# Each job owns its saves and RNG seeds, so the audit fans out over CPU cores:
+# the parent re-launches this script headless once per job (`-- job=<name>
+# dir=<tmp>`), at most `workers` at a time, and merges the results. Phase-B
+# jobs replay the day-3 / day-8 snapshots the "main" job writes (var_to_bytes:
+# exact). `-- serial` runs every job in-process (same results; debugging).
+const JOBS_A: Array = ["main", "fresh", "mass"]
+const JOBS_B: Array = ["gear", "corebld", "xp", "dir", "weapons_a", "weapons_b", "perks"]
 
 
 static func _job_file(job: String) -> String:
-	return job.replace(":", "_") + ".bin"
+	return "job_%s.bin" % job.replace(":", "_")
+
+
+static func _snap_path(dir: String, d: int) -> String:
+	return dir.path_join("snap%d.bin" % d)
+
+
+static func _snap(dir: String, d: int) -> Dictionary:
+	var path: String = _snap_path(dir, d)
+	if not FileAccess.file_exists(path):
+		return {}
+	var f := FileAccess.open(path, FileAccess.READ)
+	var v: Variant = bytes_to_var(f.get_buffer(f.get_length()))
+	f.close()
+	return v if v is Dictionary else {}
 
 
 static func run_job(job: String, seed0: int, dir: String) -> Dictionary:
-	var p: PackedStringArray = job.split(":")
-	match p[0]:
-		"pol":
-			return job_policies(seed0)
+	match job:
 		"main":
-			return job_main(seed0, dir)
-		"strat":
-			return job_strat(seed0)
-		"seed":
-			return job_seed(seed0, int(EXTRA_SEEDS[int(p[1])]))
-		"perks", "mods", "mono":
-			var snaps: Dictionary = {}
-			for d in [7, 20]:
-				var f := FileAccess.open(dir.path_join("snap%d.bin" % d), FileAccess.READ)
-				snaps[d] = bytes_to_var(f.get_buffer(f.get_length()))
+			var M: Dictionary = campaign(seed0, DAYS_RUN)
+			for d in (M["snaps"] as Dictionary).keys():
+				var f := FileAccess.open(_snap_path(dir, int(d)), FileAccess.WRITE)
+				f.store_buffer(var_to_bytes(M["snaps"][d]))
 				f.close()
-			match p[0]:
-				"perks":
-					return job_perks(seed0, snaps)
-				"mods":
-					return job_mods(seed0, snaps)
-				_:
-					return job_mono(seed0, snaps)
+			M.erase("snaps")
+			M.erase("save")
+			return M
 		"fresh":
 			return job_fresh(seed0)
 		"mass":
 			return job_mass(seed0)
+		"gear":
+			return job_gear(seed0, _snap(dir, 8))
+		"corebld":
+			return job_corebld(seed0, _snap(dir, 8))
+		"xp":
+			return job_xp(seed0, _snap(dir, 3))
+		"dir":
+			return job_dir(seed0, _snap(dir, 8))
+		"weapons_a":
+			return job_weapons(seed0, _snap(dir, 8), _weapon_ids().slice(0, _weapon_ids().size() / 2))
+		"weapons_b":
+			return job_weapons(seed0, _snap(dir, 8), _weapon_ids().slice(_weapon_ids().size() / 2))
+		"perks":
+			return job_perks(seed0, _snap(dir, 8))
 	return {}
 
 
-# ======================================================================
-# MASS_HORDE §D8 invariants H1-H12 (replace the split-model gates; owner
-# FEEDBACK_3). Every probe here runs the shipped ruleset at 1:1 (no harness
-# LOD): designed bodies, mass waves, legacy split knob off.
-#   H1 body counts 100s -> 1,000s -> 10,000s   H2 peak alive >= 10k, queue held
-#   H3 no split body (share 1, knob 1)          H4 designed HP x growth
-#   H5 full-clear wave pays pool x 1.3 (+-5%)   H6 drops <= cap, >= 1 per 2 waves
-#   H7 first-run goal held on day 1 (campaign)  H8 every weapon kills masses
+func run_jobs(seed0: int, serial: bool, workers: int) -> Dictionary:
+	var dir: String = OS.get_user_data_dir().path_join("pt_jobs")
+	DirAccess.make_dir_recursive_absolute(dir)
+	var R: Dictionary = {}
+	var failed: Array = []
+	var order: Array = ["main"] + JOBS_B + JOBS_A.slice(1)
+	if serial:
+		for job in order:
+			LOGBUF = []
+			R[job] = run_job(String(job), seed0, dir)
+	else:
+		var exe: String = OS.get_executable_path()
+		var proj: String = ProjectSettings.globalize_path("res://")
+		var pending: Array = order.duplicate()
+		var running: Dictionary = {}     # job -> pid
+		var done: Dictionary = {}
+		while pending.size() > 0 or running.size() > 0:
+			for job in running.keys():
+				if not OS.is_process_running(int(running[job])):
+					running.erase(job)
+					done[job] = true
+					var path: String = dir.path_join(_job_file(String(job)))
+					if FileAccess.file_exists(path):
+						var f := FileAccess.open(path, FileAccess.READ)
+						var res: Variant = bytes_to_var(f.get_buffer(f.get_length()))
+						f.close()
+						DirAccess.remove_absolute(path)
+						var rd: Dictionary = res
+						for line in rd["log"]:
+							print(String(line))
+						R[job] = rd["r"]
+					else:
+						failed.append(job)
+						R[job] = {}
+			var k: int = 0
+			while k < pending.size() and running.size() < maxi(1, workers):
+				var job: String = String(pending[k])
+				if JOBS_B.has(job) and not done.has("main"):
+					k += 1
+					continue
+				pending.remove_at(k)
+				var pid: int = OS.create_process(exe, ["--headless", "--path", proj, "--script", "res://playtest.gd", "--", "job=" + job, "dir=" + dir])
+				if pid <= 0:
+					failed.append(job)
+					R[job] = {}
+					done[job] = true
+				else:
+					running[job] = pid
+			OS.delay_msec(100)
+	for d in SNAP_DAYS:
+		DirAccess.remove_absolute(_snap_path(dir, int(d)))
+	R["_failed"] = failed
+	return R
+
+
+
 #   H9 fluid sanity (selftest MASS-HORDE world) H10 same seed -> same waves
 #   H11 perf logged (not gated)                 H12 = no_death_spiral (kept)
 # ======================================================================
@@ -281,6 +334,8 @@ static func job_mass(seed0: int) -> Dictionary:
 		guard = 0
 		while cc < 0.0 and guard < 2000:
 			guard += 1
+			SE.combo = 0.0   # V2 P7c: the kill-streak combo is a bonus on top of the pool
+			SE.combo_tier = 0
 			for e in SE.tick(TowerState.SUBSTEP):
 				var ed: Dictionary = e
 				if String(ed["t"]) == "kills":
@@ -472,6 +527,8 @@ static func _boss_dps_lv5(seed0: int) -> Dictionary:
 ## balanced bot, each on its own brand-new save and seed (no meta, no draft
 ## memory). Reports death waves and the boss-aware R probes of camp_run.
 const FRESH_N: int = 16
+## A fresh first run (no meta) must reach this wave (every one of FRESH_N).
+const FRESH_GOAL_WAVE: int = 5
 static func job_fresh(seed0: int) -> Dictionary:
 	var waves: Array = []
 	var times: Array = []
@@ -490,202 +547,72 @@ static func job_fresh(seed0: int) -> Dictionary:
 	return {"waves": waves, "times": times, "r_early": re, "r_wall": rwl, "r_front": rf}
 
 
-func run_jobs(seed0: int, serial: bool, workers: int) -> Dictionary:
-	var dir: String = OS.get_user_data_dir().path_join("pt_jobs")
-	DirAccess.make_dir_recursive_absolute(dir)
-	var R: Dictionary = {}
-	var failed: Array = []
-	var order: Array = ["main"] + JOBS_B + JOBS_A.slice(1)
-	if serial:
-		for job in order:
-			LOGBUF = []
-			R[job] = run_job(String(job), seed0, dir)
-	else:
-		var exe: String = OS.get_executable_path()
-		var proj: String = ProjectSettings.globalize_path("res://")
-		var pending: Array = order.duplicate()
-		var running: Dictionary = {}     # job -> pid
-		var done: Dictionary = {}
-		while pending.size() > 0 or running.size() > 0:
-			for job in running.keys():
-				if not OS.is_process_running(int(running[job])):
-					running.erase(job)
-					done[job] = true
-					var path: String = dir.path_join(_job_file(String(job)))
-					if FileAccess.file_exists(path):
-						var f := FileAccess.open(path, FileAccess.READ)
-						var res: Variant = bytes_to_var(f.get_buffer(f.get_length()))
-						f.close()
-						DirAccess.remove_absolute(path)
-						var rd: Dictionary = res
-						for line in rd["log"]:
-							print(String(line))
-						R[job] = rd["r"]
-					else:
-						failed.append(job)
-						R[job] = {}
-			var k: int = 0
-			while k < pending.size() and running.size() < maxi(1, workers):
-				var job: String = String(pending[k])
-				if JOBS_B.has(job) and not done.has("main"):
-					k += 1
-					continue
-				pending.remove_at(k)
-				var pid: int = OS.create_process(exe, ["--headless", "--path", proj, "--script", "res://playtest.gd", "--", "job=" + job, "dir=" + dir])
-				if pid <= 0:
-					failed.append(job)
-					R[job] = {}
-					done[job] = true
-				else:
-					running[job] = pid
-			OS.delay_msec(100)
-	for d in [7, 20]:
-		DirAccess.remove_absolute(dir.path_join("snap%d.bin" % d))
-	R["_failed"] = failed
-	return R
+
+# ======================================================================
+# IN-RUN BOT
+# ======================================================================
+static func _weapon_ids() -> Array:
+	return WeaponDB.DEFS.keys()
 
 
-static func job_policies(seed0: int) -> Dictionary:
-	var camp: Dictionary = {}
-	for pol in ["balanced", "eco", "weapon", "mono:gun", "mono:mortar", "mono:tesla"]:
-		camp[pol] = campaign(pol, seed0)
-	var bal: Array = camp["balanced"]["waves"]
-	var eco: Array = camp["eco"]["waves"]
-	var wpn: Array = camp["weapon"]["waves"]
-	var first: Dictionary = camp["balanced"]["first"]
-	var first_wave: int = int(first["wave"])
-	var bal_best: int = int(bal.max())
-	var eco_best: int = int(eco.max())
-	var wpn_best: int = int(wpn.max())
-	# AC-39 (adapted, REDESIGN): the Core is the main weapon and buildings are
-	# single-instance picks, so a "mono board" no longer exists; a run that
-	# builds only one building id must still fall short of the mixed run.
-	# (Was: mono permanent board < 70% of balanced.)
-	var mono8: Dictionary = {}
-	var mono8_ok: bool = true
-	for mid in ["gun", "mortar", "tesla"]:
-		var mb8: int = int((camp["mono:" + mid]["waves"] as Array).max())
-		mono8[mid] = mb8
-		if mb8 >= bal_best:
-			mono8_ok = false
-	# Death spiral (REDESIGN-adapted, deliberate): the in-run grid is now a
-	# roguelite draft (starts empty, random picks), so single-seed outcomes
-	# quantise to the boss walls (w20 / w30) and run-to-run drops of one boss
-	# step are draft variance, not a collapse. A spiral is progress trending
-	# DOWN: the later half's median below the first half's by > 2 waves, or any
-	# run below the very first run by > 2. (Was: any run > 2 below the previous.)
-	var half: int = bal.size() / 2
-	var spiral: bool = _median(bal.slice(half)) < _median(bal.slice(0, half)) - 2.0
-	for k in range(1, bal.size()):
-		if int(bal[k]) < int(bal[0]) - 2:
-			spiral = true
-	return {
-		"first_wave": first_wave, "first_coins": int(first["coins"]), "first_levels": int(first["level"]),
-		"first_time_s": snappedf(float(first["time"]), 0.1),
-		"balanced_waves": bal, "eco_waves": eco, "weapon_waves": wpn,
-		"balanced_best": bal_best, "eco_best": eco_best, "weapon_best": wpn_best,
-		"solvent": int(first["coins"]) >= 15,
-		"first_goal_reachable": first_wave >= FIRST_GOAL_WAVE,
-		"progressable": bal_best >= first_wave + PROGRESS_GAIN,
-		"no_death_spiral": not spiral,
-		"no_trivial_dominant": float(maxi(eco_best, wpn_best)) <= float(bal_best) * 1.15,
-		"mono_best": mono8, "ac39_no_mono": mono8_ok,
-	}
+static func _is_weapon(id: String) -> bool:
+	return WeaponDB.has(id)
 
 
-static func campaign(policy: String, seed0: int) -> Dictionary:
-	var save: Dictionary = BaseMeta.default_save()
-	var waves: Array = []
-	var first: Dictionary = {}
-	for r in RUNS:
-		var res: Dictionary = run_once(save, policy, seed0 + r * 97)
-		if r == 0:
-			first = res
-		waves.append(int(res["wave"]))
-		say("PLAYTEST run %s #%d: wave %d lv %d kills %d coins %d (%.0fs) bank=%d" % [policy, r + 1, res["wave"], res["level"], res["kills"], res["coins"], res["time"], save["coins"]])
-		spend_meta(save, policy)
-	return {"waves": waves, "first": first}
-
-
-## Draft score for one card under a policy (REDESIGN: every pick family).
-##   balanced: weapons first, then a mix of eco / packs / specials / troops
-##   eco:      eco picks first; weapon: dps/aoe/control only
-##   mono:X:   AC-39 probe — only building X (and its level-ups); otherwise the
-##             least committal card (packs that are not damage)
-##   refinery: PC-E14 probe — Refinery + Mine first, weapons as glue
+## Draft score for one card under an in-run policy:
+##   balanced     weapons first (up to 3 + wave / 5), supports once two
+##                weapons stand, two eco picks in waves 6-17, damage packs,
+##                then specials / huts; evolutions and Insight always
+##   xp           balanced + XP cards first (XP Siphon, XP packs)
+##   radial / directional   balanced, but only weapons of that aim class
+##   only:<id>    balanced, but <id> is the only weapon it drafts
 static func _card_score(S, policy: String, c: Dictionary) -> float:
 	var id: String = String(c["id"])
 	var fam: String = String(c["fam"])
 	var kind: String = String(c["kind"])
 	var tags: Array = c["tags"]
-	var rar: int = ["common", "rare", "epic", "legendary"].find(String(c["rarity"]))
+	var rar: int = maxi(0, ["common", "rare", "epic", "legendary"].find(String(c["rarity"])))
 	if kind == "insight":
 		return 1000.0
-	var weapon: bool = fam == "building" and (tags.has("dps") or tags.has("aoe") or tags.has("control")) and not ["armory", "beacon", "barricade"].has(id)
+	if kind == "evo":
+		return 900.0
+	var weapon: bool = fam == "building" and _is_weapon(id)
 	var eco: bool = tags.has("eco")
+	if weapon and policy.begins_with("only:") and id != policy.substr(5):
+		return -50.0
+	if weapon and (policy == "radial" or policy == "directional") and WeaponDB.directional(id) != (policy == "directional"):
+		return -50.0
 	var nw: int = _weapon_count(S)
-	var sc: float = 1.0 + 1.5 * float(maxi(0, rar))
-	if policy.begins_with("mono:"):
-		if id == policy.substr(5):
-			return 100.0
-		if fam == "pack" and not tags.has("dps"):
-			return 5.0
-		return 1.0 if fam == "building" or fam == "hut" else 2.0
-	match policy:
-		"eco":
-			if eco:
-				sc += 10.0
-			elif fam == "building" and nw < 1 and weapon:
-				sc += 6.0
-		"weapon":
-			if weapon or (fam == "pack" and tags.has("dps")):
-				sc += 10.0
-			elif eco:
-				sc -= 5.0
-		"refinery":
-			if id == "refinery" or id == "mine":
-				sc += 12.0
-			elif weapon:
-				sc += 6.0
-		"spec_eco", "single", "damage":
-			# Redesign specs = the balanced line re-weighted: spec_eco takes up to
-			# 3 eco picks from wave 10; single keeps few buildings and stacks the
-			# Core (Core Surge, damage packs, Overdrive); damage takes one eco pick
-			# and every damage card.
-			var ne2: int = _counts(S).y
-			if eco:
-				var cap: int = {"spec_eco": 3, "single": 2, "damage": 1}[policy]
-				var from: int = 10 if policy == "spec_eco" else TuneRef.int_of("bot_eco_from", 12)
-				sc += 11.0 if (nw >= 1 and S.wave >= from and S.wave < 20 and ne2 < cap) else -2.0
-			elif weapon:
-				if policy == "single":
-					sc += 11.0 if nw < 1 + S.wave / 10 else 4.0
-				else:
-					sc += 11.0 if nw < 3 + S.wave / 5 else 9.0
-			elif fam == "pack" and tags.has("dps"):
-				sc += 12.0 if (policy == "single" and id == "pk_core") else (10.0 if policy != "spec_eco" else 9.0)
-			elif fam == "special":
-				sc += (6.0 if policy == "single" and id == "sp_overdrive" else 0.0) + (3.0 if ["sp_orbital", "sp_overdrive", "sp_timewarp", "sp_emp"].has(id) else 1.0)
-			elif fam == "hut":
-				sc += 2.5
-		_:
-			# balanced = the weapon line plus an early eco engine: the first two
-			# eco picks before wave 12 come first (they compound all run), then
-			# weapons / damage packs, then utility (specials, troops).
-			var ne: int = _counts(S).y
-			if eco:
-				sc += TuneRef.num("bot_eco_pick", 11.0) if (nw >= 2 and S.wave >= TuneRef.int_of("bot_eco_from", 12) and S.wave < 16 and ne < 2) else -2.0
-			elif weapon:
-				sc += 11.0 if nw < 3 + S.wave / 5 else 9.0
-			elif fam == "pack" and tags.has("dps"):
-				sc += 9.0
-			elif fam == "special":
-				sc += 3.0 if ["sp_orbital", "sp_overdrive", "sp_timewarp", "sp_emp"].has(id) else 1.0
-			elif fam == "hut":
-				sc += 2.5
+	var sc: float = 1.0 + 1.5 * float(rar)
+	if weapon:
+		sc += 11.0 if nw < 3 + S.wave / 5 else 8.0
+		# a horde is a crowd: area damage first; a pure-control weapon (Cryo
+		# Spire, Sonic Cannon) only once two damage weapons stand
+		if tags.has("aoe"):
+			sc += 2.0
+		if not tags.has("dps") and not tags.has("aoe") and nw < 2:
+			sc -= 8.0
+	elif eco:
+		sc += 10.0 if (nw >= 2 and S.wave >= 6 and S.wave < 18 and _counts(S).y < 2) else -2.0
+	elif fam == "building":
+		sc += 7.5 if nw >= 2 else 3.0   # supports buff the weapons around them
+	elif fam == "pack":
+		sc += 8.5 if tags.has("dps") else 4.0
+	elif fam == "special":
+		sc += 3.0
+	elif fam == "hut":
+		sc += 2.5
+	if policy == "xp" and _xp_card(id):
+		sc += 14.0
 	if bool(c.get("merge", false)):
-		sc += 1.5   # V2 P7a: a duplicate that merges into a T2
+		sc += 2.0   # V2 P7a: a duplicate merges into a T2
 	return sc
+
+
+static func _xp_card(id: String) -> bool:
+	if id == "xpsiphon":
+		return true
+	return float((PickDB.get_def(id).get("fx", {}) as Dictionary).get("xp", 0.0)) > 0.0
 
 
 ## V2 P7a bot merging: take mod 0 of an open offer, then fold any building
@@ -712,8 +639,8 @@ static func merge_step(S) -> Array:
 
 static func _weapon_count(S) -> int:
 	var n: int = 0
-	for w in S.stats.get("weapons", []):
-		if int((w as Dictionary)["slot"]) != TowerState.CORE_SLOT:
+	for i in TowerState.N:
+		if _is_weapon(S.id_at(i)) and S.owner_at(i) == i:
 			n += 1
 	return n
 
@@ -723,59 +650,47 @@ static func _counts(S) -> Vector2i:
 	var e: int = 0
 	for i in TowerState.N:
 		var id: String = S.id_at(i)
-		if id == "":
+		if id == "" or S.owner_at(i) != i:
 			continue
 		if PickDB.is_eco(id):
 			e += 1
-		elif BuildingDB.cat_of(id) == "weapon":
+		elif _is_weapon(id):
 			w += 1
 	return Vector2i(w, e)
 
 
-## Perk pick: policy family first, pure perks over tradeoffs.
+## Gold perk pick: pure perks over trade-offs; offense / defense / tempo
+## first; `fam:<f>` prefers family f; `xp` prefers XP perks.
 static func _perk_score(policy: String, id: String) -> int:
 	var d: Dictionary = PerkDB.get_def(id)
 	var fam: String = String(d.get("fam", ""))
 	var sc: int = 0 if bool(d.get("tradeoff", false)) else 2
-	match policy:
-		"eco":
-			sc += 3 if fam == "economy" else 0
-		"weapon":
-			sc += 3 if fam == "offense" else 0
-		_:
-			sc += 3 if fam != "economy" else 1
-	return sc
+	if policy.begins_with("fam:"):
+		return sc + (8 if fam == policy.substr(4) else 0)
+	if policy == "xp" and float((d.get("fx", {}) as Dictionary).get("xp", 0.0)) > 0.0:
+		sc += 8
+	return sc + (3 if ["offense", "defense", "tempo"].has(fam) else 1)
 
 
-## Track priority weights per policy: cheapest weighted cost wins.
+## Track priority weights: the cheapest weighted price wins. Standard tracks
+## by tree (defense when hurt, economy early); Overdrives at a premium.
 static func _track_weight(S, policy: String, t: String) -> float:
 	var hp_frac: float = S.hp / maxf(1.0, float(S.stats["max_hp"]))
-	# V2 P7b: standard enhancement tracks by tree (P9 rewrites the bot policy)
-	if not TrackDB.is_od(t):
-		var tree: String = String(TrackDB.get_def(t).get("tree", "attack"))
-		var tw: float = {"attack": 1.0, "defense": 0.9 if hp_frac < 0.5 else 1.5, "economy": 0.8 if S.wave < 30 else 2.0}.get(tree, 1.0)
-		return tw * (99.0 if policy == "weapon" and tree == "economy" else 1.0)
-	match policy:
-		"eco":
-			return {"eco": 0.4, "dmg": 1.0, "rate": 1.4, "range": 3.0, "armor": 1.6}[t]
-		"weapon":
-			return {"eco": 99.0, "dmg": 0.8, "rate": 1.0, "range": 2.0, "armor": 1.4}[t]
-	var w: Dictionary = {"dmg": 0.8, "rate": 1.0, "range": 2.0, "eco": TuneRef.num("bot_eco_w", 0.35) if S.wave < TuneRef.int_of("bot_eco_until", 30) else TuneRef.num("bot_eco_w_late", 1.6), "armor": 0.9 if hp_frac < 0.5 else 1.4}
-	match policy:
-		"spec_eco":
-			w = {"eco": 0.3 if S.wave < 35 else 1.2, "dmg": 0.8, "rate": 1.0, "range": 2.0, "armor": 0.9 if hp_frac < 0.5 else 1.4}
-		"single":
-			w = {"eco": 0.5 if S.wave < 25 else 1.8, "dmg": 0.7, "rate": 0.85, "range": 2.0, "armor": 0.9 if hp_frac < 0.5 else 1.4}
-	if int(S.tracks["range"]) >= 6:
-		w["range"] = 6.0
-	# Boss prep: the last waves before a boss wave go to damage, not eco.
+	if TrackDB.is_od(t):
+		var od: Dictionary = {"dmg": 1.6, "rate": 1.8, "range": 3.0, "eco": 2.5 if S.wave < 25 else 6.0, "armor": 1.6 if hp_frac < 0.5 else 2.6}
+		return float(od.get(t, 3.0))
+	var tree: String = String(TrackDB.get_def(t).get("tree", "attack"))
+	var w: float = {"attack": 1.0, "defense": 0.9 if hp_frac < 0.5 else 1.4, "economy": 0.8 if S.wave < 20 else 2.0}.get(tree, 1.0)
+	if policy == "xp" and t == "e_xp":
+		w *= 0.25
+	# boss prep: the last waves before a boss wave go to attack
 	var be: int = int(S.boss_every)
-	if S.wave >= maxi(be, TuneRef.int_of("bot_boss_prep_from", 0)) and be - S.wave % be <= TuneRef.int_of("bot_boss_prep", 3):
-		w["eco"] = float(w["eco"]) * 4.0
-	return float(w[t])
+	if tree == "economy" and be - S.wave % be <= 2:
+		w *= 3.0
+	return w
 
 
-## Specials: cast when it pays (bots use auto-aim for Orbital).
+## Specials: cast when it pays (targeted ones auto-aim at the densest pile).
 static func _use_specials(S) -> Array:
 	var ev: Array = []
 	var live: int = 0
@@ -798,31 +713,35 @@ static func _use_specials(S) -> Array:
 		var id: String = String((S.specials[k] as Dictionary)["id"])
 		var go: bool = false
 		match id:
-			"sp_orbital":
-				go = live >= 4 or boss
-			"sp_emp":
-				go = live >= 10 or (boss and near > 0)
+			"sp_orbital", "sp_nuke", "sp_meteor":
+				go = live >= 8 or boss
+			"sp_emp", "sp_blackhole":
+				go = live >= 12 or (boss and near > 0)
 			"sp_repair":
 				go = hp_frac < 0.55
-			"sp_overdrive":
+			"sp_shield":
+				go = hp_frac < 0.35 and near >= 3
+			"sp_overdrive", "sp_frenzy":
 				go = near >= 3 or boss
 			"sp_magnet":
 				go = live >= 12
 			"sp_timewarp":
 				go = hp_frac < 0.4 and near >= 3
+			"sp_jackpot":
+				go = true
 		if go:
 			var r: Dictionary = S.cast_special(k, -1)
 			ev.append_array(r["ev"])
 	return ev
 
 
-## Competent in-run policy; also used as a library by selftest / _shots.
+## Competent in-run policy; also used as a library by _shots.
 static func bot_step(S, policy: String, perk_pref: String = "") -> Array:
 	var ev: Array = []
 	if S.mutation_offer.size() > 0:
 		ev.append_array(S.choose_mutation(_pick_mutation(S)))
 	if S.directive_offer.size() > 0:
-		ev.append_array(S.choose_directive(0))   # V2 P7c (P9: a real Directive policy)
+		ev.append_array(S.choose_directive(0))
 	if S.perk_offer.size() > 0:
 		var bp: int = 0
 		var bs: int = -99
@@ -845,7 +764,7 @@ static func bot_step(S, policy: String, perk_pref: String = "") -> Array:
 				best_score = sc
 				best = k
 		# A free reroll is taken when the hand has nothing the policy wants.
-		if best_score < 5.0 and S.reroll_cost() == 0 and not policy.begins_with("mono:"):
+		if best_score < 5.0 and S.reroll_cost() == 0:
 			ev.append_array(S.reroll_draft())
 		else:
 			ev.append_array(S.choose_card(best))
@@ -861,8 +780,7 @@ static func bot_step(S, policy: String, perk_pref: String = "") -> Array:
 			else:
 				ev.append_array(S.cancel_place())   # nowhere legal: skip the card
 	ev.append_array(merge_step(S))
-	if not policy.begins_with("mono:"):
-		ev.append_array(_use_specials(S))
+	ev.append_array(_use_specials(S))
 	# A competent player focuses fire on a boss once it is inside Core range.
 	var core_r: float = float((S.stats["weapons"] as Array).back()["range"])
 	var boss_in: bool = false
@@ -876,7 +794,7 @@ static func bot_step(S, policy: String, perk_pref: String = "") -> Array:
 		var si: int = int((w as Dictionary)["slot"])
 		if String(S.target_modes[si]) != want:
 			ev.append_array(S.set_target_mode(si, want))
-	# Spend cash on the Core track with the cheapest weighted price.
+	# Spend cash on the Core Enhancement with the cheapest weighted price.
 	var guard: int = 0
 	while guard < 12:
 		guard += 1
@@ -884,8 +802,8 @@ static func bot_step(S, policy: String, perk_pref: String = "") -> Array:
 		var bc: float = INF
 		for t in TowerState.TRACK_IDS:
 			var c: int = S.track_cost(String(t))
-			if c < 0 or (policy == "weapon" and String(t) == "eco"):
-				continue   # zero-eco line: never the Eco track either
+			if c < 0 or not S.track_unlocked(String(t)):
+				continue
 			var wc: float = float(c) * _track_weight(S, policy, String(t))
 			if wc < bc:
 				bc = wc
@@ -896,8 +814,7 @@ static func bot_step(S, policy: String, perk_pref: String = "") -> Array:
 	return ev
 
 
-## Endless mutations: the competent pick is the least dangerous buff
-## (Plating only matters with elites, Rush before Fangs/Vigor/Horde).
+## Endless mutations: the least dangerous buff first.
 static func _pick_mutation(S) -> int:
 	var order: Array = ["m_plating", "m_rush", "m_fangs", "m_vigor", "m_horde"]
 	var best: int = 0
@@ -910,19 +827,17 @@ static func _pick_mutation(S) -> int:
 	return best
 
 
-## Placement: weapons as close to the Core as allowed (cover every lane),
-## huts on the busiest lane's side, eco / support on the outer cells.
+## Placement: weapons and auras as close to the Core as allowed (they face
+## away from it by default), eco / huts on the outer cells.
 static func _place_cell(S, id: String) -> int:
 	var best: int = -1
 	var best_k: float = INF
-	var inner: bool = BuildingDB.cat_of(id) == "weapon" or id == "armory" or id == "beacon" or id == "frost"
+	var inner: bool = _is_weapon(id) or (PickDB.fam_of(id) == "building" and not PickDB.is_eco(id))
 	for i in S.free_slots():
 		if not S.can_place(int(i), id):
 			continue
 		var r: int = TowerState.ring_of(int(i))
-		var k: float = float(r) if inner else float(10 - r)
-		if PickDB.fam_of(id) == "hut":
-			k = float(10 - r)   # FEEDBACK-1: no lanes — huts sit on the outer cells
+		var k: float = float(r) if inner else float(20 - r)
 		k += float(int(i)) * 0.001
 		if k < best_k:
 			best_k = k
@@ -930,49 +845,9 @@ static func _place_cell(S, id: String) -> int:
 	return best
 
 
-static func run_once(save: Dictionary, policy: String, seed_value: int) -> Dictionary:
-	var S = TowerState.new()
-	S.mass_lod_cap = BOT_LOD_CAP   # harness-only runtime cap (waves above it compress; see BOT_LOD_CAP)
-	S.setup(seed_value, save)
-	var t: float = 0.0
-	var acc: float = 0.0
-	while not S.over and t < MAX_SIM_S:
-		S.tick(DT)
-		t += DT
-		acc += DT
-		if acc >= 0.5:
-			acc = 0.0
-			bot_step(S, policy)
-	return {"wave": S.wave, "level": S.level, "kills": S.kills, "coins": int(S.coins_run), "time": t}
-
-
-## Meta spending between runs (REDESIGN + ENGINE-META): coins go to the
-## active Core's level first (Core Cores gate every 5th level), then Field
-## Crates (Keys open Supply Crates), then the best parts are installed and
-## levelled with Scrap. The legacy v3 Core stat levels are no longer bought
-## (save v4 migrates them into the Bastion level). The Outpost is built in
-## session_open (it needs the clock).
-static func spend_meta(save: Dictionary, policy: String, rng: RandomNumberGenerator = null) -> void:
-	var guard: int = 0
-	var core_order: Array = ["dmg", "hp", "regen"]
-	while guard < 400:
-		guard += 1
-		var cid: String = Cores.active(save)
-		var did: bool = not Cores.try_level(save).is_empty()
-		if not did:
-			break
-
-
-
-
-
-
-
-
-
-
-
-
+# ======================================================================
+# META BOT (between runs)
+# ======================================================================
 ## The Outpost plan a competent player follows (start area first, then plot
 ## 0): [kind, id, x, y, rot]. Each session the bot takes the first affordable
 ## action (one job per builder) within pc_bot_op_frac of its coins.
@@ -1042,34 +917,284 @@ static func outpost_spend(save: Dictionary, now: int) -> void:
 			break
 
 
+## A competent player works toward the next Core milestone: what it needs
+## (an Outpost building / level, the Relay, Core Theory) goes first, within
+## half the coins.
+const CoreLevelDB := preload("res://data/CoreLevelDB.gd")
+static func core_reqs_spend(save: Dictionary, now: int) -> void:
+	var ms: int = CoreLevelDB.next_milestone(Cores.level(save))
+	if ms <= 0:
+		return
+	for r in CoreLevelDB.reqs_for(ms):
+		var rq: Array = r
+		var budget: int = int(float(save["coins"]) * 0.5)
+		match String(rq[0]):
+			"res":
+				var id: String = String(rq[1])
+				if Labs.level(save, id) < int(rq[2]) and Labs.is_open(save, id) and Labs.price(save, id) <= budget:
+					Labs.start(save, id, now)
+			"relay":
+				if int(save["outpost"]["relay_lvl"]) < int(rq[2]) and Outpost.relay_cost(int(save["outpost"]["relay_lvl"])) <= budget:
+					Outpost.upgrade(save, "relay", now)
+			"bld":
+				var id2: String = String(rq[1])
+				var best_uid: String = ""
+				var best_lv: int = -1
+				for k in save["outpost"]["buildings"].keys():
+					var b: Dictionary = save["outpost"]["buildings"][k]
+					if String(b["id"]) == id2 and int(b["lvl"]) > best_lv:
+						best_lv = int(b["lvl"])
+						best_uid = String(k)
+				if best_uid == "":
+					for st in OP_PLAN:
+						var a: Array = st
+						if String(a[0]) == "place" and String(a[1]) == id2 and int(OutpostDB.get_def(id2)["coins"]) <= budget:
+							Outpost.place(save, id2, int(a[2]), int(a[3]), int(a[4]), now)
+							break
+				elif best_lv < int(rq[2]) and Outpost.can_upgrade(save, best_uid) and Outpost.cost(id2, best_lv) <= budget:
+					Outpost.upgrade(save, best_uid, now)
+
+
 ## Outpost hourly coin output (live).
 static func outpost_coins_h(save: Dictionary) -> float:
 	return float(Outpost.production(save)["coins"])
 
 
-# ======================================================================
-# CAMPAIGN SIM — ~30 simulated days of the full retention loop with an
-# injected clock: login streak, missions, offline earnings, labs (real-time
-# research that completes between sessions), cards (chests/equip/slots),
-# perks, permanent base spending and tier selection. The balanced bot plays
-# every run; policy / perk comparisons replay a frozen snapshot save.
-# ======================================================================
-const Labs := preload("res://Labs.gd")
-const Missions := preload("res://Missions.gd")
-const Outpost := preload("res://Outpost.gd")
-const Tiers := preload("res://Tiers.gd")
-const LabDB := preload("res://data/LabDB.gd")
-const ModifierDB := preload("res://data/ModifierDB.gd")
+## Research weights (lower = bought earlier at the same price): the board,
+## Core levels and raw power first, then economy, enemy cuts and the Forge.
+const LAB_W: Dictionary = {
+	"grid": 0.3, "core_theory": 0.35, "dmg": 1.0, "hp": 1.1, "coin": 0.9, "speed": 0.12, "startcash": 2.0, "xp": 1.4,
+	"offrate": 1.3, "offcap": 2.5, "reroll": 2.5, "targeting": 1.3, "reactor": 1.2, "optics": 1.4, "aegis": 1.5, "shielding": 1.7,
+	"en_hp": 1.0, "en_atk": 1.4, "en_speed": 1.6, "boss_breaker": 1.4, "elite_hp": 1.8, "interest": 1.8, "bounty": 1.2,
+	"lab_discount": 0.7, "lic_mill": 0.9, "loot_theory": 1.6, "appraisal": 1.7, "enh_theory": 1.2, "stabilizer": 3.0,
+	"greater_cal": 2.0, "draft_choices": 1.0, "banish_r": 3.0, "draft_lock": 3.0, "scav_rate": 2.5, "reclaim": 3.0,
+}
 
-const DAYS: int = 30
-const SESSION_H: Array = [8, 8, 16, 16]        # 2 sessions x 2 runs; 8 h / 16 h offline gaps (AC-40)
-const NOW0: int = 1767225600                   # 2026-01-01 00:00 UTC (a day boundary)
-## FEEDBACK-1: Grid Expansion is the first research a player buys (bigger
-## board = more buildings); Lab Speed is gone (research is instant).
-const LAB_PRIO: Array = ["grid", "core_theory", "dmg", "hp", "coin", "speed", "startcash", "xp", "offrate", "offcap", "reroll"]
-const LAB_W: Dictionary = {"grid": 0.25, "core_theory": 0.3, "dmg": 1.0, "hp": 1.0, "coin": 1.0, "speed": 0.6, "startcash": 1.6, "xp": 1.8, "offrate": 2.0, "offcap": 2.0, "reroll": 2.5}
 
-## One run on `save` (mutated: banks, missions). Returns run facts.
+## Buys research (cheapest weighted price first) until `budget` coins are spent.
+static func research_spend(save: Dictionary, now: int, budget: int) -> void:
+	var spent: int = 0
+	for guard in 200:
+		var best: String = ""
+		var best_sc: float = INF
+		for idv in LAB_W.keys():
+			var id: String = String(idv)
+			if Labs.level(save, id) >= LabDB.max_of(id) or not Labs.is_open(save, id):
+				continue
+			var sc: float = float(Labs.price(save, id)) * float(LAB_W[id])
+			if sc < best_sc:
+				best_sc = sc
+				best = id
+		if best == "":
+			return
+		var pr: int = Labs.price(save, best)
+		if spent + pr > budget or pr > int(save["coins"]):
+			return
+		if Labs.start(save, best, now).is_empty():
+			return
+		spent += pr
+
+
+## Gear: weapons by estimated DPS, modules by power x perks.
+static func _gear_score(save: Dictionary, uid: int) -> float:
+	var it: Dictionary = Gear.item(save, uid)
+	if it.is_empty():
+		return 0.0
+	if String(it["kind"]) == "weapon":
+		return Gear.est_dps(it)
+	return Gear.power(it) * (1.0 + 0.35 * float((it["perks"] as Array).size()))
+
+
+static func _by_score(save: Dictionary, uids: Array) -> Array:
+	var a: Array = uids.duplicate()
+	a.sort_custom(func(x: Variant, y: Variant) -> bool:
+		var sx: float = _gear_score(save, int(x))
+		var sy: float = _gear_score(save, int(y))
+		return sx > sy if sx != sy else int(x) < int(y))
+	return a
+
+
+## Merge spare Commons / Uncommons (best three into the next rarity), equip the
+## best Weapon and Modules, salvage the weakest past 150 items, level the
+## equipped gear, forge a little when rich.
+static func gear_manage(save: Dictionary) -> void:
+	for kind in ["weapon", "module"]:
+		for rar in ["common", "uncommon"]:
+			for guard in 20:
+				var pool: Array = []
+				for u in Gear.uids(save, String(kind)):
+					var it: Dictionary = Gear.item(save, int(u))
+					if String(it["rar"]) == rar and not Gear.is_equipped(save, int(u)) and not bool(it.get("fav", false)):
+						pool.append(int(u))
+				if pool.size() < 3:
+					break
+				var set3: Array = _by_score(save, pool).slice(0, 3)
+				if Gear.why_merge(save, set3, int(set3[0])) != "" or Gear.merge(save, set3, int(set3[0]), 0).is_empty():
+					break
+	var ws: Array = _by_score(save, Gear.uids(save, "weapon"))
+	if not ws.is_empty() and not Gear.is_equipped(save, int(ws[0])):
+		Gear.equip(save, int(ws[0]))
+	var ms: Array = _by_score(save, Gear.uids(save, "module"))
+	var n: int = Gear.sockets_for(Cores.level(save))
+	for k in mini(n, ms.size()):
+		Gear.equip(save, int(ms[k]), k)
+	if Gear.count(save) > 150:
+		var all: Array = _by_score(save, Gear.uids(save))
+		all.reverse()
+		for u in all:
+			if Gear.count(save) <= 120:
+				break
+			if not Gear.is_equipped(save, int(u)):
+				Gear.salvage(save, int(u))
+	var w: Dictionary = Gear.weapon(save)
+	if not w.is_empty():
+		for guard in 60:
+			if Gear.why_upgrade(save, int(w["uid"])) != "" or float(Gear.upgrade_cost(w, save)) > 0.15 * float(save["coins"]):
+				break
+			Gear.upgrade(save, int(w["uid"]))
+	for m in Gear.modules(save):
+		for guard in 40:
+			if Gear.why_upgrade(save, int(m["uid"])) != "" or float(Gear.upgrade_cost(m, save)) > 0.04 * float(save["coins"]):
+				break
+			Gear.upgrade(save, int(m["uid"]))
+	for k in 2:
+		var fc: Dictionary = Gear.forge_cost(save)
+		if w.is_empty() or int(save["coins"]) < 8 * int(fc["coins"]) or int(save["scrap"]) < int(fc["scrap"]) + 100 or Gear.count(save) >= 150:
+			break
+		Gear.forge_new(save, "weapon", String(w["base"]))
+
+
+## Core levels with what the session has left (requirements permitting).
+static func core_spend(save: Dictionary, frac: float) -> void:
+	for guard in 400:
+		var c: int = int(Cores.level_cost(Cores.level(save))["coins"])
+		if float(c) > frac * float(save["coins"]) or Cores.try_level(save).is_empty():
+			return
+
+
+## Start-of-session chores, in the order a player meets them on the hub.
+static func session_open(save: Dictionary, now: int, led: Dictionary) -> void:
+	Labs.claim(save, now)
+	Missions.roll(save, now)
+	var c0: int = int(save["coins"])
+	var away: int = maxi(0, now - int(save["last_seen"])) / 60 if int(save["last_seen"]) > 0 else 0
+	for x in Outpost.claim_away(save, now):
+		var oe: Dictionary = x
+		if String(oe["t"]) == "offline":
+			led["offline_coins"] = int(led["offline_coins"]) + int(oe["coins"])
+	save["last_seen"] = now
+	led["offline_min"] = int(led["offline_min"]) + away
+	Missions.streak_claim(save, now)
+	led["gross_coins"] = int(led["gross_coins"]) + int(save["coins"]) - c0
+	_claim_missions(save)
+	core_reqs_spend(save, now)   # the next Core milestone's requirements
+	outpost_spend(save, now)     # cheapest ROI first: Mills pay back in hours
+	var c1: int = int(save["coins"])
+	research_spend(save, now, int(0.3 * float(c1)))
+	gear_manage(save)
+	core_spend(save, 0.5)
+	research_spend(save, now, int(0.5 * float(save["coins"])))   # half of the rest; the bank saves for big buys
+	var steps: Array = Labs.speed_steps(save)
+	BaseMeta.set_speed(save, float(steps[steps.size() - 1]))
+
+
+static func _claim_missions(save: Dictionary) -> void:
+	for k in Missions.list(save).size():
+		Missions.claim(save, k)
+	Missions.claim_bonus(save)
+
+
+## Tier choice: push the highest unlocked tier; when it pays < 80% of the tier
+## below (coins per real minute), farm the lower tier on alternate runs.
+static func pick_tier(save: Dictionary, rate: Dictionary, run_idx: int) -> int:
+	var h: int = Tiers.highest(save)
+	if h > 1 and rate.has(h) and rate.has(h - 1) and float(rate[h]) < 0.8 * float(rate[h - 1]) and run_idx % 2 == 1:
+		return h - 1
+	return h
+
+
+# ======================================================================
+# CAMPAIGN (main job)
+# ======================================================================
+## The DAYS-day balanced campaign on one fresh save. Per run: tier, wave,
+## coins, game seconds, banked rarities; per day: tier, best waves, Core
+## level, research, game speed, gear, coins, Outpost output.
+static func campaign(seed0: int, n_days: int) -> Dictionary:
+	var save: Dictionary = BaseMeta.default_save()
+	var led: Dictionary = {"offline_coins": 0, "offline_min": 0, "gross_coins": 0, "run_coins": 0, "run_min": 0.0}
+	var rate: Dictionary = {}          # tier -> latest coins / real minute
+	var days: Array = []
+	var runs: Array = []
+	var snaps: Dictionary = {}
+	var run_idx: int = 0
+	var t2_day: int = -1
+	var sp2_day: int = -1
+	var goal_run: int = -1
+	var goal_s: float = -1.0
+	var first_coins: int = -1
+	var rar: Dictionary = {}
+	var pity_max: Dictionary = {"e": 0, "l": 0, "m": 0}
+	var best_at: Dictionary = {}       # tier -> best wave so far (spiral check)
+	var spiral: Array = []
+	for d in n_days:
+		for h in SESSION_H:
+			var now: int = maxi(NOW0 + d * 86400 + int(h) * 3600, int(save["last_seen"]) + 60)
+			session_open(save, now, led)
+			var t: int = pick_tier(save, rate, run_idx)
+			BaseMeta.select_tier(save, t)
+			var c0: int = int(save["coins"])
+			var r: Dictionary = camp_run(save, "balanced", seed0 + 1000 + run_idx * 131, now)
+			if run_idx == 0:
+				first_coins = int(save["coins"]) - c0
+			if goal_run < 0 and t == 1 and int(r["wave"]) > TowerState.RUN_GOAL_WAVE:
+				goal_run = run_idx + 1   # MASS_HORDE H7: first run that held the wave-20 goal
+				goal_s = float(r["real_s"])
+			var bt: int = int(best_at.get(t, 0))
+			if bt >= 10 and int(r["wave"]) < bt / 2:
+				spiral.append([run_idx, t, int(r["wave"]), bt])
+			best_at[t] = maxi(bt, int(r["wave"]))
+			for k in (r["rar"] as Dictionary).keys():
+				rar[k] = int(rar.get(k, 0)) + int(r["rar"][k])
+			var pity: Dictionary = Gear.block(save)["pity"]
+			for g in pity_max.keys():
+				pity_max[g] = maxi(int(pity_max[g]), int(pity.get(g, 0)))
+			var mins: float = maxf(0.1, float(r["real_s"]) / 60.0)
+			rate[t] = float(r["coins"]) / mins
+			led["run_coins"] = int(led["run_coins"]) + int(r["coins"])
+			led["run_min"] = float(led["run_min"]) + mins
+			led["gross_coins"] = int(led["gross_coins"]) + int(r["coins"])
+			save["last_seen"] = now + int(r["real_s"])
+			runs.append({"day": d + 1, "tier": t, "wave": int(r["wave"]), "coins": int(r["coins"]), "game_s": snappedf(float(r["game_s"]), 1.0), "level": int(r["level"])})
+			say("  run %2d d%d T%d wave %2d lvl %2d coins %6d game %4.0fs speed x%.1f" % [run_idx, d + 1, t, int(r["wave"]), int(r["level"]), int(r["coins"]), float(r["game_s"]), float(save["speed"])])
+			run_idx += 1
+			_claim_missions(save)
+		var hi: int = Tiers.highest(save)
+		if hi >= 2 and t2_day < 0:
+			t2_day = d + 1
+		var steps: Array = Labs.speed_steps(save)
+		if steps.has(2.0) and sp2_day < 0:
+			sp2_day = d + 1
+		var lab_sum: int = 0
+		for id in LabDB.IDS:
+			lab_sum += Labs.level(save, String(id))
+		var w: Dictionary = Gear.weapon(save)
+		var row: Dictionary = {
+			"day": d + 1, "tier": hi, "best_wave_hi_tier": Tiers.best_in(save, hi), "best_wave": int(save["best_wave"]),
+			"progress_key": hi * 1000 + Tiers.best_in(save, hi), "core_lvl": Cores.level(save), "labs": lab_sum,
+			"speed": float(steps[steps.size() - 1]), "weapon_rar": String(w.get("rar", "")), "weapon_dps": snappedf(Gear.est_dps(w), 0.1) if not w.is_empty() else 0.0,
+			"items": Gear.count(save), "coins_gross": int(led["gross_coins"]), "bank": int(save["coins"]), "scrap": int(save["scrap"]),
+			"outpost_h": snappedf(outpost_coins_h(save), 1.0), "relay": int(save["outpost"]["relay_lvl"]), "hall": Outpost.level_of(save, "research"),
+		}
+		days.append(row)
+		say("CAMPAIGN day %2d: T%d best@T%d w%d best w%d | core L%d labs %d speed x%.1f | weapon %s %.0f dps, %d items | coins gross %d bank %d scrap %d | outpost %d/h relay %d hall %d | core needs %s" % [d + 1, hi, hi, int(row["best_wave_hi_tier"]), int(row["best_wave"]), int(row["core_lvl"]), lab_sum, float(row["speed"]), String(row["weapon_rar"]), float(row["weapon_dps"]), int(row["items"]), int(row["coins_gross"]), int(row["bank"]), int(row["scrap"]), int(row["outpost_h"]), int(row["relay"]), int(row["hall"]), str(Cores.missing(save))])
+		if SNAP_DAYS.has(d + 1):
+			snaps[d + 1] = save.duplicate(true)
+	return {"days": days, "runs": runs, "save": save, "led": led, "t2_day": t2_day, "speed2_day": sp2_day, "snaps": snaps,
+		"goal_run": goal_run, "goal_s": goal_s, "first_coins": first_coins, "rar": rar, "pity_max": pity_max, "spiral": spiral}
+
+
+## One run on `save` (mutated: banks, missions). Returns run facts: wave,
+## tier, coins, real / game seconds, level, banked rarities, R probes.
 static func camp_run(save: Dictionary, policy: String, seed_value: int, now: int, perk_pref: String = "", feed_missions: bool = true, opts: Dictionary = {}) -> Dictionary:
 	var S = TowerState.new()
 	S.mass_lod_cap = BOT_LOD_CAP   # harness-only runtime cap (waves above it compress; see BOT_LOD_CAP)
@@ -1077,9 +1202,9 @@ static func camp_run(save: Dictionary, policy: String, seed_value: int, now: int
 	var t: float = 0.0
 	var acc: float = 0.0
 	var res: Dictionary = {}
+	var rar: Dictionary = {}
 	var rw: Dictionary = {}          # wave -> effective DPS at the wave's start
-	var whp: Dictionary = {}         # wave -> HP spawned in it (bosses, elites, tier multipliers)
-	var wboss: Dictionary = {}       # wave -> boss HP spawned in it
+	var whp: Dictionary = {}         # wave -> HP spawned in it
 	var wt: Dictionary = {}          # wave -> seconds of it played
 	var lw: int = -1
 	var last_eid: int = -1
@@ -1098,509 +1223,226 @@ static func camp_run(save: Dictionary, policy: String, seed_value: int, now: int
 			var es: int = eo[k]
 			if String(S.en.kind[es]) != "courier":
 				whp[S.wave] = float(whp.get(S.wave, 0.0)) + float(S.en.max_hp[es])
-				if String(S.en.kind[es]) == "boss":
-					wboss[S.wave] = float(wboss.get(S.wave, 0.0)) + float(S.en.max_hp[es])
 			k -= 1
 		if ne > 0:
 			last_eid = maxi(last_eid, int(S.en.eid[eo[ne - 1]]))
 		if acc >= 0.5:
 			acc = 0.0
 			ev.append_array(bot_step(S, policy, perk_pref))
-			if OS.get_environment("DBG2") != "" and int(t * 10.0) % 250 == 0:
-				print("   camp t=%.0f wave %d alive %d ms %d" % [t, S.wave, S.en.count(), Time.get_ticks_msec()])
 		if feed_missions:
 			Missions.on_run_events(save, ev)
 		for x in ev:
 			var e: Dictionary = x
-			if String(e.get("t", "")) == "game_over":
-				res = e
+			match String(e.get("t", "")):
+				"game_over":
+					res = e
+				"loot_item", "loot_salvaged":
+					rar[String(e["rar"])] = int(rar.get(String(e["rar"]), 0)) + 1
 	var coins: int = int(res.get("coins", int(S.coins_run)))
-	# POWER_MODEL §2.3 / §9 probes. R(w) = effective DPS (PowerModel over the
-	# engine's power_snapshot) / the HP the engine actually spawned per second
-	# of wave w (PM-1's "measured spawn HP/s": composition, elites + shields,
-	# bosses and tier multipliers included). Frontier = the death wave with the
-	# build the run died with; early = w*/2 with the build of that moment; wall
-	# = the frontier requirement grown to w*+5 by PowerModel's D(w) curve.
-	# On a boss wave the boss's share of the HP is matched with single-target
-	# DPS (AoE / multi-target factors do not apply to one target).
-	var snap: Dictionary = S.power_snapshot()
 	var wave_s: float = TuneRef.num("wave_time", 25.0)
-	var hp_w: float = maxf(0.001, float(whp.get(S.wave, 0.0)))
-	var b_sh: float = clampf(float(wboss.get(S.wave, 0.0)) / hp_w, 0.0, 1.0)
-	var dps: float = PowerModel.effective_dps(snap) * (1.0 - b_sh) + PowerModel.single_target_dps(snap) * b_sh
-	var front: float = dps / (hp_w / clampf(float(wt.get(S.wave, wave_s)), wave_s / 3.0, wave_s))
 	var we: int = maxi(1, S.wave / 2)
 	var early: float = float(rw.get(we, 0.0)) / maxf(0.001, float(whp.get(we, 0.0)) / wave_s)
+	var snap: Dictionary = S.power_snapshot()
+	var hp_w: float = maxf(0.001, float(whp.get(S.wave, 0.0)))
+	var front: float = PowerModel.effective_dps(snap) / (hp_w / clampf(float(wt.get(S.wave, wave_s)), wave_s / 3.0, wave_s))
 	var wall: float = front * PowerModel.required_dps(S.wave, S.tier) / maxf(0.001, PowerModel.required_dps(S.wave + 5, S.tier))
-	return {"wave": S.wave, "tier": S.tier, "coins": coins, "real_s": t, "gems": 0, "perks": S.perks_taken.duplicate(), "mode": S.mode, "mutations": S.mutations_taken.size(),
-		"r_front": front, "r_early": early, "r_wall": wall,
-		"r_hp": PowerModel.hp_ratio(snap, S.wave, S.tier), "timeout": not S.over, "boss_dps": PowerModel.single_target_dps(snap) * float(S.stats.get("boss_mult", 1.0))}
+	return {"wave": S.wave, "tier": S.tier, "coins": coins, "real_s": t, "game_s": t * S.speed, "level": S.level, "rar": rar,
+		"perks": S.perks_taken.duplicate(), "r_early": early, "r_front": front, "r_wall": wall, "timeout": not S.over}
 
 
-static func _labs_spend(save: Dictionary, now: int, frac: float = 0.5) -> void:
-	var lguard: int = 0
-	while Labs.running(save).size() < Labs.slots(save) and lguard < 200:
-		lguard += 1
-		var best: String = ""
-		var best_sc: float = INF
-		for idv in LAB_PRIO:
-			var id: String = idv
-			if Labs.is_running(save, id) or Labs.level(save, id) >= LabDB.max_of(id) or not Labs.is_open(save, id):
-				continue
-			var sc: float = float(Labs.price(save, id)) * float(LAB_W[id])
-			if sc < best_sc:
-				best_sc = sc
-				best = id
-		if best == "" or float(Labs.price(save, best)) > frac * float(save["coins"]):
-			break
-		Labs.start(save, best, now)
+# ======================================================================
+# PHASE-B JOBS (A/B on the frozen day-3 / day-8 snapshots)
+# ======================================================================
+## Mean death wave of `policy` over seeds, each run on a fresh copy of `save`.
+static func ab_waves(save: Dictionary, policy: String, seeds: Array, perk_pref: String = "") -> Dictionary:
+	var waves: Array = []
+	var tot: float = 0.0
+	for sd in seeds:
+		var sv: Dictionary = save.duplicate(true)
+		var r: Dictionary = camp_run(sv, policy, int(sd), int(sv.get("last_seen", NOW0)) + 3600, perk_pref, false)
+		waves.append(int(r["wave"]))
+		tot += float(r["wave"])
+	return {"waves": waves, "mean": tot / maxf(1.0, float(seeds.size()))}
 
 
-## Start-of-session chores, in the order a player meets them on the Base screen.
-static func session_open(save: Dictionary, now: int, rng: RandomNumberGenerator, led: Dictionary, policy: String = "balanced") -> void:
-	Labs.claim(save, now)
-	Missions.roll(save, now)
-	var c0: int = int(save["coins"])
-	var away: int = maxi(0, now - int(save["last_seen"])) / 60 if int(save["last_seen"]) > 0 else 0
-	for x in Outpost.claim_away(save, now):
-		var oe: Dictionary = x
-		if String(oe["t"]) == "offline":
-			led["offline_coins"] = int(led["offline_coins"]) + int(oe["coins"])
-	save["last_seen"] = now
-	led["offline_min"] = int(led["offline_min"]) + away
-	Missions.streak_claim(save, now)
-	led["gross_coins"] = int(led["gross_coins"]) + int(save["coins"]) - c0
-	_claim_missions(save)
-	_labs_spend(save, now)
-	outpost_spend(save, now)     # cheapest ROI first: Mills pay back in hours
-	spend_meta(save, policy, rng)
-	_labs_spend(save, now, 1.0)   # base saturated: the rest goes to research
-	var steps: Array = Labs.speed_steps(save)
-	BaseMeta.set_speed(save, float(steps[steps.size() - 1]))
+## The snapshot's gear vs a fresh Common Autocannon loadout.
+static func job_gear(seed0: int, snap: Dictionary) -> Dictionary:
+	if snap.is_empty():
+		return {}
+	var a: Dictionary = ab_waves(snap, "balanced", AB_SEEDS.map(func(x: Variant) -> int: return seed0 + int(x)))
+	var bare: Dictionary = snap.duplicate(true)
+	bare["gear"] = Gear.default_block()
+	var b: Dictionary = ab_waves(bare, "balanced", AB_SEEDS.map(func(x: Variant) -> int: return seed0 + int(x)))
+	var ratio: float = float(a["mean"]) / maxf(0.1, float(b["mean"]))
+	say("GEAR day 8: own gear %s vs Common Autocannon %s -> x%.2f" % [str(a["waves"]), str(b["waves"]), ratio])
+	return {"with": a, "without": b, "ratio": ratio}
 
 
-## A competent player chases the "take tradeoff perks" daily while it is open.
-static func _mission_perk(save: Dictionary) -> String:
-	for x in Missions.list(save):
-		var e: Dictionary = x
-		if String(e["tpl"]) == "perk" and not bool(e["claimed"]) and not Missions.is_done(e):
-			return "tradeoff"
-	return ""
-
-
-static func _claim_missions(save: Dictionary) -> void:
-	for k in Missions.list(save).size():
-		Missions.claim(save, k)
-	Missions.claim_bonus(save)
-
-
-## Tier choice: push the highest unlocked tier; when it pays < 80% of the tier
-## below (coins per real minute), farm the lower tier on alternate runs.
-static func pick_tier(save: Dictionary, rate: Dictionary, run_idx: int) -> int:
-	var h: int = Tiers.highest(save)
-	if h > 1 and rate.has(h) and rate.has(h - 1) and float(rate[h]) < 0.8 * float(rate[h - 1]) and run_idx % 2 == 1:
-		return h - 1
-	return h
-
-
-static func campaign_days(seed0: int, policy: String = "balanced", n_days: int = DAYS) -> Dictionary:
-	var save: Dictionary = BaseMeta.default_save()
-	var rng := RandomNumberGenerator.new()
-	rng.seed = seed0 + 7
-	var led: Dictionary = {"offline_coins": 0, "offline_min": 0, "gross_coins": 0, "run_coins": 0, "run_min": 0.0}
-	var rate: Dictionary = {}          # tier -> latest coins / real minute
-	var days: Array = []
-	var snaps: Dictionary = {}
-	var run_idx: int = 0
-	var t2_day: int = -1
-	var t3_day: int = -1
-	var first_s: float = -1.0
-	var goal_run: int = -1
-	var goal_s: float = -1.0
-	for d in n_days:
-		for h in SESSION_H:
-			var now: int = maxi(NOW0 + d * 86400 + int(h) * 3600, int(save["last_seen"]) + 60)
-			session_open(save, now, rng, led, policy)
-			var t: int = pick_tier(save, rate, run_idx)
-			BaseMeta.select_tier(save, t)
-			var r: Dictionary = camp_run(save, policy, seed0 + 1000 + run_idx * 131, now, _mission_perk(save))
-			if OS.get_environment("PT_RUNS") != "":
-				print("  run %d T%d wave %d game_s %.0f coins %d wall_ms %d" % [run_idx, t, int(r["wave"]), float(r["real_s"]), int(r["coins"]), Time.get_ticks_msec()])
-			if run_idx == 0:
-				first_s = float(r["real_s"])   # fresh save: game speed 1x
-			if goal_run < 0 and t == 1 and int(r["wave"]) > TowerState.RUN_GOAL_WAVE:
-				goal_run = run_idx + 1   # MASS_HORDE H7: first run that held the wave-20 goal
-				goal_s = float(r["real_s"])
-			run_idx += 1
-			var mins: float = maxf(0.1, float(r["real_s"]) / 60.0)
-			rate[t] = float(r["coins"]) / mins
-			led["run_coins"] = int(led["run_coins"]) + int(r["coins"])
-			led["run_min"] = float(led["run_min"]) + mins
-			led["gross_coins"] = int(led["gross_coins"]) + int(r["coins"])
-			save["last_seen"] = now + int(r["real_s"])
-			_claim_missions(save)
-		var hi: int = Tiers.highest(save)
-		if hi >= 2 and t2_day < 0:
-			t2_day = d + 1
-		if hi >= 3 and t3_day < 0:
-			t3_day = d + 1
-		var lab_sum: int = 0
-		for id in LabDB.IDS:
-			lab_sum += Labs.level(save, String(id))
-		var bit: int = Tiers.best_in(save, hi)
-		var op_h: float = outpost_coins_h(save)
-		var act_h: float = float(rate.get(Tiers.highest(save), rate.get(1, 0.0))) * 60.0
-		var row: Dictionary = {
-			"outpost_h": snappedf(op_h, 1.0), "outpost_ratio": snappedf(op_h / maxf(1.0, act_h), 0.001), "core_lvl": Cores.level(save),
-			"day": d + 1, "tier": hi, "best_wave_hi_tier": bit, "best_wave": int(save["best_wave"]),
-			"coins_gross": int(led["gross_coins"]), "bank": int(save["coins"]), "gems": int(save.get("gems", 0)),
-			"gems_earned": _gems_total(save), "labs": lab_sum,
-			"progress_key": hi * 1000 + bit,
-		}
-		days.append(row)
-		say("CAMPAIGN " + policy + " day %2d: T%d best@T%d w%d best w%d | coins gross %d bank %d | gems %d (earned %d) | labs %d cards %d | core L%d parts %d outpost %d/h (x%.3f)" % [d + 1, hi, hi, bit, row["best_wave"], row["coins_gross"], row["bank"], row["gems"], row["gems_earned"], lab_sum, row["cards"], row["core_lvl"], row["parts"], int(op_h), float(row["outpost_ratio"])])
-		if d + 1 == 7 or d + 1 == 20:
-			snaps[d + 1] = save.duplicate(true)
-	return {"days": days, "save": save, "led": led, "rate": rate, "t2_day": t2_day, "t3_day": t3_day, "snaps": snaps, "first_run_s": first_s, "goal_run": goal_run, "goal_s": goal_s}
-
-
-## Shard tree priority for the bot (power first, then economy, then speed).
-const SHARD_PRIO: Array = ["root_forge", "might", "bulwark_p", "prosperity", "head_start", "outpost_p", "starting_cash", "builder2", "shard_yield", "scrap_p", "crate_luck", "tempo", "banish_plus", "wide_draft", "core_ceiling", "retain"]
-
-
-## Weighted cost per node (lower = bought first): a walled player puts its
-## shards into raw power first, then the economy / speed nodes.
-const SHARD_W: Dictionary = {"root_forge": 0.1, "might": 1.0, "bulwark_p": 1.3, "head_start": 1.5, "prosperity": 2.0, "outpost_p": 2.5, "starting_cash": 2.5}
-
-
-static func spend_shards(save: Dictionary) -> void:
-	var guard: int = 0
-	while guard < 100:
-		guard += 1
-		var best: String = ""
-		var bc: float = INF
-		for id in SHARD_PRIO:
-			if Reforge.can_buy(save, String(id)):
-				var c: float = float(ReforgeDB.cost(String(id), Reforge.node(save, String(id)))) * float(SHARD_W.get(String(id), 3.0))
-				if c < bc:
-					bc = c
-					best = String(id)
-		if best == "" or Reforge.buy(save, best).is_empty():
-			break
-
-
-## A competent player reforges when the shards on offer at least match what
-## the tree already holds (REDESIGN_SPEC §3.4 loop table: 12, 15, 28, 50).
-static func wants_reforge(save: Dictionary) -> bool:
-	return Reforge.can_reforge(save) and Reforge.shards_now(save) >= maxi(TuneRef.int_of("pc_bot_reforge_min", 16), int(save["reforge"]["cum_shards"]))
-
-
-static func _gems_total(save: Dictionary) -> int:
-	var gl: Dictionary = save.get("gem_log", {})
+## With vs without the Outpost's Core buildings (Arsenal, Reactor, ...).
+static func job_corebld(seed0: int, snap: Dictionary) -> Dictionary:
+	if snap.is_empty():
+		return {}
+	var a: Dictionary = ab_waves(snap, "balanced", AB_SEEDS.map(func(x: Variant) -> int: return seed0 + int(x)))
+	var bare: Dictionary = snap.duplicate(true)
+	var bl: Dictionary = bare["outpost"]["buildings"]
 	var n: int = 0
-	for k in gl.keys():
-		n += int(gl[k])
-	return n
+	for k in bl.keys():
+		if OutpostDB.CORE_IDS.has(String((bl[k] as Dictionary)["id"])):
+			bl.erase(k)
+			n += 1
+	var b: Dictionary = ab_waves(bare, "balanced", AB_SEEDS.map(func(x: Variant) -> int: return seed0 + int(x)))
+	var ratio: float = float(a["mean"]) / maxf(0.1, float(b["mean"]))
+	say("COREBLD day 8: %d Core buildings %s vs none %s -> x%.2f" % [n, str(a["waves"]), str(b["waves"]), ratio])
+	return {"with": a, "without": b, "ratio": ratio, "core_buildings": n}
 
 
-## Replays a frozen snapshot with an in-run policy (and optional forced perk).
-static func snap_eval(snap: Dictionary, policy: String, seeds: Array, perk_pref: String = "", opts: Dictionary = {}) -> Dictionary:
-	var w: float = 0.0
-	var c: float = 0.0
-	for sv in seeds:
-		var s: Dictionary = snap.duplicate(true)
-		BaseMeta.select_tier(s, Tiers.highest(s))
-		var r: Dictionary = camp_run(s, policy, int(sv), NOW0, perk_pref, false, opts)
-		w += float(r["wave"])
-		c += float(r["coins"])
-	var n: float = float(seeds.size())
-	return {"wave": w / n, "coins": c / n}
+## Levels reached by wave XP_WAVE with the Core held up (pure XP engine):
+## XP-focus policy vs balanced on the day-3 save.
+const XP_WAVE: int = 12
+static func _levels_by(save: Dictionary, policy: String, seed_value: int) -> int:
+	var S = TowerState.new()
+	S.mass_lod_cap = BOT_LOD_CAP
+	S.setup(seed_value, save.duplicate(true), int(save.get("last_seen", NOW0)) + 3600)
+	S.max_hp_mult = 1.0e6
+	S.recompute()
+	S.hp = float(S.stats["max_hp"])
+	var t: float = 0.0
+	var acc: float = 0.0
+	while S.wave <= XP_WAVE and not S.over and t < MAX_SIM_S:
+		S.tick(DT)
+		t += DT
+		acc += DT
+		if acc >= 0.5:
+			acc = 0.0
+			bot_step(S, policy)
+	return S.level
 
 
-## ---- legacy campaign jobs (ECONOMY.md §6 / BRIEF AC-38..41, PC_BALANCE) ----
-## The 30-day balanced campaign; writes the day-7 / day-20 snapshots for the
-## phase-B jobs.
-static func job_main(seed0: int, dir: String) -> Dictionary:
-	var C: Dictionary = campaign_days(seed0)
-	for d in [7, 20]:
-		var f := FileAccess.open(dir.path_join("snap%d.bin" % d), FileAccess.WRITE)
-		f.store_buffer(var_to_bytes((C["snaps"] as Dictionary)[d]))
-		f.close()
-	return {"days": C["days"], "led": C["led"], "gem_log": (C["save"] as Dictionary).get("gem_log", {}), "t2_day": C["t2_day"], "t3_day": C["t3_day"], "first_run_s": C["first_run_s"], "goal_run": C["goal_run"], "goal_s": C["goal_s"]}
+static func job_xp(seed0: int, snap: Dictionary) -> Dictionary:
+	if snap.is_empty():
+		return {}
+	var lb: Array = []
+	var lx: Array = []
+	for sd in AB_SEEDS:
+		lb.append(_levels_by(snap, "balanced", seed0 + int(sd)))
+		lx.append(_levels_by(snap, "xp", seed0 + int(sd)))
+	var mb: float = float(lb.reduce(func(a: int, b: int) -> int: return a + b, 0)) / float(lb.size())
+	var mx: float = float(lx.reduce(func(a: int, b: int) -> int: return a + b, 0)) / float(lx.size())
+	say("XP day 3: levels by wave %d balanced %s vs XP focus %s -> x%.2f" % [XP_WAVE, str(lb), str(lx), mx / maxf(0.1, mb)])
+	return {"balanced": lb, "xp": lx, "ratio": mx / maxf(0.1, mb)}
 
 
-## AC-38 (strategy level): a week of pure-weapon / pure-eco play from the same fresh save.
-static func job_strat(seed0: int) -> Dictionary:
-	var wk: int = 7
+## Radial-only vs directional-only weapon drafts on the day-8 save.
+static func job_dir(seed0: int, snap: Dictionary) -> Dictionary:
+	if snap.is_empty():
+		return {}
+	var sds: Array = AB_SEEDS.map(func(x: Variant) -> int: return seed0 + int(x))
+	var r: Dictionary = ab_waves(snap, "radial", sds)
+	var d: Dictionary = ab_waves(snap, "directional", sds)
+	var ratio: float = maxf(float(r["mean"]), float(d["mean"])) / maxf(0.1, minf(float(r["mean"]), float(d["mean"])))
+	say("DIR day 8: radial %s vs directional %s -> spread x%.2f" % [str(r["waves"]), str(d["waves"]), ratio])
+	return {"radial": r, "directional": d, "spread": ratio}
+
+
+## Each weapon as the only weapon (one seed) vs the balanced mean.
+static func job_weapons(seed0: int, snap: Dictionary, ids: Array) -> Dictionary:
+	if snap.is_empty():
+		return {}
+	var bal: Dictionary = ab_waves(snap, "balanced", AB_SEEDS.map(func(x: Variant) -> int: return seed0 + int(x)))
 	var out: Dictionary = {}
-	for p in ["weapon", "eco"]:
-		var Cp: Dictionary = campaign_days(seed0, String(p), wk)
-		var dp: Dictionary = (Cp["days"] as Array)[wk - 1]
-		out[p] = {"key": int(dp["progress_key"]), "coins": int(dp["coins_gross"]), "best_wave": int(dp["best_wave"])}
-	return out
+	for id in ids:
+		out[String(id)] = int(ab_waves(snap, "only:" + String(id), [seed0 + int(AB_SEEDS[0])])["waves"][0])
+	say("WEAPONS day 8: balanced %s | only-one-weapon %s" % [str(bal["waves"]), JSON.stringify(out)])
+	return {"balanced": bal, "only": out}
 
 
-## AC-38 / AC-40 on an extra seed (the eco-mix margin and early pace are seed-sensitive).
-static func job_seed(seed0: int, xs: int) -> Dictionary:
-	var wk: int = 7
-	var sd: int = seed0 + xs
-	var Cb: Dictionary = campaign_days(sd, "balanced", wk)
-	var Cw: Dictionary = campaign_days(sd, "weapon", wk)
-	var db: Dictionary = (Cb["days"] as Array)[wk - 1]
-	var dw: Dictionary = (Cw["days"] as Array)[wk - 1]
-	var d1: int = int(((Cb["days"] as Array)[0] as Dictionary)["best_wave"])
-	var row: Dictionary = {"bal_wave": int(db["best_wave"]), "wpn_wave": int(dw["best_wave"]), "bal_coins": int(db["coins_gross"]), "wpn_coins": int(dw["coins_gross"]), "t2_day": int(Cb["t2_day"]), "day1": d1}
-	row["ok"] = int(row["bal_wave"]) > int(row["wpn_wave"]) and int(row["t2_day"]) >= 3 and int(row["t2_day"]) <= 5 and d1 >= 18 and d1 <= 32
-	return {"sd": sd, "row": row}
+## Each gold-perk family preferred (one seed) vs the balanced mean.
+static func job_perks(seed0: int, snap: Dictionary) -> Dictionary:
+	if snap.is_empty():
+		return {}
+	var bal: Dictionary = ab_waves(snap, "balanced", AB_SEEDS.map(func(x: Variant) -> int: return seed0 + int(x)))
+	var out: Dictionary = {}
+	for f in PerkDB.FAMILIES:
+		out[String(f)] = int(ab_waves(snap, "fam:" + String(f), [seed0 + int(AB_SEEDS[0])])["waves"][0])
+	say("PERKS day 8: balanced %s | family-first %s" % [str(bal["waves"]), JSON.stringify(out)])
+	return {"balanced": bal, "fam": out}
 
 
-
-
-## AC-39 same-save mono boards (report) + in-run policy on the same frozen save (report).
-static func job_mono(seed0: int, snaps: Dictionary) -> Dictionary:
-	var mono: Dictionary = {}
-	var mono_ok: bool = true
-	var mseeds: Array = [seed0 + 11, seed0 + 23]
-	for mday in [7, 20]:
-		var msnap: Dictionary = snaps[mday]
-		var mb: float = float(snap_eval(msnap, "balanced", mseeds)["wave"])
-		var row: Dictionary = {"balanced": snappedf(mb, 0.1)}
-		for mid in ["gun", "mortar", "tesla"]:
-			var ms: Dictionary = msnap.duplicate(true)
-			var sl: Dictionary = ms["slots"]
-			for k in sl.keys():
-				(sl[k] as Dictionary)["id"] = String(mid)
-			var mw: float = float(snap_eval(ms, "mono:" + String(mid), mseeds)["wave"])
-			row[mid] = snappedf(mw, 0.1)
-			if mw >= 0.70 * mb:
-				mono_ok = false   # report only (same-save probe); gate is the fresh-save AC-39
-		mono["d%d" % mday] = row
-	say("AC-39 mono boards (same save): " + JSON.stringify(mono))
-	var seeds: Array = [seed0 + 11, seed0 + 23, seed0 + 37]
-	var pol: Dictionary = {}
-	for day in [7, 20]:
-		var snap: Dictionary = snaps[day]
-		for p in ["balanced", "weapon", "eco"]:
-			pol["d%d_%s" % [day, p]] = snap_eval(snap, String(p), seeds)
-		say("IN-RUN POLICY day %d (same save): balanced %s | weapon %s | eco %s" % [day, JSON.stringify(pol["d%d_balanced" % day]), JSON.stringify(pol["d%d_weapon" % day]), JSON.stringify(pol["d%d_eco" % day])])
-	return {"mono": mono, "mono_ok": mono_ok, "pol": pol}
-
-
-## I-4: no dominant perk — always-take-X policies on the day-20 save. A perk
-## dominates when it out-earns the median by > 20% WITHOUT costing waves.
-static func job_perks(seed0: int, snaps: Dictionary) -> Dictionary:
-	var snap20: Dictionary = snaps[20]
-	var perk_rows: Dictionary = {}
-	var cv: Array = []
-	var wv: Array = []
-	for pid in PerkDB.IDS:
-		var r: Dictionary = snap_eval(snap20, "balanced", [seed0 + 11, seed0 + 23], String(pid))
-		perk_rows[pid] = {"wave": snappedf(float(r["wave"]), 0.1), "coins": int(r["coins"])}
-		cv.append(float(r["coins"]))
-		wv.append(float(r["wave"]))
-	cv.sort()
-	wv.sort()
-	var c_med: float = (float(cv[5]) + float(cv[6])) / 2.0
-	var w_med: float = (float(wv[5]) + float(wv[6])) / 2.0
-	var dominant: Array = []
-	var top_ratio: float = 0.0
-	for pid in perk_rows.keys():
-		var pr: Dictionary = perk_rows[pid]
-		var ratio: float = float(pr["coins"]) / maxf(1.0, c_med)
-		top_ratio = maxf(top_ratio, ratio)
-		if ratio > 1.2 and float(pr["wave"]) >= w_med:
-			dominant.append(pid)
-	say("PERKS day 20 (always-take-X): " + JSON.stringify(perk_rows))
-	return {"rows": perk_rows, "dominant": dominant, "top_ratio": top_ratio}
-
-
-## PC-E14 refinery probe, PC-E16 modifiers / fairness, endless.
-static func job_mods(seed0: int, snaps: Dictionary) -> Dictionary:
-	var seeds: Array = [seed0 + 11, seed0 + 23, seed0 + 37]
-	var snap20: Dictionary = snaps[20]
-	# PC-E14: a Refinery + Mine economy must not out-earn the same board without
-	# Refineries by > 15%. Same frozen day-7 / day-20 save; the probe turns every
-	# other permanent Mine into a Refinery (so each sits next to a Mine: S11
-	# Smelter), and both boards are played by the same eco-leaning in-run policy.
-	var refin: Dictionary = {}
-	var refin_ok: bool = true
-	for rday in [7, 20]:
-		var rsnap: Dictionary = snaps[rday]
-		var rp: Dictionary = rsnap.duplicate(true)
-		var nmine: int = 0
-		var rsl: Dictionary = rp["slots"]
-		for k in rsl.keys():
-			var re: Dictionary = rsl[k]
-			if String(re["id"]) == "mine":
-				if nmine % 2 == 0:
-					re["id"] = "refinery"
-				nmine += 1
-		var rb: Dictionary = snap_eval(rsnap, "refinery", seeds)
-		var rr: Dictionary = snap_eval(rp, "refinery", seeds)
-		var ratio: float = float(rr["coins"]) / maxf(1.0, float(rb["coins"]))
-		refin["d%d" % rday] = {"with_refinery": rr, "without": rb, "coin_ratio": snappedf(ratio, 0.001)}
-		if ratio > 1.15:
-			refin_ok = false
-	say("PC REFINERY vs balanced: " + JSON.stringify(refin))
-	# PC-E16 (subset): every challenge modifier stays winnable to wave 25 on the
-	# day-20 save, and an endless run plays past its first mutation.
-	# PC_BALANCE fairness: each modifier's coin reward tracks its measured cost
-	# (same save, same seeds vs no modifier): net coins 0.9-1.4x, and a modifier
-	# that costs <= 1.5 waves may not pay > 1.25x (no free coins).
-	var mod_rows: Dictionary = {}
-	var mods_ok: bool = true
-	var fair_ok: bool = true
-	var modseeds: Array = [seed0 + 11, seed0 + 58]
-	var mbase: Dictionary = snap_eval(snap20, "balanced", modseeds)
-	mod_rows["_base"] = {"wave": snappedf(float(mbase["wave"]), 0.1), "coins": roundi(float(mbase["coins"]))}
-	for mid in ModifierDB.IDS:
-		var mr: Dictionary = snap_eval(snap20, "balanced", modseeds, "", {"modifiers": [mid]})
-		var cr: float = float(mr["coins"]) / maxf(1.0, float(mbase["coins"]))
-		var dw: float = float(mr["wave"]) - float(mbase["wave"])
-		mod_rows[mid] = {"wave": snappedf(float(mr["wave"]), 0.1), "dwave": snappedf(dw, 0.1), "coin_ratio": snappedf(cr, 0.01)}
-		mods_ok = mods_ok and float(mr["wave"]) >= 25.0
-		fair_ok = fair_ok and cr >= 0.9 and cr <= 1.4 and not (dw >= -1.5 and cr > 1.25)
-	say("PC MODIFIERS day 20: " + JSON.stringify(mod_rows))
-	var esnap: Dictionary = snap20.duplicate(true)
-	var endless_ok: bool = BaseMeta.endless_unlocked(esnap)
-	var er: Dictionary = {}
-	if endless_ok:
-		BaseMeta.select_tier(esnap, Tiers.highest(esnap))
-		er = camp_run(esnap, "balanced", seed0 + 11, NOW0, "", false, {"mode": "endless"})
-		endless_ok = String(er["mode"]) == "endless" and int(er["wave"]) > ModifierDB.MUTATION_EVERY and int(er["mutations"]) >= 1
-		# endless pays roughly a normal run (0.8-1.15x the same-seed baseline):
-		# a real alternative, not a replacement for tier progression.
-		var eb: Dictionary = snap_eval(snap20, "balanced", [seed0 + 11])
-		er["coin_ratio"] = snappedf(float(er["coins"]) / maxf(1.0, float(eb["coins"])), 0.01)
-		endless_ok = endless_ok and float(er["coin_ratio"]) >= 0.8 and float(er["coin_ratio"]) <= 1.15
-	say("PC ENDLESS day 20: " + JSON.stringify(er))
-	return {"refin": refin, "refin_ok": refin_ok, "mod_rows": mod_rows, "mods_ok": mods_ok, "fair_ok": fair_ok, "er": er, "endless_ok": endless_ok}
-
-
-## Merge every job into the METRICS dict (legacy keys unchanged) + the
-## redesign campaign gates (RD_GATES).
+# ======================================================================
+# GATES
+# ======================================================================
+## Merge every job into the METRICS dict and evaluate the V2 gates.
 static func combine(R: Dictionary) -> Dictionary:
-	var m: Dictionary = (R.get("pol", {}) as Dictionary).duplicate(true)
+	var m: Dictionary = {}
 	var M: Dictionary = R.get("main", {})
-	if M.is_empty():
+	var Fr: Dictionary = R.get("fresh", {})
+	var X: Dictionary = R.get("mass", {})
+	m.merge(fresh_checks(Fr))
+	m.merge(mass_checks(X, M))
+	var days: Array = M.get("days", [])
+	if days.is_empty():
 		return m
-	var days: Array = M["days"]
-	var led: Dictionary = M["led"]
-	var keys: Array = []
-	for r in days:
-		keys.append(int((r as Dictionary)["progress_key"]))
-	var t3: int = int(M["t3_day"])
-	# I-7: no 5-day window without a gain in (tier, best wave in highest tier) until T3
-	var stall_days: Array = []
-	var stop: int = t3 if t3 > 0 else DAYS
-	for d in range(5, stop):
-		if int(keys[d]) <= int(keys[d - 5]):
-			stall_days.append(d + 1)
-	# Post-T3 (fix round): the late game keeps climbing — no 5-day stall from
-	# T3 to day 30, and the best wave climbs >= 8 past the T3 day.
-	var late_stall: Array = []
-	if t3 > 0:
-		for d in range(maxi(5, t3 + 4), DAYS):
-			if int(keys[d]) <= int(keys[d - 5]):
-				late_stall.append(d + 1)
-	var bw_t3: int = int((days[t3 - 1] as Dictionary)["best_wave"]) if t3 > 0 else 0
-	var bw_30: int = int((days[DAYS - 1] as Dictionary)["best_wave"])
-	var late_ok: bool = t3 > 0 and late_stall.is_empty() and bw_30 >= bw_t3 + 8
-	# AC-40: in week 1 every 3-day window shows a gain
-	var early: bool = true
-	for d in range(3, mini(7, DAYS)):
-		if int(keys[d]) <= int(keys[d - 3]):
-			early = false
-	# AC-41 / I-10: gems
-	var gl: Dictionary = M["gem_log"]
-	var gtot: int = 0
-	var gmax: int = 0
-	var gsrc: String = ""
-	for k in gl.keys():
-		gtot += int(gl[k])
-		if int(gl[k]) > gmax:
-			gmax = int(gl[k])
-			gsrc = String(k)
-	var gpd: float = float(gtot) / float(DAYS)
-	# I-6: offline vs active coins/min
-	var active_rate: float = float(led["run_coins"]) / maxf(0.1, float(led["run_min"]))
-	var off_rate: float = float(led["offline_coins"]) / maxf(1.0, float(led["offline_min"]))
-	var wk: int = 7
-	var bal7: Dictionary = days[wk - 1]
-	var strat: Dictionary = {"balanced": {"key": int(bal7["progress_key"]), "coins": int(bal7["coins_gross"]), "best_wave": int(bal7["best_wave"])}}
-	var ST: Dictionary = R.get("strat", {})
-	for p in ["weapon", "eco"]:
-		strat[p] = ST.get(p, {"key": 0, "coins": 0, "best_wave": 0})
-	var sb: Dictionary = strat["balanced"]
-	var sw: Dictionary = strat["weapon"]
-	var se: Dictionary = strat["eco"]
-	say("STRATEGY week 1: balanced %s | weapon %s | eco %s" % [JSON.stringify(sb), JSON.stringify(sw), JSON.stringify(se)])
-	var mix_w: bool = int(sb["key"]) >= int(sw["key"]) and int(sb["coins"]) > int(sw["coins"])
-	var mix_e: bool = int(sb["key"]) > int(se["key"]) and int(sb["coins"]) > int(se["coins"])
-	# AC-38 (adapted to REDESIGN_BRIEF AC-30 / G1): the mixed policy reaches a
-	# strictly higher frontier than both zero-eco and all-eco. (Was: >= 1.10x
-	# the weapon wave and >= 1.25x its coins; coins now follow waves only, and
-	# the redesign wants viable specs, not an eco premium — PM-10.)
-	var ac38: bool = int(sb["best_wave"]) > int(sw["best_wave"]) and int(sb["best_wave"]) > int(se["best_wave"])
-	var seed_rows: Dictionary = {}
-	var seeds_ok: bool = true
-	for k in EXTRA_SEEDS.size():
-		var sr: Dictionary = R.get("seed:%d" % k, {})
-		if sr.is_empty():
-			seeds_ok = false
+	m["days"] = days
+	m["t2_day"] = int(M["t2_day"])
+	m["speed2_day"] = int(M["speed2_day"])
+	m["first_coins"] = int(M["first_coins"])
+	m["rarities"] = M["rar"]
+	m["pity_max"] = M["pity_max"]
+	m["spiral"] = M["spiral"]
+	# solvent: the very first run banks a Core level (300 coins) or more
+	m["solvent"] = int(M["first_coins"]) >= 300
+	m["first_goal_day1"] = int((days[0] as Dictionary)["best_wave"]) >= FIRST_GOAL_WAVE
+	m["progressable"] = int((days.back() as Dictionary)["progress_key"]) >= int((days[0] as Dictionary)["progress_key"]) + 10
+	m["no_death_spiral"] = (M["spiral"] as Array).is_empty()
+	m["t2_by_day3_6"] = int(M["t2_day"]) >= 3 and int(M["t2_day"]) <= 6
+	m["speed2_by_day4_8"] = int(M["speed2_day"]) >= 4 and int(M["speed2_day"]) <= 8
+	var G: Dictionary = R.get("gear", {})
+	m["gear_ratio"] = snappedf(float(G.get("ratio", 0.0)), 0.01)
+	m["gear_matters"] = float(G.get("ratio", 0.0)) >= 1.25
+	var C: Dictionary = R.get("corebld", {})
+	m["corebld_ratio"] = snappedf(float(C.get("ratio", 0.0)), 0.01)
+	m["corebld_matters"] = float(C.get("ratio", 0.0)) >= 1.10
+	var XP: Dictionary = R.get("xp", {})
+	m["xp_ratio"] = snappedf(float(XP.get("ratio", 0.0)), 0.01)
+	m["xp_drafts"] = float(XP.get("ratio", 0.0)) >= 1.20
+	var D: Dictionary = R.get("dir", {})
+	m["dir_spread"] = snappedf(float(D.get("spread", 99.0)), 0.01)
+	m["dir_parity"] = not D.is_empty() and float(D["spread"]) <= 1.25
+	# no dominant weapon: no single-weapon run beats the balanced mix by > 20%
+	var only: Dictionary = {}
+	var bal_w: float = 0.0
+	for j in ["weapons_a", "weapons_b"]:
+		var W: Dictionary = R.get(j, {})
+		if W.is_empty():
 			continue
-		seed_rows[str(int(sr["sd"]))] = sr["row"]
-		seeds_ok = seeds_ok and bool((sr["row"] as Dictionary)["ok"])
-	say("SEEDS week 1: " + JSON.stringify(seed_rows))
-	var MO: Dictionary = R.get("mono", {})
-	var PK: Dictionary = R.get("perks", {})
-	var MD: Dictionary = R.get("mods", {})
-	var per_day: Array = []
-	for r in days:
-		var rd: Dictionary = r
-		per_day.append({"day": rd["day"], "tier": rd["tier"], "best_wave_hi_tier": rd["best_wave_hi_tier"], "best_wave": rd["best_wave"], "coins": rd["coins_gross"], "gems": rd["gems_earned"], "labs": rd["labs"], "cards": rd["cards"], "core_lvl": rd["core_lvl"], "parts": rd["parts"], "outpost_h": rd["outpost_h"], "outpost_ratio": rd["outpost_ratio"]})
-	var day1: int = int((days[0] as Dictionary)["best_wave"])
-	var last: Dictionary = days[DAYS - 1]
-	m.merge({
-		"campaign_days": per_day, "t2_day": M["t2_day"], "t3_day": t3, "final_tier": int(last["tier"]),
-		"day1_best_wave": day1, "day1_in_target_band": day1 >= 18 and day1 <= 32,
-		"day30_best_wave_hi_tier": int(last["best_wave_hi_tier"]), "stall_days": stall_days,
-		"gems_total": gtot, "gems_per_day": snappedf(gpd, 0.1), "gem_log": gl, "gem_top_source": gsrc,
-		"active_coin_rate": snappedf(active_rate, 0.1), "offline_coin_rate": snappedf(off_rate, 0.1),
-		"strategy_week1": strat, "ac38_strict": ac38, "inrun_policy": MO.get("pol", {}),
-		"perks_d20": PK.get("rows", {}), "perk_top_coin_ratio": snappedf(float(PK.get("top_ratio", 0.0)), 0.01), "dominant_perks": PK.get("dominant", []),
-		"t2_by_day5": int(M["t2_day"]) >= 3 and int(M["t2_day"]) <= 5,
-		"day1_band": day1 >= 18 and day1 <= 32,
-		# FEEDBACK-1 (new gate): a brand-new player's first run is short
-		# (5-8 real minutes at 1x) so they reach the meta features sooner.
-		"first_run_s": snappedf(float(M.get("first_run_s", -1.0)), 0.1),
-		# MASS_HORDE (re-aimed, same band): the owner's 5-8 min first run is
-		# checked on the MEDIAN of the FRESH_N fresh first runs (fresh_checks),
-		# not one seed: with 100s of bodies a single run's wall varies +-5 waves.
-		"first_run_short_single": float(M.get("first_run_s", -1.0)) >= 300.0 and float(M.get("first_run_s", -1.0)) <= 480.0,
-		"tier3_by_day30": t3 > 0,
-		"no_plateau_before_t3": stall_days.is_empty(),
-		"early_3day_rise": early,
-		# FEEDBACK-1 (deliberate gate change): gems / premium currency are
-		# removed, so the AC-41 gem-income bands become "no gem is ever earned".
-		"gems_per_day_ok": gtot == 0 and gpd == 0.0,
-		"gem_sources_ok": gmax == 0,
-		"offline_below_active": off_rate <= 0.2 * active_rate,
-		"mix_beats_weapon": mix_w, "mix_beats_eco": mix_e,
-		"no_dominant_perk": PK.has("dominant") and (PK["dominant"] as Array).is_empty(),
-		"ac38_eco_mix": ac38, "mono_same_save": MO.get("mono", {}), "mono_same_save_below_70": bool(MO.get("mono_ok", false)),
-		"late_stall_days": late_stall, "best_wave_at_t3": bw_t3, "no_plateau_after_t3": late_ok,
-		"seed_runs": seed_rows, "seeds_ok": seeds_ok,
-		"pc_refinery": MD.get("refin", {}), "pc_refinery_not_dominant": bool(MD.get("refin_ok", false)),
-		"pc_modifiers_d20": MD.get("mod_rows", {}), "pc_modifiers_reach_w25": bool(MD.get("mods_ok", false)), "pc_modifiers_fair": bool(MD.get("fair_ok", false)),
-		"pc_endless_d20": MD.get("er", {}), "pc_endless_runs": bool(MD.get("endless_ok", false)),
-	})
-	m.merge(fresh_checks(R.get("fresh", {})))
-	m.merge(mass_checks(R.get("mass", {}), M))
+		only.merge(W["only"])
+		bal_w = maxf(bal_w, float(W["balanced"]["mean"]))
+	var top_w: float = 0.0
+	for k in only.keys():
+		top_w = maxf(top_w, float(only[k]))
+	m["weapons_only"] = only
+	m["weapon_top_ratio"] = snappedf(top_w / maxf(0.1, bal_w), 0.01)
+	m["no_dominant_weapon"] = only.size() == _weapon_ids().size() and top_w <= 1.2 * bal_w
+	var P: Dictionary = R.get("perks", {})
+	var top_p: float = 0.0
+	for k in (P.get("fam", {}) as Dictionary).keys():
+		top_p = maxf(top_p, float(P["fam"][k]))
+	m["perk_fam"] = P.get("fam", {})
+	m["perk_top_ratio"] = snappedf(top_p / maxf(0.1, float((P.get("balanced", {}) as Dictionary).get("mean", 0.0))), 0.01)
+	m["no_dominant_perk"] = not P.is_empty() and top_p <= 1.2 * float(P["balanced"]["mean"])
+	# pity: counters never pass their hard caps; Epic+ arrives at least once
+	# per 30 banked rolls on average
+	var rolls: int = 0
+	var epic_up: int = 0
+	for k in (M["rar"] as Dictionary).keys():
+		rolls += int(M["rar"][k])
+		if RarityDB.at_least(String(k), "epic"):
+			epic_up += int(M["rar"][k])
+	var pm: Dictionary = M["pity_max"]
+	m["pity_holds"] = int(pm["e"]) <= int(RarityDB.PITY["e"]["hard"]) and int(pm["l"]) <= int(RarityDB.PITY["l"]["hard"]) and epic_up * 30 >= rolls
 	return m
 
 
-## MASS_HORDE §D8 gates from the "mass" job (+ H7 from the main campaign).
 static func mass_checks(X: Dictionary, M: Dictionary) -> Dictionary:
 	var o: Dictionary = {"mass_h": X.duplicate(true)}
 	o["h1_wave_bodies"] = bool(X.get("h1_ok", false))
@@ -1642,27 +1484,10 @@ static func fresh_checks(Fr: Dictionary) -> Dictionary:
 	return {
 		"fresh_runs": {"n": w.size(), "waves": w, "median_wave": mw, "min_wave": int(w.min()), "reach_w30": at30, "r_early_median": snappedf(me, 0.01), "r_wall_median": snappedf(ml, 0.01)},
 		"ac25_fresh_wall": w.size() >= 16 and mw >= 8.0 and mw <= 15.0 and at30 * 4 <= w.size() and me >= 2.0 and ml < 0.6,   # owner FB1: fresh wall at waves 8-15 (was 12-25)
-		"fresh_median_first_goal": w.size() >= 16 and mw >= float(FIRST_GOAL_WAVE) and int(w.min()) >= FIRST_GOAL_WAVE,
+		"fresh_median_first_goal": w.size() >= 16 and mw >= float(FRESH_GOAL_WAVE) and int(w.min()) >= FRESH_GOAL_WAVE,
 		"fresh_median_s": snappedf(tm, 0.1),
 		"first_run_short": tm >= 300.0 and tm <= 480.0,   # owner FB2: short first runs ~5-8 min (median of the fresh first runs)
 	}
-
-
-# ======================================================================
-# REDESIGN CAMPAIGN (POWER_MODEL §9, REDESIGN_SPEC §3.4, REDESIGN_BALANCE.md)
-# One fresh save per archetype spec, played session by session (4 runs a
-# day on the SESSION_H clock) through FORGE_LOOPS Core Reforges. The bot is
-# the competent player for its spec: Outpost first (OP_PLAN), Core levels,
-# crates (token / Keys / Field), installs + levels the parts its spec values,
-# drafts / casts specials / buys cash tracks with the spec's in-run policy,
-# spends shards (SHARD_PRIO) and reforges when its spec says (SPEC_REFORGE)
-# — never before it has regained the previous best. Measured per day: the
-# boss-aware frontier power ratio at the death wave, the early (w*/2) and wall
-# ratios, Outpost/active coin share, gems, loadouts; per loop: sessions to
-# regain the previous best.
-# ======================================================================
-
-
 
 
 static func _median(a: Array) -> float:
@@ -1672,10 +1497,3 @@ static func _median(a: Array) -> float:
 	b.sort()
 	var n: int = b.size()
 	return float(b[n / 2]) if n % 2 == 1 else (float(b[n / 2 - 1]) + float(b[n / 2])) / 2.0
-
-
-static var FORGE_DUMP: String = ""     # debug: write the state right after the first Reforge
-static var FORGE_RESUME: String = ""   # debug: continue from such a state
-
-
-

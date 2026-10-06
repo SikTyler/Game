@@ -821,9 +821,15 @@ static func _draw_map(m, s: Dictionary, o: Dictionary, mr: Rect2) -> void:
 			var fr: float = clampf(float(b["stored"]) / cp, 0.0, 1.0)
 			var bcol: Color = Kit.GOLD if id == "mill" else (Kit.SCRAP if id == "refinery" else Kit.GEM)
 			Kit.bar(m, Rect2(r2.position.x + 6, r2.end.y - 12, r2.size.x - 12, 7), fr, bcol if fr < 0.999 else Kit.ENEMY)
+			if fr >= 0.999:
+				# V2 P9 audit: "full, production stopped" is a word, not only a red bar
+				var fw: float = 40.0
+				m.draw_style_box(Kit.sb(Kit.ENEMY, Color(Kit.BG, 0.92), 1, 6), Rect2(r2.end.x - fw - 6, r2.end.y - 34, fw, 20))
+				Kit.th(m, "FULL", Vector2(r2.end.x - 6 - fw * 0.5, r2.end.y - 19), 14, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, fw)
 			if float(b["stored"]) >= 1.0:
 				var bounce: float = 3.0 * sin(m.t_anim * 4.0 + float(int(String(uid))))
-				Kit.icon(m, "ui_collect", Rect2(r2.get_center() + Vector2(-c * 0.22, -r2.size.y * 0.5 - c * 0.2 + bounce), Vector2(c * 0.44, c * 0.44)))
+				# inside its own frame (it used to sit on the neighbour's bar)
+				Kit.icon(m, "ui_collect", Rect2(r2.get_center() + Vector2(-c * 0.22, -r2.size.y * 0.5 + 4.0 + bounce), Vector2(c * 0.44, c * 0.44)))
 		if m.op_sel == String(uid):
 			Kit.outline(m, r2, Kit.GOLD)
 	# decor

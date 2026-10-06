@@ -383,7 +383,7 @@ static func _build_modes(m) -> void:
 		var id: String = ModifierDB.IDS[k]
 		var d: Dictionary = ModifierDB.get_def(id)
 		var on: bool = mods.has(id)
-		Kit.btn(m, "%s %s  +%d%%" % ["[x]" if on else "[ ]", String(d["name"]), int(round(float(d["coin"]) * 100.0))], Rect2(x + (k % 3) * 345.0, y + 120 + (k / 3) * 70.0, 330, 56), func() -> void: toggle_mod(m, id), String(d["desc"]) + " — coin reward +%d%%" % int(round(float(d["coin"]) * 100.0)), true, Kit.ENEMY if on else Kit.NEUTRAL, "MOD " + String(d["name"]), "icon_mod")
+		Kit.btn(m, "%s%s  +%d%%" % ["ON  ·  " if on else "", String(d["name"]), int(round(float(d["coin"]) * 100.0))], Rect2(x + (k % 3) * 345.0, y + 120 + (k / 3) * 70.0, 330, 56), func() -> void: toggle_mod(m, id), String(d["desc"]) + " — coin reward +%d%%" % int(round(float(d["coin"]) * 100.0)), true, Kit.ENEMY if on else Kit.NEUTRAL, "MOD " + String(d["name"]), "icon_mod")
 	Kit.btn(m, "Start run", Rect2(r.end.x - 440, r.end.y - 70, 200, 52), func() -> void: m.start_run(), "Start with this mode and modifiers", Tiers.is_unlocked(m.save, m.view_tier), Kit.RUST, "MODES START")
 	Kit.btn(m, "Close [%s]" % hint(m, "cancel"), Rect2(r.end.x - 220, r.end.y - 70, 200, 52), func() -> void: m.set_overlay(""), "Keep these choices and close", true, Kit.NEUTRAL, "MODES CLOSE")
 
@@ -598,11 +598,18 @@ static func update_tip(m, delta: float) -> void:
 			m.tip_rich.text = Kit.tip_bbcode(t)
 		m.tipbox.reset_size()
 		var sz: Vector2 = m.tipbox.get_combined_minimum_size()
+		# V2 P9 audit: a tip raised over the battlefield stays inside the field
+		# (it never covers the HUD panels' text); elsewhere the window bounds it.
+		var bound := Rect2(0, 0, m.vw, m.vh)
+		if m.screen == "run" and m.S != null and m.field_rect().has_point(m.mouse_pos):
+			bound = m.field_rect()
 		var p: Vector2 = m.mouse_pos + Vector2(18, 22)
-		if p.x + sz.x > m.vw - 6.0:
+		if p.x + sz.x > bound.end.x - 6.0:
 			p.x = m.mouse_pos.x - sz.x - 12.0
-		if p.y + sz.y > m.vh - 6.0:
+		if p.y + sz.y > bound.end.y - 6.0:
 			p.y = m.mouse_pos.y - sz.y - 12.0
+		p.x = clampf(p.x, bound.position.x + 4.0, maxf(bound.position.x + 4.0, bound.end.x - sz.x - 4.0))
+		p.y = clampf(p.y, bound.position.y + 4.0, maxf(bound.position.y + 4.0, bound.end.y - sz.y - 4.0))
 		m.tipbox.position = p
 
 
@@ -888,5 +895,5 @@ static func _draw_achievements(m, r: Rect2) -> void:
 		Kit.panel(m, Rect2(cx, cy, cw - 10, rh - 6), Kit.GOLD if on else Kit.EDGE, Kit.CARD if on else Kit.PANEL)
 		Kit.icon(m, "icon_trophy", Rect2(cx + 8, cy + (rh - 6) * 0.5 - 16, 32, 32), Color.WHITE if on else Color(1, 1, 1, 0.25))
 		Kit.t(m, String(d["name"]), Vector2(cx + 48, cy + rh * 0.42), 17, Kit.TEXT if on else Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, cw - 66)
-		Kit.t(m, String(d["desc"]), Vector2(cx + 48, cy + rh * 0.42 + 19), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, cw - 66)
+		Kit.t(m, Kit.fit(m, String(d["desc"]), 14, cw - 66), Vector2(cx + 48, cy + rh * 0.42 + 19), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, cw - 66)   # V2 P9 audit: ellipsis, full text in the tip
 		m.stat_tips.append([Rect2(cx, cy, cw - 10, rh - 6), "%s\n%s" % [String(d["name"]), String(d["desc"])]])

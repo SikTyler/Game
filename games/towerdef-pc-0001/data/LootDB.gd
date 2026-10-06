@@ -13,6 +13,7 @@ extends RefCounted
 ## A cache holds `items` items; `min` guarantees its best one at that rarity
 ## or better (the rest roll the drop odds); Scrap is x tier.
 
+const TuneRef := preload("res://Tune.gd")
 const ITEM_P: float = 0.04
 const WAVE_ITEM_CAP: int = 6
 const RELIQUARY_TIER: int = 4
@@ -40,7 +41,12 @@ static func ilvl(wave: int, tier: int) -> int:
 
 ## Item drops allowed per wave at a tier.
 static func wave_cap(tier: int) -> int:
-	return WAVE_ITEM_CAP + 2 * (maxi(1, tier) - 1)
+	return TuneRef.int_of("loot_wave_cap", WAVE_ITEM_CAP) + TuneRef.int_of("loot_wave_cap_step", 2) * (maxi(1, tier) - 1)
+
+
+## Elite item chance (Tune loot_item_p for balance search).
+static func item_p() -> float:
+	return TuneRef.num("loot_item_p", ITEM_P)
 
 
 ## One-line disclosure of every source (the reveal's odds tooltip).

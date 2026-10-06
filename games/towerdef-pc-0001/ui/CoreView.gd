@@ -26,6 +26,8 @@ const TABS: Array = [["loadout", "Loadout", "core_open", "The Weapon and Module 
 const ROWS: int = 9
 const SWATCHES: Array = ["1b2440", "2a1640", "103a3a", "3a1010", "202020", "e8f0ff", "39e6ff", "ff3ea5", "ffd34d", "4ade80", "b26bff", "ff8a3d"]
 const R_CORE: float = 150.0
+## Core title offset below the Core centre's ring (outermost orbit = R + 106).
+const TITLE_DY: float = 122.0
 
 
 # ------------------------------------------------------------------ layout
@@ -219,7 +221,8 @@ static func draw(m, cr: Rect2) -> void:
 	for k in n:
 		mods.append(Gear.item(s, int(so[k])) if k < so.size() else {})
 	GearVis.draw_core(m, Cores.look(s), mods, Gear.weapon(s), c, R_CORE, -PI * 0.5 + 0.25 * sin(m.t_anim * 0.6), m.t_anim)
-	Kit.th(m, "THE CORE  ·  Lv %d / %d" % [lv, Cores.max_level(s)], Vector2(c.x, c.y + R_CORE + 64.0), 24, Kit.GOLD, HORIZONTAL_ALIGNMENT_CENTER, 600.0)
+	# V2 P9 audit: the title sits outside the outermost orbit ring (R + 106)
+	Kit.th(m, "THE CORE  ·  Lv %d / %d" % [lv, Cores.max_level(s)], Vector2(c.x, c.y + R_CORE + TITLE_DY), 24, Kit.GOLD, HORIZONTAL_ALIGNMENT_CENTER, 600.0)
 	var reqs: Array = milestone_reqs(s)
 	if not reqs.is_empty():
 		var cr0: Rect2 = chip_rect(m, 0, reqs.size())
@@ -246,12 +249,12 @@ static func _draw_loadout(m, s: Dictionary, c: Vector2, n: int) -> void:
 			nxt = int(Gear.SOCKET_LVLS[k])
 			break
 	if nxt > 0:
-		Kit.t(m, "%d sockets open  ·  the next at Core Lv%d" % [n, nxt], Vector2(c.x, c.y + R_CORE + 90.0), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, 500.0)
+		Kit.t(m, "%d sockets open  ·  the next at Core Lv%d" % [n, nxt], Vector2(c.x, c.y + R_CORE + TITLE_DY + 26.0), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, 500.0)
 	# loadout bonuses
 	var cr: Rect2 = m.content_rect()
 	var ln: Array = Gear.fx_lines(Gear.run_fx(s))
 	var bx: float = cr.position.x + 40.0
-	var by: float = c.y + R_CORE + 116.0
+	var by: float = c.y + R_CORE + TITLE_DY + 52.0
 	var bw: float = cr.size.x * 0.5 - 60.0
 	Kit.head(m, "LOADOUT BONUSES", Vector2(bx, by), bw)
 	if ln.is_empty():

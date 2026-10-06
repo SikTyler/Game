@@ -138,12 +138,8 @@ static func draw(m) -> void:
 	Kit.panel_glow(m, r, Kit.GOLD, Kit.PANEL2, 1.4, 2)
 	var all: Array = m.reveal_uids
 	Kit.th(m, "LOOT", Vector2(r.position.x + 28, r.position.y + 54), 34, Kit.GOLD)
-	var best: String = "common"
-	for u in all:
-		var rr: String = String(Gear.item(m.save, int(u)).get("rar", "common"))
-		if RarityDB.rank(rr) > RarityDB.rank(best):
-			best = rr
-	Kit.t(m, "%d items  ·  best: %s  ·  everything is already in your inventory" % [all.size(), String(RarityDB.get_def(best)["name"])], Vector2(r.position.x + 140, r.position.y + 50), 17, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 400.0)
+	# V2 P9 audit: no "best: Legendary" spoiler before the cards flip
+	Kit.t(m, "%d items  ·  everything is already in your inventory" % all.size(), Vector2(r.position.x + 140, r.position.y + 50), 17, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 400.0)
 	var lst: Array = _page_uids(m)
 	for k in lst.size():
 		_card(m, k, Gear.item(m.save, int(lst[k])))
@@ -161,7 +157,7 @@ static func draw(m) -> void:
 		var pd: Dictionary = RarityDB.PITY[g]
 		var x: float = px + float(i) * (pw + 16.0)
 		var col: Color = Kit.rarity_col(String(pd["min"]))
-		Kit.th(m, "%s within %d drops" % [names[g], maxi(1, int(pd["hard"]) - int(pity.get(g, 0)))], Vector2(x, py), 15, col, HORIZONTAL_ALIGNMENT_LEFT, pw)
+		Kit.th(m, "%s within %d drops" % [names[g], maxi(1, int(pd["hard"]) - int(pity.get(g, 0)))], Vector2(x, py), 15, Kit.rarity_text(String(pd["min"])), HORIZONTAL_ALIGNMENT_LEFT, pw)
 		Kit.bar_glow(m, Rect2(x, py + 10.0, pw, 10.0), float(pity.get(g, 0)) / float(pd["hard"]), col)
 	var od: Dictionary = RarityDB.odds("drop")
 	var lines: Array = ["Drop odds (before luck):"]
@@ -215,4 +211,4 @@ static func _card(m, k: int, it: Dictionary) -> void:
 		var y: float = r.position.y + 222.0 + float(i) * 19.0
 		if y > r.end.y - 6.0:
 			break
-		Kit.t(m, "T%d %s" % [int(p["t"]), AffixDB.text(String(p["id"]), int(p["t"]), float(p["q"]))], Vector2(r.position.x + 12.0, y), 14, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 24.0)
+		Kit.t(m, Kit.fit(m, "T%d %s" % [int(p["t"]), AffixDB.text(String(p["id"]), int(p["t"]), float(p["q"]))], 14, r.size.x - 24.0), Vector2(r.position.x + 12.0, y), 14, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 24.0)

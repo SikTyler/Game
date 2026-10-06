@@ -432,6 +432,411 @@
    }
   },
   {
+   "name": "shot_flak",
+   "kind": "sfx",
+   "note": "Flamer: a short noise hiss",
+   "synth": {
+    "zzfx": [
+     1,
+     0.2,
+     300,
+     0,
+     0.06,
+     0.1,
+     4,
+     1,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1.5,
+     0,
+     0.3
+    ],
+    "volume": 0.06,
+    "seed": 31
+   }
+  },
+  {
+   "name": "shot_railgun",
+   "kind": "sfx",
+   "note": "Railgun: a falling saw zap",
+   "synth": {
+    "zzfx": [
+     1,
+     0,
+     1200,
+     0,
+     0.05,
+     0.2,
+     1,
+     2,
+     -30,
+     0,
+     0,
+     0,
+     0,
+     0.2,
+     0,
+     0.1
+    ],
+    "volume": 0.12,
+    "seed": 32
+   }
+  },
+  {
+   "name": "shot_frost",
+   "kind": "sfx",
+   "note": "Cryo Spire: a cold sine chime",
+   "synth": {
+    "zzfx": [
+     1,
+     0,
+     1500,
+     0.01,
+     0.04,
+     0.12,
+     0,
+     1,
+     -5,
+     0,
+     0,
+     0,
+     0,
+     0,
+     20,
+     0
+    ],
+    "volume": 0.06,
+    "seed": 33
+   }
+  },
+  {
+   "name": "shot_pulse",
+   "kind": "sfx",
+   "note": "Pulse Emitter: a low ringing thump",
+   "synth": {
+    "zzfx": [
+     1,
+     0,
+     110,
+     0.01,
+     0.05,
+     0.25,
+     0,
+     1,
+     2,
+     0,
+     0,
+     0,
+     0,
+     0.1,
+     0,
+     0.1
+    ],
+    "volume": 0.14,
+    "seed": 34
+   }
+  },
+  {
+   "name": "shot_missile",
+   "kind": "sfx",
+   "note": "Missile Battery: a rising whoosh",
+   "synth": {
+    "zzfx": [
+     1,
+     0.1,
+     200,
+     0.02,
+     0.08,
+     0.2,
+     1,
+     1,
+     8,
+     0,
+     0,
+     0,
+     0,
+     0.6,
+     0,
+     0.2
+    ],
+    "volume": 0.1,
+    "seed": 35
+   }
+  },
+  {
+   "name": "shot_spike",
+   "kind": "sfx",
+   "note": "Spike Pylon: a metallic stab",
+   "synth": {
+    "zzfx": [
+     1,
+     0.05,
+     420,
+     0,
+     0.01,
+     0.05,
+     1,
+     1.2,
+     -10,
+     0,
+     0,
+     0,
+     0,
+     0.4,
+     0,
+     0.3
+    ],
+    "volume": 0.07,
+    "seed": 36
+   }
+  },
+  {
+   "name": "shot_mines",
+   "kind": "sfx",
+   "note": "Minelayer: a soft drop click",
+   "synth": {
+    "zzfx": [
+     1,
+     0,
+     260,
+     0,
+     0.01,
+     0.06,
+     2,
+     1,
+     -20,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "volume": 0.08,
+    "seed": 37
+   }
+  },
+  {
+   "name": "shot_scatter",
+   "kind": "sfx",
+   "note": "Scatter Gun: a noisy blast",
+   "synth": {
+    "zzfx": [
+     1,
+     0.15,
+     160,
+     0,
+     0.02,
+     0.12,
+     4,
+     1,
+     -3,
+     0,
+     0,
+     0,
+     0,
+     1.2,
+     0,
+     0.4
+    ],
+    "volume": 0.12,
+    "seed": 38
+   }
+  },
+  {
+   "name": "shot_laser",
+   "kind": "sfx",
+   "note": "Laser Lance: a high buzzing beam",
+   "synth": {
+    "zzfx": [
+     1,
+     0,
+     700,
+     0.01,
+     0.1,
+     0.05,
+     1,
+     0.5,
+     0,
+     0,
+     0,
+     0,
+     0.02,
+     0,
+     30,
+     0
+    ],
+    "volume": 0.05,
+    "seed": 39
+   }
+  },
+  {
+   "name": "shot_saw",
+   "kind": "sfx",
+   "note": "Saw Launcher: a rising whirr",
+   "synth": {
+    "zzfx": [
+     1,
+     0.05,
+     520,
+     0,
+     0.06,
+     0.08,
+     1,
+     1,
+     12,
+     0,
+     0,
+     0,
+     0.03,
+     0.2,
+     0,
+     0.2
+    ],
+    "volume": 0.07,
+    "seed": 40
+   }
+  },
+  {
+   "name": "shot_arcproj",
+   "kind": "sfx",
+   "note": "Arc Projector: a lower crackle",
+   "synth": {
+    "zzfx": [
+     1,
+     0.15,
+     600,
+     0,
+     0.03,
+     0.08,
+     2,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0.015,
+     0.8,
+     50,
+     0.1
+    ],
+    "volume": 0.08,
+    "seed": 41
+   }
+  },
+  {
+   "name": "shot_sonic",
+   "kind": "sfx",
+   "note": "Sonic Cannon: a deep whomp",
+   "synth": {
+    "zzfx": [
+     1,
+     0,
+     60,
+     0.02,
+     0.06,
+     0.3,
+     0,
+     1,
+     4,
+     0,
+     0,
+     0,
+     0,
+     0.3,
+     0,
+     0.3
+    ],
+    "volume": 0.16,
+    "seed": 42
+   }
+  },
+  {
+   "name": "shot_harpoon",
+   "kind": "sfx",
+   "note": "Harpoon: a heavy twang",
+   "synth": {
+    "zzfx": [
+     1,
+     0,
+     240,
+     0,
+     0.03,
+     0.18,
+     3,
+     1,
+     -8,
+     0,
+     0,
+     0,
+     0,
+     0.1,
+     0,
+     0.2
+    ],
+    "volume": 0.12,
+    "seed": 43
+   }
+  },
+  {
+   "name": "shot_plasma",
+   "kind": "sfx",
+   "note": "Plasma Fence: a fizz",
+   "synth": {
+    "zzfx": [
+     1,
+     0.2,
+     900,
+     0,
+     0.04,
+     0.1,
+     4,
+     1,
+     0,
+     0,
+     0,
+     0,
+     0,
+     2,
+     0,
+     0.2
+    ],
+    "volume": 0.05,
+    "seed": 44
+   }
+  },
+  {
+   "name": "shot_flakburst",
+   "kind": "sfx",
+   "note": "Flak Burst: an airburst pop",
+   "synth": {
+    "zzfx": [
+     1,
+     0.05,
+     140,
+     0,
+     0.02,
+     0.15,
+     4,
+     1,
+     -2,
+     0,
+     0,
+     0,
+     0,
+     0.8,
+     0,
+     0.5
+    ],
+    "volume": 0.12,
+    "seed": 45
+   }
+  },
+  {
    "name": "theme",
    "kind": "music",
    "song": "audio/theme.song.json"

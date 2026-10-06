@@ -327,6 +327,10 @@ static func _qol(t) -> void:
 	var ac: Array = _ev(Outpost.auto_collect(oc, later + 60), "auto_collect")
 	var bl: Dictionary = oc["outpost"]["buildings"]
 	t._check("P8b Auto-Collect: one summary event pays the Mill; the Scavenger keeps its items for a click", mu != "" and su != "" and ac.size() == 1 and int(ac[0]["coins"]) > 0 and int(oc["coins"]) == c0 + int(ac[0]["coins"]) and float(bl[mu]["stored"]) < 1.0 and float(bl[su]["stored"]) >= 1.0, "%s %s" % [ac, bl.get(su, {})])
+	# P9 regression: the boot "while you were away" claim with a stocked
+	# Scavenger (its resource is items, not coins / Scrap) used to crash
+	var aw: Array = Outpost.claim_away(oc, later + 7200)
+	t._check("P9 regression: claim_away with a stocked Scavenger pays coins and banks its items (no crash)", _ev(aw, "offline").size() == 1 and _ev(aw, "loot_item").size() + _ev(aw, "loot_salvaged").size() >= 1, str(aw.map(func(e: Variant) -> String: return String((e as Dictionary)["t"]))))
 	# Auto-Salvage: Commons become Scrap on arrival when switched on
 	var ls: Dictionary = _save()
 	_lv(ls, "auto_salvage", 1)

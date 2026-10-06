@@ -151,8 +151,13 @@ static func _draw_tree(m, s: Dictionary) -> void:
 		if can:
 			m.draw_arc(p2, NODE_R + 4.0, 0, TAU, 40, Color(col2, 0.5 + 0.4 * sin(m.t_anim * 4.0)), 3.0)
 		var lx: float = p2.x + NODE_R + 8.0
-		Kit.t(m, "%s  %d/%d" % [String(d["name"]), lv, int(d["max"])], Vector2(lx, p2.y - 2), 15, col2 if lv > 0 else Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, 200.0)
-		Kit.t(m, ("%d shards" % ReforgeDB.cost(String(id), lv)) if lv < int(d["max"]) else "max", Vector2(lx, p2.y + 17), 14, Kit.SHARD if can else Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, 170.0)
+		var l1: String = "%s  %d/%d" % [String(d["name"]), lv, int(d["max"])]
+		var l2: String = ("%d shards" % ReforgeDB.cost(String(id), lv)) if lv < int(d["max"]) else "max"
+		# V2 P9 audit: a backing plate so connector lines never strike through labels
+		var lw: float = maxf(m.font.get_string_size(l1, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x, m.font.get_string_size(l2, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x)
+		m.draw_rect(Rect2(lx - 3, p2.y - 17, minf(lw, 200.0) + 6, 40), Color(Kit.BG2, 0.92))
+		Kit.t(m, l1, Vector2(lx, p2.y - 2), 15, col2 if lv > 0 else Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, 200.0)
+		Kit.t(m, l2, Vector2(lx, p2.y + 17), 14, Kit.SHARD if can else Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, 170.0)
 
 
 static func _commas(n: int) -> String:

@@ -387,6 +387,9 @@ static func draw(m, _cr: Rect2) -> void:
 	_draw_new(m, s, R["new"])
 
 
+const RARITY_LETTER: Dictionary = {"common": "C", "uncommon": "U", "rare": "R", "epic": "E", "legendary": "L", "mythic": "M", "exotic": "X"}
+
+
 static func _draw_inv(m, s: Dictionary, inv: Rect2) -> void:
 	Kit.panel(m, inv, Kit.EDGE, Kit.PANEL)
 	Kit.th(m, "INVENTORY", inv.position + Vector2(18, 36), 24, Kit.TEXT)
@@ -405,16 +408,20 @@ static func _draw_inv(m, s: Dictionary, inv: Rect2) -> void:
 		if inset:
 			m.draw_rect(r.grow(3.0), Kit.GOLD, false, 2.0)
 		if String(it["kind"]) == "weapon":
-			GearVis.draw_weapon(m, it, r.get_center() + Vector2(0, -6), TILE * 0.82, 0.0, m.t_anim)
+			GearVis.draw_weapon(m, it, r.get_center() + Vector2(0, -4), TILE * 0.70, 0.0, m.t_anim)   # V2 P9 audit: muzzles stay inside the tile
 		else:
-			GearVis.draw_module(m, it, r.get_center() + Vector2(0, -6), TILE * 0.52, m.t_anim)
+			GearVis.draw_module(m, it, r.get_center() + Vector2(0, -4), TILE * 0.48, m.t_anim)
+		# V2 P9 audit: rarity is not hue-only — a rank letter in the corner
+		var rl: String = RARITY_LETTER.get(String(it["rar"]), "?")
+		m.draw_style_box(Kit.sb(Color(Kit.rarity_col(String(it["rar"])), 0.9), Color(Kit.BG, 0.9), 1, 6), Rect2(r.position.x + 4, r.position.y + 4, 20, 20))
+		Kit.th(m, rl, Vector2(r.position.x + 14, r.position.y + 19), 14, Kit.rarity_text(String(it["rar"])), HORIZONTAL_ALIGNMENT_CENTER, 20.0)
 		Kit.th(m, "Lv%d" % int(it["lvl"]), Vector2(r.position.x + 8, r.end.y - 8), 14, Kit.TEXT)
 		if Gear.is_equipped(s, int(it["uid"])):
 			Kit.th(m, "EQ", Vector2(r.end.x - 8, r.end.y - 8), 14, Kit.GREEN, HORIZONTAL_ALIGNMENT_RIGHT, 40.0)
 		if bool(it.get("new", false)):
 			m.draw_circle(Vector2(r.end.x - 12, r.position.y + 16), 6.0, Kit.MAGENTA)
 		if bool(it.get("fav", false)):
-			_star(m, Vector2(r.position.x + 14, r.position.y + 18), 7.0, Kit.GOLD)
+			_star(m, Vector2(r.position.x + 14, r.position.y + 38), 7.0, Kit.GOLD)
 	if lst.is_empty():
 		Kit.t(m, "Nothing here yet", Vector2(inv.get_center().x, inv.position.y + 200), 18, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, inv.size.x)
 	Kit.t(m, "Page %d / %d" % [int(m.forge_page) + 1, _pages(m)], Vector2(inv.get_center().x, inv.end.y - 24), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, 200.0)
@@ -541,7 +548,7 @@ static func _draw_new(m, s: Dictionary, n: Rect2) -> void:
 		var pd: Dictionary = RarityDB.PITY[g]
 		var left: int = maxi(1, int(pd["hard"]) - int(pity.get(g, 0)))
 		var nm: String = "Epic+" if g == "e" else "Legendary"
-		Kit.th(m, "%s guaranteed within %d forges" % [nm, left], Vector2(n.position.x + 18, y), 16, Kit.rarity_col("epic" if g == "e" else "legendary"), HORIZONTAL_ALIGNMENT_LEFT, n.size.x - 36.0)
+		Kit.th(m, "%s guaranteed within %d forges" % [nm, left], Vector2(n.position.x + 18, y), 16, Kit.rarity_text("epic" if g == "e" else "legendary"), HORIZONTAL_ALIGNMENT_LEFT, n.size.x - 36.0)
 		Kit.bar_glow(m, Rect2(n.position.x + 18, y + 8, n.size.x - 36, 10), float(pity.get(g, 0)) / float(pd["hard"]), Kit.rarity_col("epic" if g == "e" else "legendary"))
 		y += 42.0
 	# disclosed odds: live (luck + pity) for the Forge, the base drop table
@@ -555,7 +562,7 @@ static func _draw_new(m, s: Dictionary, n: Rect2) -> void:
 		var yy: float = y + 26.0 + float(i) * 21.0
 		if yy > n.end.y - (68.0 if Labs.level(s, "auto_salvage") > 0 else 8.0):
 			break
-		Kit.t(m, _rar_name(r2), Vector2(n.position.x + 18, yy), 15, Kit.rarity_col_t(r2, m.t_anim))
+		Kit.t(m, _rar_name(r2), Vector2(n.position.x + 18, yy), 15, Kit.rarity_col_t(r2, m.t_anim).lerp(Kit.TEXT, 0.3))
 		Kit.t(m, _pct(float(fo[r2])), Vector2(n.end.x - 150, yy), 15, Kit.TEXT, HORIZONTAL_ALIGNMENT_RIGHT, 120.0)
 		Kit.t(m, _pct(float(dro[r2])), Vector2(n.end.x - 18, yy), 15, Kit.TEXT, HORIZONTAL_ALIGNMENT_RIGHT, 120.0)
 

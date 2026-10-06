@@ -117,21 +117,21 @@ static func card_type(m, cd: Dictionary) -> Dictionary:
 		var dup: bool = bool(cd.get("dup", false))
 		if bool(cd.get("merge", false)):
 			return {"type": "BUILDING", "col": Kit.GOLD, "icon": "icon_tier",
-				"sub": "Merge into your T1 %s (-> T2) or place another" % nm,
+				"sub": "Merge -> T2 %s" % nm,
 				"how": "BUILDING: drop on your T1 %s to merge it into a T2, or on an empty cell" % nm}
 		return {"type": "BUILDING", "col": Kit.RARITY["rare"], "icon": "ui_blueprint",
-			"sub": "Place another %s on the grid" % nm if dup else "Place it on a grid cell",
+			"sub": "Place another" if dup else "Place on the grid",
 			"how": "BUILDING: drag onto an empty cell (or click, then click a cell)"}
 	if rw == "ability" or kind == "special":
 		var have: bool = S != null and S.specials.any(func(s: Variant) -> bool: return String((s as Dictionary)["id"]) == id)
 		return {"type": "ABILITY", "col": Kit.GEM, "icon": "ui_cooldown",
-			"sub": "+1 copy (faster cooldown)" if have else "New ability icon at the bottom",
+			"sub": "+1 copy (faster)" if have else "New ability",
 			"how": "ABILITY: click to add it to your floating abilities"}
-	var sub: String = "Instant stat buff  ·  listed under Perks"
+	var sub: String = "Instant stat buff"
 	if kind == "pack" and S != null:
-		sub = "Instant stat buff  ·  %d/%d  ·  under Perks" % [S.pack_n(id) + 1, PickDB.max_of(id)]
+		sub = "Stat buff  ·  %d/%d" % [S.pack_n(id) + 1, PickDB.max_of(id)]
 	elif kind == "insight":
-		sub = "Permanent insight  ·  banked at run end"
+		sub = "Permanent insight"
 	return {"type": "PERK", "col": Kit.GOLD, "icon": "icon_streak", "sub": sub,
 		"how": "PERK: click to take it now (no placing)"}
 
@@ -150,11 +150,13 @@ static func _press_card(m, k: int) -> void:
 static func draw(m) -> void:
 	var S = m.S
 	var lr: Rect2 = m.left_rect()
-	m.draw_rect(lr, Kit.PANEL)
+	m.draw_rect(lr, Color(Kit.PANEL, 1.0))   # V2 P9 audit: opaque side panel
 	m.draw_line(Vector2(lr.end.x, lr.position.y), Vector2(lr.end.x, lr.end.y), Kit.EDGE, 2.0)
 	var x: float = lr.position.x + 16.0
 	var w: float = lr.size.x - 32.0
-	var off: Dictionary = _offer(m)
+	# V2 P9 audit: the run is over on the results screen, so no live offer
+	# (draft cards / Reroll / Banish) is shown there, only this run's perks
+	var off: Dictionary = _offer(m) if m.screen != "results" else {}
 	if not off.is_empty():
 		var kind: String = String(off["kind"])
 		var title: String = "DRAFT — wave %d" % int(S.wave)
@@ -236,8 +238,11 @@ static func _draw_card(m, r: Rect2, cd: Dictionary, k: int) -> void:
 	m.draw_rect(Rect2(br.position, Vector2(6, br.size.y)), tcol)
 	Kit.icon(m, String(ct["icon"]), Rect2(br.position.x + 10, br.position.y + 2, 22, 22))
 	Kit.t(m, String(ct["type"]), Vector2(br.position.x + 38, br.position.y + 20), 16, tcol.lightened(0.25), HORIZONTAL_ALIGNMENT_LEFT, 110.0)
-	Kit.t(m, String(ct["sub"]), Vector2(br.position.x + 38 + 110, br.position.y + 19), 14, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, br.size.x - 160.0 - 64.0)
-	Kit.t(m, rar.capitalize(), Vector2(br.end.x - 8, br.position.y + 19), 14, rc, HORIZONTAL_ALIGNMENT_RIGHT, 70.0)
+	Kit.t(m, Kit.fit(m, String(ct["sub"]), 14, br.size.x - 160.0 - 74.0), Vector2(br.position.x + 38 + 110, br.position.y + 19), 14, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, br.size.x - 160.0 - 74.0)
+	# V2 P9 audit: the rarity word on a dark pill in a lifted tint (>= 4.5:1)
+	var rw: float = m.font.get_string_size(rar.capitalize(), HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x + 14.0
+	m.draw_style_box(Kit.sb(Color(rc, 0.7), Color(Kit.BG, 0.92), 1, 9), Rect2(br.end.x - rw - 4, br.position.y + 3, rw, 20))
+	Kit.t(m, rar.capitalize(), Vector2(br.end.x - 11, br.position.y + 18), 14, Kit.rarity_text(rar), HORIZONTAL_ALIGNMENT_RIGHT, 70.0)
 	var tx: float = r.position.x + 22.0 + isz
 	var tw: float = r.end.x - tx - 10.0
 	Kit.t(m, String(d.get("name", id)), Vector2(tx, r.position.y + 58), 21, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, tw)
@@ -246,13 +251,13 @@ static func _draw_card(m, r: Rect2, cd: Dictionary, k: int) -> void:
 	var cx: float = tx
 	for tg in (d.get("tags", []) as Array):
 		var tag: String = String(tg)
-		var cw: float = 22.0 + float(tag.length()) * 8.0
+		var cw: float = 30.0 + float(tag.length()) * 8.0
 		if cx + cw > r.end.x - 8.0:
 			break
 		var cr := Rect2(cx, r.end.y - 28, cw, 20)
 		Kit.panel(m, cr, Kit.EDGE, Kit.BG2, 1)
 		Kit.icon(m, "tag_" + tag, Rect2(cx + 2, r.end.y - 27, 18, 18))
-		Kit.t(m, tag, Vector2(cx + 20, r.end.y - 13), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, cw - 20)
+		Kit.t(m, tag, Vector2(cx + 25, r.end.y - 13), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, cw - 27)
 		cx += cw + 4.0
 	
 
@@ -316,9 +321,12 @@ static func perk_rows(m) -> Array:
 	for iid in S.insight_found:
 		var idf: Dictionary = PickDB.get_def(String(iid))
 		out.append({"sec": "INSIGHTS", "col": Kit.RARITY["insight"], "icon": String(iid), "name": String(idf.get("name", iid)), "n": "", "desc": String(idf.get("desc", "")) + "\nBanked permanently at run end"})
+	var dn: Dictionary = {}   # V2 P9 audit: repeats stack as one row (xN)
 	for did in S.directives:
+		dn[String(did)] = int(dn.get(String(did), 0)) + 1
+	for did in dn.keys():
 		var ddf: Dictionary = DirectiveDB.get_def(String(did))
-		out.append({"sec": "DIRECTIVES", "col": Kit.MAGENTA, "icon": "icon_endless", "name": String(ddf.get("name", did)), "n": "", "desc": "%s\nCost: %s" % [String(ddf.get("desc", "")), String(ddf.get("cost", ""))]})
+		out.append({"sec": "DIRECTIVES", "col": Kit.MAGENTA, "icon": "icon_endless", "name": String(ddf.get("name", did)), "n": ("x%d" % int(dn[did])) if int(dn[did]) > 1 else "", "desc": "%s\nCost: %s" % [String(ddf.get("desc", "")), String(ddf.get("cost", ""))]})
 	for mid in S.mutations_taken:
 		var md: Dictionary = ModifierDB.MUTATIONS.get(String(mid), {})
 		out.append({"sec": "MUTATIONS", "col": Kit.MAG, "icon": "icon_endless", "name": String(md.get("name", mid)), "n": "", "desc": String(md.get("desc", ""))})

@@ -101,7 +101,7 @@ static func build(m) -> void:
 			var kind: String = String(lt[0])
 			var rid: String = String(lt[1])
 			Kit.req_chip(m, chip_rect(r), kind, rid, String(lt[2]), false, func() -> void: m.jump_to(kind, rid),
-				"Needs %s - click to go there" % String(lt[2]), "icon_lab")
+				"Needs %s - click to go there" % String(lt[2]), "icon_lock")
 		Kit.hit(m, hr, func() -> void: m.meta_act(Labs.start(m.save, id, m.now())), tip(s, id), "LAB " + id, Labs.can_start(s, id), cat_col(cat))
 
 
@@ -116,7 +116,7 @@ static func draw(m, cr: Rect2) -> void:
 	for id in LabDB.IDS:
 		if Labs.level(s, String(id)) >= LabDB.max_of(String(id)):
 			maxed += 1
-	var hx: float = cr.end.x - 520.0
+	var hx: float = cr.end.x - 548.0
 	Kit.chip(m, "icon_lab", "Hall Lv %d" % Outpost.level_of(s, "research"), Vector2(hx, cr.position.y + 50), Kit.CYAN, "Research Hall level: rows open at Lv %s" % " / ".join(PackedStringArray(LabDB.HALL_ROWS.map(func(x: Variant) -> String: return str(x)))), 160.0, 0.8)
 	Kit.chip(m, "cur_coin", "-%d%%" % int(round(Labs.discount(s) * 100.0)), Vector2(hx + 172.0, cr.position.y + 50), Kit.GREEN, "Lab Discount: every research price -3% per level", 150.0, 0.8)
 	Kit.chip(m, "", "%d / %d maxed" % [maxed, LabDB.IDS.size()], Vector2(hx + 334.0, cr.position.y + 50), Kit.GOLD, "Research projects at their max level", 186.0, 0.8)
@@ -151,7 +151,7 @@ static func draw(m, cr: Rect2) -> void:
 		else:
 			Kit.bar(m, Rect2(tx, py, tw, 5.0), float(lv) / float(mx), cc)
 		var lines: int = 2 if r.size.y >= 140.0 else 1
-		Kit.wrap(m, String(d["effect"]), Vector2(tx, py + 10.0), 14, Kit.DIM if open else Color(Kit.DIM, 0.7), tw, lines)
+		Kit.wrap(m, String(d["effect"]), Vector2(tx, py + 10.0), 14, Kit.DIM, tw, lines)   # V2 P9 audit: locked effects stay readable
 		if not open:
 			continue   # the jump chip (a button) fills the bottom strip
 		var by: float = r.end.y - 14.0

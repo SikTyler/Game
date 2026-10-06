@@ -39,8 +39,8 @@ const Desktop := preload("res://ui/Desktop.gd")
 const Battle := preload("res://ui/Battle.gd")
 const RunArt := preload("res://ui/RunArt.gd")
 ## V2 P7d: the new weapons borrow the nearest existing shot sound.
-const SHOT_CLIP: Dictionary = {"pulse": "tesla", "missile": "mortar", "spike": "gun", "mines": "mortar", "scatter": "gun", "laser": "tesla",
-	"saw": "gun", "arcproj": "tesla", "sonic": "mortar", "harpoon": "core", "plasma": "tesla", "flakburst": "mortar"}
+## V2 P9: every weapon has its own shot clip; kinds without one fall back here.
+const SHOT_CLIP: Dictionary = {}
 const Intel := preload("res://ui/Intel.gd")
 const Hub := preload("res://ui/Hub.gd")
 const OutpostView := preload("res://ui/OutpostView.gd")
@@ -543,6 +543,11 @@ func abandon_run() -> void:
 func set_tab(id: String) -> void:
 	if screen != "base":
 		return
+	if tab == "forge" and id != "forge":
+		# V2 P9 audit: leaving the Forge marks what it showed as seen, so the
+		# "new" dots / Forge badge mean new since the last visit
+		for u in Gear.uids(save):
+			Gear.mark_seen(save, int(u))
 	tab = id
 	op_arm = ""
 	op_moving = false
@@ -1163,7 +1168,8 @@ func _handle(events: Array) -> void:
 				sfx_play("levelup", 0.8)
 				rebuild = true
 			"combo_tier":
-				if bool(ev["up"]) and int(ev["tier"]) >= 1:
+				# V2 P9 audit: no centre COMBO pop while the Supply Drop panel is up
+				if bool(ev["up"]) and int(ev["tier"]) >= 1 and (supply_show.is_empty() or t_anim - supply_t0 > 4.0):
 					_pop(TowerState.CENTER + Vector2(0, -200), "COMBO x%.2f" % float(ev["mult"]), 1.0, [Kit.CYAN, Kit.GREEN, GOLD, Kit.MAGENTA][mini(3, int(ev["tier"]) - 1)], 24 + 4 * int(ev["tier"]))
 					sfx_play("click", 1.0 + 0.15 * float(int(ev["tier"])))
 					if int(ev["tier"]) >= 3:

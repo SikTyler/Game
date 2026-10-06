@@ -1057,7 +1057,8 @@ func _run_screen() -> void:
 	var DP = load("res://ui/DraftPanel.gd")
 	var Dr = load("res://Draft.gd")
 	_check("FB1: draft cards name their type (BUILDING vs PERK vs ABILITY)", String(DP.card_type(main, Dr.card_for("gun", S._draft_ctx("")))["type"]) == "BUILDING" and String(DP.card_type(main, Dr.card_for("pk_arsenal", S._draft_ctx("")))["type"]) == "PERK" and String(DP.card_type(main, Dr.card_for("sp_emp", S._draft_ctx("")))["type"]) == "ABILITY")
-	_check("P7a: a duplicate with a T1 twin says it merges into your <Building>", String(DP.card_type(main, {"id": "mine", "fam": "building", "kind": "new", "reward": "building", "dup": true, "merge": true})["sub"]).begins_with("Merge into your T1 Gold Mine"))
+	# V2 P9 audit (deliberate): the band subtitle is short enough to fit ("Merge -> T2 X"); the hint line keeps the long form
+	_check("P7a: a duplicate with a T1 twin says it merges into your <Building>", String(DP.card_type(main, {"id": "mine", "fam": "building", "kind": "new", "reward": "building", "dup": true, "merge": true})["sub"]) == "Merge -> T2 Gold Mine" and String(DP.card_type(main, {"id": "mine", "fam": "building", "kind": "new", "reward": "building", "dup": true, "merge": true})["how"]).contains("T1 Gold Mine"))
 	_check("FB1: no hotkey callouts on the draft buttons", _find("Reroll") != null and not _find("Reroll").text.contains("[") and not _find("Banish").text.contains("["))
 	_audit("draft")
 	var hand0: String = JSON.stringify(S.draft)

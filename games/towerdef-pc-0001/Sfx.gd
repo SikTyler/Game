@@ -12,9 +12,14 @@ const CLIPS: Array = [
 	"shot_core", "shot_gun", "shot_mortar", "shot_tesla", "hit", "kill",
 	"shield_break", "boss_spawn", "boss_kill", "wave_start", "levelup", "perk",
 	"card_open", "lab_done", "place", "upgrade", "click", "coin", "core_hit", "game_over",
+	# V2 P9: every weapon has its own shot (procedural, audio/recipes.json)
+	"shot_flak", "shot_railgun", "shot_frost", "shot_pulse", "shot_missile", "shot_spike", "shot_mines", "shot_scatter",
+	"shot_laser", "shot_saw", "shot_arcproj", "shot_sonic", "shot_harpoon", "shot_plasma", "shot_flakburst",
 ]
 ## Rapid clips get a longer minimum interval so a burst never stacks.
-const GAP_MS: Dictionary = {"shot_core": 70, "shot_gun": 60, "shot_mortar": 90, "shot_tesla": 70, "hit": 50, "kill": 50, "core_hit": 80}
+const GAP_MS: Dictionary = {"shot_core": 70, "shot_gun": 60, "shot_mortar": 90, "shot_tesla": 70, "hit": 50, "kill": 50, "core_hit": 80,
+	"shot_flak": 90, "shot_railgun": 90, "shot_frost": 110, "shot_pulse": 120, "shot_missile": 90, "shot_spike": 70, "shot_mines": 90, "shot_scatter": 80,
+	"shot_laser": 120, "shot_saw": 80, "shot_arcproj": 80, "shot_sonic": 140, "shot_harpoon": 90, "shot_plasma": 120, "shot_flakburst": 90}
 const LOG_MAX: int = 256
 
 var streams: Dictionary = {}
