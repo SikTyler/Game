@@ -73,6 +73,12 @@ const DEFS: Dictionary = {
 	"draft_choices": {"name": "Draft Choices", "cat": "run", "max": 2, "costs": [150000, 2000000], "hall": 5, "req": [["reroll", 1]], "effect": "+1 card in every draft (3 -> 5)", "icon": ["pellets", "c084fc"]},
 	# ---- QOL -------------------------------------------------------------
 	"fast_reveal": {"name": "Fast Reveal", "cat": "qol", "max": 1, "costs": [2500], "hall": 1, "effect": "Loot reveals play twice as fast", "icon": ["chevrons", "ffd34d"]},
+	"presets":     {"name": "Loadout Presets", "cat": "qol", "max": 3, "costs": [15000, 150000, 1500000], "hall": 3, "effect": "+1 saved loadout (Weapon + Modules), on the Core's Presets tab", "icon": ["box", "39e6ff"]},
+	"auto_salvage": {"name": "Auto-Salvage", "cat": "qol", "max": 2, "costs": [20000, 200000], "hall": 3, "effect": "Salvage banked Commons (Lv 2: and Uncommons) on arrival, when switched on in the Forge", "icon": ["gear", "d9b98a"]},
+	"auto_collect": {"name": "Auto-Collect", "cat": "qol", "max": 1, "costs": [30000], "hall": 3, "effect": "The Outpost collects its coins and Scrap by itself (Scavengers stay manual)", "icon": ["magnet", "4ade80"]},
+	"bulk_upgrade": {"name": "Bulk Upgrade", "cat": "qol", "max": 1, "costs": [40000], "hall": 3, "effect": "Upgrade gear x5 or to its max in one click", "icon": ["chevrons", "4ade80"]},
+	"auto_buy":    {"name": "Auto-Buy", "cat": "qol", "max": 1, "costs": [80000], "hall": 3, "req": [["enh_theory", 1]], "effect": "Runs spend spare cash on Core Enhancements by the rule you pick (AUTO in the run panel)", "icon": ["coin", "a3e635"]},
+	"auto_restart": {"name": "Auto-Restart", "cat": "qol", "max": 1, "costs": [100000], "hall": 5, "effect": "A finished run starts the next one after 8 s, when switched on", "icon": ["rings", "4ade80"]},
 }
 
 ## Display / iteration order (by category, cheapest first within a row).
@@ -83,7 +89,7 @@ const IDS: Array = [
 	"loot_theory", "appraisal", "cache_luck", "scav_rate", "reclaim",
 	"stabilizer", "blacklist", "reroll_disc", "greater_cal", "enchanters_eye", "masterwork_odds", "brand_contracts", "mythic_fusion",
 	"grid", "speed", "xp", "reroll", "banish_r", "draft_lock", "enh_theory", "draft_choices",
-	"fast_reveal",
+	"fast_reveal", "presets", "auto_salvage", "auto_collect", "bulk_upgrade", "auto_buy", "auto_restart",
 ]
 
 const SPEED_STEPS: Array = [1.0, 1.5, 2.0, 2.5, 3.0]

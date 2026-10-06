@@ -80,6 +80,13 @@ func _initialize() -> void:
 	main.core_tab = "look"
 	main._rebuild_ui()
 	await _shot("%s/03b_core_look.png" % outdir)
+	# V2 P8b: Loadout Presets (two saved loadouts) + the Forge's QOL switches
+	for kq in ["presets", "bulk_upgrade", "auto_salvage"]:
+		s["research"]["lvls"][kq] = 2 if kq == "presets" else 1
+	GR.save_preset(s, 0)
+	main.core_tab = "presets"
+	main._rebuild_ui()
+	await _shot("%s/03c_core_presets.png" % outdir)
 	main.core_tab = "loadout"
 	main.core_sock = 1
 	main._rebuild_ui()
@@ -87,6 +94,12 @@ func _initialize() -> void:
 	main.forge_sel = best
 	main._rebuild_ui()
 	await _shot("%s/04_forge.png" % outdir)
+	Labs.cycle_auto_salvage(s)
+	main._rebuild_ui()
+	await _shot("%s/04d_forge_qol.png" % outdir)
+	Labs.cycle_auto_salvage(s)
+	for kq in ["presets", "bulk_upgrade", "auto_salvage"]:
+		s["research"]["lvls"][kq] = 0
 	s["scrap"] = 5000
 	GR.reroll(s, best, 0)
 	main._rebuild_ui()

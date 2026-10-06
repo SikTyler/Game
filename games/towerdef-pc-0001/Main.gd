@@ -210,6 +210,8 @@ var op_flash: String = ""            # palette entry flashing (a building not bu
 var op_flash_t: float = -10.0
 var res_focus: String = ""           # research card pulsing
 var res_cat: String = "core"          # Research tab category (LabDB.CATS)
+var auto_collect_t: float = 0.0       # V2 P8b Auto-Collect cadence (menus)
+const AUTO_COLLECT_S: float = 30.0
 var res_focus_t: float = -10.0
 var credits_scroll: float = 0.0
 
@@ -816,6 +818,12 @@ func ev_text(e: Dictionary) -> String:
 			return "Core Relay -> Lv%d" % int(e["lvl"])
 		"collect":
 			return "+%d %s" % [int(e["n"]), String(e["res"])]
+		"auto_collect":
+			return "Auto-collected +%s coins%s" % [Kit.fmt(float(e["coins"])), ("  +%d Scrap" % int(e["scrap"])) if int(e["scrap"]) > 0 else ""]
+		"preset_saved":
+			return "Loadout %d saved" % (int(e["k"]) + 1)
+		"preset_loaded":
+			return "Loadout %d equipped%s" % [int(e["k"]) + 1, ("  (%d missing)" % int(e["missing"])) if int(e["missing"]) > 0 else ""]
 		"plot_open":
 			return "New land opened"
 		"blueprint_saved":
@@ -879,6 +887,23 @@ func jump_to(kind: String, id: String) -> void:
 			res_focus = id
 			res_focus_t = t_anim
 	_rebuild_ui()
+
+
+## V2 P8b Auto-Buy switch (run panel): cycles the save's rule and the live run.
+func cycle_auto_buy() -> void:
+	var mode_ab: String = Labs.cycle_auto_buy(save)
+	if S != null:
+		S.set_auto_buy(mode_ab)
+	_save()
+	_rebuild_ui()
+
+
+## V2 P8b Auto-Restart: the results screen starts the next run after
+## Labs.AUTO_RESTART_S unless an overlay (loot reveal, menus) is up.
+func auto_restart_left() -> float:
+	if screen != "results" or not Labs.auto_restart_on(save):
+		return -1.0
+	return maxf(0.0, Labs.AUTO_RESTART_S - (t_anim - results_t0))
 
 
 ## Open the casino reveal over this run's banked items (results screen).
@@ -1476,6 +1501,8 @@ func _process(delta: float) -> void:
 		if ui_t >= 0.25 and screen == "run":
 			ui_t = 0.0
 			_rebuild_ui()   # refresh affordability (buttons fire on PRESS, so safe)
+	elif screen == "results" and overlay == "" and auto_restart_left() == 0.0:
+		start_run()   # V2 P8b Auto-Restart
 	elif screen == "base" and overlay == "" and offline_offer.is_empty():
 		poll_t += delta
 		if poll_t >= 1.0:
@@ -1483,6 +1510,10 @@ func _process(delta: float) -> void:
 			var t: int = now()
 			var ev: Array = Labs.claim(save, t)
 			ev.append_array(Missions.roll(save, t))
+			auto_collect_t += 1.0
+			if auto_collect_t >= AUTO_COLLECT_S:
+				auto_collect_t = 0.0
+				ev.append_array(Outpost.auto_collect(save, t))
 			if not ev.is_empty():
 				meta_act(ev)
 			elif not op_drag and not op_pan:

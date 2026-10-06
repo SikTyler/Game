@@ -358,6 +358,28 @@ func _core_tab() -> void:
 	await _frames()
 	_check("P4 CORE: the Weapon slot takes a picked Weapon", int(Gear.block(main.save)["equipped"]["weapon"]) == wu)
 	_audit("core loadout")
+	# V2 P8b Loadout Presets
+	_check("P8b CORE: the Presets tab is locked without the research", _find("CORETAB Presets") != null and _find("CORETAB Presets").disabled)
+	main.save["research"]["lvls"]["presets"] = 1
+	main._rebuild_ui()
+	await _frames()
+	_press("CORETAB Presets")
+	await _frames()
+	_check("P8b CORE: Loadout Presets opens one preset slot", main.core_tab == "presets" and _find("preset:save:0") != null and _find("preset:save:1") == null and _find("preset:load:0").disabled)
+	_press("preset:save:0")
+	await _frames()
+	var pw: int = Gear.add_item(main.save, Gear.make("weapon", "flame", "common"))
+	Gear.equip(main.save, pw)
+	main._rebuild_ui()
+	await _frames()
+	_press("preset:load:0")
+	await _frames()
+	_check("P8b CORE: SAVE then LOAD brings the saved Weapon back", int(Gear.block(main.save)["equipped"]["weapon"]) == wu and not _find("preset:load:0").disabled)
+	_audit("core presets")
+	main.save["research"]["lvls"]["presets"] = 0
+	main.core_tab = "loadout"
+	main._rebuild_ui()
+	await _frames()
 	_press("CORETAB Look")
 	await _frames()
 	_press("core:shell:3")
@@ -441,6 +463,26 @@ func _forge() -> void:
 	_press("forge:upgrade")
 	await _frames()
 	_check("P4 FORGE: UPGRADE raises the level", int(Gear.item(main.save, u)["lvl"]) == 2)
+	# V2 P8b Bulk Upgrade + Auto-Salvage
+	_check("P8b FORGE: no bulk / auto-salvage buttons without the research", _find("forge:up5") == null and _find("forge:autosalvage") == null)
+	main.save["research"]["lvls"]["bulk_upgrade"] = 1
+	main.save["research"]["lvls"]["auto_salvage"] = 1
+	main._rebuild_ui()
+	await _frames()
+	_press("forge:up5")
+	await _frames()
+	_check("P8b FORGE: UPGRADE x5 raises five levels", int(Gear.item(main.save, u)["lvl"]) == 7, str(Gear.item(main.save, u)["lvl"]))
+	_press("forge:autosalvage")
+	await _frames()
+	_check("P8b FORGE: the Auto-Salvage switch cycles to Commons", Labs.auto_salvage_level(main.save) == 1 and _find("forge:autosalvage").text.contains("COMMONS"))
+	_audit("forge qol")
+	_press("forge:autosalvage")
+	await _frames()
+	_check("P8b FORGE: ... and back off (Lv 1 has two states)", Labs.auto_salvage_level(main.save) == 0)
+	main.save["research"]["lvls"]["bulk_upgrade"] = 0
+	main.save["research"]["lvls"]["auto_salvage"] = 0
+	main._rebuild_ui()
+	await _frames()
 	_press("forge:equip")
 	await _frames()
 	_check("P4 FORGE: EQUIP mounts it on the Core", int(Gear.block(main.save)["equipped"]["weapon"]) == u and _find("forge:equip").disabled)
@@ -955,6 +997,22 @@ func _run_screen() -> void:
 	await _frames()
 	_press("EMODE")
 	await _frames()
+	# V2 P8b Auto-Buy switch
+	_check("P8b RUN: no AUTO switch without the research", _find("EAUTO") == null)
+	main.save["research"]["lvls"]["auto_buy"] = 1
+	main._rebuild_ui()
+	await _frames()
+	_press("EAUTO")
+	await _frames()
+	_check("P8b RUN: AUTO cycles the rule into the live run (Attack)", String(S.mods.get("auto_buy", "")) == "attack" and _find("EAUTO").text == "A:ATK" and String(main.save["qol"]["auto_buy"]) == "attack")
+	_audit("enhancements auto")
+	for k in 4:
+		_press("EAUTO")
+		await _frames()
+	_check("P8b RUN: ... and around to off", String(S.mods.get("auto_buy", "")) == "" and _find("EAUTO").text == "AUTO")
+	main.save["research"]["lvls"]["auto_buy"] = 0
+	main._rebuild_ui()
+	await _frames()
 	_press("ETAB Economy")
 	await _frames()
 	_check("P7b RUN: the Economy tab lists its tracks + the Eco Engine Overdrive", main.enh_tree == "economy" and _find("TRACK Kill Cash") != null and _find("TRACK Eco Engine") != null and _find("TRACK Damage") == null)
@@ -1227,6 +1285,20 @@ func _run_screen() -> void:
 	_check("RUN: Abandon ends the run -> results (banked)", S2.over and main.screen == "results" and int(main.save["runs"]) == runs_b + 1)
 	_check("RUN: results offer Back to base + Play again (no seed retry)", _find("DBACK") != null and _find("PLAY AGAIN") != null and _find("RETRY SEED") == null)
 	_audit("results")
+	# V2 P8b Auto-Restart switch
+	_check("P8b RESULTS: no Auto-Restart switch without the research", _find("AUTORESTART") == null and main.auto_restart_left() < 0.0)
+	main.save["research"]["lvls"]["auto_restart"] = 1
+	main._rebuild_ui()
+	await _frames()
+	_press("AUTORESTART")
+	await _frames()
+	_check("P8b RESULTS: the switch turns on and a countdown starts", Labs.auto_restart_on(main.save) and main.auto_restart_left() > 0.0 and _find("AUTORESTART").text.contains("ON") and main.screen == "results")
+	_press("AUTORESTART")
+	await _frames()
+	_check("P8b RESULTS: ... and off again", not Labs.auto_restart_on(main.save) and main.auto_restart_left() < 0.0)
+	main.save["research"]["lvls"]["auto_restart"] = 0
+	main._rebuild_ui()
+	await _frames()
 	_check("sfx: game_over clip", main.sfx.played("game_over"))
 	_check("P5 RESULTS: the run's tokens banked as 5 items; OPEN LOOT offers the reveal", Gear.count(main.save) == n_items0 + 5 and _find("loot:open") != null and _find("loot:open").text.contains("5"))
 	_press("loot:open")

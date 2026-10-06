@@ -46,6 +46,7 @@ static func default_save() -> Dictionary:
 		"insight": {},
 		"outpost": Outpost.default_block(),
 		"reforge": Reforge.default_block(),
+		"qol": Labs.default_qol(),
 	}
 
 
@@ -129,6 +130,7 @@ static func normalize(s_in: Dictionary) -> Dictionary:
 	d["achievements"] = _achievements(s.get("achievements", {}))
 	d["insight"] = PickDB.normalize_insight(s.get("insight", {}))
 	d["settings"] = _settings(s.get("settings", {}))
+	d["qol"] = Labs.normalize_qol(s.get("qol", {}))
 	# speed snaps to an unlocked step
 	var steps: Array = Labs.speed_steps(d)
 	var sp: float = float(s.get("speed", 1.0))
@@ -172,6 +174,7 @@ static func run_mods(s: Dictionary) -> Dictionary:
 		"lab_fx": Labs.run_fx(s), "lab_enemy": Labs.enemy(s), "res": Labs.levels(s),
 		"lab_aim": float(lm["aim"]), "lab_bounty": float(lm["bounty"]), "lab_items": float(lm["items"]),
 		"lab_locks": int(lm["locks"]), "lab_choices": int(lm["choices"]),
+		"auto_buy": Labs.auto_buy_mode(s),
 	}
 
 

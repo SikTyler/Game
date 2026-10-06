@@ -24,6 +24,7 @@ const ModuleDB := preload("res://data/ModuleDB.gd")
 const BrandDB := preload("res://data/BrandDB.gd")
 const AffixDB := preload("res://data/AffixDB.gd")
 const Kit := preload("res://ui/Kit.gd")
+const Labs := preload("res://Labs.gd")
 
 const COLS: int = 5
 const ROWS: int = 6
@@ -63,6 +64,22 @@ static func _act_rect(m, k: int) -> Rect2:
 	var c: Rect2 = rects(m)["card"]
 	var w: float = (c.size.x - 32.0 - 16.0) / 3.0
 	return Rect2(c.position.x + 16.0 + float(k % 3) * (w + 8.0), c.end.y - 116.0 + float(k / 3) * 56.0, w, 48.0)
+
+
+## Bulk Upgrade row: right two thirds above the verb grid.
+static func _bulk_rect(m, k: int) -> Rect2:
+	var a: Rect2 = _act_rect(m, 1 + k)
+	return Rect2(a.position.x, a.position.y - 56.0, a.size.x, a.size.y)
+
+
+## Auto-Salvage switch: the bottom of the Forge panel.
+static func _auto_salvage_rect(m) -> Rect2:
+	var n: Rect2 = rects(m)["new"]
+	return Rect2(n.position.x + 16.0, n.end.y - 60.0, n.size.x - 32.0, 44.0)
+
+
+static func auto_salvage_label(lv: int) -> String:
+	return ["AUTO-SALVAGE: OFF", "AUTO-SALVAGE: COMMONS", "AUTO-SALVAGE: UP TO UNCOMMON"][clampi(lv, 0, 2)]
 
 
 static func _new_rect(m, k: int, kind: String) -> Rect2:
@@ -151,6 +168,12 @@ static func build(m) -> void:
 			m.forge_filter = fid
 			m.forge_page = 0
 			m._rebuild_ui(), "Show %s" % String(FILTERS[k][1]).to_lower(), true, Kit.CYAN if on else Kit.NEUTRAL, "forge:filter:" + fid, "", 16)
+	# V2 P8b Auto-Salvage switch (bottom of the Forge panel)
+	if Labs.level(s, "auto_salvage") > 0:
+		Kit.btn(m, auto_salvage_label(Labs.auto_salvage_level(s)), _auto_salvage_rect(m), func() -> void:
+			Labs.cycle_auto_salvage(m.save)
+			m._save()
+			m._rebuild_ui(), "Auto-Salvage (research): banked items below the chosen rarity turn into Scrap on arrival. Click: off / Commons / up to Uncommon (Lv 2).", true, Kit.ENEMY if Labs.auto_salvage_level(s) > 0 else Kit.NEUTRAL, "forge:autosalvage", "cur_scrap", 15)
 	# tiles
 	var lst: Array = _list(m)
 	var per: int = COLS * ROWS
@@ -274,6 +297,10 @@ static func _build_card(m, s: Dictionary, g: Dictionary) -> void:
 	Kit.btn(m, "UPGRADE %s" % Kit.fmt(float(Gear.upgrade_cost(it, m.save))), _act_rect(m, 1), func() -> void: _act(m, Gear.upgrade(m.save, uid)),
 		"+1 level (+5%% power) for %d coins. Every 5th level is a MASTERWORK: +6%% power and a perk +1 tier (jackpot %d%%: +2 tiers or a bonus perk)%s" % [Gear.upgrade_cost(it, m.save), int(round(Gear.jackpot_chance(s) * 100.0)), "" if why_u == "" else "\n" + why_u],
 		why_u == "", Kit.GOLD, "forge:upgrade", "cur_coin", 16)
+	if Labs.level(s, "bulk_upgrade") > 0:
+		# V2 P8b Bulk Upgrade: a row above the verbs
+		Kit.btn(m, "UPGRADE x5", _bulk_rect(m, 0), func() -> void: _act(m, Gear.upgrade_n(m.save, uid, 5)), "Up to five levels at once (stops when coins run out or at the cap)", why_u == "", Kit.GOLD, "forge:up5", "cur_coin", 15)
+		Kit.btn(m, "UPGRADE MAX", _bulk_rect(m, 1), func() -> void: _act(m, Gear.upgrade_n(m.save, uid, 0)), "Every level your coins cover, up to the rarity's cap", why_u == "", Kit.GOLD, "forge:upmax", "cur_coin", 15)
 	var ms: Array = merge_set(m)
 	var why_m: String = "Need two more %s %ss (not favourites)" % [_rar_name(String(it["rar"])), String(it["kind"])] if ms.is_empty() else Gear.why_merge(s, ms, uid)
 	Kit.btn(m, "MERGE", _act_rect(m, 2), func() -> void:
@@ -526,7 +553,7 @@ static func _draw_new(m, s: Dictionary, n: Rect2) -> void:
 	for i in RarityDB.IDS.size():
 		var r2: String = String(RarityDB.IDS[i])
 		var yy: float = y + 26.0 + float(i) * 21.0
-		if yy > n.end.y - 8.0:
+		if yy > n.end.y - (68.0 if Labs.level(s, "auto_salvage") > 0 else 8.0):
 			break
 		Kit.t(m, _rar_name(r2), Vector2(n.position.x + 18, yy), 15, Kit.rarity_col_t(r2, m.t_anim))
 		Kit.t(m, _pct(float(fo[r2])), Vector2(n.end.x - 150, yy), 15, Kit.TEXT, HORIZONTAL_ALIGNMENT_RIGHT, 120.0)

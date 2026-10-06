@@ -31,6 +31,7 @@ static func run(t) -> void:
 	_gating(t)
 	_run_effects(t)
 	_meta_effects(t)
+	_qol(t)
 
 
 static func _save(coins: int = 100_000_000) -> Dictionary:
@@ -302,3 +303,96 @@ static func _meta_effects(t) -> void:
 	t._check("P8 loot: Cache Luck 5 raises the rarity of cache contents", int(ranks[1]) > int(ranks[0]), str(ranks))
 	# the research view's glyph tiles draw for every project (no missing glyph)
 	t._check("P8 research view: Labs.levels hands every project to the run (TrackDB unlocks)", (BaseMeta.run_mods(_save())["res"] as Dictionary).size() == LabDB.IDS.size())
+
+
+# ------------------------------------------------------------------ P8b QOL
+static func _qol(t) -> void:
+	var sv: Dictionary = _save()
+	t._check("P8b QOL: switches start off and do nothing without research", Labs.auto_buy_mode(sv) == "" and Labs.cycle_auto_buy(sv) == "" and Labs.auto_salvage_level(sv) == 0 and Labs.cycle_auto_salvage(sv) == 0 and not Labs.toggle_auto_restart(sv) and not Labs.auto_restart_on(sv) and Labs.preset_slots(sv) == 0 and sv.has("qol"))
+	var bad: Dictionary = BaseMeta.normalize({"version": BaseMeta.VERSION, "qol": {"auto_buy": "bogus", "auto_salvage": 9, "auto_restart": 1}})
+	t._check("P8b QOL: the save block normalizes (unknown rule off, salvage clamped)", String(bad["qol"]["auto_buy"]) == "" and int(bad["qol"]["auto_salvage"]) == 2 and bool(bad["qol"]["auto_restart"]))
+	# Auto-Collect: coins / Scrap buildings, not Scavengers
+	var oc: Dictionary = _save()
+	oc["outpost"]["relay_lvl"] = 8
+	var mu: String = ""
+	var pe: Array = _ev(Outpost.place(oc, "mill", 7, 8, 0, OT0), "op_placed")
+	if not pe.is_empty():
+		mu = String(pe[0]["uid"])
+	var pe2: Array = _ev(Outpost.place(oc, "scav_post", 7, 10, 0, OT0), "op_placed")
+	var su: String = String(pe2[0]["uid"]) if not pe2.is_empty() else ""
+	var later: int = OT0 + 6 * 3600 * 4
+	t._check("P8b Auto-Collect: nothing without the research", Outpost.auto_collect(oc, later).filter(func(e: Variant) -> bool: return String((e as Dictionary)["t"]) == "auto_collect").is_empty())
+	_lv(oc, "auto_collect", 1)
+	var c0: int = int(oc["coins"])
+	var ac: Array = _ev(Outpost.auto_collect(oc, later + 60), "auto_collect")
+	var bl: Dictionary = oc["outpost"]["buildings"]
+	t._check("P8b Auto-Collect: one summary event pays the Mill; the Scavenger keeps its items for a click", mu != "" and su != "" and ac.size() == 1 and int(ac[0]["coins"]) > 0 and int(oc["coins"]) == c0 + int(ac[0]["coins"]) and float(bl[mu]["stored"]) < 1.0 and float(bl[su]["stored"]) >= 1.0, "%s %s" % [ac, bl.get(su, {})])
+	# Auto-Salvage: Commons become Scrap on arrival when switched on
+	var ls: Dictionary = _save()
+	_lv(ls, "auto_salvage", 1)
+	Labs.cycle_auto_salvage(ls)
+	var n0: int = (Gear.block(ls)["items"] as Dictionary).size()
+	var lev: Array = Loot.realize(ls, {"caches": [{"id": "field", "ilvl": 10}, {"id": "field", "ilvl": 10}, {"id": "field", "ilvl": 10}], "items": [], "scrap": 0, "tier": 1, "luck": 0})
+	var kept_common: int = 0
+	for e in _ev(lev, "loot_item"):
+		if String(e["rar"]) == "common":
+			kept_common += 1
+	var auto_c: Array = _ev(lev, "loot_salvaged").filter(func(e: Variant) -> bool: return bool((e as Dictionary).get("auto", false)) and String((e as Dictionary)["rar"]) == "common")
+	t._check("P8b Auto-Salvage: Commons are salvaged for Scrap on arrival, better items are kept", kept_common == 0 and auto_c.size() > 0 and (Gear.block(ls)["items"] as Dictionary).size() == n0 + _ev(lev, "loot_item").size() and Labs.cycle_auto_salvage(ls) == 0, "%d %d" % [kept_common, auto_c.size()])
+	# Presets
+	var ps: Dictionary = _save()
+	_lv(ps, "presets", 2)
+	var g: Dictionary = Gear.block(ps)
+	var w0: int = int(g["equipped"]["weapon"])
+	var r := RandomNumberGenerator.new()
+	r.seed = 21
+	var w1: int = Gear.add_item(ps, GearGen.roll(r, "drop", {"kind": "weapon", "base": "lance", "rarity": "rare", "ilvl": 10}, {}))
+	var m1: int = Gear.add_item(ps, GearGen.roll(r, "drop", {"kind": "module", "base": "echo", "rarity": "rare", "ilvl": 10}, {}))
+	var sv0: Array = Gear.save_preset(ps, 0)
+	Gear.equip(ps, w1)
+	Gear.equip(ps, m1, 0)
+	Gear.save_preset(ps, 1)
+	var ld0: Array = Gear.load_preset(ps, 0)
+	var back0: bool = int(g["equipped"]["weapon"]) == w0 and int((g["equipped"]["sockets"] as Array)[0]) == 0
+	Gear.load_preset(ps, 1)
+	var back1: bool = int(g["equipped"]["weapon"]) == w1 and int((g["equipped"]["sockets"] as Array)[0]) == m1
+	t._check("P8b presets: save / load swaps the whole loadout; slot 3 needs more research", sv0.size() == 1 and ld0.size() == 1 and back0 and back1 and Gear.save_preset(ps, 2).is_empty())
+	Gear.salvage(ps, m1)
+	Gear.load_preset(ps, 1)
+	t._check("P8b presets: a salvaged Module leaves its socket empty", int((g["equipped"]["sockets"] as Array)[0]) == 0)
+	# Bulk Upgrade
+	var bu: Dictionary = _save(1_000_000)
+	_lv(bu, "bulk_upgrade", 1)
+	var it: Dictionary = GearGen.roll(r, "drop", {"kind": "weapon", "base": "autocannon", "rarity": "common", "ilvl": 10}, {})
+	var u: int = Gear.add_item(bu, it)
+	var up5: Array = Gear.upgrade_n(bu, u, 5)
+	var upm: Array = Gear.upgrade_n(bu, u, 0)
+	t._check("P8b Bulk Upgrade: x5 = five levels, MAX = up to the rarity cap", _ev(up5, "gear_upgrade").size() == 5 and int(Gear.item(bu, u)["lvl"]) == Gear.max_lvl_of("common") and not upm.is_empty())
+	var nb: Dictionary = _save(1_000_000)
+	var u2: int = Gear.add_item(nb, GearGen.roll(r, "drop", {"kind": "weapon", "base": "autocannon", "rarity": "common", "ilvl": 10}, {}))
+	t._check("P8b Bulk Upgrade: without the research one click is one level", _ev(Gear.upgrade_n(nb, u2, 5), "gear_upgrade").size() == 1)
+	# Auto-Buy in a run
+	var ab: Dictionary = _save()
+	_lv(ab, "auto_buy", 1)
+	_lv(ab, "enh_theory", 1)
+	Labs.cycle_auto_buy(ab)
+	var S = _run(ab)
+	S.draft_queue.clear()
+	S.cash = 1000.0
+	var ev: Array = []
+	S._auto_buy(ev)
+	var bought: Array = _ev(ev, "track")
+	var only_attack: bool = true
+	for e in bought:
+		only_attack = only_attack and String(TrackDB.get_def(String(e["track"]))["tree"]) == "attack" and not TrackDB.is_od(String(e["track"])) and bool(e.get("auto", false))
+	t._check("P8b Auto-Buy: Attack rule buys the cheapest Attack tracks and keeps 25% of the cash", Labs.auto_buy_mode(ab) == "attack" and bought.size() >= 3 and only_attack and S.cash >= 250.0 - 0.001, "%d %s %f" % [bought.size(), only_attack, S.cash])
+	var S0 = _run(_save())
+	S0.cash = 1000.0
+	var ev0: Array = []
+	S0._auto_buy(ev0)
+	t._check("P8b Auto-Buy: off without the research (a default run buys nothing)", ev0.is_empty() and is_equal_approx(S0.cash, 1000.0))
+	# Auto-Restart switch
+	var ar: Dictionary = _save()
+	_lv(ar, "auto_restart", 1)
+	t._check("P8b Auto-Restart: the switch toggles once researched", Labs.toggle_auto_restart(ar) and Labs.auto_restart_on(ar) and not Labs.toggle_auto_restart(ar))
+

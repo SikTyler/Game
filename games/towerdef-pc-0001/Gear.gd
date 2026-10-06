@@ -495,6 +495,67 @@ static func unequip(s: Dictionary, slot: int) -> Array:
 	return [{"t": "gear_unequip", "uid": old, "slot": slot}]
 
 
+# ------------------------------------------------------------------ presets
+## V2 P8b Loadout Presets: slot k (< Labs.preset_slots) stores the equipped
+## Weapon + sockets; loading equips what still exists (missing items leave
+## their socket empty).
+static func save_preset(s: Dictionary, k: int) -> Array:
+	if k < 0 or k >= mini(PRESETS_MAX, Labs.preset_slots(s)):
+		return []
+	var g: Dictionary = block(s)
+	var pr: Array = g["presets"]
+	while pr.size() <= k:
+		pr.append({})
+	var eq: Dictionary = g["equipped"]
+	pr[k] = {"name": "Loadout %d" % (k + 1), "weapon": int(eq["weapon"]), "sockets": (eq["sockets"] as Array).duplicate()}
+	return [{"t": "preset_saved", "k": k}]
+
+
+static func preset(s: Dictionary, k: int) -> Dictionary:
+	var pr: Array = block(s)["presets"]
+	return pr[k] if k >= 0 and k < pr.size() and pr[k] is Dictionary else {}
+
+
+static func load_preset(s: Dictionary, k: int) -> Array:
+	if k < 0 or k >= mini(PRESETS_MAX, Labs.preset_slots(s)):
+		return []
+	var p: Dictionary = preset(s, k)
+	if p.is_empty() or not p.has("weapon"):
+		return []
+	var g: Dictionary = block(s)
+	var eq: Dictionary = g["equipped"]
+	if has_item(g, int(p["weapon"])) and String(get_item(g, int(p["weapon"]))["kind"]) == "weapon":
+		eq["weapon"] = int(p["weapon"])
+	_fit_sockets(s)
+	var so: Array = eq["sockets"]
+	var ps: Array = p.get("sockets", [])
+	var missing: int = 0
+	for i in so.size():
+		var u: int = int(ps[i]) if i < ps.size() else 0
+		if u != 0 and has_item(g, u) and String(get_item(g, u)["kind"]) == "module" and not so.slice(0, i).has(u):
+			so[i] = u
+		else:
+			if u != 0:
+				missing += 1
+			so[i] = 0
+	return [{"t": "preset_loaded", "k": k, "missing": missing}]
+
+
+## V2 P8b Bulk Upgrade: up to n levels (0 = until max or broke).
+static func upgrade_n(s: Dictionary, uid: int, n: int) -> Array:
+	if Labs.level(s, "bulk_upgrade") <= 0:
+		return upgrade(s, uid)
+	var ev: Array = []
+	var k: int = 0
+	while (n <= 0 or k < n) and k < 200:
+		var e1: Array = upgrade(s, uid)
+		if e1.is_empty():
+			break
+		ev.append_array(e1)
+		k += 1
+	return ev
+
+
 ## Grow / shrink the socket list to the Core level's count.
 static func _fit_sockets(s: Dictionary) -> void:
 	var so: Array = (block(s)["equipped"] as Dictionary)["sockets"]

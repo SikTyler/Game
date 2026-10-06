@@ -426,8 +426,8 @@ func _meta_stages() -> void:
 	_check("AC-20 queues 1/2/3 at Hall L1/L4/L8, 0 without a Hall", qok == [1, 1, 2, 2, 3, 3] and Labs.slots(nohall) == 0 and Labs.start(nohall, "dmg", NOW).is_empty())
 	# V2 (deliberate): Part Analysis / Crate Theory are gone with parts and crates -> 10.
 	# V2 P6 (deliberate): + Core Theory (gates Core levels 10 / 20 / 30 / 40 / 50)
-	# V2 P8 (deliberate): the research tree is 49 projects in 7 categories (st_research checks them).
-	_check("AC-20 every LabDB project + Grid + Core Theory (no part / crate research)", LabDB.IDS.size() == 49 and LabDB.DEFS.has("core_theory") and LabDB.DEFS.has("grid") and not LabDB.DEFS.has("labspeed") and not LabDB.DEFS.has("part_analysis") and not LabDB.DEFS.has("crate_theory") and String(LabDB.DEFS["offcap"]["name"]) == "Storage Tech" and String(LabDB.DEFS["offrate"]["name"]) == "Logistics Tech")
+	# V2 P8 (deliberate): the research tree is 55 projects in 7 categories (st_research checks them).
+	_check("AC-20 every LabDB project + Grid + Core Theory (no part / crate research)", LabDB.IDS.size() == 55 and LabDB.DEFS.has("core_theory") and LabDB.DEFS.has("grid") and not LabDB.DEFS.has("labspeed") and not LabDB.DEFS.has("part_analysis") and not LabDB.DEFS.has("crate_theory") and String(LabDB.DEFS["offcap"]["name"]) == "Storage Tech" and String(LabDB.DEFS["offrate"]["name"]) == "Logistics Tech")
 	# V2 P3b/P8 (deliberate): 26 px cells, grid 7x7 -> 21x21 in 7 steep steps.
 	_check("V2 grid research 7..21 in 7 steps, costs 2k/10k/50k/200k/750k/2.5M/8M", LabDB.max_of("grid") == 7 and Labs.cost("grid", 0) == 2000 and Labs.cost("grid", 3) == 200000 and Labs.cost("grid", 6) == 8000000 and TowerState.grid_for_level(0) == 7 and TowerState.grid_for_level(1) == 9 and TowerState.grid_for_level(4) == 15 and TowerState.grid_for_level(7) == 21)
 	L["research"]["lvls"]["dmg"] = 30

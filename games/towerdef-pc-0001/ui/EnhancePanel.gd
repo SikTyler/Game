@@ -11,6 +11,7 @@ extends RefCounted
 const TowerState := preload("res://TowerState.gd")
 const TrackDB := preload("res://data/TrackDB.gd")
 const Kit := preload("res://ui/Kit.gd")
+const Labs := preload("res://Labs.gd")
 
 const MODES: Array = [1, 5, 0]   # 0 = MAX
 
@@ -34,7 +35,21 @@ static func _top(m) -> float:
 
 static func tab_rect(m) -> Rect2:
 	var a: Rect2 = area(m)
-	return Rect2(a.position.x, a.position.y, a.size.x - 70.0, 34.0)
+	return Rect2(a.position.x, a.position.y, a.size.x - (140.0 if has_auto(m) else 70.0), 34.0)
+
+
+## V2 P8b: the Auto-Buy switch sits left of the buy mode once researched.
+static func has_auto(m) -> bool:
+	return Labs.level(m.save, "auto_buy") > 0
+
+
+static func auto_rect(m) -> Rect2:
+	var a: Rect2 = area(m)
+	return Rect2(a.end.x - 134.0, a.position.y, 64.0, 34.0)
+
+
+static func auto_label(mode_ab: String) -> String:
+	return {"": "AUTO", "attack": "A:ATK", "defense": "A:DEF", "economy": "A:ECO", "all": "A:ALL"}.get(mode_ab, "AUTO")
 
 
 static func mode_rect(m) -> Rect2:
@@ -79,6 +94,10 @@ static func build(m) -> void:
 		items.append([tid, String((tr as Array)[1]), "", "Core Enhancements: %s tree" % String((tr as Array)[1])])
 	Kit.tabs(m, tab_rect(m), items, String(m.enh_tree), func(id: String) -> void: m.enh_tree = id; m._rebuild_ui(), "ETAB ", [], 15)
 	Kit.btn(m, mode_label(int(m.enh_mode)), mode_rect(m), func() -> void: m.cycle_enh_mode(), "Buy mode: x1 / x5 / MAX levels per click", true, Kit.GOLD, "EMODE", "", 15)
+	if has_auto(m):
+		var ab: String = String(S.mods.get("auto_buy", ""))
+		Kit.btn(m, auto_label(ab), auto_rect(m), func() -> void: m.cycle_auto_buy(),
+			"Auto-Buy (research): at each wave start, buy the cheapest open track of a tree, keeping 25%% of your cash.\nNow: %s. Click: off / Attack / Defense / Economy / all trees" % ("off" if ab == "" else ab.capitalize()), true, Kit.GREEN if ab != "" else Kit.NEUTRAL, "EAUTO", "", 14)
 	var li: Array = ids(m)
 	for k in li.size():
 		var tid: String = String(li[k])

@@ -12,6 +12,7 @@ const CoreDB := preload("res://data/CoreDB.gd")
 const Tiers := preload("res://Tiers.gd")
 const Roll := preload("res://vfx/Roll.gd")
 const Kit := preload("res://ui/Kit.gd")
+const Labs := preload("res://Labs.gd")
 const DraftPanel := preload("res://ui/DraftPanel.gd")
 const Hotbar := preload("res://ui/Hotbar.gd")
 const Intel := preload("res://ui/Intel.gd")
@@ -78,6 +79,13 @@ static func build_results(m) -> void:
 	var bw: float = (r.size.x - 72.0) * 0.5
 	Kit.btn(m, "Back to base", Rect2(r.position.x + 24, r.end.y - 76, bw, 56), m.go_base, "Return to the hub to spend your loot", true, Kit.RUST, "DBACK", "", 22)
 	Kit.btn(m, "Play again", Rect2(r.position.x + 48 + bw, r.end.y - 76, bw, 56), func() -> void: m.start_run(), "Start a new run (every run is randomly seeded)", true, Kit.GREEN, "PLAY AGAIN", "", 20)
+	if Labs.level(m.save, "auto_restart") > 0:
+		var on: bool = Labs.auto_restart_on(m.save)
+		Kit.btn(m, "AUTO-RESTART: %s" % ("ON" if on else "OFF"), Rect2(r.position.x + 24.0, r.end.y - 152.0, r.size.x * 0.5 - 44.0, 60.0), func() -> void:
+			Labs.toggle_auto_restart(m.save)
+			m.results_t0 = m.t_anim
+			m._save()
+			m._rebuild_ui(), "Auto-Restart (research): start the next run %d s after this screen opens" % int(Labs.AUTO_RESTART_S), true, Kit.GREEN if on else Kit.NEUTRAL, "AUTORESTART", "", 18)
 	var n: int = loot_count(m)
 	if n > 0:
 		var lb: Button = Kit.btn(m, "OPEN LOOT  ·  %d items" % n, Rect2(r.get_center().x + 20.0, r.end.y - 152.0, r.size.x * 0.5 - 44.0, 60.0), m.open_loot, "Reveal this run's items one by one (already in your inventory)", true, Kit.GOLD, "loot:open", "chest", 20)
@@ -896,6 +904,9 @@ static func _draw_results(m) -> void:
 		var rw: Array = rows[k]
 		Kit.row(m, String(rw[0]), String(rw[1]), Vector2(x, y + 34 + k * 30.0), w, Kit.TEXT, "", 17)
 	var yb: float = y + 34 + rows.size() * 30.0 + 20.0
+	var left: float = m.auto_restart_left()
+	if left >= 0.0:   # V2 P8b Auto-Restart countdown above its switch
+		Kit.th(m, "NEXT RUN IN %d s" % int(ceil(left)), Vector2(r.position.x + 24.0 + (r.size.x * 0.5 - 44.0) * 0.5, r.end.y - 160.0), 16, Kit.GREEN, HORIZONTAL_ALIGNMENT_CENTER, r.size.x * 0.5)
 	# casino moment: the banked total rolls up, then pops (vfx/Roll.gd)
 	var tot: float = float(lr.get("coins", 0))
 	var el: float = m.t_anim - m.results_t0 - 0.3

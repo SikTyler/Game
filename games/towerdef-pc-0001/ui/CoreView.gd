@@ -20,8 +20,9 @@ const RarityDB := preload("res://data/RarityDB.gd")
 const FrameDB := preload("res://data/FrameDB.gd")
 const ModuleDB := preload("res://data/ModuleDB.gd")
 const Kit := preload("res://ui/Kit.gd")
+const Labs := preload("res://Labs.gd")
 
-const TABS: Array = [["loadout", "Loadout", "core_open", "The Weapon and Module sockets"], ["look", "Look", "", "Shell, trim, pattern and colours"], ["levels", "Levels", "", "Permanent Core level and sheet"]]
+const TABS: Array = [["loadout", "Loadout", "core_open", "The Weapon and Module sockets"], ["look", "Look", "", "Shell, trim, pattern and colours"], ["levels", "Levels", "", "Permanent Core level and sheet"], ["presets", "Presets", "", "Saved loadouts (Loadout Presets research)"]]
 const ROWS: int = 9
 const SWATCHES: Array = ["1b2440", "2a1640", "103a3a", "3a1010", "202020", "e8f0ff", "39e6ff", "ff3ea5", "ffd34d", "4ade80", "b26bff", "ff8a3d"]
 const R_CORE: float = 150.0
@@ -60,10 +61,11 @@ static func _row_rect(m, k: int) -> Rect2:
 static func build(m) -> void:
 	var s: Dictionary = m.save
 	var cr: Rect2 = m.content_rect()
-	Kit.tabs(m, Rect2(cr.position.x + 20.0, cr.position.y + 14.0, 520.0, 48.0), TABS, String(m.core_tab), func(id: String) -> void:
+	var tw: float = minf(680.0, panel_rect(m).position.x - cr.position.x - 40.0)
+	Kit.tabs(m, Rect2(cr.position.x + 20.0, cr.position.y + 14.0, tw, 48.0), TABS, String(m.core_tab), func(id: String) -> void:
 		m.core_tab = id
 		m.core_page = 0
-		m._rebuild_ui(), "CORETAB ", [], 17)
+		m._rebuild_ui(), "CORETAB ", [] if Labs.preset_slots(s) > 0 else ["presets"], 17)
 	var lv: int = Cores.level(s)
 	var c: int = int(Cores.level_cost(lv)["coins"])
 	var maxed: bool = lv >= Cores.max_level(s)
@@ -84,6 +86,8 @@ static func build(m) -> void:
 			_build_loadout(m, s)
 		"look":
 			_build_look(m, s)
+		"presets":
+			_build_presets(m, s)
 
 
 ## Requirements of the next milestone level (shown as chips above Level up).
@@ -225,6 +229,8 @@ static func draw(m, cr: Rect2) -> void:
 			_draw_loadout(m, s, c, n)
 		"look":
 			_draw_look(m, s)
+		"presets":
+			_draw_presets(m, s)
 		_:
 			_draw_levels(m, s, lv)
 
@@ -288,6 +294,58 @@ static func _draw_loadout(m, s: Dictionary, c: Vector2, n: int) -> void:
 		Kit.t(m, sub, Vector2(r.position.x + 124.0, r.position.y + 48.0), 14, Kit.rarity_col(String(it["rar"])), HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 140.0)
 		if eq:
 			Kit.th(m, "EQUIPPED", Vector2(r.end.x - 12.0, r.position.y + 26.0), 14, Kit.GREEN, HORIZONTAL_ALIGNMENT_RIGHT, 120.0)
+
+
+# ------------------------------------------------------------------ presets
+## V2 P8b Loadout Presets: one card per researched slot (SAVE stores the
+## equipped Weapon + Modules, LOAD equips them back).
+static func _preset_rect(m, k: int) -> Rect2:
+	var p: Rect2 = panel_rect(m)
+	var h: float = minf(150.0, (p.size.y - 120.0 - 2.0 * 14.0) / 3.0)
+	return Rect2(p.position.x + 16.0, p.position.y + 100.0 + float(k) * (h + 14.0), p.size.x - 32.0, h)
+
+
+static func _build_presets(m, s: Dictionary) -> void:
+	for k in mini(Gear.PRESETS_MAX, Labs.preset_slots(s)):
+		var kk: int = k
+		var r: Rect2 = _preset_rect(m, k)
+		var has: bool = not Gear.preset(s, k).is_empty()
+		Kit.btn(m, "LOAD", Rect2(r.end.x - 252.0, r.end.y - 58.0, 116.0, 46.0), func() -> void: m.meta_act(Gear.load_preset(m.save, kk)), "Equip loadout %d (missing items leave their slot empty)" % (k + 1), has, Kit.GREEN, "preset:load:%d" % k, "", 16)
+		Kit.btn(m, "SAVE", Rect2(r.end.x - 128.0, r.end.y - 58.0, 116.0, 46.0), func() -> void: m.meta_act(Gear.save_preset(m.save, kk)), "Store the equipped Weapon and Modules as loadout %d" % (k + 1), true, Kit.GOLD, "preset:save:%d" % k, "", 16)
+
+
+static func _draw_presets(m, s: Dictionary) -> void:
+	var p: Rect2 = panel_rect(m)
+	Kit.panel(m, p, Kit.EDGE, Kit.PANEL)
+	Kit.th(m, "LOADOUT PRESETS", p.position + Vector2(18, 40), 22, Kit.TEXT)
+	Kit.t(m, "Save the equipped Weapon + Modules, swap back in one click. More slots: Loadout Presets research.", p.position + Vector2(18, 70), 15, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, p.size.x - 36.0)
+	for k in mini(Gear.PRESETS_MAX, Labs.preset_slots(s)):
+		var r: Rect2 = _preset_rect(m, k)
+		var pr: Dictionary = Gear.preset(s, k)
+		Kit.panel(m, r, Kit.EDGE2, Kit.CARD, 1)
+		Kit.th(m, "LOADOUT %d" % (k + 1), Vector2(r.position.x + 16, r.position.y + 30), 18, Kit.GOLD)
+		if pr.is_empty():
+			Kit.t(m, "Empty - SAVE stores what the Core has equipped now", Vector2(r.position.x + 16, r.position.y + 58), 15, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 290.0)
+			continue
+		var w: Dictionary = Gear.item(s, int(pr.get("weapon", 0)))
+		if not w.is_empty():
+			GearVis.draw_weapon(m, w, Vector2(r.position.x + 70.0, r.position.y + 72.0), 96.0, 0.0, m.t_anim)
+			Kit.t(m, String(w["name"]), Vector2(r.position.x + 130, r.position.y + 62), 16, Kit.rarity_col(String(w["rar"])), HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 400.0)
+		else:
+			Kit.t(m, "Weapon gone", Vector2(r.position.x + 130, r.position.y + 62), 16, Kit.ENEMY, HORIZONTAL_ALIGNMENT_LEFT, 200.0)
+		var mods: Array = (pr.get("sockets", []) as Array).filter(func(u: Variant) -> bool: return int(u) != 0)
+		var x: float = r.position.x + 130.0
+		for u in mods:
+			var it: Dictionary = Gear.item(s, int(u))
+			if it.is_empty():
+				continue
+			GearVis.draw_module(m, it, Vector2(x + 14.0, r.position.y + 96.0), 26.0, m.t_anim)
+			x += 34.0
+			if x > r.end.x - 300.0:
+				break
+		var eqw: bool = int((Gear.block(s)["equipped"] as Dictionary)["weapon"]) == int(pr.get("weapon", -1)) and (Gear.block(s)["equipped"] as Dictionary)["sockets"] == pr.get("sockets", [])
+		if eqw:
+			Kit.th(m, "EQUIPPED", Vector2(r.end.x - 16, r.position.y + 30), 15, Kit.GREEN, HORIZONTAL_ALIGNMENT_RIGHT, 140.0)
 
 
 static func _draw_look(m, s: Dictionary) -> void:

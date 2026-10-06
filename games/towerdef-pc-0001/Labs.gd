@@ -234,6 +234,75 @@ static func enemy(s: Dictionary) -> Dictionary:
 	}
 
 
+# ------------------------------------------------------------------ QOL
+## V2 P8b QOL switches: save["qol"] = {auto_buy, auto_salvage, auto_restart}.
+## Each works only while its research is owned (the switch is kept anyway).
+const AUTO_BUY_MODES: Array = ["", "attack", "defense", "economy", "all"]
+## Auto-Restart delay on the results screen (seconds).
+const AUTO_RESTART_S: float = 8.0
+
+
+static func default_qol() -> Dictionary:
+	return {"auto_buy": "", "auto_salvage": 0, "auto_restart": false}
+
+
+static func normalize_qol(v: Variant) -> Dictionary:
+	var src: Dictionary = v if v is Dictionary else {}
+	var ab: String = String(src.get("auto_buy", ""))
+	return {"auto_buy": ab if AUTO_BUY_MODES.has(ab) else "", "auto_salvage": clampi(int(src.get("auto_salvage", 0)), 0, 2), "auto_restart": bool(src.get("auto_restart", false))}
+
+
+static func qol(s: Dictionary) -> Dictionary:
+	if not (s.get("qol", null) is Dictionary):
+		s["qol"] = default_qol()
+	return s["qol"]
+
+
+## Auto-Buy rule for a run: "" (off) unless researched.
+static func auto_buy_mode(s: Dictionary) -> String:
+	return String(qol(s)["auto_buy"]) if level(s, "auto_buy") > 0 else ""
+
+
+static func cycle_auto_buy(s: Dictionary) -> String:
+	if level(s, "auto_buy") <= 0:
+		return ""
+	var q: Dictionary = qol(s)
+	var k: int = AUTO_BUY_MODES.find(String(q["auto_buy"]))
+	q["auto_buy"] = AUTO_BUY_MODES[(k + 1) % AUTO_BUY_MODES.size()]
+	return String(q["auto_buy"])
+
+
+## Rarities below this rank are salvaged on arrival (0 = off; 1 Common, 2 + Uncommon).
+static func auto_salvage_level(s: Dictionary) -> int:
+	return mini(int(qol(s)["auto_salvage"]), level(s, "auto_salvage"))
+
+
+static func cycle_auto_salvage(s: Dictionary) -> int:
+	var cap: int = level(s, "auto_salvage")
+	if cap <= 0:
+		return 0
+	var q: Dictionary = qol(s)
+	q["auto_salvage"] = (mini(int(q["auto_salvage"]), cap) + 1) % (cap + 1)
+	return int(q["auto_salvage"])
+
+
+static func auto_restart_on(s: Dictionary) -> bool:
+	return level(s, "auto_restart") > 0 and bool(qol(s)["auto_restart"])
+
+
+static func toggle_auto_restart(s: Dictionary) -> bool:
+	if level(s, "auto_restart") <= 0:
+		return false
+	var q: Dictionary = qol(s)
+	q["auto_restart"] = not bool(q["auto_restart"])
+	return bool(q["auto_restart"])
+
+
+## Loadout preset slots (Loadout Presets research).
+static func preset_slots(s: Dictionary) -> int:
+	return level(s, "presets")
+
+
 ## Every research level (TowerState reads TrackDB unlocks from it).
 static func levels(s: Dictionary) -> Dictionary:
 	return (_rb(s)["lvls"] as Dictionary).duplicate()

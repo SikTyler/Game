@@ -1713,6 +1713,7 @@ func _advance_wave(ev: Array) -> void:
 	if wave % SUPPLY_EVERY == 0:
 		_supply_drop(ev)
 	_slot_spins(ev)
+	_auto_buy(ev)
 	recompute()   # cash/s, building HP and troops scale with the wave
 	_drain_troop_events(ev)
 	ev.append({"t": "wave", "wave": wave})
@@ -4068,6 +4069,42 @@ func buy_tracks(t: String, n: int) -> Array:
 			break
 		ev.append_array(e1)
 	return ev
+
+
+## V2 P8b Auto-Buy research: at each wave start, buy the cheapest open
+## standard track of the chosen tree ("all": any tree) while it costs at most
+## the cash above a 25% reserve. Off ("") without the research.
+func _auto_buy(ev: Array) -> void:
+	var mode_ab: String = String(mods.get("auto_buy", ""))
+	if mode_ab == "" or over:
+		return
+	var floor_cash: float = cash * 0.25
+	for n in 60:
+		var best: String = ""
+		var bc: int = -1
+		for t in TrackDB.IDS:
+			var tid: String = String(t)
+			if TrackDB.is_od(tid) or not track_unlocked(tid):
+				continue
+			if mode_ab != "all" and String(TrackDB.get_def(tid)["tree"]) != mode_ab:
+				continue
+			var c: int = track_cost(tid)
+			if c >= 0 and (bc < 0 or c < bc):
+				bc = c
+				best = tid
+		if best == "" or cash - float(bc) < floor_cash:
+			return
+		var e1: Array = buy_track(best)
+		if e1.is_empty():
+			return
+		for e in e1:
+			(e as Dictionary)["auto"] = true
+		ev.append_array(e1)
+
+
+## Live switch from the run panel (EAUTO): the next wave start uses it.
+func set_auto_buy(mode_ab: String) -> void:
+	mods["auto_buy"] = mode_ab
 
 
 ## V2 P8 research unlocks (TrackDB `unlock` = [research id, level]).

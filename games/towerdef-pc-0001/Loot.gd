@@ -88,6 +88,10 @@ static func realize(s: Dictionary, loot: Dictionary, scrap_mult: float = 1.0) ->
 static func _keep(s: Dictionary, it: Dictionary, cache: String, src: String) -> Dictionary:
 	it["src"] = "cache:" + cache if cache != "" else src
 	it["new"] = true
+	# V2 P8b Auto-Salvage: low rarities turn into Scrap on arrival
+	if RarityDB.rank(String(it["rar"])) < Labs.auto_salvage_level(s):
+		var va: int = Gear.salvage_value(it, s)
+		return {"uid": 0, "scrap": va, "ev": [{"t": "loot_salvaged", "rar": String(it["rar"]), "scrap": va, "auto": true}]}
 	var uid: int = Gear.add_item(s, it)
 	if uid > 0:
 		return {"uid": uid, "scrap": 0, "ev": [{"t": "loot_item", "uid": uid, "rar": String(it["rar"]), "kind": String(it["kind"]), "base": String(it["base"]), "src": src, "cache": cache}]}
