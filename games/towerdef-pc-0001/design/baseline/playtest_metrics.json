@@ -1,0 +1,1647 @@
+{
+    "ac25_fresh_wall": true,
+    "ac27_fill_h": {
+        "bad": [],
+        "max": 10.0,
+        "min": 8.0,
+        "snapshots": 65
+    },
+    "ac28_reforge_loops": [
+        {
+            "key": 3057,
+            "loop": 0,
+            "reach": 26,
+            "sessions": 0,
+            "wave": 57
+        },
+        {
+            "at_session": 27,
+            "cum_shards": 16,
+            "key": 3057,
+            "lifetime_coins": 532199,
+            "loop": 1,
+            "reach": 13,
+            "sessions": 1,
+            "shards": 16,
+            "wave": 57
+        },
+        {
+            "at_session": 43,
+            "cum_shards": 32,
+            "key": 5079,
+            "lifetime_coins": 1558269,
+            "loop": 2,
+            "reach": 1,
+            "sessions": 1,
+            "shards": 16,
+            "wave": 79
+        },
+        {
+            "at_session": 57,
+            "cum_shards": 48,
+            "key": 6080,
+            "lifetime_coins": 2612028,
+            "loop": 3,
+            "sessions": 4,
+            "shards": 16,
+            "wave": 80
+        }
+    ],
+    "ac29_campaign_ok": false,
+    "ac29_spec_identity": true,
+    "ac29_spec_probe": {
+        "eco_coins_per_run_x": 1.51,
+        "rows": {
+            "balanced": {
+                "boss_dps": 18168119.9128388,
+                "coins_per_run": 55078.5,
+                "load": [
+                    "f_glass",
+                    "b_ringcaster",
+                    "c_capacitor_arc",
+                    "e_railcore",
+                    "f_regenmesh",
+                    "b_hollow"
+                ],
+                "median_wave": 80.0,
+                "owned": 32,
+                "waves": [
+                    80,
+                    76,
+                    80,
+                    76,
+                    80,
+                    80
+                ]
+            },
+            "damage": {
+                "boss_dps": 14955531.1548997,
+                "coins_per_run": 57425.5,
+                "load": [
+                    "f_glass",
+                    "b_scatter",
+                    "c_capacitor_arc",
+                    "e_bastionheart",
+                    "f_lightweave",
+                    "b_crit"
+                ],
+                "median_wave": 80.0,
+                "owned": 32,
+                "waves": [
+                    80,
+                    76,
+                    80,
+                    76,
+                    80,
+                    80
+                ]
+            },
+            "eco": {
+                "boss_dps": 15521060.2831735,
+                "coins_per_run": 83425.5,
+                "load": [
+                    "f_ledgerframe",
+                    "b_bounty",
+                    "c_interest",
+                    "e_mintpress",
+                    "f_glass",
+                    "b_ringcaster",
+                    "golden_ratio"
+                ],
+                "median_wave": 79.0,
+                "owned": 33,
+                "waves": [
+                    80,
+                    80,
+                    78,
+                    76,
+                    80,
+                    76
+                ]
+            },
+            "single": {
+                "boss_dps": 64460084.4043961,
+                "coins_per_run": 63208.5,
+                "load": [
+                    "f_glass",
+                    "b_hollow",
+                    "c_scope",
+                    "e_railcore",
+                    "f_regenmesh",
+                    "b_crit"
+                ],
+                "median_wave": 80.5,
+                "owned": 32,
+                "waves": [
+                    80,
+                    84,
+                    84,
+                    77,
+                    81,
+                    80
+                ]
+            }
+        },
+        "single_boss_dps_x": 3.55,
+        "wave_gap": {
+            "balanced": 0.5,
+            "damage": 0.5,
+            "eco": 1.5,
+            "single": 0.0
+        }
+    },
+    "ac29_specs": {
+        "eco_coins_per_run_x": 0.68,
+        "single_boss_dps_x": 0.89,
+        "wave_gap": {
+            "balanced": 8,
+            "damage": 0,
+            "eco": 8,
+            "single": 0
+        }
+    },
+    "ac29_wave_gap": true,
+    "ac38_eco_mix": true,
+    "ac38_strict": true,
+    "ac39_no_mono": true,
+    "active_coin_rate": 2760.8,
+    "balanced_best": 30,
+    "balanced_waves": [
+        20,
+        20,
+        20,
+        20,
+        30,
+        20,
+        20,
+        20
+    ],
+    "best_wave_at_t3": 50,
+    "campaign_days": [
+        {
+            "best_wave": 30,
+            "best_wave_hi_tier": 30,
+            "cards": 0,
+            "coins": 3488,
+            "core_lvl": 6,
+            "day": 1,
+            "gems": 12,
+            "labs": 2,
+            "outpost_h": 0.0,
+            "outpost_ratio": 0.0,
+            "parts": 3,
+            "tier": 1
+        },
+        {
+            "best_wave": 30,
+            "best_wave_hi_tier": 30,
+            "cards": 1,
+            "coins": 18359,
+            "core_lvl": 6,
+            "day": 2,
+            "gems": 32,
+            "labs": 6,
+            "outpost_h": 1410.0,
+            "outpost_ratio": 0.203,
+            "parts": 7,
+            "tier": 1
+        },
+        {
+            "best_wave": 40,
+            "best_wave_hi_tier": 0,
+            "cards": 2,
+            "coins": 51705,
+            "core_lvl": 8,
+            "day": 3,
+            "gems": 65,
+            "labs": 10,
+            "outpost_h": 3510.0,
+            "outpost_ratio": 0.415,
+            "parts": 14,
+            "tier": 2
+        },
+        {
+            "best_wave": 40,
+            "best_wave_hi_tier": 39,
+            "cards": 3,
+            "coins": 133428,
+            "core_lvl": 12,
+            "day": 4,
+            "gems": 86,
+            "labs": 14,
+            "outpost_h": 4442.0,
+            "outpost_ratio": 0.294,
+            "parts": 23,
+            "tier": 2
+        },
+        {
+            "best_wave": 42,
+            "best_wave_hi_tier": 42,
+            "cards": 3,
+            "coins": 231809,
+            "core_lvl": 14,
+            "day": 5,
+            "gems": 103,
+            "labs": 17,
+            "outpost_h": 5076.0,
+            "outpost_ratio": 0.325,
+            "parts": 28,
+            "tier": 2
+        },
+        {
+            "best_wave": 50,
+            "best_wave_hi_tier": 50,
+            "cards": 5,
+            "coins": 347159,
+            "core_lvl": 18,
+            "day": 6,
+            "gems": 132,
+            "labs": 20,
+            "outpost_h": 8661.0,
+            "outpost_ratio": 0.237,
+            "parts": 29,
+            "tier": 3
+        },
+        {
+            "best_wave": 64,
+            "best_wave_hi_tier": 0,
+            "cards": 6,
+            "coins": 548209,
+            "core_lvl": 22,
+            "day": 7,
+            "gems": 169,
+            "labs": 23,
+            "outpost_h": 12584.0,
+            "outpost_ratio": 1.488,
+            "parts": 30,
+            "tier": 4
+        },
+        {
+            "best_wave": 64,
+            "best_wave_hi_tier": 60,
+            "cards": 6,
+            "coins": 835984,
+            "core_lvl": 26,
+            "day": 8,
+            "gems": 182,
+            "labs": 27,
+            "outpost_h": 13843.0,
+            "outpost_ratio": 0.253,
+            "parts": 31,
+            "tier": 4
+        },
+        {
+            "best_wave": 65,
+            "best_wave_hi_tier": 65,
+            "cards": 6,
+            "coins": 1177208,
+            "core_lvl": 30,
+            "day": 9,
+            "gems": 209,
+            "labs": 30,
+            "outpost_h": 15203.0,
+            "outpost_ratio": 0.236,
+            "parts": 31,
+            "tier": 4
+        },
+        {
+            "best_wave": 70,
+            "best_wave_hi_tier": 0,
+            "cards": 6,
+            "coins": 1551985,
+            "core_lvl": 34,
+            "day": 10,
+            "gems": 245,
+            "labs": 33,
+            "outpost_h": 19543.0,
+            "outpost_ratio": 2.31,
+            "parts": 31,
+            "tier": 5
+        },
+        {
+            "best_wave": 70,
+            "best_wave_hi_tier": 70,
+            "cards": 6,
+            "coins": 2058496,
+            "core_lvl": 39,
+            "day": 11,
+            "gems": 272,
+            "labs": 36,
+            "outpost_h": 21171.0,
+            "outpost_ratio": 0.237,
+            "parts": 31,
+            "tier": 5
+        },
+        {
+            "best_wave": 76,
+            "best_wave_hi_tier": 76,
+            "cards": 6,
+            "coins": 2614478,
+            "core_lvl": 43,
+            "day": 12,
+            "gems": 295,
+            "labs": 39,
+            "outpost_h": 22133.0,
+            "outpost_ratio": 0.231,
+            "parts": 32,
+            "tier": 5
+        },
+        {
+            "best_wave": 78,
+            "best_wave_hi_tier": 78,
+            "cards": 7,
+            "coins": 3177456,
+            "core_lvl": 45,
+            "day": 13,
+            "gems": 316,
+            "labs": 43,
+            "outpost_h": 22133.0,
+            "outpost_ratio": 0.227,
+            "parts": 32,
+            "tier": 5
+        },
+        {
+            "best_wave": 78,
+            "best_wave_hi_tier": 78,
+            "cards": 7,
+            "coins": 3791220,
+            "core_lvl": 46,
+            "day": 14,
+            "gems": 340,
+            "labs": 49,
+            "outpost_h": 23096.0,
+            "outpost_ratio": 0.229,
+            "parts": 32,
+            "tier": 5
+        },
+        {
+            "best_wave": 78,
+            "best_wave_hi_tier": 78,
+            "cards": 7,
+            "coins": 4411318,
+            "core_lvl": 47,
+            "day": 15,
+            "gems": 364,
+            "labs": 54,
+            "outpost_h": 24058.0,
+            "outpost_ratio": 0.174,
+            "parts": 32,
+            "tier": 5
+        },
+        {
+            "best_wave": 78,
+            "best_wave_hi_tier": 78,
+            "cards": 7,
+            "coins": 5093277,
+            "core_lvl": 48,
+            "day": 16,
+            "gems": 390,
+            "labs": 60,
+            "outpost_h": 28547.0,
+            "outpost_ratio": 0.195,
+            "parts": 32,
+            "tier": 5
+        },
+        {
+            "best_wave": 80,
+            "best_wave_hi_tier": 77,
+            "cards": 7,
+            "coins": 5962337,
+            "core_lvl": 49,
+            "day": 17,
+            "gems": 423,
+            "labs": 66,
+            "outpost_h": 38109.0,
+            "outpost_ratio": 0.215,
+            "parts": 32,
+            "tier": 6
+        },
+        {
+            "best_wave": 80,
+            "best_wave_hi_tier": 79,
+            "cards": 7,
+            "coins": 7037454,
+            "core_lvl": 50,
+            "day": 18,
+            "gems": 442,
+            "labs": 72,
+            "outpost_h": 41203.0,
+            "outpost_ratio": 0.219,
+            "parts": 32,
+            "tier": 6
+        },
+        {
+            "best_wave": 80,
+            "best_wave_hi_tier": 80,
+            "cards": 7,
+            "coins": 8232073,
+            "core_lvl": 51,
+            "day": 19,
+            "gems": 468,
+            "labs": 78,
+            "outpost_h": 43266.0,
+            "outpost_ratio": 0.182,
+            "parts": 32,
+            "tier": 6
+        },
+        {
+            "best_wave": 80,
+            "best_wave_hi_tier": 80,
+            "cards": 7,
+            "coins": 9449784,
+            "core_lvl": 52,
+            "day": 20,
+            "gems": 487,
+            "labs": 84,
+            "outpost_h": 43266.0,
+            "outpost_ratio": 0.177,
+            "parts": 32,
+            "tier": 6
+        },
+        {
+            "best_wave": 82,
+            "best_wave_hi_tier": 82,
+            "cards": 8,
+            "coins": 10741080,
+            "core_lvl": 53,
+            "day": 21,
+            "gems": 514,
+            "labs": 90,
+            "outpost_h": 48891.0,
+            "outpost_ratio": 0.177,
+            "parts": 32,
+            "tier": 6
+        },
+        {
+            "best_wave": 84,
+            "best_wave_hi_tier": 84,
+            "cards": 8,
+            "coins": 12174591,
+            "core_lvl": 54,
+            "day": 22,
+            "gems": 537,
+            "labs": 96,
+            "outpost_h": 52641.0,
+            "outpost_ratio": 0.187,
+            "parts": 32,
+            "tier": 6
+        },
+        {
+            "best_wave": 84,
+            "best_wave_hi_tier": 84,
+            "cards": 8,
+            "coins": 13715879,
+            "core_lvl": 55,
+            "day": 23,
+            "gems": 563,
+            "labs": 102,
+            "outpost_h": 54516.0,
+            "outpost_ratio": 0.205,
+            "parts": 32,
+            "tier": 6
+        },
+        {
+            "best_wave": 84,
+            "best_wave_hi_tier": 84,
+            "cards": 8,
+            "coins": 15292580,
+            "core_lvl": 55,
+            "day": 24,
+            "gems": 586,
+            "labs": 108,
+            "outpost_h": 55453.0,
+            "outpost_ratio": 0.177,
+            "parts": 32,
+            "tier": 6
+        },
+        {
+            "best_wave": 84,
+            "best_wave_hi_tier": 84,
+            "cards": 8,
+            "coins": 16862511,
+            "core_lvl": 56,
+            "day": 25,
+            "gems": 605,
+            "labs": 112,
+            "outpost_h": 55453.0,
+            "outpost_ratio": 0.175,
+            "parts": 32,
+            "tier": 6
+        },
+        {
+            "best_wave": 87,
+            "best_wave_hi_tier": 87,
+            "cards": 8,
+            "coins": 18482143,
+            "core_lvl": 56,
+            "day": 26,
+            "gems": 621,
+            "labs": 114,
+            "outpost_h": 55453.0,
+            "outpost_ratio": 0.177,
+            "parts": 32,
+            "tier": 6
+        },
+        {
+            "best_wave": 87,
+            "best_wave_hi_tier": 87,
+            "cards": 8,
+            "coins": 20086962,
+            "core_lvl": 56,
+            "day": 27,
+            "gems": 642,
+            "labs": 116,
+            "outpost_h": 55453.0,
+            "outpost_ratio": 0.165,
+            "parts": 32,
+            "tier": 6
+        },
+        {
+            "best_wave": 90,
+            "best_wave_hi_tier": 85,
+            "cards": 8,
+            "coins": 21791834,
+            "core_lvl": 56,
+            "day": 28,
+            "gems": 688,
+            "labs": 118,
+            "outpost_h": 64326.0,
+            "outpost_ratio": 0.174,
+            "parts": 32,
+            "tier": 7
+        },
+        {
+            "best_wave": 90,
+            "best_wave_hi_tier": 86,
+            "cards": 8,
+            "coins": 23617892,
+            "core_lvl": 56,
+            "day": 29,
+            "gems": 706,
+            "labs": 119,
+            "outpost_h": 64326.0,
+            "outpost_ratio": 0.195,
+            "parts": 32,
+            "tier": 7
+        },
+        {
+            "best_wave": 90,
+            "best_wave_hi_tier": 86,
+            "cards": 8,
+            "coins": 25498209,
+            "core_lvl": 56,
+            "day": 30,
+            "gems": 720,
+            "labs": 120,
+            "outpost_h": 64326.0,
+            "outpost_ratio": 0.177,
+            "parts": 32,
+            "tier": 7
+        }
+    ],
+    "day1_band": true,
+    "day1_best_wave": 30,
+    "day1_in_target_band": true,
+    "day30_best_wave_hi_tier": 86,
+    "dominant_perks": [],
+    "early_3day_rise": true,
+    "eco_best": 16,
+    "eco_waves": [
+        6,
+        10,
+        10,
+        6,
+        10,
+        10,
+        16,
+        10
+    ],
+    "final_tier": 7,
+    "first_coins": 387,
+    "first_goal_reachable": true,
+    "first_levels": 15,
+    "first_time_s": 490.3,
+    "first_wave": 20,
+    "fresh_median_first_goal": true,
+    "fresh_runs": {
+        "median_wave": 20.0,
+        "min_wave": 10,
+        "n": 16,
+        "r_early_median": 3.93,
+        "r_wall_median": 0.5,
+        "reach_w30": 1,
+        "waves": [
+            30,
+            20,
+            20,
+            20,
+            20,
+            20,
+            20,
+            20,
+            10,
+            20,
+            10,
+            20,
+            10,
+            10,
+            20,
+            20
+        ]
+    },
+    "gem_log": {
+        "boss": 289,
+        "mission": 293,
+        "streak": 78,
+        "tier": 60
+    },
+    "gem_sources_ok": true,
+    "gem_top_source": "mission",
+    "gems_per_day": 24.0,
+    "gems_per_day_ok": true,
+    "gems_total": 720,
+    "inrun_policy": {
+        "d20_balanced": {
+            "coins": 57976.3333333333,
+            "wave": 78.0
+        },
+        "d20_eco": {
+            "coins": 42421.6666666667,
+            "wave": 43.0
+        },
+        "d20_weapon": {
+            "coins": 48185.3333333333,
+            "wave": 77.3333333333333
+        },
+        "d7_balanced": {
+            "coins": 13328.3333333333,
+            "wave": 53.0
+        },
+        "d7_eco": {
+            "coins": 4683.0,
+            "wave": 19.3333333333333
+        },
+        "d7_weapon": {
+            "coins": 11238.6666666667,
+            "wave": 52.0
+        }
+    },
+    "late_stall_days": [],
+    "mix_beats_eco": true,
+    "mix_beats_weapon": true,
+    "mono_best": {
+        "gun": 20,
+        "mortar": 20,
+        "tesla": 20
+    },
+    "mono_same_save": {
+        "d20": {
+            "balanced": 78.5,
+            "gun": 76.0,
+            "mortar": 76.5,
+            "tesla": 75.0
+        },
+        "d7": {
+            "balanced": 54.5,
+            "gun": 51.5,
+            "mortar": 50.0,
+            "tesla": 53.0
+        }
+    },
+    "mono_same_save_below_70": false,
+    "no_death_spiral": true,
+    "no_dominant_perk": true,
+    "no_plateau_after_t3": true,
+    "no_plateau_before_t3": true,
+    "no_trivial_dominant": true,
+    "offline_below_active": true,
+    "offline_coin_rate": 507.6,
+    "pc_endless_d20": {
+        "boss_dps": 42243875.6316897,
+        "coin_ratio": 0.89,
+        "coins": 55172,
+        "gems": 6,
+        "mode": "endless",
+        "mutations": 3,
+        "perks": [
+            "p_rate",
+            "p_dmg",
+            "p_range",
+            "p_glass",
+            "p_rate",
+            "p_frenzy",
+            "p_dmg",
+            "p_dmg",
+            "p_fort",
+            "p_hp",
+            "p_xp",
+            "p_cash",
+            "p_cash",
+            "p_miser",
+            "p_greed"
+        ],
+        "r_early": 121.423959392597,
+        "r_front": 1.29260892838677,
+        "r_hp": 0.343739782693928,
+        "r_wall": 0.628864718878982,
+        "real_s": 779.000000000109,
+        "tier": 6,
+        "timeout": false,
+        "wave": 77
+    },
+    "pc_endless_runs": true,
+    "pc_modifiers_d20": {
+        "_base": {
+            "coins": 58500,
+            "wave": 78.0
+        },
+        "allsides": {
+            "coin_ratio": 1.05,
+            "dwave": 0.0,
+            "wave": 78.0
+        },
+        "elitist": {
+            "coin_ratio": 1.17,
+            "dwave": -4.0,
+            "wave": 74.0
+        },
+        "glass": {
+            "coin_ratio": 1.14,
+            "dwave": -0.5,
+            "wave": 77.5
+        },
+        "haste": {
+            "coin_ratio": 1.03,
+            "dwave": -2.0,
+            "wave": 76.0
+        },
+        "ironclad": {
+            "coin_ratio": 1.07,
+            "dwave": -3.5,
+            "wave": 74.5
+        },
+        "nolabs": {
+            "coin_ratio": 1.05,
+            "dwave": -4.0,
+            "wave": 74.0
+        },
+        "noperks": {
+            "coin_ratio": 0.99,
+            "dwave": -14.0,
+            "wave": 64.0
+        },
+        "poverty": {
+            "coin_ratio": 1.08,
+            "dwave": -1.0,
+            "wave": 77.0
+        },
+        "swarm": {
+            "coin_ratio": 1.02,
+            "dwave": -4.0,
+            "wave": 74.0
+        }
+    },
+    "pc_modifiers_fair": true,
+    "pc_modifiers_reach_w25": true,
+    "pc_refinery": {
+        "d20": {
+            "coin_ratio": 1.0,
+            "with_refinery": {
+                "coins": 46074.6666666667,
+                "wave": 68.3333333333333
+            },
+            "without": {
+                "coins": 46074.6666666667,
+                "wave": 68.3333333333333
+            }
+        },
+        "d7": {
+            "coin_ratio": 1.0,
+            "with_refinery": {
+                "coins": 11181.3333333333,
+                "wave": 46.3333333333333
+            },
+            "without": {
+                "coins": 11181.3333333333,
+                "wave": 46.3333333333333
+            }
+        }
+    },
+    "pc_refinery_not_dominant": true,
+    "perk_top_coin_ratio": 1.19,
+    "perks_d20": {
+        "p_bloodmoon": {
+            "coins": 62136,
+            "wave": 76.0
+        },
+        "p_cash": {
+            "coins": 50367,
+            "wave": 74.5
+        },
+        "p_dmg": {
+            "coins": 59168,
+            "wave": 78.5
+        },
+        "p_fort": {
+            "coins": 57062,
+            "wave": 77.5
+        },
+        "p_frenzy": {
+            "coins": 59301,
+            "wave": 78.5
+        },
+        "p_glass": {
+            "coins": 59168,
+            "wave": 78.5
+        },
+        "p_greed": {
+            "coins": 70277,
+            "wave": 76.5
+        },
+        "p_hp": {
+            "coins": 58680,
+            "wave": 79.0
+        },
+        "p_miser": {
+            "coins": 55691,
+            "wave": 80.0
+        },
+        "p_range": {
+            "coins": 59168,
+            "wave": 78.5
+        },
+        "p_rate": {
+            "coins": 59168,
+            "wave": 78.5
+        },
+        "p_xp": {
+            "coins": 59485,
+            "wave": 79.0
+        }
+    },
+    "progressable": true,
+    "rd_ac27_storage_fill": true,
+    "rd_archetypes_viable": true,
+    "rd_early_power": true,
+    "rd_frontier_band": true,
+    "rd_gems_sane": true,
+    "rd_loops_complete": true,
+    "rd_loops_faster": true,
+    "rd_no_dominant_part": true,
+    "rd_no_dominant_set": true,
+    "rd_no_plateau": true,
+    "rd_no_runaway": true,
+    "rd_outpost_share": true,
+    "rd_wall_exists": true,
+    "redesign": {
+        "archetypes": {
+            "_days": 16,
+            "balanced": {
+                "V": 62.3,
+                "V_share": 1.0,
+                "final_best": 80,
+                "final_share": 0.91
+            },
+            "damage": {
+                "V": 62.1,
+                "V_share": 1.0,
+                "final_best": 88,
+                "final_share": 1.0
+            },
+            "eco": {
+                "V": 55.8,
+                "V_share": 0.9,
+                "final_best": 80,
+                "final_share": 0.91
+            },
+            "single": {
+                "V": 59.2,
+                "V_share": 0.95,
+                "final_best": 88,
+                "final_share": 1.0
+            }
+        },
+        "loop_band": {
+            "0": {
+                "days": 27,
+                "early": 5.22,
+                "front": 1.22,
+                "wall": 0.55
+            },
+            "1": {
+                "days": 17,
+                "early": 18.18,
+                "front": 1.18,
+                "wall": 0.54
+            },
+            "2": {
+                "days": 16,
+                "early": 51.67,
+                "front": 1.08,
+                "wall": 0.53
+            },
+            "3": {
+                "days": 9,
+                "early": 70.7,
+                "front": 0.99,
+                "wall": 0.48
+            }
+        },
+        "loop_speed": {
+            "1": {
+                "by_spec": [
+                    0.04,
+                    0.03,
+                    0.04,
+                    0.07
+                ],
+                "margin": 0.66,
+                "max": 0.07,
+                "median": 0.04
+            },
+            "2": {
+                "by_spec": [
+                    0.08,
+                    0.67,
+                    0.47,
+                    0.56
+                ],
+                "margin": 0.19,
+                "max": 0.67,
+                "median": 0.51
+            },
+            "3": {
+                "by_spec": [
+                    4.0,
+                    0.08,
+                    0.29,
+                    0.61
+                ],
+                "margin": 0.25,
+                "max": 4.0,
+                "median": 0.45
+            }
+        },
+        "outpost_ratio_median": 0.225,
+        "part_pick_rate": {
+            "b_bounty": 0.11,
+            "b_crit": 0.2,
+            "b_hollow": 0.36,
+            "b_ringcaster": 0.33,
+            "b_scatter": 0.2,
+            "c_battery": 0.05,
+            "c_capacitor_arc": 0.59,
+            "c_overcharge": 0.02,
+            "c_scope": 0.33,
+            "e_bastionheart": 0.18,
+            "e_dynamo": 0.07,
+            "e_railcore": 0.57,
+            "f_glass": 0.69,
+            "f_ledgerframe": 0.3,
+            "f_lightweave": 0.15,
+            "f_mirror": 0.03,
+            "f_plating": 0.02,
+            "f_regenmesh": 0.28
+        },
+        "set4_rate": {},
+        "specs": {
+            "balanced": {
+                "best_wave": 80,
+                "best_wave_by_day": [
+                    30,
+                    30,
+                    40,
+                    40,
+                    42,
+                    50,
+                    61,
+                    68,
+                    77,
+                    79,
+                    80,
+                    80,
+                    80,
+                    80,
+                    80,
+                    80
+                ],
+                "days": 16,
+                "days_in_band": 0.63,
+                "gem_log": {
+                    "boss": 149,
+                    "mission": 161,
+                    "streak": 40,
+                    "tier": 50
+                },
+                "gems_per_day": 25.0,
+                "jump_days": [],
+                "loop_ratios": {
+                    "0": {
+                        "days": 6,
+                        "early": 4.51,
+                        "front": 1.25,
+                        "wall": 0.57
+                    },
+                    "1": {
+                        "days": 4,
+                        "early": 20.24,
+                        "front": 1.06,
+                        "wall": 0.52
+                    },
+                    "2": {
+                        "days": 4,
+                        "early": 59.06,
+                        "front": 1.23,
+                        "wall": 0.58
+                    },
+                    "3": {
+                        "days": 2,
+                        "early": 46.54,
+                        "front": 1.05,
+                        "wall": 0.51
+                    }
+                },
+                "loops": [
+                    {
+                        "key": 3057,
+                        "loop": 0,
+                        "reach": 26,
+                        "sessions": 0,
+                        "wave": 57
+                    },
+                    {
+                        "at_session": 27,
+                        "cum_shards": 16,
+                        "key": 3057,
+                        "lifetime_coins": 532199,
+                        "loop": 1,
+                        "reach": 13,
+                        "sessions": 1,
+                        "shards": 16,
+                        "wave": 57
+                    },
+                    {
+                        "at_session": 43,
+                        "cum_shards": 32,
+                        "key": 5079,
+                        "lifetime_coins": 1558269,
+                        "loop": 2,
+                        "reach": 1,
+                        "sessions": 1,
+                        "shards": 16,
+                        "wave": 79
+                    },
+                    {
+                        "at_session": 57,
+                        "cum_shards": 48,
+                        "key": 6080,
+                        "lifetime_coins": 2612028,
+                        "loop": 3,
+                        "sessions": 4,
+                        "shards": 16,
+                        "wave": 80
+                    }
+                ],
+                "outpost_ratio_by_day": [
+                    0.0,
+                    0.217,
+                    0.475,
+                    0.308,
+                    0.324,
+                    0.302,
+                    0.089,
+                    0.268,
+                    0.224,
+                    0.229,
+                    0.052,
+                    0.236,
+                    0.172,
+                    0.2,
+                    0.131,
+                    0.192
+                ],
+                "outpost_ratio_median": 0.227,
+                "plateau_days": [],
+                "r_front_by_day": [
+                    1.07,
+                    1.06,
+                    1.07,
+                    2.09,
+                    1.69,
+                    1.42,
+                    1.18,
+                    1.56,
+                    0.9,
+                    0.95,
+                    1.31,
+                    1.33,
+                    1.16,
+                    0.9,
+                    1.14,
+                    0.96
+                ],
+                "sessions": 64,
+                "timeouts": 0
+            },
+            "damage": {
+                "best_wave": 88,
+                "best_wave_by_day": [
+                    30,
+                    30,
+                    30,
+                    40,
+                    47,
+                    47,
+                    50,
+                    67,
+                    78,
+                    78,
+                    79,
+                    81,
+                    81,
+                    81,
+                    87,
+                    88,
+                    88,
+                    88,
+                    88
+                ],
+                "days": 19,
+                "days_in_band": 0.42,
+                "gem_log": {
+                    "boss": 178,
+                    "mission": 200,
+                    "streak": 43,
+                    "tier": 50
+                },
+                "gems_per_day": 24.8,
+                "jump_days": [],
+                "loop_ratios": {
+                    "0": {
+                        "days": 7,
+                        "early": 5.36,
+                        "front": 1.19,
+                        "wall": 0.52
+                    },
+                    "1": {
+                        "days": 4,
+                        "early": 28.2,
+                        "front": 1.13,
+                        "wall": 0.54
+                    },
+                    "2": {
+                        "days": 4,
+                        "early": 50.67,
+                        "front": 0.77,
+                        "wall": 0.37
+                    },
+                    "3": {
+                        "days": 4,
+                        "early": 88.46,
+                        "front": 0.96,
+                        "wall": 0.46
+                    }
+                },
+                "loops": [
+                    {
+                        "key": 3052,
+                        "loop": 0,
+                        "reach": 29,
+                        "sessions": 0,
+                        "wave": 52
+                    },
+                    {
+                        "at_session": 29,
+                        "cum_shards": 16,
+                        "key": 3052,
+                        "lifetime_coins": 555207,
+                        "loop": 1,
+                        "reach": 16,
+                        "sessions": 2,
+                        "shards": 16,
+                        "wave": 52
+                    },
+                    {
+                        "at_session": 45,
+                        "cum_shards": 32,
+                        "key": 6000,
+                        "lifetime_coins": 1614866,
+                        "loop": 2,
+                        "reach": 18,
+                        "sessions": 9,
+                        "shards": 16,
+                        "wave": 81
+                    },
+                    {
+                        "at_session": 63,
+                        "cum_shards": 52,
+                        "key": 6088,
+                        "lifetime_coins": 3312699,
+                        "loop": 3,
+                        "sessions": 11,
+                        "shards": 20,
+                        "wave": 88
+                    }
+                ],
+                "outpost_ratio_by_day": [
+                    0.0,
+                    0.232,
+                    0.278,
+                    0.462,
+                    0.319,
+                    0.273,
+                    0.37,
+                    0.268,
+                    0.258,
+                    0.22,
+                    0.225,
+                    0.149,
+                    0.193,
+                    0.175,
+                    0.166,
+                    0.033,
+                    0.224,
+                    0.186,
+                    0.181
+                ],
+                "outpost_ratio_median": 0.224,
+                "plateau_days": [],
+                "r_front_by_day": [
+                    0.96,
+                    1.68,
+                    0.79,
+                    0.85,
+                    1.19,
+                    1.6,
+                    1.5,
+                    1.29,
+                    1.64,
+                    0.87,
+                    0.97,
+                    0.64,
+                    0.74,
+                    0.87,
+                    0.79,
+                    0.92,
+                    1.41,
+                    0.99,
+                    0.79
+                ],
+                "sessions": 76,
+                "timeouts": 0
+            },
+            "eco": {
+                "best_wave": 81,
+                "best_wave_by_day": [
+                    22,
+                    30,
+                    30,
+                    40,
+                    40,
+                    40,
+                    40,
+                    61,
+                    61,
+                    71,
+                    72,
+                    72,
+                    78,
+                    78,
+                    78,
+                    80,
+                    81
+                ],
+                "days": 17,
+                "days_in_band": 0.53,
+                "gem_log": {
+                    "boss": 153,
+                    "mission": 181,
+                    "streak": 40,
+                    "tier": 50
+                },
+                "gems_per_day": 24.9,
+                "jump_days": [],
+                "loop_ratios": {
+                    "0": {
+                        "days": 7,
+                        "early": 6.18,
+                        "front": 1.21,
+                        "wall": 0.55
+                    },
+                    "1": {
+                        "days": 5,
+                        "early": 18.18,
+                        "front": 0.94,
+                        "wall": 0.46
+                    },
+                    "2": {
+                        "days": 4,
+                        "early": 26.88,
+                        "front": 1.24,
+                        "wall": 0.61
+                    },
+                    "3": {
+                        "days": 1,
+                        "early": 40.22,
+                        "front": 1.47,
+                        "wall": 0.69
+                    }
+                },
+                "loops": [
+                    {
+                        "key": 2044,
+                        "loop": 0,
+                        "reach": 30,
+                        "sessions": 0,
+                        "wave": 44
+                    },
+                    {
+                        "at_session": 31,
+                        "cum_shards": 16,
+                        "key": 2044,
+                        "lifetime_coins": 518272,
+                        "loop": 1,
+                        "reach": 18,
+                        "sessions": 1,
+                        "shards": 16,
+                        "wave": 44
+                    },
+                    {
+                        "at_session": 49,
+                        "cum_shards": 33,
+                        "key": 5078,
+                        "lifetime_coins": 1679065,
+                        "loop": 2,
+                        "reach": 12,
+                        "sessions": 12,
+                        "shards": 17,
+                        "wave": 78
+                    },
+                    {
+                        "at_session": 64,
+                        "cum_shards": 49,
+                        "key": 6080,
+                        "lifetime_coins": 2731180,
+                        "loop": 3,
+                        "sessions": 1,
+                        "shards": 16,
+                        "wave": 80
+                    }
+                ],
+                "outpost_ratio_by_day": [
+                    0.0,
+                    0.203,
+                    0.228,
+                    0.514,
+                    0.33,
+                    0.244,
+                    0.263,
+                    0.126,
+                    0.228,
+                    0.238,
+                    0.214,
+                    0.215,
+                    0.176,
+                    0.195,
+                    0.172,
+                    0.172,
+                    0.271
+                ],
+                "outpost_ratio_median": 0.228,
+                "plateau_days": [],
+                "r_front_by_day": [
+                    1.17,
+                    1.21,
+                    0.68,
+                    0.83,
+                    1.77,
+                    1.43,
+                    1.84,
+                    1.34,
+                    1.38,
+                    0.88,
+                    0.93,
+                    0.94,
+                    0.92,
+                    1.29,
+                    1.23,
+                    1.25,
+                    1.47
+                ],
+                "sessions": 68,
+                "timeouts": 0
+            },
+            "single": {
+                "best_wave": 89,
+                "best_wave_by_day": [
+                    20,
+                    29,
+                    30,
+                    40,
+                    40,
+                    40,
+                    45,
+                    62,
+                    68,
+                    78,
+                    78,
+                    81,
+                    81,
+                    81,
+                    86,
+                    88,
+                    89
+                ],
+                "days": 17,
+                "days_in_band": 0.59,
+                "gem_log": {
+                    "boss": 152,
+                    "mission": 185,
+                    "streak": 40,
+                    "tier": 50
+                },
+                "gems_per_day": 25.1,
+                "jump_days": [],
+                "loop_ratios": {
+                    "0": {
+                        "days": 7,
+                        "early": 4.73,
+                        "front": 1.24,
+                        "wall": 0.56
+                    },
+                    "1": {
+                        "days": 4,
+                        "early": 26.25,
+                        "front": 1.67,
+                        "wall": 0.75
+                    },
+                    "2": {
+                        "days": 4,
+                        "early": 64.15,
+                        "front": 1.08,
+                        "wall": 0.53
+                    },
+                    "3": {
+                        "days": 2,
+                        "early": 99.14,
+                        "front": 0.9,
+                        "wall": 0.43
+                    }
+                },
+                "loops": [
+                    {
+                        "key": 2045,
+                        "loop": 0,
+                        "reach": 28,
+                        "sessions": 0,
+                        "wave": 45
+                    },
+                    {
+                        "at_session": 31,
+                        "cum_shards": 16,
+                        "key": 2045,
+                        "lifetime_coins": 516186,
+                        "loop": 1,
+                        "reach": 15,
+                        "sessions": 1,
+                        "shards": 16,
+                        "wave": 45
+                    },
+                    {
+                        "at_session": 47,
+                        "cum_shards": 32,
+                        "key": 6080,
+                        "lifetime_coins": 1533811,
+                        "loop": 2,
+                        "reach": 14,
+                        "sessions": 7,
+                        "shards": 16,
+                        "wave": 81
+                    },
+                    {
+                        "at_session": 61,
+                        "cum_shards": 49,
+                        "key": 6088,
+                        "lifetime_coins": 2689904,
+                        "loop": 3,
+                        "sessions": 4,
+                        "shards": 17,
+                        "wave": 88
+                    }
+                ],
+                "outpost_ratio_by_day": [
+                    0.0,
+                    0.209,
+                    0.257,
+                    0.451,
+                    0.358,
+                    0.3,
+                    0.264,
+                    0.145,
+                    0.254,
+                    0.242,
+                    0.224,
+                    0.046,
+                    0.237,
+                    0.183,
+                    0.179,
+                    0.118,
+                    0.176
+                ],
+                "outpost_ratio_median": 0.237,
+                "plateau_days": [],
+                "r_front_by_day": [
+                    1.22,
+                    1.24,
+                    0.9,
+                    0.82,
+                    1.6,
+                    1.38,
+                    2.4,
+                    1.23,
+                    2.11,
+                    3.79,
+                    1.09,
+                    0.86,
+                    1.05,
+                    1.11,
+                    1.39,
+                    0.77,
+                    1.03
+                ],
+                "sessions": 68,
+                "timeouts": 0
+            }
+        },
+        "top_part": "f_glass",
+        "top_part_rate": 0.69
+    },
+    "runtime_s": 503.0,
+    "seed_runs": {
+        "10504": {
+            "bal_coins": 586464,
+            "bal_wave": 63,
+            "day1": 30,
+            "ok": true,
+            "t2_day": 3,
+            "wpn_coins": 328080,
+            "wpn_wave": 40
+        },
+        "9393": {
+            "bal_coins": 564038,
+            "bal_wave": 60,
+            "day1": 30,
+            "ok": true,
+            "t2_day": 3,
+            "wpn_coins": 298302,
+            "wpn_wave": 40
+        }
+    },
+    "seeds_ok": true,
+    "set4_fair": false,
+    "set4_no_trap": true,
+    "set4_probe": {
+        "bulwark": 72.0,
+        "hi": 83.5,
+        "lancer": 84.5,
+        "lo": 72.0,
+        "mint": 79.5,
+        "storm": 76.5,
+        "swarm": 72.0,
+        "trap": 60.0
+    },
+    "solvent": true,
+    "stall_days": [],
+    "strategy_week1": {
+        "balanced": {
+            "best_wave": 64,
+            "coins": 548209,
+            "key": 4000
+        },
+        "eco": {
+            "best_wave": 20,
+            "coins": 148723,
+            "key": 1020
+        },
+        "weapon": {
+            "best_wave": 46,
+            "coins": 233780,
+            "key": 2046
+        }
+    },
+    "t2_by_day5": true,
+    "t2_day": 3,
+    "t3_day": 6,
+    "tier3_by_day30": true,
+    "weapon_best": 30,
+    "weapon_waves": [
+        20,
+        20,
+        30,
+        20,
+        30,
+        20,
+        30,
+        30
+    ]
+}

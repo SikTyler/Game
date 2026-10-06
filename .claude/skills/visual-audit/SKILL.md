@@ -5,6 +5,8 @@ description: Use when judging the composited, assembled screen of a running Godo
 
 # visual-audit
 
+> Palette/font cohesion fixes: the `theme-factory` skill offers preset palettes + font pairings to re-theme UI consistently (check contrast with `tools/contrast.mjs`).
+
 Grade the **assembled, running screen** of a Godot game — not the raw asset files. "The art is good" ≠ "the screen is good": a re-skin that nails every PNG still ships unfinished if a primitive HUD, an unreadable value, an icon-over-the-name collision, or a colour-blind-hostile state survives. This skill is the composited audit, extracted from `asset` so it is reusable on ANY running game and so independent fresh eyes — not the person who made the fix — render the verdict.
 
 ```

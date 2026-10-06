@@ -5,6 +5,8 @@ description: Use to empirically verify a playable Godot game is actually WINNABL
 
 # playtest-audit
 
+> Optional reference when judging idle/incremental pacing (wall detection, time-to-next-purchase, prestige spacing): `games/towerdef-0001/design/IDLE_MATH.md`.
+
 Prove the game can actually be *played to a good outcome*, not just that its rules are
 correct. Emit `games/<id>/playtest.gd`: a headless bot that drives the **real** game loop
 with a competent policy and asserts the title is winnable, fair, and lets a player make

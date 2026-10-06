@@ -5,6 +5,8 @@ description: Use when re-skinning a playable Godot game with coherent, Claude-au
 
 # asset
 
+> Need a UI palette + font pairing? See the `theme-factory` skill (preset/generated themes) when deriving the visual system.
+
 Replace a `playable` game's deliberate **primitive** visuals with real, coherent, **Claude-authored art**, so the title goes from "intentional toy" to "looks designed" — recorded legibly in the manifest. The deliverable is a sharp re-skin **system**, not one prettier game: every gap must trace to specific prose here. Runs as a clean bolt-on after `playable`:
 
 ```

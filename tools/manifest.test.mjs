@@ -197,6 +197,28 @@ describe("validate", () => {
     expect(validate(m)).toEqual({ valid: true, errors: [] });
   });
 
+  test("accepts a procedural (GPU-free sfxr/ZzFXM) audio_pass with synth/song recipes", () => {
+    const m = validManifest();
+    m.status = "scored";
+    m.audio_pass = {
+      method: "procedural",
+      audio_system: { model: "jsfxr+zzfxm", sonic_character: "bright square-wave chiptune" },
+      recipes: [
+        { name: "shoot", kind: "sfx", synth: { preset: "laserShoot", seed: 3 }, format: "wav", loop: false },
+        { name: "theme", kind: "music", song: "audio/theme.song.json", format: "wav", loop: true }
+      ],
+      events: [{ event: "shot_fired", clip: "shoot", node: "Sfx", signal: "shot_fired" }]
+    };
+    expect(validate(m)).toEqual({ valid: true, errors: [] });
+  });
+
+  test("rejects an unknown audio_pass method", () => {
+    const m = validManifest();
+    m.status = "scored";
+    m.audio_pass = { method: "midi" };
+    expect(validate(m).valid).toBe(false);
+  });
+
   test("rejects an unknown key inside audio_pass", () => {
     const m = validManifest();
     m.status = "scored";

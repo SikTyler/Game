@@ -156,7 +156,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "method": { "enum": ["audio"] },
+        "method": { "enum": ["audio", "procedural"] },
         "audio_system": {
           "type": "object",
           "additionalProperties": false,
@@ -184,6 +184,8 @@
               "cfg": { "type": "number" },
               "format": { "enum": ["wav", "ogg"] },
               "loop": { "type": "boolean" },
+              "synth": { "type": "object" },
+              "song": { "type": "string" },
               "import_settings": {
                 "type": "object",
                 "additionalProperties": false,
