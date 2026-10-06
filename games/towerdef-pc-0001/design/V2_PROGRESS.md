@@ -53,6 +53,7 @@ The full `playtest.gd` (~35 min, 52 gates) is the P9 gate only. 7 mass balance g
 | P9a1 balance defaults (fixed bot) | done | Tuned with the fixed bot (`only=fresh` x16 + `only=main` 10-day campaigns per candidate). Baked into code (no GF_TUNE needed): enemy contact damage `DIFF_DMG` 1.5 → **0.9**, mass body HP `mass_hp_k` 0.5 → **0.35**, per-wave body HP track `mass_hp_track` 1.006 → **1.03**, XP need base `xp_base` 6 → **4** (x1.18 a level), tier unlock base 10 → **40** (T2 @ w60, T3 @ w70 ... T8 @ w120). Old defaults: fresh first runs median wave ~9 (~225 s), first run 132 coins, a day-1 run reached w45 so T2 opened on day 1. New defaults: fresh first runs [19 14 22 16 11 11 21 11 11 16 16 16 7 14 22 23] (median w16, ~400 s); the campaign's first run w16 / 386 s / 328 coins; day 1 best w21, day 2 w50, day 3 w56, T2 on day 4. Meta bot: a **savings goal** for the next Game Speed step (bought once it costs <= 12 h of Outpost income; that much is held back from the other purchases until then), because fraction-of-bank budgets never reached the 60k 2x step (the old bot sat at 1.5x through day 7 with 2.6M gross). |
 | P9a2 full playtest 1 → A/B gate fixes | done | First full `playtest.gd -- workers=4` on the P9a1 defaults (1 h 54 min): every gate passed except **corebld_matters** (x1.02), **xp_drafts** (x1.05) and **no_dominant_perk** (defense-first 79 vs balanced 61 on the same seed). Fixes: **Core buildings** x2.5–3 per level (Arsenal +6% dmg, Reactor +4% rate, Bulwark +8% HP, Aegis -1.2% damage taken, Optics +1% crit, Treasury +4% cash, Training +6% XP); the day-8 save's set was worth +24% dmg / +15% rate / +27% HP, about two waves at a wall where a wave costs ~x1.2 enemy HP. The bot now builds the **second copy** the Relay allows (`more` plan step: the nearest legal cell touching a linked building). **XP**: Study Pack +40% (was 10%), XP Siphon +50% (12%), XP Gain track +10% a level (5%); the XP bot now prefers Scholar (its +30% lives in code, not `fx`) and rerolls a free hand with no XP card (x1.05 → x1.30 on a day-3 save). A flatter XP curve was tried and rejected: x1.10 a level made 4 of 16 fresh first runs snowball to waves 46–55. **Defense perks**: Fortress +35% HP / +50% regen (was +60% / +100%), Plated Hull +2 armor (3), Aegis Core +45 shield (60), Spiked Hull reflects 15% (20%). **Harness**: the Core-building A/B takes 6 seeds and each perk family 2 (one stat change reshuffles a run's RNG path by up to ±20 waves); `only=<job> dir=<path>` reads / writes snapshots there. |
 | P9a3 full playtest 2 → defense / Core building trim | done | Second full playtest (P9a2, 2 h 26 min): 30 of 32 gates pass — XP drafts x1.31, gear x1.26, radial / directional spread x1.00, top single weapon x1.15, T2 on day 3, 2x speed on day 4, first run 353 coins, fresh first runs median 394.5 s, every H gate. Missed: **corebld_matters** x1.09 (6 seeds; 16 Core buildings incl. second copies) and **no_dominant_perk** (defense-first 80.5 vs balanced 65.0 = x1.24, cap x1.20; economy-first x1.15). Trim: Reinforced Core +20% HP (was 25%), Plated Hull one stack (was 2), Aegis Core +40 shield (45), Spiked Hull 12% (15%); Arsenal +7% damage a level (6%), Reactor +5% rate (4%). |
+| P9 close-out | done | The third full playtest (to re-measure the P9a3 trim) was stopped by the owner's call: the full playtest is a balance measurement, not a correctness gate. `tools/test_all.sh` is green on the final commit. The §P9 gate table below is the second full run (P9a2 code); the P9a3 trim targets its two near-misses and is unmeasured by a full run. |
 
 ## Test ledger
 Every deleted, rewritten or added check, with its reason. A surviving check is never silently loosened.
@@ -136,6 +137,30 @@ Every deleted, rewritten or added check, with its reason. A surviving check is n
 | P9a3 | `tests/st_outpost.gd` Core building literals again: Arsenal L3 +21%, with a Reactor +25.2% / rate +5%, run damage x1.252 / rate x1.05, one Arsenal's share 0.084 | rewritten | V2 P9a3 Arsenal +7%, Reactor +5% |
 | P9a3 | selftest "Reinforced Core heals to full": 144 (was 150) | rewritten | V2 P9a3 Reinforced Core +20% HP |
 | P9a2 | selftest "AC-24 Fortress": max HP 162 / regen 1.5 (was 192 / 2.0) | rewritten | V2 P9 Fortress +35% HP, +50% regen |
+
+## P9 gate table (full `playtest.gd -- workers=4`, P9a2 code, 2 h 26 min)
+| Gate | Threshold | Result | Pass |
+|---|---|---|---|
+| solvent | first run banks >= 300 coins | 353 | yes |
+| first_goal_day1 | best wave >= 10 on day 1 | w39 | yes |
+| first_run_short | fresh first runs median 300–480 s | 394.5 s (median wave 16) | yes |
+| fresh_median_first_goal | 16 fresh runs median and min >= wave 5 | median 16, min 11 | yes |
+| progressable | +10 progress from day 1 to day 10 | T1 w39 → T3 w76 | yes |
+| no_death_spiral | no tier's best wave falls | none | yes |
+| t2_by_day3_6 | T2 unlocked on day 3–6 | day 3 | yes |
+| speed2_by_day4_8 | 2x speed researched on day 4–8 | day 4 | yes |
+| gear_matters | own gear >= x1.25 a Common Autocannon (waves) | x1.26 | yes |
+| corebld_matters | Core buildings >= x1.10 (6 seeds) | x1.09 | **no** (P9a3: Arsenal +7%, Reactor +5%) |
+| xp_drafts | XP focus >= x1.20 levels by wave 12 | x1.31 | yes |
+| dir_parity | radial vs directional within x1.25 | x1.00 | yes |
+| no_dominant_weapon | no single weapon > x1.20 balanced | x1.15 (Spike Pylon / Harpoon) | yes |
+| no_dominant_perk | no perk family > x1.20 balanced (2 seeds) | defense x1.24, economy x1.15 | **no** (P9a3: defense trim) |
+| pity_holds | pity counters stay under their caps | max Epic counter 23 / 30 | yes |
+| H1–H10 mass gates | MASS_HORDE §C7 | all pass (H2 peak 16,384 alive, 13.95 ms a substep) | yes |
+
+Known balance notes for the next pass:
+- The campaign plateaus at T3 wave ~76 from day 7 (T4 opens at wave 80): late-game power growth is slow once the Outpost is maxed; the bot banks ~400k unspent Scrap by day 10.
+- Run outcomes are high-variance (one stat change reshuffles a run's RNG path by up to ±20 waves at day 8), so the A/B gates use 6 seeds (Core buildings) and 2 per perk family.
 
 ## Golden fingerprint history (HORDE_FP_GOLDEN)
 | Phase | Hash | Why it changed |
