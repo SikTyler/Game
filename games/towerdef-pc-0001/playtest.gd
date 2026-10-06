@@ -18,7 +18,8 @@ extends SceneTree
 # Gates: GATES + MASS_GATES (V2_PROGRESS §P9 documents each threshold).
 # Prints per-run / per-day lines, "PLAYTEST METRICS {json}" and exactly
 # "PLAYTEST OK" (exit 0) or "PLAYTEST FAIL: <gate>" lines (exit 1).
-# Debug: `-- only=<job>` runs one job in-process (verbose, no gates);
+# Debug: `-- only=<job> [dir=<snapshots>]` runs one job in-process (verbose,
+# no gates; phase-B jobs read / main writes snap3.bin / snap8.bin in dir);
 # `-- serial` runs every job in-process. Clears user:// saves at start / end.
 
 const TowerState := preload("res://TowerState.gd")
@@ -56,6 +57,9 @@ const SESSION_H: Array = [8, 8, 16, 16]        # 2 sessions x 2 runs; 8 h / 16 h
 const NOW0: int = 1767225600                   # 2026-01-01 00:00 UTC (a day boundary)
 const SNAP_DAYS: Array = [3, 8]
 const AB_SEEDS: Array = [101, 202, 303]
+## One stat change reshuffles a run's whole RNG path (+-20 waves at day 8),
+## so the small-effect A/Bs (Core buildings, perk families) take more seeds.
+const AB_SEEDS6: Array = [101, 202, 303, 404, 505, 606]
 
 var fail_count: int = 0
 const GATES: Array = ["solvent", "first_goal_day1", "first_run_short", "fresh_median_first_goal", "progressable", "no_death_spiral",
@@ -95,7 +99,7 @@ func _initialize() -> void:
 	if args.has("days"):
 		DAYS_RUN = int(args["days"])
 	if args.has("only"):
-		var o: Dictionary = run_job(String(args["only"]), seed0, OS.get_user_data_dir())
+		var o: Dictionary = run_job(String(args["only"]), seed0, String(args.get("dir", OS.get_user_data_dir())))
 		print("ONLY " + JSON.stringify(o))
 		quit(0)
 		return
@@ -667,8 +671,8 @@ static func _perk_score(policy: String, id: String) -> int:
 	var sc: int = 0 if bool(d.get("tradeoff", false)) else 2
 	if policy.begins_with("fam:"):
 		return sc + (8 if fam == policy.substr(4) else 0)
-	if policy == "xp" and float((d.get("fx", {}) as Dictionary).get("xp", 0.0)) > 0.0:
-		sc += 8
+	if policy == "xp" and (id == "p_xp" or float((d.get("fx", {}) as Dictionary).get("xp", 0.0)) > 0.0):
+		sc += 8   # Scholar (p_xp) is a classic perk: its +XP lives in code, not fx
 	return sc + (3 if ["offense", "defense", "tempo"].has(fam) else 1)
 
 
@@ -763,8 +767,10 @@ static func bot_step(S, policy: String, perk_pref: String = "") -> Array:
 			if sc > best_score:
 				best_score = sc
 				best = k
-		# A free reroll is taken when the hand has nothing the policy wants.
-		if best_score < 5.0 and S.reroll_cost() == 0:
+		# A free reroll is taken when the hand has nothing the policy wants
+		# (an XP-focused player also rerolls a free hand without an XP card).
+		var xp_miss: bool = policy == "xp" and not S.draft.any(func(c: Variant) -> bool: return _xp_card(String((c as Dictionary)["id"])))
+		if (best_score < 5.0 or xp_miss) and S.reroll_cost() == 0:
 			ev.append_array(S.reroll_draft())
 		else:
 			ev.append_array(S.choose_card(best))
@@ -878,7 +884,38 @@ const OP_PLAN: Array = [
 	["up", "arsenal"], ["up", "reactor"], ["up", "warehouse"], ["up", "refinery"], ["up", "gemmine"], ["up", "treasury"],
 	["up", "bulwark_w"], ["up", "optics"], ["up", "rangefinder"], ["up", "aegis_a"], ["up", "scav_post"],
 	["up", "archive"], ["up", "barracks"], ["up", "training"], ["up", "shrine"], ["up", "forgeworks"],
+	# second copies once the Relay allows them ("more": the nearest legal cell
+	# touching a linked building), then the ups level the newest copy first
+	["more", "arsenal"], ["more", "reactor"], ["more", "bulwark_w"], ["more", "aegis_a"], ["more", "optics"],
+	["more", "treasury"], ["more", "training"], ["more", "rangefinder"],
+	["up", "arsenal"], ["up", "reactor"], ["up", "bulwark_w"], ["up", "aegis_a"], ["up", "optics"],
+	["up", "treasury"], ["up", "training"], ["up", "rangefinder"],
 ]
+
+
+## The legal anchor for `id` nearest the Relay whose footprint touches a
+## linked building (so the new copy is linked too), or (-1, -1).
+static func _op_spot(save: Dictionary, id: String) -> Vector2i:
+	var o: Dictionary = save["outpost"]
+	var occ: Dictionary = Outpost.occupancy(o)
+	var con: Dictionary = Outpost.connected(o)
+	var best := Vector2i(-1, -1)
+	var best_d: int = 1 << 30
+	for y in OutpostDB.H:
+		for x in OutpostDB.W:
+			var d2: int = (x - 5) * (x - 5) + (y - 9) * (y - 9)
+			if d2 >= best_d or Outpost.place_error(save, id, x, y, 0) != "":
+				continue
+			var touch: bool = false
+			for c in Outpost.footprint(id, x, y, 0):
+				for dv in Outpost.DIRS:
+					var who: String = String(occ.get((c as Vector2i) + (dv as Vector2i), ""))
+					if who == "relay" or (who != "" and bool(con.get(who, false))):
+						touch = true
+			if touch:
+				best_d = d2
+				best = Vector2i(x, y)
+	return best
 
 
 static func _op_has(save: Dictionary, id: String, x: int, y: int) -> bool:
@@ -907,6 +944,13 @@ static func outpost_spend(save: Dictionary, now: int) -> void:
 					if int(d["coins"]) > budget:
 						continue
 					did = not Outpost.place(save, id, int(a[2]), int(a[3]), int(a[4]), now).is_empty()
+				"more":
+					var id3: String = String(a[1])
+					if Outpost.count_of(save["outpost"], id3) >= Outpost.limit_of(save, id3) or int(OutpostDB.get_def(id3)["coins"]) > budget:
+						continue
+					var sp: Vector2i = _op_spot(save, id3)
+					if sp.x >= 0:
+						did = not Outpost.place(save, id3, sp.x, sp.y, 0, now).is_empty()
 				"plot":
 					var pc: Dictionary = Outpost.plot_cost(save)
 					if int(pc["coins_alt"]) <= budget:
@@ -1305,7 +1349,7 @@ static func ab_waves(save: Dictionary, policy: String, seeds: Array, perk_pref: 
 static func job_gear(seed0: int, snap: Dictionary) -> Dictionary:
 	if snap.is_empty():
 		return {}
-	var a: Dictionary = ab_waves(snap, "balanced", AB_SEEDS.map(func(x: Variant) -> int: return seed0 + int(x)))
+	var a: Dictionary = ab_waves(snap, "balanced", AB_SEEDS6.map(func(x: Variant) -> int: return seed0 + int(x)))
 	var bare: Dictionary = snap.duplicate(true)
 	bare["gear"] = Gear.default_block()
 	var b: Dictionary = ab_waves(bare, "balanced", AB_SEEDS.map(func(x: Variant) -> int: return seed0 + int(x)))
@@ -1318,7 +1362,7 @@ static func job_gear(seed0: int, snap: Dictionary) -> Dictionary:
 static func job_corebld(seed0: int, snap: Dictionary) -> Dictionary:
 	if snap.is_empty():
 		return {}
-	var a: Dictionary = ab_waves(snap, "balanced", AB_SEEDS.map(func(x: Variant) -> int: return seed0 + int(x)))
+	var a: Dictionary = ab_waves(snap, "balanced", AB_SEEDS6.map(func(x: Variant) -> int: return seed0 + int(x)))
 	var bare: Dictionary = snap.duplicate(true)
 	var bl: Dictionary = bare["outpost"]["buildings"]
 	var n: int = 0
@@ -1326,7 +1370,7 @@ static func job_corebld(seed0: int, snap: Dictionary) -> Dictionary:
 		if OutpostDB.CORE_IDS.has(String((bl[k] as Dictionary)["id"])):
 			bl.erase(k)
 			n += 1
-	var b: Dictionary = ab_waves(bare, "balanced", AB_SEEDS.map(func(x: Variant) -> int: return seed0 + int(x)))
+	var b: Dictionary = ab_waves(bare, "balanced", AB_SEEDS6.map(func(x: Variant) -> int: return seed0 + int(x)))
 	var ratio: float = float(a["mean"]) / maxf(0.1, float(b["mean"]))
 	say("COREBLD day 8: %d Core buildings %s vs none %s -> x%.2f" % [n, str(a["waves"]), str(b["waves"]), ratio])
 	return {"with": a, "without": b, "ratio": ratio, "core_buildings": n}
@@ -1398,8 +1442,8 @@ static func job_perks(seed0: int, snap: Dictionary) -> Dictionary:
 		return {}
 	var bal: Dictionary = ab_waves(snap, "balanced", AB_SEEDS.map(func(x: Variant) -> int: return seed0 + int(x)))
 	var out: Dictionary = {}
-	for f in PerkDB.FAMILIES:
-		out[String(f)] = int(ab_waves(snap, "fam:" + String(f), [seed0 + int(AB_SEEDS[0])])["waves"][0])
+	for f in PerkDB.FAMILIES:   # two seeds a family (mean): one seed swings +-15 waves
+		out[String(f)] = snappedf(float(ab_waves(snap, "fam:" + String(f), [seed0 + int(AB_SEEDS[0]), seed0 + int(AB_SEEDS[1])])["mean"]), 0.1)
 	say("PERKS day 8: balanced %s | family-first %s" % [str(bal["waves"]), JSON.stringify(out)])
 	return {"balanced": bal, "fam": out}
 

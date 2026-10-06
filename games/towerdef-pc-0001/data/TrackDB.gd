@@ -45,7 +45,7 @@ const DEFS: Dictionary = {
 	"e_flow":   {"tree": "economy", "name": "Cash Flow", "base": 40.0, "growth": 1.40, "cap": 20, "step": {"cash": 0.05}, "desc": "+5% cash per second"},
 	"e_int":    {"tree": "economy", "name": "Interest", "base": 60.0, "growth": 1.45, "cap": 10, "step": {"interest": 0.005}, "desc": "+0.5% wave interest"},
 	"e_icap":   {"tree": "economy", "name": "Interest Cap", "base": 50.0, "growth": 1.42, "cap": 15, "step": {"icap": 0.15}, "desc": "+15% interest cap", "unlock": ["enh_theory", 3]},
-	"e_xp":     {"tree": "economy", "name": "XP Gain", "base": 40.0, "growth": 1.40, "cap": 20, "step": {"xp": 0.05}, "desc": "+5% XP (faster drafts)"},
+	"e_xp":     {"tree": "economy", "name": "XP Gain", "base": 40.0, "growth": 1.40, "cap": 20, "step": {"xp": 0.10}, "desc": "+10% XP (faster drafts)"},
 	"e_loot":   {"tree": "economy", "name": "Loot Luck", "base": 120.0, "growth": 1.80, "cap": 5, "step": {"loot_luck": 1.0}, "desc": "+1 luck on the loot this run banks"},
 	"e_draft":  {"tree": "economy", "name": "Draft Luck", "base": 120.0, "growth": 1.80, "cap": 5, "step": {"draft_luck": 1.0}, "desc": "+1 draft luck (rarer cards)"},
 	"e_free":   {"tree": "economy", "name": "Lucky Purchase", "base": 80.0, "growth": 1.50, "cap": 10, "step": {"free_buy": 0.03}, "desc": "+3% chance an enhancement is free", "unlock": ["enh_theory", 1]},

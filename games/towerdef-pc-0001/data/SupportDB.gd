@@ -26,7 +26,7 @@ const DEFS: Dictionary = {
 	"bank":        {"core": {"interest": 0.01, "icap": 0.25}},
 	"capacitor":   {"core": {"rate": 0.06, "crit_dmg": 0.10}},
 	"market":      {"cash": 1.2, "core": {"kill_cash": 0.05}},
-	"xpsiphon":    {"core": {"xp": 0.12}},
+	"xpsiphon":    {"core": {"xp": 0.50}},
 	"magnet":      {"core": {"loot_luck": 1.0, "scrap_find": 0.10}},
 	"salvager":    {"core": {"scrap_find": 0.25, "coin_run": 0.03}},
 	"totem":       {"core": {"draft_luck": 1.0}},

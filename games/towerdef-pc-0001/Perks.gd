@@ -76,13 +76,13 @@ static func mults(taken: Array) -> Dictionary:
 	if glass:
 		hp *= 0.75
 	if fort:
-		hp *= 1.6
+		hp *= 1.35   # V2 P9: was 1.6 (+100% regen); the defense family dominated
 	return {
 		"dmg": 1.0 + 0.2 * float(count(taken, "p_dmg")) + (0.4 if glass else 0.0) - (0.2 if fort else 0.0),
 		"rate": 1.0 + 0.15 * float(count(taken, "p_rate")) + (0.3 if taken.has("p_frenzy") else 0.0),
 		"range": 1.2 if taken.has("p_range") else 1.0,
 		"hp": maxf(0.5, hp),
-		"regen": 0.0 if taken.has("p_frenzy") else (2.0 if fort else 1.0),
+		"regen": 0.0 if taken.has("p_frenzy") else (1.5 if fort else 1.0),
 		"mine": 1.0 + TuneRef.num("perk_cash", 0.2) * float(count(taken, "p_cash")),
 		"xp": (1.3 if taken.has("p_xp") else 1.0) * (0.7 if taken.has("p_miser") else 1.0),
 		"cash": 1.5 if taken.has("p_greed") else 1.0,

@@ -1448,7 +1448,7 @@ func _engine_b_stages() -> void:
 	_check("AC-24 Glass Cannon +40% dmg -25% hp", is_equal_approx(float(_weapon(S, "core")["dmg"]), base_core * 1.4) and is_equal_approx(float(S.stats["max_hp"]), 90.0))
 	S.perks_taken = ["p_fort"]
 	S.recompute()
-	_check("AC-24 Fortress", is_equal_approx(float(S.stats["max_hp"]), 192.0) and is_equal_approx(float(S.stats["regen"]), 2.0) and is_equal_approx(float(_weapon(S, "core")["dmg"]), base_core * 0.8))
+	_check("AC-24 Fortress (V2 P9: +35% HP, +50% regen)", is_equal_approx(float(S.stats["max_hp"]), 162.0) and is_equal_approx(float(S.stats["regen"]), 1.5) and is_equal_approx(float(_weapon(S, "core")["dmg"]), base_core * 0.8))
 	S.perks_taken = ["p_frenzy", "p_rate"]
 	S.recompute()
 	_check("AC-24 Frenzy + Hair Trigger rate, regen 0", is_equal_approx(float(_weapon(S, "core")["rate"]), base_rate * 1.45) and is_equal_approx(float(S.stats["regen"]), 0.0))
