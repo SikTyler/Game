@@ -37,8 +37,8 @@ func _initialize() -> void:
 	var save: Dictionary = BaseMeta.default_save()
 	save["coins"] = 60000
 	save["scrap"] = 900
-	save["best_wave_by_tier"] = {"1": 42, "2": 31}
-	save["best_wave"] = 42
+	save["best_wave_by_tier"] = {"1": 62, "2": 31}
+	save["best_wave"] = 62
 	save["tier"] = 2
 	save["runs"] = 14
 	save["core"]["lvl"] = 13

@@ -365,22 +365,22 @@ func _meta_stages() -> void:
 	_check("AC-4 first boot pays no offline (Outpost away report)", int(Outpost.away_report(BaseMeta.normalize({}), NOW)["coins"]) == 0)
 	# bank
 	var b: Dictionary = BaseMeta.default_save()
-	var bev: Array = BaseMeta.bank(b, 100, 25, 1, 10.0, NOW)   # meta-economy: w25 (T2 opens at w30)
+	var bev: Array = BaseMeta.bank(b, 100, 25, 1, 10.0, NOW)   # meta-economy: w25 (T2 opens at w60)
 	_check("bank records tier best, rate, last_seen, coins (no gems)", int(b["best_wave_by_tier"]["1"]) == 25 and is_equal_approx(float(b["best_coin_rate"]), 10.0) and int(b["last_seen"]) == NOW and int(b["coins"]) == 100 and not b.has("gems") and bev.is_empty())
 	b["coins"] = 1_000_000
 
 	# --- Stage 13: tiers (AC-5..7) ------------------------------------------
-	_check("unlock waves 30/40/50 (meta-economy: was 40/50/60)", Tiers.unlock_wave(2) == 30 and Tiers.unlock_wave(3) == 40 and Tiers.unlock_wave(4) == 50)
+	_check("unlock waves 60/70/80 (V2 P9 balance: was 30/40/50)", Tiers.unlock_wave(2) == 60 and Tiers.unlock_wave(3) == 70 and Tiers.unlock_wave(4) == 80)
 	_check("T1 only at start", Tiers.highest(b) == 1 and Tiers.is_unlocked(b, 1) and not Tiers.is_unlocked(b, 2))
-	bev = BaseMeta.bank(b, 10, 29, 1, 1.0, NOW)
-	_check("w29 in T1 does not unlock T2", Tiers.highest(b) == 1 and bev.is_empty())
+	bev = BaseMeta.bank(b, 10, 59, 1, 1.0, NOW)
+	_check("w59 in T1 does not unlock T2", Tiers.highest(b) == 1 and bev.is_empty())
 	var g0: int = int(b["coins"])
-	bev = BaseMeta.bank(b, 10, 30, 1, 1.0, NOW)
-	_check("AC-5 w30 in T1 unlocks T2 with +500 coins (FB1: was 10 gems)", Tiers.highest(b) == 2 and _evts(bev, "tier_unlocked").size() == 1 and int(b["coins"]) == g0 + 10 + 500)
-	bev = BaseMeta.bank(b, 10, 35, 1, 1.0, NOW)
+	bev = BaseMeta.bank(b, 10, 60, 1, 1.0, NOW)
+	_check("AC-5 w60 in T1 unlocks T2 with +500 coins (FB1: was 10 gems)", Tiers.highest(b) == 2 and _evts(bev, "tier_unlocked").size() == 1 and int(b["coins"]) == g0 + 10 + 500)
+	bev = BaseMeta.bank(b, 10, 65, 1, 1.0, NOW)
 	_check("AC-5 tier unlock rewarded once", bev.is_empty() and int(b["coins"]) == g0 + 10 + 500 + 10)
-	bev = BaseMeta.bank(b, 10, 39, 2, 1.0, NOW)
-	_check("w39 in T2 does not unlock T3", Tiers.highest(b) == 2)
+	bev = BaseMeta.bank(b, 10, 69, 2, 1.0, NOW)
+	_check("w69 in T2 does not unlock T3", Tiers.highest(b) == 2)
 	var big: Dictionary = BaseMeta.default_save()
 	big["best_wave_by_tier"] = {"1": 999, "2": 999, "3": 999, "4": 999, "5": 999, "6": 999, "7": 999, "8": 999}
 	_check("AC-5 max tier 8", Tiers.highest(big) == 8 and not Tiers.is_unlocked(big, 9))
@@ -518,7 +518,7 @@ func _meta_stages() -> void:
 
 	# --- Stage 18: run_mods bundle (A8) -------------------------------------
 	var R: Dictionary = BaseMeta.default_save()
-	R["best_wave_by_tier"] = {"1": 40, "2": 50}
+	R["best_wave_by_tier"] = {"1": 60, "2": 70}
 	R["tier"] = 3
 	R["research"]["lvls"]["dmg"] = 4
 	R["research"]["lvls"]["startcash"] = 2
@@ -846,7 +846,11 @@ func _mass_horde_world() -> void:
 ## V2 P9 (deliberate): Core threat priority - auto-fire takes an Elite /
 ## Boss on the Core first and every other volley a Spitter in range - so the
 ## fingerprint run's Core targets differ; re-recorded (was 59834292).
-const HORDE_FP_GOLDEN: String = "57314d4fd25efe23f26d7da8b92da8aafa563ff3e595694de37e2a093581c75e"
+## V2 P9 (deliberate): balance defaults - enemy contact damage x0.9 (was
+## 1.5), mass body HP x0.35 (0.5) growing x1.03 a wave on top of the tier
+## curve (1.006), XP need base 4 (6) - so every fingerprint run's numbers
+## differ; re-recorded (was 57314d4f).
+const HORDE_FP_GOLDEN: String = "c59da9d4b5b1f156e39a593518acc2b24cf4a844c56f31c3e31556dd515b8f81"
 ## MASS_HORDE §Design content (designed mass waves, the shipping ruleset).
 func _mfresh(seed_value: int = 1234):
 	var S = TowerState.new()
@@ -2583,7 +2587,7 @@ func _track_stages() -> void:
 	S._reap([])
 	_check("TRACK kill cash 3 x 1.10^10 (T1)", is_equal_approx(S.cash, 3.0 * pow(1.1, 10.0)))
 	var t3: Dictionary = BaseMeta.default_save()
-	t3["best_wave_by_tier"] = {"1": 40, "2": 50}
+	t3["best_wave_by_tier"] = {"1": 60, "2": 70}
 	BaseMeta.select_tier(t3, 3)
 	var S3 = TowerState.new()
 	S3.setup(1, t3)

@@ -13,7 +13,10 @@ static func tier_max() -> int:
 static func unlock_wave(n: int) -> int:
 	# Meta-economy pass (mass-horde short runs): base 10 -> T2 @ w30, T3 @ w40
 	# (was base 20: w40 / w50, tuned before the horde made runs shorter).
-	return TuneRef.int_of("tier_unlock_base", 10) + TuneRef.int_of("tier_unlock_step", 10) * n
+	# V2 P9 balance: base 40 -> T2 @ w60, T3 @ w70 ... T8 @ w120. The V2 meta
+	# (Outpost, research, gear) carried day-2 runs to wave 50, so T2 at w30
+	# fell on day 1; at w60 it lands on day 3-4 (V2 gate: day 3-6).
+	return TuneRef.int_of("tier_unlock_base", 40) + TuneRef.int_of("tier_unlock_step", 10) * n
 
 
 static func best_in(s: Dictionary, t: int) -> int:

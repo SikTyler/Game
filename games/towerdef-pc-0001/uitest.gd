@@ -282,7 +282,7 @@ func _run() -> void:
 	_check("missions rolled at boot", Missions.list(main.save).size() == 3)
 
 	# ---- TIER SELECT --------------------------------------------------------------
-	main.save["best_wave_by_tier"] = {"1": 40}
+	main.save["best_wave_by_tier"] = {"1": 60}
 	main._rebuild_ui()
 	await _frames()
 	_press(">")

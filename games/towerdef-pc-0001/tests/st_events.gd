@@ -135,7 +135,7 @@ static func _combo(t) -> void:
 	B.combo = 150.0
 	B._combo_check([])
 	for X in [A, B]:
-		X.add_enemy({"kind": "drone", "pos": TowerState.CENTER + Vector2(200, 0), "hp": 0.5, "max_hp": 0.5, "spd": 0.0, "dmg": 0.0, "cash": 4.0, "xp": 4.0, "coin": 0.0, "size": 12.0, "atk_cd": 0.0, "slow_t": 0.0})
+		X.add_enemy({"kind": "drone", "pos": TowerState.CENTER + Vector2(200, 0), "hp": 0.5, "max_hp": 0.5, "spd": 0.0, "dmg": 0.0, "cash": 4.0, "xp": 2.0, "coin": 0.0, "size": 12.0, "atk_cd": 0.0, "slow_t": 0.0})   # xp 2 x1.25 < the level-1 need (4)
 	A.stats["cash_ps"] = 0.0
 	B.stats["cash_ps"] = 0.0
 	var ca: float = A.cash

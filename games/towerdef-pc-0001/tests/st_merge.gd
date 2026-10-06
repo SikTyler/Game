@@ -52,7 +52,7 @@ static func _xp(t) -> void:
 	S0.setup(77, BaseMeta.normalize({}))
 	t._check("P7a XP: a run starts with the opening draft queued", S0.draft_queue == [""])
 	var S = _run()
-	t._check("P7a XP: need = 6 x 1.18^(L-1)", is_equal_approx(S.xp_need(), 6.0) and is_equal_approx(S.xp_base * pow(1.18, 4.0), 6.0 * pow(1.18, 4.0)))
+	t._check("P7a XP: need = 4 x 1.18^(L-1) (V2 P9 base 4)", is_equal_approx(S.xp_need(), 4.0) and is_equal_approx(S.xp_base * pow(1.18, 4.0), 4.0 * pow(1.18, 4.0)))
 	# a scripted XP feed worth exactly 3 levels queues 3 drafts
 	var need3: float = 0.0
 	for k in 3:

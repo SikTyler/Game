@@ -102,7 +102,10 @@ const SUPPLY_PAY: Array = [0, 1, 3, 8]
 const MAX_LOCKS: int = 2
 ## Per-level track multipliers (gain / drawback).
 const DIFF_HP: float = 2.5
-const DIFF_DMG: float = 1.5
+## V2 P9 balance: 1.5 -> 0.9. With the Core the only thing bodies can hit
+## (no building HP) and directional boards, 1.5 ended fresh runs at wave ~9
+## (~225 s); the first-run gate wants 300-480 s.
+const DIFF_DMG: float = 0.9
 const TRACK_DMG: float = 1.40
 const TRACK_DMG_RATE: float = 0.88
 const TRACK_RATE: float = 1.30
@@ -390,7 +393,7 @@ var dmg_growth: float = 1.06
 var spawn_base: float = 1.8
 var spawn_decay: float = 0.93
 var min_spawn: float = 0.45
-var xp_base: float = 6.0
+var xp_base: float = 4.0   # V2 P9 balance (was 6): first drafts come sooner
 var xp_growth: float = 1.18
 
 
@@ -2075,7 +2078,7 @@ func mass_hp_scale(kind: String, w: int) -> float:
 	var gr: float = mass_hp_growth(tier) * (TuneRef.num("mass_hp_heavy", 1.015) if g == "h" else 1.0)
 	var cap_w: int = TuneRef.int_of("pc_endless_soft_wave", 100)
 	var ww: int = mini(w, cap_w) if mode == "endless" else w
-	var sc: float = pow(gr, float(ww - 1)) * TuneRef.num("mass_hp_k", 0.5)
+	var sc: float = pow(gr, float(ww - 1)) * TuneRef.num("mass_hp_k", 0.35)
 	if mode == "endless" and w > cap_w:
 		sc *= pow(TuneRef.num("mass_endless_hp_exp", 1.04), float(w - cap_w))
 	return sc * mass_tier_hp() * float(stats.get("perk_enemy_hp", 1.0)) * enemy_hp_mod * (1.0 + 0.15 * float(pack_n("pk_gambit"))) * difficulty_hp()
@@ -2096,11 +2099,15 @@ func mass_tier_hp() -> float:
 ## the growth (x1.11); the body HP carries the rest of the classic tier curve:
 ## hp_growth(tier) / mass_b_growth x mass_hp_track (1.04 = the classic
 ## per-wave spawn-count growth averaged over waves 1-40).
+## V2 P9 balance: mass_hp_k 0.5 -> 0.35 (a softer start: fresh runs reach
+## wave ~16 in ~400 s) and mass_hp_track 1.006 -> 1.03 (a steeper climb:
+## a meta-boosted run used to coast to wave 50 on day 2, the wall now
+## moves with the meta instead).
 static func mass_hp_growth(t: int) -> float:
 	var g: float = TuneRef.num("mass_hp_g_f", 0.0)
 	if g > 0.0:
 		return g
-	return PowerModel.hp_growth(t) / TuneRef.num("mass_b_growth", 1.11) * TuneRef.num("mass_hp_track", 1.006)
+	return PowerModel.hp_growth(t) / TuneRef.num("mass_b_growth", 1.11) * TuneRef.num("mass_hp_track", 1.03)
 
 
 ## One designed mass body (§D1/§D2). `lod` > 1 only under the harness LOD.

@@ -1101,6 +1101,16 @@ static func session_open(save: Dictionary, now: int, led: Dictionary) -> void:
 	Missions.streak_claim(save, now)
 	led["gross_coins"] = int(led["gross_coins"]) + int(save["coins"]) - c0
 	_claim_missions(save)
+	# Savings goal: the next Game Speed step is the big-ticket research a
+	# player saves up for. Once it costs <= SPEED_SAVE_H hours of Outpost
+	# income the bot buys it when it can and holds that much back from every
+	# other purchase until then (fraction-of-bank budgets never reach 60k).
+	var hold: int = _speed_goal(save)
+	if hold > 0 and int(save["coins"]) >= hold:
+		Labs.start(save, "speed", now)
+		hold = _speed_goal(save)
+	hold = mini(hold, int(save["coins"]))
+	save["coins"] = int(save["coins"]) - hold
 	core_reqs_spend(save, now)   # the next Core milestone's requirements
 	outpost_spend(save, now)     # cheapest ROI first: Mills pay back in hours
 	var c1: int = int(save["coins"])
@@ -1108,8 +1118,20 @@ static func session_open(save: Dictionary, now: int, led: Dictionary) -> void:
 	gear_manage(save)
 	core_spend(save, 0.5)
 	research_spend(save, now, int(0.5 * float(save["coins"])))   # half of the rest; the bank saves for big buys
+	save["coins"] = int(save["coins"]) + hold
 	var steps: Array = Labs.speed_steps(save)
 	BaseMeta.set_speed(save, float(steps[steps.size() - 1]))
+
+
+const SPEED_SAVE_H: float = 12.0
+
+
+## Price of the next Game Speed step when it is a savings goal, else 0.
+static func _speed_goal(save: Dictionary) -> int:
+	if Labs.level(save, "speed") >= LabDB.max_of("speed") or not Labs.is_open(save, "speed"):
+		return 0
+	var p: int = Labs.price(save, "speed")
+	return p if float(p) <= outpost_coins_h(save) * SPEED_SAVE_H else 0
 
 
 static func _claim_missions(save: Dictionary) -> void:
