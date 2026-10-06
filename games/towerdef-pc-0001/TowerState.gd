@@ -37,6 +37,7 @@ const EnemyStore := preload("res://EnemyStore.gd")
 const EnemyHash := preload("res://EnemyHash.gd")
 const WeaponDB := preload("res://data/WeaponDB.gd")
 const FirePatterns := preload("res://FirePatterns.gd")
+const Gear := preload("res://Gear.gd")
 
 const CENTER: Vector2 = Vector2(360, 470)
 const CELL: float = 26.0
@@ -285,7 +286,25 @@ var special_casts: int = 0
 var couriers: int = 0
 var couriers_caught: int = 0
 var ins: Dictionary = {}          # Insight values {in_dmg: 0.01, ...}
-var pfx: Dictionary = {}          # summed gear fx (V2 P4: Gear.run_fx; {} until then)
+var pfx: Dictionary = {}          # summed gear fx (V2 P4: Gear.run_fx of the save's loadout)
+## V2 P4 manual aim: while the player holds fire on a point, the Core's Weapon
+## takes the body nearest the cursor (within AIM_R, in range) with +15% crit,
+## and a focus meter fills over 4 s to +30% damage (drains when released).
+## The bots never aim (auto-fire).
+const AIM_R: float = 39.0           # 1.5 cells around the cursor
+const AIM_CRIT: float = 0.15
+const AIM_FOCUS: float = 0.30
+const FOCUS_UP_S: float = 4.0
+const FOCUS_DOWN_S: float = 1.5
+var aim_on: bool = false
+var aim_pos: Vector2 = Vector2.ZERO
+var focus: float = 0.0
+## Gear on-hit fx of the Core's own hits (compute_stats): burn dps share,
+## slow, execute threshold; _core_hook is false for a quirk-free loadout.
+var core_burn: float = 0.0
+var core_slow: float = 0.0
+var core_exec: float = 0.0
+var _core_hook: bool = false
 var last_stand_used: bool = false # Bulwark 4-piece: once per wave
 var immune_t: float = 0.0         # Bulwark 4-piece immunity timer
 var interest_t: float = 0.0       # Mint 4-piece: interest every 15 s
@@ -359,12 +378,16 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	min_spawn = TuneRef.num("min_spawn", min_spawn)
 	xp_base = TuneRef.num("xp_base", xp_base)
 	xp_growth = TuneRef.num("xp_growth", xp_growth)
-	# Core (V2: one Core) at its permanent level; gear fx arrive in P4
-	# (Gear.run_fx: the equipped Weapon + Modules).
+	# Core (V2: one Core) at its permanent level, firing the equipped Weapon
+	# frame; gear fx (the Weapon + socketed Modules) land in pfx.
 	core_id = CoreDB.ID
-	core_def = CoreDB.get_def()
+	core_def = Gear.core_def(save)
 	core_lvl = Cores.level(save)
-	pfx = {}
+	pfx = Gear.run_fx(save)
+	coin_mult *= maxf(0.1, 1.0 + pf("coin_run"))
+	aim_on = false
+	aim_pos = CENTER
+	focus = 0.0
 	mods["special_dmg"] = float(mods.get("special_dmg", 1.0)) * maxf(0.1, 1.0 + pf("special_dmg"))
 	mods["special_cd"] = float(mods.get("special_cd", 1.0)) * maxf(0.2, 1.0 + pf("special_cd"))
 	last_stand_used = false
@@ -1001,13 +1024,50 @@ func compute_stats() -> Dictionary:
 			cw["chain_every"] = int(cd["chain_every"])
 			cw["chain_frac"] = float(cd.get("chain_frac", 0.4)) * (1.0 + pf("chain_dmg"))
 			cw["chain_n"] = int(cd["chain_n"])
+		"scatter":
+			cw["pellets"] = int(cd.get("pellets", 6)) + (2 if L >= 20 else 0)
+			cw["cone"] = float(cd.get("cone", 40.0))
+		"rail":
+			cw["rail_n"] = int(cd.get("pierce", 10)) + int(pf("pierce")) + (4 if L >= 20 else 0)
+		"arc":
+			cw["chain_n"] = mini(TuneRef.int_of("mass_chain_cap", 20), int(cd.get("chain", 5)) + int(pf("chain")) + (2 if L >= 20 else 0))
+			cw["chain_frac"] = minf(0.95, float(cd.get("chain_frac", 0.8)) * (1.0 + pf("chain_dmg")))
+			cw["jump"] = float(cd.get("jump", 70.0))
+		"flame":
+			cw["cone"] = float(cd.get("cone", 50.0)) + (10.0 if L >= 20 else 0.0)
+			cw["flame_burn"] = TuneRef.num("gear_flame_burn", 0.5)
+		"missiles":
+			cw["missiles"] = int(cd.get("missiles", 4)) + (1 if L >= 20 else 0)
+			cw["splash"] = 0.0 if nosplash else (float(cd.get("splash", 0.3)) + pf("splash")) * px
+		"saw":
+			cw["bounces"] = int(cd.get("bounces", 4)) + int(pf("bounce")) + (1 if L >= 20 else 0)
+			cw["bounce_frac"] = float(cd.get("bounce_frac", 0.85))
+			cw["jump"] = float(cd.get("jump", 90.0))
+	# V2 P4 gear on the Weapon: extra volleys, echo, knockback, ricochet
+	# (the Saw folds ricochet into its own bounces; the Pulse into its rings).
+	cw["multishot"] = mini(4, int(pf("multishot")))
+	cw["echo"] = clampf(pf("echo"), 0.0, 0.5)
+	cw["knock_m"] = maxf(0.0, 1.0 + pf("knock"))
+	cw["bounce"] = 0 if String(cd["attack"]) == "saw" else mini(6, int(pf("bounce")))
+	if String(cd["attack"]) == "pulse":
+		cw["rings"] = int(cw["rings"]) + int(cw["multishot"])
 	weapons.append(cw)
-	st["xp_mult"] = float(st["xp_mult"]) * xp_mod
+	core_burn = maxf(0.0, pf("burn"))
+	core_slow = clampf(pf("slow_hit"), 0.0, 0.6)
+	core_exec = clampf(pf("execute"), 0.0, 0.25)
+	_core_hook = core_burn > 0.0 or core_slow > 0.0 or core_exec > 0.0
+	st["xp_mult"] = float(st["xp_mult"]) * xp_mod * maxf(0.1, 1.0 + pf("xp"))
 	st["crit"] = float(st["crit"]) + pf("crit")
+	st["crit_mult"] = TuneRef.num("pc_crit_mult", 2.0) + pf("crit_dmg")
 	st["boss_mult"] = 1.0 + pf("boss")
 	st["normal_mult"] = maxf(0.1, 1.0 + pf("normal_dmg"))
 	st["reflect"] = pf("reflect")
-	st["shred"] = pf("shred")
+	st["shred"] = pf("shred") + (TuneRef.num("gear_saw_shred", 0.04) if String(cd["attack"]) == "saw" else 0.0)
+	# V2 P4 gear on the Core's body.
+	st["shield_max"] = float(st["shield_max"]) + pf("shield")
+	st["shield_regen"] = float(st["shield_regen"]) + 0.1 * pf("shield")
+	st["lifesteal"] = float(st["lifesteal"]) + pf("lifesteal")
+	st["dr"] = minf(0.6, float(st["dr"]) + pf("dr"))
 	# Perks (B7) multiply weapons / HP / regen / cash / XP.
 	Perks.apply(st, perks_taken)
 	st["cash_ps"] = float(st["cash_ps"]) * float(st["perk_cash"])
@@ -2104,8 +2164,15 @@ func _hit(e: int, dmg_in: float, ev: Array, crit: bool = false) -> void:
 		var away: Vector2 = en.pos[e] - _kb_from
 		if away != Vector2.ZERO:
 			en.knock(e, away.normalized() * (_kb_k * TuneRef.num("horde_knock", 60.0) * (0.25 + minf(1.0, dmg / en.max_hp[e]))))
+	if _core_hook and _src == "core" and core_exec > 0.0 and not BOSSY.has(en.kind[e]) and en.hp[e] - dmg < core_exec * en.max_hp[e]:
+		dmg = maxf(dmg, en.hp[e])   # gear Executioner
 	var was: float = en.hp[e]
 	en.hp[e] = en.hp[e] - dmg
+	if _core_hook and _src == "core" and en.hp[e] > 0.0:
+		if core_slow > 0.0:
+			en.apply_slow(e, 1.5, 1.0 - core_slow)
+		if core_burn > 0.0:
+			_ignite(e, TuneRef.num("mass_burn_s", 2.0), dmg * core_burn)
 	if en.hp[e] <= 0.0:
 		en.kill(e)
 		if was > 0.0:
@@ -2183,7 +2250,21 @@ func _hit_carry(e0: int, dmg: float, ev: Array, crit: bool, from: Vector2, rng_l
 
 func _roll_crit(wd: Dictionary) -> bool:
 	var c: float = float(stats.get("crit", 0.0)) + float(wd.get("crit", 0.0))
+	if aim_on and int(wd.get("slot", -1)) == CORE_SLOT:
+		c += AIM_CRIT
 	return c > 0.0 and combat_rng.randf() < c
+
+
+## Crit damage multiplier (pc_crit_mult 2.0 + gear crit damage).
+func crit_mult() -> float:
+	return float(stats.get("crit_mult", TuneRef.num("pc_crit_mult", 2.0)))
+
+
+## V2 P4 manual aim (the view: hold LMB on the field, or the pad's right
+## stick + RB). `firing` false releases it (auto-fire resumes).
+func set_aim(pos: Vector2, firing: bool) -> void:
+	aim_on = firing
+	aim_pos = pos
 
 
 ## Wall (id "barricade"; omnidirectional): with spawns from every side there is
@@ -2212,6 +2293,10 @@ func _wall_auras(ev: Array) -> void:
 
 
 func _fire(dt: float, ev: Array) -> void:
+	if aim_on:
+		focus = minf(1.0, focus + dt / FOCUS_UP_S)
+	elif focus > 0.0:
+		focus = maxf(0.0, focus - dt / FOCUS_DOWN_S)
 	for w in stats["weapons"]:
 		var wd: Dictionary = w
 		var si: int = int(wd["slot"])
@@ -2227,10 +2312,10 @@ func _fire(dt: float, ev: Array) -> void:
 		_kb_k = 0.0
 		_blockable = false
 		if si == CORE_SLOT:
-			_kb_k = float(KNOCK_W["core"])
+			_kb_k = float(KNOCK_W["core"]) * float(wd.get("knock_m", 1.0))
 			_kb_from = CENTER
 			_src = "core"
-			_blockable = ["cannon", "beam"].has(String(wd.get("attack", "")))
+			_blockable = ["cannon", "beam", "scatter", "rail", "missiles", "saw"].has(String(wd.get("attack", "")))
 			# Queen Engine: the Core holds fire while 3+ troops are alive.
 			if pf("queen_hold") > 0.0 and Troops.alive_count(troops) >= 3:
 				cooldowns[si] = 0.0
@@ -2280,7 +2365,7 @@ func _fire(dt: float, ev: Array) -> void:
 		var dmg: float = float(wd["dmg"])
 		var crit: bool = _roll_crit(wd)
 		if crit:
-			dmg *= TuneRef.num("pc_crit_mult", 2.0)
+			dmg *= crit_mult()
 		FirePatterns.fire(self, pattern, wd, from, wd.get("facing", Vector2.UP), tgt, dmg, crit, ev)
 
 
@@ -2398,32 +2483,69 @@ func _beam_hold(wd: Dictionary, dt: float) -> void:
 	beam_t = 0.0
 
 
-## The Core's attack (REDESIGN §2.1). Emits core_attack{kind, targets} and a
-## legacy `shot` (kind "core") the current view already draws. Returns false
-## when nothing is in range (the attack stays ready).
+## The Core's attack (REDESIGN §2.1; V2 P4: the equipped Weapon frame picks
+## it). A shot is one volley, +1 per multishot at another target (the Pulse
+## adds rings instead); an echo repeats the first volley. Emits
+## core_attack{kind, targets} and `shot` events (kind "core") the view draws.
+## Returns false when nothing is in range (the attack stays ready).
 func _core_fire(wd: Dictionary, ev: Array) -> bool:
 	var atk: String = String(wd.get("attack", "cannon"))
-	var rng_lim: float = float(wd["range"])
-	var dmg: float = float(wd["dmg"])
 	var targets: Array = []
+	var used: Dictionary = {}
+	var vols: int = 1 if atk == "pulse" else 1 + int(wd.get("multishot", 0))
+	var fired: bool = false
+	for k in vols:
+		if not _core_volley(atk, wd, ev, targets, used, k):
+			break
+		fired = true
+	if not fired:
+		return false
+	if float(wd.get("echo", 0.0)) > 0.0 and combat_rng.randf() < float(wd["echo"]):
+		_core_volley(atk, wd, ev, targets, {}, 0)
+		ev.append({"t": "core_echo", "kind": atk})
+	ev.append({"t": "core_attack", "kind": atk, "core": core_id, "targets": targets})
+	return true
+
+
+## A volley's primary target: the aimed body (manual aim, in range), else the
+## Core's targeting mode for the first volley and the nearest unused body for
+## the extra ones.
+func _core_target(rng_lim: float, mode_s: String, used: Dictionary, k: int) -> int:
+	if aim_on:
+		var a: int = _nearest(aim_pos, AIM_R, used)
+		if a >= 0 and CENTER.distance_to(en.pos[a]) <= rng_lim + en.size[a] * 0.5:
+			return a
+	if k == 0 and used.is_empty():
+		return pick_target(CENTER, rng_lim, mode_s)
+	return _nearest(CENTER, rng_lim, used)
+
+
+static func _dir_to(from: Vector2, to: Vector2) -> Vector2:
+	var d: Vector2 = to - from
+	return d.normalized() if d.length_squared() > 1e-6 else Vector2.UP
+
+
+func _core_volley(atk: String, wd: Dictionary, ev: Array, targets: Array, used: Dictionary, k: int) -> bool:
+	var rng_lim: float = float(wd["range"])
+	var dmg: float = float(wd["dmg"]) * (1.0 + AIM_FOCUS * focus)
+	var mode_s: String = String(target_modes[CORE_SLOT])
 	match atk:
 		"cannon":
 			var barrels: int = int(wd.get("barrels", 1))
 			var hit_any: bool = false
-			var skip: Dictionary = {}
 			for b in barrels:
-				var tgt: int = pick_target(CENTER, rng_lim, String(target_modes[CORE_SLOT]))
+				var tgt: int = _core_target(rng_lim, mode_s, used if b == 0 else {}, k)
 				if b > 0:
-					var alt: int = _nearest(CENTER, rng_lim, skip)
+					var alt: int = _nearest(CENTER, rng_lim, used)
 					tgt = alt if alt >= 0 else tgt
 				if tgt < 0:
 					break
-				skip[tgt] = true
+				used[tgt] = true
 				hit_any = true
 				var te: int = tgt
 				var tpos: Vector2 = en.pos[te]
 				var crit: bool = _roll_crit(wd)
-				var d: float = dmg * (TuneRef.num("pc_crit_mult", 2.0) if crit else 1.0)
+				var d: float = dmg * (crit_mult() if crit else 1.0)
 				_hit_carry(te, d * float(wd.get("single_mult", 1.0)), ev, crit, CENTER, rng_lim)
 				_shred(te, wd)
 				targets.append(en.eid[te])
@@ -2433,16 +2555,18 @@ func _core_fire(wd: Dictionary, ev: Array) -> bool:
 					if ed != te and en.hp[ed] > 0.0 and en.pos[ed].distance_to(tpos) <= rad:
 						_hit(ed, d * float(wd.get("splash_frac", 0.4)), ev)
 						targets.append(en.eid[ed])
+				_core_bounce(te, d, wd, ev, targets)
 				ev.append({"t": "shot", "kind": "core", "from": CENTER, "to": tpos, "radius": rad})
 			if not hit_any:
 				return false
 		"slag":
-			var tgt2: int = pick_target(CENTER, rng_lim, String(target_modes[CORE_SLOT]))
+			var tgt2: int = _core_target(rng_lim, mode_s, used, k)
 			if tgt2 < 0:
 				return false
+			used[tgt2] = true
 			var tpos2: Vector2 = en.pos[tgt2]
 			var crit2: bool = _roll_crit(wd)
-			var d2: float = dmg * (TuneRef.num("pc_crit_mult", 2.0) if crit2 else 1.0)
+			var d2: float = dmg * (crit_mult() if crit2 else 1.0)
 			var rad2: float = float(wd["splash"])
 			for ed in eh.candidates(tpos2, rad2):
 				if en.hp[ed] > 0.0 and en.pos[ed].distance_to(tpos2) <= rad2:
@@ -2452,26 +2576,32 @@ func _core_fire(wd: Dictionary, ev: Array) -> bool:
 			ev.append({"t": "shot", "kind": "core", "from": CENTER, "to": tpos2, "radius": rad2})
 		"beam":
 			# Lock the highest-HP enemy in range; the ramp resets on a switch.
-			var tgt3: int = pick_target(CENTER, rng_lim, "strongest")
+			# Extra volleys (multishot) are unramped side beams.
+			var tgt3: int = _core_target(rng_lim, "strongest", used, k)
 			if tgt3 < 0:
-				beam_eid = -1
-				beam_t = 0.0
+				if k == 0:
+					beam_eid = -1
+					beam_t = 0.0
 				return false
+			used[tgt3] = true
 			var te3: int = tgt3
-			if en.eid[te3] != beam_eid:
-				beam_eid = en.eid[te3]
-				beam_t = -float(wd.get("retarget", 0.0))   # Focus Lens retarget delay
-			var ramp: float = clampf(float(wd["ramp"]) * beam_t, 0.0, float(wd["ramp_max"]))
+			var ramp: float = 0.0
+			if k == 0:
+				if en.eid[te3] != beam_eid:
+					beam_eid = en.eid[te3]
+					beam_t = -float(wd.get("retarget", 0.0))   # Focus Lens retarget delay
+				ramp = clampf(float(wd["ramp"]) * beam_t, 0.0, float(wd["ramp_max"]))
 			var d3: float = dmg * (1.0 + ramp) * float(wd.get("single_mult", 1.0))
 			if BOSSY.has(en.kind[te3]) or en.is_marked(te3):
 				d3 *= float(wd.get("boss_mult", 1.0))
 			var crit3: bool = _roll_crit(wd)
 			if crit3:
-				d3 *= TuneRef.num("pc_crit_mult", 2.0)
+				d3 *= crit_mult()
 			_hit_carry(te3, d3, ev, crit3, CENTER, rng_lim)
 			_shred(te3, wd)
 			targets.append(en.eid[te3])
 			_pierce(te3, d3, wd, ev, targets)
+			_core_bounce(te3, d3, wd, ev, targets)
 			ev.append({"t": "shot", "kind": "core", "from": CENTER, "to": en.pos[te3], "beam": true, "ramp": ramp})
 		"pulse":
 			var rings: int = int(wd.get("rings", 1))
@@ -2485,8 +2615,8 @@ func _core_fire(wd: Dictionary, ev: Array) -> bool:
 				return false
 			pulse_n += 1
 			var crit4: bool = _roll_crit(wd)
-			var d4: float = dmg * float(rings) * float(wd.get("pulse_mult", 1.0)) * (TuneRef.num("pc_crit_mult", 2.0) if crit4 else 1.0)
-			var kb: float = float(wd.get("knock", 0.3)) * 40.0
+			var d4: float = dmg * float(rings) * float(wd.get("pulse_mult", 1.0)) * (crit_mult() if crit4 else 1.0)
+			var kb: float = float(wd.get("knock", 0.3)) * 40.0 * float(wd.get("knock_m", 1.0))
 			for xd in inside:
 				_hit(xd, d4, ev, crit4)
 				targets.append(en.eid[xd])
@@ -2502,14 +2632,210 @@ func _core_fire(wd: Dictionary, ev: Array) -> bool:
 				for od in eh.nearest_n(CENTER, inside.size() + int(wd["chain_n"]), spawn_r() * 2.0):
 					if en.hp[od] > 0.0 and not in_set.has(od):
 						outer.append(od)
-				for k in mini(int(wd["chain_n"]), outer.size()):
-					var cd2: int = outer[k]
+				for kk in mini(int(wd["chain_n"]), outer.size()):
+					var cd2: int = outer[kk]
 					_hit(cd2, dmg * float(wd["chain_frac"]), ev)
 					targets.append(en.eid[cd2])
 					ev.append({"t": "shot", "kind": "tesla", "from": CENTER, "to": en.pos[cd2]})
 			ev.append({"t": "shot", "kind": "core", "from": CENTER, "to": CENTER, "radius": rng_lim, "pulse": true})
-	ev.append({"t": "core_attack", "kind": atk, "core": core_id, "targets": targets})
+		"scatter":
+			# Scatter Cannon: pellets fanned evenly across the cone at the
+			# target; each stops in the first body its line touches.
+			var ts: int = _core_target(rng_lim, mode_s, used, k)
+			if ts < 0:
+				return false
+			used[ts] = true
+			var dir_s: Vector2 = _dir_to(CENTER, en.pos[ts])
+			var n_p: int = maxi(1, int(wd.get("pellets", 6)))
+			var half_s: float = deg_to_rad(float(wd.get("cone", 40.0))) * 0.5
+			var slice: float = half_s / float(n_p)
+			var crit_s: bool = _roll_crit(wd)
+			var d_s: float = dmg * (crit_mult() if crit_s else 1.0)
+			for pp in n_p:
+				var pd: Vector2 = dir_s.rotated(-half_s + slice * (2.0 * float(pp) + 1.0))
+				var pe: int = _first_on_ray(CENTER, pd, rng_lim)
+				if pe >= 0:
+					_hit(pe, d_s, ev, crit_s)
+					targets.append(en.eid[pe])
+					ev.append({"t": "shot", "kind": "core", "from": CENTER, "to": en.pos[pe], "pellet": true})
+				else:
+					ev.append({"t": "shot", "kind": "core", "from": CENTER, "to": CENTER + pd * rng_lim, "pellet": true})
+		"rail":
+			# Rail Driver: a slug through the first rail_n bodies on the line
+			# to the target, no falloff (a Shieldbearer's front stops it).
+			var tr: int = _core_target(rng_lim, mode_s, used, k)
+			if tr < 0:
+				return false
+			used[tr] = true
+			var dir_r: Vector2 = _dir_to(CENTER, en.pos[tr])
+			var tip: Vector2 = CENTER + dir_r * rng_lim
+			var crit_r: bool = _roll_crit(wd)
+			var d_r: float = dmg * (crit_mult() if crit_r else 1.0) * float(wd.get("single_mult", 1.0))
+			var on: Array = []
+			for ed in eh.line(CENTER, tip, en.max_size * 0.5 + 3.0):
+				if en.hp[ed] <= 0.0:
+					continue
+				var rel: Vector2 = en.pos[ed] - CENTER
+				var al: float = rel.dot(dir_r)
+				if al < 0.0 or al > rng_lim or absf(rel.cross(dir_r)) > en.size[ed] * 0.5 + 3.0:
+					continue
+				on.append([al, ed])
+			on.sort_custom(func(x: Array, y: Array) -> bool: return float(x[0]) < float(y[0]) or (float(x[0]) == float(y[0]) and int(x[1]) < int(y[1])))
+			var hn: int = 0
+			for x in on:
+				if hn >= int(wd.get("rail_n", 10)):
+					break
+				var er: int = int((x as Array)[1])
+				_hit(er, d_r, ev, crit_r)
+				targets.append(en.eid[er])
+				hn += 1
+				if _blocked:
+					break
+			if hn == 0:
+				_hit(tr, d_r, ev, crit_r)
+				targets.append(en.eid[tr])
+			ev.append({"t": "shot", "kind": "core", "from": CENTER, "to": tip, "rail": true})
+		"arc":
+			# Arc Caster: lightning from the target through chain_n more bodies
+			# (jump px, x chain_frac each); every struck body is shocked.
+			var ta: int = _core_target(rng_lim, mode_s, used, k)
+			if ta < 0:
+				return false
+			used[ta] = true
+			var crit_a: bool = _roll_crit(wd)
+			var d_a: float = dmg * (crit_mult() if crit_a else 1.0)
+			var seen_a: Dictionary = {}
+			var ce: int = ta
+			var prev: Vector2 = CENTER
+			for j in int(wd.get("chain_n", 5)) + 1:
+				if ce < 0:
+					break
+				seen_a[ce] = true
+				var cpos: Vector2 = en.pos[ce]
+				_hit(ce, d_a, ev, crit_a)
+				en.set_shock(ce, 1.0)
+				en.shock_src[ce] = CORE_SLOT
+				targets.append(en.eid[ce])
+				ev.append({"t": "shot", "kind": "tesla", "from": prev, "to": cpos})
+				prev = cpos
+				d_a *= float(wd.get("chain_frac", 0.8))
+				ce = _nearest(cpos, float(wd.get("jump", 70.0)), seen_a)
+		"flame":
+			# Flame Projector: a cone of fire at the target - every body in it
+			# takes a light hit and burns (the burn spreads through a pile).
+			var tf: int = _core_target(rng_lim, mode_s, used, k)
+			if tf < 0:
+				return false
+			used[tf] = true
+			var dir_f: Vector2 = _dir_to(CENTER, en.pos[tf])
+			var half_f: float = deg_to_rad(float(wd.get("cone", 50.0))) * 0.5
+			var crit_f: bool = _roll_crit(wd)
+			var d_f: float = dmg * (crit_mult() if crit_f else 1.0)
+			var bdps: float = d_f * float(wd.get("flame_burn", 0.5))
+			for ed in eh.cone(CENTER, dir_f, half_f, rng_lim):
+				if en.hp[ed] <= 0.0:
+					continue
+				_hit(ed, d_f, ev, crit_f)
+				if en.hp[ed] > 0.0:
+					_ignite(ed, TuneRef.num("mass_burn_s", 2.0), bdps)
+				targets.append(en.eid[ed])
+			ev.append({"t": "shot", "kind": "core", "from": CENTER, "to": CENTER + dir_f * rng_lim, "cone": rad_to_deg(half_f * 2.0)})
+		"missiles":
+			# Swarm Missiles: seekers at the target and the nearest others in
+			# range; each blasts a small splash at half damage.
+			var t0: int = _core_target(rng_lim, mode_s, used, k)
+			if t0 < 0:
+				return false
+			var aims: Array = [t0]
+			used[t0] = true
+			var nm: int = maxi(1, int(wd.get("missiles", 4)))
+			for c in eh.nearest_n(CENTER, nm + used.size(), rng_lim):
+				if aims.size() >= nm:
+					break
+				if used.has(c) or en.hp[c] <= 0.0:
+					continue
+				aims.append(c)
+				used[c] = true
+			var crit_m: bool = _roll_crit(wd)
+			var d_m: float = dmg * (crit_mult() if crit_m else 1.0)
+			var rad_m: float = float(wd.get("splash", 0.0))
+			for te_m in aims:
+				var tm: int = int(te_m)
+				var tp: Vector2 = en.pos[tm]
+				_hit(tm, d_m, ev, crit_m)
+				targets.append(en.eid[tm])
+				if rad_m > 0.0:
+					for ed in eh.candidates(tp, rad_m):
+						if ed != tm and en.hp[ed] > 0.0 and en.pos[ed].distance_to(tp) <= rad_m:
+							_hit(ed, d_m * 0.5, ev)
+				_core_bounce(tm, d_m, wd, ev, targets)
+				ev.append({"t": "shot", "kind": "core", "from": CENTER, "to": tp, "radius": rad_m, "missile": true})
+		"saw":
+			# Saw Launcher: ricochets through `bounces` more bodies (x bounce_frac
+			# each) and stacks armor shred on every body it cuts.
+			var tw: int = _core_target(rng_lim, mode_s, used, k)
+			if tw < 0:
+				return false
+			used[tw] = true
+			var crit_w: bool = _roll_crit(wd)
+			var d_w: float = dmg * (crit_mult() if crit_w else 1.0) * float(wd.get("single_mult", 1.0))
+			var seen_w: Dictionary = {}
+			var cw_e: int = tw
+			var prev_w: Vector2 = CENTER
+			for j in int(wd.get("bounces", 4)) + 1:
+				if cw_e < 0:
+					break
+				seen_w[cw_e] = true
+				var p_w: Vector2 = en.pos[cw_e]
+				_hit(cw_e, d_w, ev, crit_w)
+				en.shred_n[cw_e] = mini(5, en.shred_n[cw_e] + 1)
+				targets.append(en.eid[cw_e])
+				ev.append({"t": "shot", "kind": "core", "from": prev_w, "to": p_w, "saw": true})
+				prev_w = p_w
+				d_w *= float(wd.get("bounce_frac", 0.85))
+				cw_e = _nearest(p_w, float(wd.get("jump", 90.0)), seen_w)
+		_:
+			return false
 	return true
+
+
+## The first living body a ray from `from` along `dir` touches within `reach`
+## (body size counts; ties by slot), or -1.
+func _first_on_ray(from: Vector2, dir: Vector2, reach: float) -> int:
+	var best: int = -1
+	var best_al: float = INF
+	for ed in eh.line(from, from + dir * reach, en.max_size * 0.5 + 2.0):
+		if en.hp[ed] <= 0.0:
+			continue
+		var rel: Vector2 = en.pos[ed] - from
+		var al: float = rel.dot(dir)
+		if al < 0.0 or al > reach or absf(rel.cross(dir)) > en.size[ed] * 0.5 + 2.0:
+			continue
+		if al < best_al or (al == best_al and ed < best):
+			best_al = al
+			best = ed
+	return best
+
+
+## Gear Ricochet: a Core hit bounces on to `bounce` more bodies (x0.7 each,
+## 80 px jumps).
+func _core_bounce(te: int, d: float, wd: Dictionary, ev: Array, targets: Array) -> void:
+	var n: int = int(wd.get("bounce", 0))
+	if n <= 0:
+		return
+	var seen: Dictionary = {te: true}
+	var cur: Vector2 = en.pos[te]
+	var dd: float = d
+	for j in n:
+		dd *= TuneRef.num("gear_bounce_frac", 0.7)
+		var nx: int = _nearest(cur, TuneRef.num("gear_bounce_r", 80.0), seen)
+		if nx < 0:
+			return
+		seen[nx] = true
+		_hit(nx, dd, ev)
+		targets.append(en.eid[nx])
+		ev.append({"t": "shot", "kind": "core", "from": cur, "to": en.pos[nx], "bounce": true})
+		cur = en.pos[nx]
 
 
 ## Lancer 4-piece: the Core shot also hits the nearest other enemy to its target.
@@ -2704,7 +3030,12 @@ func _roll_drops(ed: int, ev: Array, ks: float = -1.0) -> void:
 	elif kind == "elite" or en.is_marked(ed):
 		src = "elite"
 	var ctx: Dictionary = {"tier": tier, "drop_mult": 1.0 + float(ins.get("in_drop", 0.0)), "share": ks if ks >= 0.0 else en.share[ed]}
-	var got: Array = Drops.add(loot, Drops.roll(drop_rng, src, ctx))
+	var drops: Array = Drops.roll(drop_rng, src, ctx)
+	if pf("scrap_find") > 0.0:
+		for d0 in drops:
+			if String((d0 as Dictionary)["kind"]) == "scrap":
+				d0["n"] = int(round(float(d0["n"]) * (1.0 + pf("scrap_find"))))
+	var got: Array = Drops.add(loot, drops)
 	for x in got:
 		var d: Dictionary = (x as Dictionary).duplicate()
 		d["t"] = "drop"
@@ -3229,6 +3560,20 @@ func power_snapshot() -> Dictionary:
 			targets = 3.0 * float(core_w.get("rings", 1))
 		"beam":
 			targets = 1.0 + 0.5 * float(core_w.get("ramp_max", 1.5))
+		"scatter":
+			targets = 0.5 * float(core_w.get("pellets", 6))
+		"rail":
+			targets = 3.0
+		"arc":
+			targets = 1.0 + 0.6 * float(core_w.get("chain_n", 5))
+		"flame":
+			targets = 4.0
+		"missiles":
+			targets = float(core_w.get("missiles", 4))
+		"saw":
+			targets = 1.0 + 0.7 * float(core_w.get("bounces", 4))
+	if String(core_w.get("attack", "cannon")) != "pulse":
+		targets *= 1.0 + float(core_w.get("multishot", 0))
 	if String(core_w.get("attack", "cannon")) != "beam":
 		targets *= float(MASS_CROWD["core"])   # overkill smash + splash into a packed crowd
 	var blds: Array = []
@@ -3259,7 +3604,7 @@ func power_snapshot() -> Dictionary:
 		"buildings": blds, "troops": Troops.dps_list(troops), "specials": sps,
 		"mult": 1.0, "dmg_all": float(stats.get("dmg_all", 1.0)), "tracks": tracks.duplicate(),
 		"cash_ps": float(stats.get("cash_ps", 0.0)), "cash_bonus": float(stats.get("kill_cash", 1.0)) - 1.0,
-		"crit": minf(1.0, float(stats.get("crit", 0.0)) + float(core_w.get("crit", 0.0))), "crit_mult": TuneRef.num("pc_crit_mult", 2.0),
+		"crit": minf(1.0, float(stats.get("crit", 0.0)) + float(core_w.get("crit", 0.0))), "crit_mult": crit_mult(),
 	}
 
 

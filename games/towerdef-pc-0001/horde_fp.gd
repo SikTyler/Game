@@ -1,14 +1,13 @@
 extends SceneTree
 ## HORDE determinism golden: 120 s seeded MASS sims (V2 P3d: the designed mass
-## horde is the only ruleset), one per Core attack — the one Core plus the Slag /
-## Beam / Pulse attack sheets that become Weapon frames in P4 — on two boards:
-## an open weapon/hut/wall board (cannon, slag) and the same board with the
-## Core sealed by a Wall ring (beam, pulse: the squeeze path), waves 14+,
-## fingerprinted with SHA-256 over
-## (wave, kills, cash, hp, every enemy eid/pos/hp) once per sim second, plus
-## Orbital auto-aim (_densest). Prints HORDE FP <core> <hash> and a combined
-## hash. selftest.gd embeds the combined value recorded from the Dict
-## implementation (pre-SoA), so the SoA port must reproduce it bit-for-bit.
+## horde is the only ruleset), one per Weapon frame equipped on the one Core
+## (V2 P4: Autocannon, Slag Lobber, Lance, Pulse Nova, Scatter, Rail Driver,
+## Arc Caster, Flame Projector, Swarm Missiles, Saw Launcher) on two boards:
+## an open weapon/hut/wall board and the same board with the Core sealed by a
+## Wall ring (Lance, Pulse: the squeeze path), waves 14+, fingerprinted with
+## SHA-256 over (wave, kills, cash, hp, every enemy eid/pos/hp) once per sim
+## second, plus Orbital auto-aim (_densest). Prints HORDE FP <frame> <hash>
+## and a combined hash; selftest.gd embeds the combined value.
 ## Usage: godot --headless --path games/towerdef-pc-0001 --script res://horde_fp.gd
 
 ## V2 P3b board (21x21 small cells, 3x3 Core): [dr, dc] from the Core's
@@ -27,15 +26,11 @@ static func board(sealed: bool = false) -> Dictionary:
 		for c in TS.CORE_RING:
 			out[int(c)] = "barricade"
 	return out
-## Attack sheets swapped onto the Core (V2: one Core; these are P4 frames).
-const SHEETS: Dictionary = {
-	"slag": {"name": "Foundry", "dmg": 5.0, "rate": 1.0, "range": 3.5, "hp": 100.0, "regen": 0.8, "armor": 1.0, "cash": 4.0, "irate": 0.05, "icap": 150.0,
-		"attack": "slag", "splash": 1.0, "slow": 0.2, "slow_t": 2.0, "attack_name": "Slag", "attack_desc": ""},
-	"beam": {"name": "Lance", "dmg": 28.0, "rate": 0.5, "range": 5.5, "hp": 90.0, "regen": 0.6, "armor": 1.0, "cash": 1.5, "irate": 0.01, "icap": 30.0,
-		"attack": "beam", "ramp": 0.15, "ramp_max": 1.5, "attack_name": "Beam", "attack_desc": ""},
-	"pulse": {"name": "Tempest", "dmg": 6.0, "rate": 0.8, "range": 3.0, "hp": 140.0, "regen": 1.2, "armor": 3.0, "cash": 1.8, "irate": 0.02, "icap": 40.0,
-		"attack": "pulse", "knock": 0.3, "chain_every": 5, "chain_frac": 0.4, "chain_n": 3, "attack_name": "Pulse", "attack_desc": ""},
-}
+## V2 P4: every Weapon frame, equipped through the gear save (Common, L1,
+## no perks, quirk-free "standard" brand). The Lance and Pulse Nova run on the
+## Wall-sealed board (squeeze path).
+const FRAMES: Array = ["autocannon", "slag", "lance", "pulse", "scatter", "rail", "arc", "flame", "missiles", "saw"]
+const SEALED: Array = ["lance", "pulse"]
 
 
 func _initialize() -> void:
@@ -47,7 +42,7 @@ func _initialize() -> void:
 static func run_all() -> String:
 	var ctx := HashingContext.new()
 	ctx.start(HashingContext.HASH_SHA256)
-	for core in ["cannon", "slag", "beam", "pulse"]:
+	for core in FRAMES:
 		var h: String = run_one(String(core))
 		print("HORDE FP %s %s" % [core, h])
 		ctx.update(h.to_utf8_buffer())
@@ -63,14 +58,14 @@ static func _dicts(S) -> Array:
 static func run_one(core: String) -> String:
 	var BM = load("res://BaseMeta.gd")
 	var TS = load("res://TowerState.gd")
+	var GR = load("res://Gear.gd")
 	var save: Dictionary = BM.default_save()
 	save["core"] = {"lvl": 3}
 	save = BM.normalize(save)
+	GR.equip(save, GR.add_item(save, GR.make("weapon", core)))
 	var S = TS.new()
 	S.setup(4242, save, 1_700_000_000)
-	if SHEETS.has(core):
-		S.core_def = SHEETS[core]
-	var bd: Dictionary = board(core == "beam" or core == "pulse")
+	var bd: Dictionary = board(SEALED.has(core))
 	for i in bd.keys():
 		S.slots[int(i)] = {"id": String(bd[i]), "perm": 0, "run": 2}
 		S.unlocked[int(i)] = true

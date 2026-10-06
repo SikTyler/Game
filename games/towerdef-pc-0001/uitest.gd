@@ -728,8 +728,9 @@ func _run_screen() -> void:
 	_check("FB2: Enemy intel lists this round's types (alive or queued) with 1-5 stars", not ro.is_empty() and Intel.stars(S, String(ro.keys()[0])) >= 1 and Intel.stars(S, "boss") <= 5 and main.intel_seen.size() >= ro.size(), str(ro.keys()))
 	_motion(_cell_scr(TowerState.CORE_SLOT))
 	await _frames(3)
-	# V2 (deliberate): one Core, no traits — the tooltip names the Core and its attack.
-	_check("RUN: hovering the Core shows its level + attack", main.tipbox.visible and main.tip_label.text.contains("Core") and main.tip_label.text.contains("Cannon"), main.tip_label.text)
+	# V2 (deliberate): one Core, no traits — the tooltip names the Core and the
+	# equipped Weapon (P4: the starter is the Standard Issue Autocannon).
+	_check("RUN: hovering the Core shows its level + equipped Weapon", main.tipbox.visible and main.tip_label.text.contains("Core") and main.tip_label.text.contains("Standard Issue Autocannon"), main.tip_label.text)
 	# draft: cards, reroll, banish, Q pick, place
 	S.grant_draft()
 	S.draft[0] = load("res://Draft.gd").card_for("gun", S._draft_ctx(""))

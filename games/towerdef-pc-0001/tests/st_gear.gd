@@ -14,10 +14,8 @@ const ModuleDB := preload("res://data/ModuleDB.gd")
 const BaseMeta := preload("res://BaseMeta.gd")
 const Cores := preload("res://Cores.gd")
 
-## fx keys TowerState does not read yet: P4b wires each into the run and
-## empties this list (the stage then demands every key is consumed).
-const PENDING_FX: Array = ["crit_dmg", "multishot", "bounce", "burn", "slow_hit", "knock", "execute", "echo",
-	"shield", "lifesteal", "dr", "xp", "scrap_find", "coin_run"]
+## fx keys TowerState does not read yet (P4a listed 14; P4b wired them all).
+const PENDING_FX: Array = []
 
 
 static func run(t) -> void:
@@ -541,12 +539,24 @@ static func _equip(t) -> void:
 static func _hand_off(t) -> void:
 	var s: Dictionary = BaseMeta.default_save()
 	var w: Dictionary = Gear.weapon(s)
-	t._check("P4 start: a fresh save equips a Common Kessler Autocannon with one perk", String(w["base"]) == "autocannon" and String(w["rar"]) == "common" and String(w["brand"]) == "kessler" and (w["perks"] as Array).size() == 1 and Gear.count(s) == 1)
+	t._check("P4 start: a fresh save equips a Standard Issue Autocannon (Common, no perks, no quirk)", String(w["base"]) == "autocannon" and String(w["rar"]) == "common" and String(w["brand"]) == "standard" and (w["perks"] as Array).is_empty() and Gear.count(s) == 1 and String(w["name"]) == "Standard Issue Autocannon")
+	t._check("P4 start: ... so a fresh run's gear fx are empty (the base Core sheet)", Gear.run_fx(s).is_empty())
+	t._check("P4 start: the standard brand is never rolled", not BrandDB.IDS.has("standard") and BrandDB.has("standard") and (BrandDB.get_def("standard")["quirk"] as Dictionary).is_empty())
+	var kw: Dictionary = _mk("weapon", "autocannon", "rare", 31)
+	kw["brand"] = "kessler"
+	Gear.add_item(s, kw)
+	Gear.equip(s, _last(s))
 	var fx: Dictionary = Gear.run_fx(s)
-	var p: Dictionary = (w["perks"] as Array)[0]
-	var key: String = String((AffixDB.DEFS[String(p["id"])] as Dictionary)["key"])
-	var want: float = AffixDB.value(String(p["id"]), int(p["t"]), float(p["q"])) + float((BrandDB.get_def("kessler")["quirk"] as Dictionary).get(key, 0.0))
-	t._check("P4 fx: run_fx = weapon perks + brand quirk", is_equal_approx(float(fx[key]), want) and fx.has("rate") and fx.has("dmg"), str(fx))
+	var want: Dictionary = {}
+	for p in kw["perks"]:
+		var key: String = String((AffixDB.DEFS[String((p as Dictionary)["id"])] as Dictionary)["key"])
+		want[key] = float(want.get(key, 0.0)) + AffixDB.value(String(p["id"]), int(p["t"]), float(p["q"]))
+	for k in (BrandDB.get_def("kessler")["quirk"] as Dictionary).keys():
+		want[k] = float(want.get(k, 0.0)) + float(BrandDB.get_def("kessler")["quirk"][k])
+	var same: bool = want.size() == fx.size()
+	for k in want.keys():
+		same = same and is_equal_approx(float(want[k]), float(fx.get(k, -99.0)))
+	t._check("P4 fx: run_fx = weapon perks + brand quirk", same, "%s vs %s" % [want, fx])
 	var m: Dictionary = _mk("module", "twin_feed", "epic", 7)
 	m["perks"] = []
 	m["brand"] = "volt"
@@ -585,7 +595,7 @@ static func _hand_off(t) -> void:
 			unread.append(k)
 		if read and PENDING_FX.has(k):
 			stale.append(k)
-	t._check("P4 fx: every gear fx key is read by the run (or listed for P4b)", unread.is_empty() and stale.is_empty(), "unread %s stale %s" % [unread, stale])
+	t._check("P4 fx: every gear fx key is read by the run (TowerState.pf)", unread.is_empty() and stale.is_empty(), "unread %s stale %s" % [unread, stale])
 
 
 # ------------------------------------------------------------------ save

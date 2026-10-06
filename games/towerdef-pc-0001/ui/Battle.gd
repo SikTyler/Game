@@ -185,8 +185,8 @@ static func cell_text(m, i: int) -> String:
 	var S = m.S
 	var ring: int = TowerState.ring_of(i)
 	if i == TowerState.CORE_SLOT:
-		var cd: Dictionary = CoreDB.get_def(S.core_id)
-		return "The Core  Lv%d\n%s: %s" % [int(S.core_lvl), String(cd["attack_name"]), String(cd["attack_desc"])]
+		var cd: Dictionary = S.core_def if not (S.core_def as Dictionary).is_empty() else CoreDB.get_def(S.core_id)
+		return "The Core  Lv%d\n%s: %s" % [int(S.core_lvl), String(cd.get("attack_name", "")), String(cd.get("attack_desc", ""))]
 	if not bool(S.unlocked[i]):
 		return "Outside your grid\nResearch Grid Expansion to build here"
 	var id: String = S.id_at(i)
@@ -731,7 +731,7 @@ static func _draw_right(m) -> void:
 	var x: float = rr.position.x + 16.0
 	var w: float = rr.size.x - 32.0
 	var y: float = rr.position.y + 14.0
-	var cd: Dictionary = CoreDB.get_def(S.core_id)
+	var cd: Dictionary = S.core_def if not (S.core_def as Dictionary).is_empty() else CoreDB.get_def(S.core_id)
 	# portrait
 	Kit.panel(m, Rect2(x, y, 96, 96), Kit.RUST, Kit.BG2)
 	Kit.icon(m, "core_bastion", Rect2(x + 6, y + 6, 84, 84))

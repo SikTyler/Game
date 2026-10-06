@@ -7,6 +7,7 @@ extends SceneTree
 const StKit := preload("res://tests/st_kit.gd")
 const StDirectional := preload("res://tests/st_directional.gd")
 const StGear := preload("res://tests/st_gear.gd")
+const StCoreWeapon := preload("res://tests/st_core_weapon.gd")
 const FirePatterns := preload("res://FirePatterns.gd")
 const WeaponDB := preload("res://data/WeaponDB.gd")
 const TowerState := preload("res://TowerState.gd")
@@ -296,6 +297,7 @@ func _initialize() -> void:
 	StKit.run(self)
 	StDirectional.run(self)
 	StGear.run(self)
+	StCoreWeapon.run(self)
 
 	if fails.is_empty():
 		print("SELFTEST OK")
@@ -811,7 +813,7 @@ func _mass_horde_world() -> void:
 ## deg arc, the Flamer / Railgun fire a fixed cone / lane along their facing
 ## (away from the Core by default), x1.2 / x1.4 / x1.6 direction damage, verbs
 ## moved to FirePatterns; re-recorded (was ebffce97).
-const HORDE_FP_GOLDEN: String = "189df79c8c7d02dab92cab5b7596ce8eb8621617486b67617ec735c772165dc9"
+const HORDE_FP_GOLDEN: String = "f7c5cf7d36e4e34cad1d81b26ac73cc19a9080506dd3a8b49674bb5d2ece99d6"
 ## MASS_HORDE §Design content (designed mass waves, the shipping ruleset).
 func _mfresh(seed_value: int = 1234):
 	var S = TowerState.new()

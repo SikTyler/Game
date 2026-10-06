@@ -18,7 +18,11 @@ const DEFS: Dictionary = {
 		"palette": ["7a8f4a", "2a2f22", "d9b98a"], "syl": ["Brut", "Slab", "Maul", "Tusk", "Grind"]},
 	"nyx": {"name": "Nyx Labs", "quirk": {"range": 0.35, "dmg": -0.05}, "quirk_text": "+0.35 range, -5% damage",
 		"palette": ["b26bff", "2dd4bf", "ff3ea5"], "syl": ["Nyx", "Void", "Shade", "Echo", "Wisp"]},
+	# never rolled (not in IDS): the starter weapon's neutral, quirk-free maker
+	"standard": {"name": "Corehold Standard", "quirk": {}, "quirk_text": "No quirk",
+		"palette": ["5a6788", "39e6ff", "e8f0ff"], "syl": ["Standard Issue"]},
 }
+const STANDARD: String = "standard"
 
 
 static func has(id: String) -> bool:

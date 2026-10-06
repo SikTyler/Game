@@ -19,6 +19,7 @@ const ModuleDB := preload("res://data/ModuleDB.gd")
 const NameDB := preload("res://data/NameDB.gd")
 const Labs := preload("res://Labs.gd")
 const Cores := preload("res://Cores.gd")
+const CoreDB := preload("res://data/CoreDB.gd")
 
 ## Module sockets by Core level: 2 at L1, then +1 at each threshold (8 at L55).
 const SOCKET_LVLS: Array = [1, 1, 5, 10, 18, 28, 40, 55]
@@ -58,11 +59,28 @@ static func default_block() -> Dictionary:
 	return g
 
 
-## The weapon every fresh save starts with: a Common Kessler Autocannon.
+## The weapon every fresh save starts with: a Standard Issue Autocannon
+## (Common, no perks, the quirk-free "standard" brand), so a fresh run plays
+## exactly the base Core sheet.
 static func starter() -> Dictionary:
+	var it: Dictionary = make("weapon", "autocannon", "common")
+	it["src"] = "start"
+	return it
+
+
+## A plain item (no perks unless given; "standard" brand: no quirk) for the
+## starter, tests and tools. Deterministic per (kind, base, rarity).
+static func make(kind: String, base: String, rar: String = "common", lvl: int = 1, perks: Array = [], brand: String = BrandDB.STANDARD) -> Dictionary:
 	var r := RandomNumberGenerator.new()
-	r.seed = START_SEED
-	var it: Dictionary = GearGen.roll(r, "start", {"kind": "weapon", "base": "autocannon", "rarity": "common", "brand": "kessler", "ilvl": 1}, {})
+	r.seed = hash([START_SEED, kind, base, rar])
+	var it: Dictionary = GearGen.roll(r, "start", {"kind": kind, "base": base, "rarity": rar, "brand": "kessler", "ilvl": 1}, {})
+	var bd: Dictionary = BrandDB.get_def(brand)
+	it["brand"] = brand
+	it["perks"] = perks.duplicate(true)
+	it["lvl"] = clampi(lvl, 1, max_lvl_of(rar))
+	it["mw"] = it["lvl"] / MW_EVERY
+	it["paint"] = {"p": String((bd["palette"] as Array)[0]), "s": String((bd["palette"] as Array)[1]), "g": String((bd["palette"] as Array)[2]), "pat": 0}
+	it["name"] = NameDB.make(int(it["seed"]), bd["syl"], _base_name(kind, base), rar)
 	it["new"] = false
 	return it
 
@@ -478,17 +496,25 @@ static func _fit_sockets(s: Dictionary) -> void:
 		so.pop_back()
 
 
+## The equipped weapon (the starter if none). Read-only: never writes the save.
 static func weapon(s: Dictionary) -> Dictionary:
-	var g: Dictionary = block(s)
-	var it: Dictionary = get_item(g, int((g["equipped"] as Dictionary)["weapon"]))
+	var g: Variant = s.get("gear", null)
+	if not (g is Dictionary):
+		return starter()
+	var it: Dictionary = get_item(g, int(((g as Dictionary).get("equipped", {}) as Dictionary).get("weapon", 0)))
 	return it if not it.is_empty() else starter()
 
 
+## The socketed modules the Core's level has opened, in socket order. Read-only.
 static func modules(s: Dictionary) -> Array:
-	_fit_sockets(s)
 	var out: Array = []
-	for u in (block(s)["equipped"] as Dictionary)["sockets"]:
-		var it: Dictionary = item(s, int(u))
+	var g: Variant = s.get("gear", null)
+	if not (g is Dictionary):
+		return out
+	var so: Array = ((g as Dictionary).get("equipped", {}) as Dictionary).get("sockets", [])
+	var n: int = mini(so.size(), sockets_for(Cores.level(s)))
+	for i in n:
+		var it: Dictionary = get_item(g, int(so[i]))
 		if not it.is_empty():
 			out.append(it)
 	return out
@@ -987,6 +1013,18 @@ static func _item_fx(fx: Dictionary, it: Dictionary, quirk_k: float) -> void:
 	var q: Dictionary = BrandDB.get_def(String(it["brand"]))["quirk"]
 	for k in q.keys():
 		fx[k] = float(fx.get(k, 0.0)) + float(q[k]) * quirk_k
+
+
+## The run's Core sheet (TowerState.core_def): the Core's body (CoreDB: HP,
+## regen, armor, cash, interest) with the equipped weapon's attack on top.
+static func core_def(s: Dictionary) -> Dictionary:
+	var d: Dictionary = CoreDB.get_def().duplicate()
+	var ws: Dictionary = weapon_sheet(s)
+	for k in ws.keys():
+		d[k] = ws[k]
+	d["attack_name"] = String(ws["name"])
+	d["attack_desc"] = String(ws["desc"])
+	return d
 
 
 ## The Core's weapon sheet for a run: the equipped frame's attack and L1
