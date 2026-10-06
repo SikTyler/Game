@@ -139,7 +139,7 @@ static func _production(t) -> void:
 	var uc: int = Outpost.cost("mill", 1)
 	var c1: int = int(nb["coins"])
 	var uev: Array = Outpost.upgrade(nb, tu, OT0 + 3720)
-	t._check("OP upgrade cost x1.6^(L-1), instant, L2 = +25%", _ev(uev, "upgrade_done").size() == 1 and int(nb["coins"]) == c1 - uc and Outpost.cost("mill", 3) == int(round(500.0 * 2.56)) and is_equal_approx(Outpost.nominal_rate(nb, tu), 1.25 * nr1))
+	t._check("OP upgrade cost x growth^(L-1) (Mill 1.45, others 1.6), instant; Mill L2 = x1.3 (V2 P10)", _ev(uev, "upgrade_done").size() == 1 and int(nb["coins"]) == c1 - uc and Outpost.cost("mill", 3) == int(round(500.0 * 1.45 * 1.45)) and Outpost.cost("refinery", 3) == int(round(1500.0 * 2.56)) and is_equal_approx(Outpost.nominal_rate(nb, tu), 1.3 * nr1))
 	t._check("OP max level = min(10, Relay L + 2)", Outpost.max_lvl(nb, "mill") == 3)
 	# Deep Mine on the start vein, linked by Conduits; lit Lamps (decor cap)
 	var gm: Dictionary = _save()

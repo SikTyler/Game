@@ -22,7 +22,7 @@ const RunArt := preload("res://ui/RunArt.gd")
 
 const OT0: int = 1767225600
 ## Run fx keys TowerState reads through pf() (research fx must be among them).
-const PF_KEYS: Array = ["range", "crit", "rate", "dr", "shield", "boss", "interest"]
+const PF_KEYS: Array = ["range", "crit", "rate", "dr", "shield", "boss", "interest", "run_cash"]
 
 
 static func run(t) -> void:

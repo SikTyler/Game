@@ -1129,6 +1129,7 @@ const FX_TEXT: Dictionary = {
 	"interest": ["Interest", "pct"], "xp": ["Run XP", "pct"], "luck": ["Luck", "int"], "bld_dmg": ["Building damage", "pct"],
 	"bld_rate": ["Building attack rate", "pct"], "troop_dmg": ["Troop damage", "pct"], "troop_hp": ["Troop HP", "pct"],
 	"special_dmg": ["Special damage", "pct"], "scrap_find": ["Scrap from runs", "pct"], "coin_run": ["Coins from runs", "pct"],
+	"run_cash": ["Run cash", "pct"],
 }
 
 

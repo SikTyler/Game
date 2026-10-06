@@ -427,7 +427,7 @@ func _meta_stages() -> void:
 	# V2 (deliberate): Part Analysis / Crate Theory are gone with parts and crates -> 10.
 	# V2 P6 (deliberate): + Core Theory (gates Core levels 10 / 20 / 30 / 40 / 50)
 	# V2 P8 (deliberate): the research tree is 55 projects in 7 categories (st_research checks them).
-	_check("AC-20 every LabDB project + Grid + Core Theory (no part / crate research)", LabDB.IDS.size() == 55 and LabDB.DEFS.has("core_theory") and LabDB.DEFS.has("grid") and not LabDB.DEFS.has("labspeed") and not LabDB.DEFS.has("part_analysis") and not LabDB.DEFS.has("crate_theory") and String(LabDB.DEFS["offcap"]["name"]) == "Storage Tech" and String(LabDB.DEFS["offrate"]["name"]) == "Logistics Tech")
+	_check("AC-20 every LabDB project + Grid + Core Theory (no part / crate research)", LabDB.IDS.size() == 56 and LabDB.DEFS.has("core_theory") and LabDB.DEFS.has("grid") and not LabDB.DEFS.has("labspeed") and not LabDB.DEFS.has("part_analysis") and not LabDB.DEFS.has("crate_theory") and String(LabDB.DEFS["offcap"]["name"]) == "Storage Tech" and String(LabDB.DEFS["offrate"]["name"]) == "Logistics Tech")
 	# V2 P3b/P8 (deliberate): 26 px cells, grid 7x7 -> 21x21 in 7 steep steps.
 	_check("V2 grid research 7..21 in 7 steps, costs 2k/10k/50k/200k/750k/2.5M/8M", LabDB.max_of("grid") == 7 and Labs.cost("grid", 0) == 2000 and Labs.cost("grid", 3) == 200000 and Labs.cost("grid", 6) == 8000000 and TowerState.grid_for_level(0) == 7 and TowerState.grid_for_level(1) == 9 and TowerState.grid_for_level(4) == 15 and TowerState.grid_for_level(7) == 21)
 	L["research"]["lvls"]["dmg"] = 30
@@ -668,7 +668,8 @@ func _mass_horde_world() -> void:
 	var above: Vector2 = TowerState.slot_pos(_rc(-1, 3)) + Vector2(0, -40)
 	_mh_steps(W, 1)   # first step builds the flow field from the building set
 	var fd: Vector2 = W.en.world.call("FlowDir", above.x + 30.0, above.y)
-	_check("MASS_HORDE flow field steers sideways around a wall (not into it)", absf(fd.x) > 0.6)
+	# V2 P10 (deliberate): bodies ignore buildings, so the flow points straight at the Core through the wall
+	_check("V2 P10 flow field ignores buildings (a wall north of the Core leaves it pointing at the Core)", fd.y > 0.6)
 	_check("MASS_HORDE flow field rebuilds only when buildings change", int((W.en.world.call("Stats") as Dictionary)["flow_rebuilds"]) >= 1)
 	var fr0: int = int((W.en.world.call("Stats") as Dictionary)["flow_rebuilds"])
 	_mh_field(W, "mite", 300, above + Vector2(0, -160), 0.0, 90.0)
@@ -686,7 +687,7 @@ func _mass_horde_world() -> void:
 	for es in W.en.order:
 		if W.en.pos[es].distance_to(C) <= 140.0:
 			near += 1
-	_check("MASS_HORDE H9 >=70%% of bodies path around the wall to the Core (%d/300), none through it (%d)" % [near, inside], near >= 210 and inside == 0)
+	_check("V2 P10 H9: >=70%% of bodies walk straight through the wall to the Core (%d/300, %d wall-cell samples)" % [near, inside], near >= 210 and inside > 0)
 	_check("MASS_HORDE flow field not rebuilt while the building set is unchanged", int((W.en.world.call("Stats") as Dictionary)["flow_rebuilds"]) == fr0)
 	# ---- pressure: a dense crowd piles on the Core without collapsing into itself
 	var P = _fresh()
@@ -805,7 +806,8 @@ func _mass_horde_world() -> void:
 		at_core_n.append(at_core)
 		if sealed:
 			sq_n = int(G.en.world.call("SqueezeStartCount"))
-	_check("V2 P3a sealed Core: the crowd squeezes through the Wall ring (%d at the Core vs %d on open ground, %d squeezes), no structure is ever hit" % [at_core_n[0], at_core_n[1], sq_n], int(at_core_n[0]) > 0 and int(at_core_n[0]) < int(at_core_n[1]) and sq_n > 0 and bld_ev == 0)
+	# V2 P10 (deliberate): bodies walk through buildings as if they were not there (no squeeze, no slowdown)
+	_check("V2 P10 sealed Core: a Wall ring does not slow the crowd (%d at the Core vs %d on open ground, %d squeezes), no structure is ever hit" % [at_core_n[0], at_core_n[1], sq_n], int(at_core_n[0]) > 0 and float(at_core_n[0]) >= 0.9 * float(at_core_n[1]) and sq_n == 0 and bld_ev == 0)
 
 
 ## HORDE Phase 1 gates: the 120 s seeded golden (recorded from the Dict
@@ -850,7 +852,12 @@ func _mass_horde_world() -> void:
 ## 1.5), mass body HP x0.35 (0.5) growing x1.03 a wave on top of the tier
 ## curve (1.006), XP need base 4 (6) - so every fingerprint run's numbers
 ## differ; re-recorded (was 57314d4f).
-const HORDE_FP_GOLDEN: String = "c59da9d4b5b1f156e39a593518acc2b24cf4a844c56f31c3e31556dd515b8f81"
+## V2 P10 (deliberate): owner playtest 2 - bodies ignore buildings (empty
+## occupancy mask), knockback / slows fade with the crowd, XP pool x0.8 with
+## need x1.25 a level, run cash x0.65, Core regen x0.25 under fire, armor
+## floor 0.6, Elite contact x0.6, Sapper blast x4.5, mortar min range 0.8 -
+## so every fingerprint run differs; re-recorded (was c59da9d4).
+const HORDE_FP_GOLDEN: String = "634268cfef2c62bc1b5a18db44b44b7b4d2d27e221037021170f59e36a59bf6e"
 ## MASS_HORDE §Design content (designed mass waves, the shipping ruleset).
 func _mfresh(seed_value: int = 1234):
 	var S = TowerState.new()
@@ -904,7 +911,7 @@ func _mass_content_stages() -> void:
 				SE.en.kill(sl)
 	var pool_c: float = SE.mass_cash_pool(1) * SE.run_cash_mult() * float(SE.stats["kill_cash"])
 	_check("MASS H5: full clear of wave 1 pays pool x 1.3 (+-5%)", ccash >= 0.0 and absf((kcash + ccash) - pool_c * 1.3) <= 0.05 * pool_c * 1.3, "kill %.2f clear %.2f pool %.2f" % [kcash, ccash, pool_c])
-	_check("MASS §D5: income per wave does not scale with the body count", absf(SE.mass_cash_pool(1) - SE.wave_time / SE.interval_for(1)) < 1e-9 and SE.mass_cash_pool(45) < 10.0 * SE.mass_cash_pool(1))
+	_check("MASS §D5: income per wave does not scale with the body count", absf(SE.mass_cash_pool(1) - SE.wave_time / SE.interval_for(1) * 0.65) < 1e-9 and SE.mass_cash_pool(45) < 10.0 * SE.mass_cash_pool(1))
 	# ---- §D3: the alive cap HOLDS the queue (never drops a planned body)
 	var SH = _mfresh(5)
 	SH.mass_cap = 40
@@ -951,8 +958,8 @@ func _mass_content_stages() -> void:
 		SS.stats["weapons"] = []
 		if not boom.is_empty():
 			break
-	var blast_ok: bool = boom.size() == 1 and int((boom[0] as Dictionary)["slot"]) == TowerState.CORE_SLOT and is_equal_approx(float((boom[0] as Dictionary)["dmg"]), 6.0 * sdmg)
-	_check("MASS Sapper (V2): passes the Wall, detonates on the Core for x6 its hit, gone, not a kill", blast_ok and SS.hp < shp0 and SS.en.count() == 0 and SS.kills == 0, "%d blasts hp %.1f->%.1f n %d kills %d" % [boom.size(), shp0, SS.hp, SS.en.count(), SS.kills])
+	var blast_ok: bool = boom.size() == 1 and int((boom[0] as Dictionary)["slot"]) == TowerState.CORE_SLOT and is_equal_approx(float((boom[0] as Dictionary)["dmg"]), 4.5 * sdmg)
+	_check("MASS Sapper (V2): passes the Wall, detonates on the Core for x4.5 its hit (V2 P10, was x6), gone, not a kill", blast_ok and SS.hp < shp0 and SS.en.count() == 0 and SS.kills == 0, "%d blasts hp %.1f->%.1f n %d kills %d" % [boom.size(), shp0, SS.hp, SS.en.count(), SS.kills])
 	# ---- §D1 Shieldbearer: the frontal shield soaks projectiles from the front only
 	var SB = _mfresh()
 	SB.spawn_hold = true
@@ -1323,7 +1330,7 @@ func _engine_b_stages() -> void:
 	S = _fresh()
 	S.hp = 100.0
 	S._core_damage(1.0, [], "core_hit", TowerState.CENTER)
-	_check("armor 2 vs a 1-dmg hit: 25% floor", is_equal_approx(S.hp, 99.75))
+	_check("armor 2 vs a 1-dmg hit: 60% floor (V2 P10, was 25%)", is_equal_approx(S.hp, 99.4))
 	# Vault interest: Core 2% + Vault 2%, cap (50 + 100) x cash index.
 	S = _fresh()
 	S.spawn_hold = true
@@ -1355,11 +1362,11 @@ func _engine_b_stages() -> void:
 	S.slots[_rc(2, 3)] = {"id": "mortar", "tier": 1}
 	S.recompute()
 	S.stats["weapons"] = [_weapon(S, "mortar")]
-	var close_e: Dictionary = _enemy("hauler", TowerState.slot_pos(_rc(2, 3)) + Vector2(0, -50))
+	var close_e: Dictionary = _enemy("hauler", TowerState.slot_pos(_rc(2, 3)) + Vector2(0, -30))
 	S.set_enemies([close_e])
 	S._fire(0.01, [])
 	_sync(S, [close_e])
-	_check("mortar cannot fire inside 1.5 cells", is_equal_approx(float(close_e["hp"]), 999.0))
+	_check("mortar cannot fire inside 0.8 cells (V2 P10, was 1.5)", is_equal_approx(float(close_e["hp"]), 999.0))
 	var far_e: Dictionary = _enemy("hauler", TowerState.slot_pos(_rc(2, 3)) + Vector2(0, -250))
 	S.set_enemies([far_e])
 	S._fire(0.01, [])
@@ -1934,7 +1941,7 @@ func _pc_building_stages() -> void:
 	for e in bev:
 		if String((e as Dictionary)["t"]) in ["bld_hit", "building_destroyed", "bld_repair"]:
 			bad_ev += 1
-	_check("V2 P3a sealed ring: the body squeezes through the Wall at <= 0.4x speed (%.1f vs %.1f px/s free) and reaches the Core; no structure event" % [in_d / maxf(0.01, in_t), free_d / 0.2], reached and in_t > 0.5 and in_d / in_t <= 0.4 * spd0 and free_d / 0.2 > 0.8 * spd0 and bad_ev == 0 and S.id_at(rn) == "barricade")
+	_check("V2 P10 sealed ring: the body crosses the Wall at full speed (%.1f vs %.1f px/s free) and reaches the Core; no structure event" % [in_d / maxf(0.01, in_t), free_d / 0.2], reached and (in_t <= 0.0 or in_d / in_t >= 0.85 * spd0) and free_d / 0.2 > 0.8 * spd0 and bad_ev == 0 and S.id_at(rn) == "barricade")
 	var hit_ev: Array = []
 	for k in 30:
 		S._move_enemies(0.05, hit_ev)

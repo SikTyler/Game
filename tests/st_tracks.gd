@@ -46,7 +46,7 @@ static func _data(t) -> void:
 	var na: int = TrackDB.tree_ids("attack").filter(func(i: Variant) -> bool: return not TrackDB.is_od(String(i))).size()
 	var nd: int = TrackDB.tree_ids("defense").filter(func(i: Variant) -> bool: return not TrackDB.is_od(String(i))).size()
 	var ne: int = TrackDB.tree_ids("economy").filter(func(i: Variant) -> bool: return not TrackDB.is_od(String(i))).size()
-	t._check("P7b tracks: ~10 standard tracks per tree (11 / 10 / 10) + 5 Overdrives", na == 11 and nd == 10 and ne == 10 and TrackDB.OVERDRIVE.size() == 5 and TrackDB.IDS.size() == 36)
+	t._check("P7b tracks: 10 standard tracks per tree (V2 P10: Multishot removed) + 5 Overdrives", na == 10 and nd == 10 and ne == 10 and TrackDB.OVERDRIVE.size() == 5 and TrackDB.IDS.size() == 35)
 	var names: Dictionary = {}
 	for id in TrackDB.IDS:
 		names[String(TrackDB.get_def(String(id))["name"])] = true
@@ -67,8 +67,8 @@ static func _costs(t) -> void:
 			continue
 		cheap = cheap and float(d["base"]) <= 400.0 and float(d["growth"]) <= 3.0 and int(d["cap"]) >= 1 and int(d["cap"]) <= 25
 	t._check("P7b tracks: standard tracks are cheap small steps (base <= 400, cap <= 25)", cheap and S.track_cost("a_hp") == -1)
-	S.tracks["a_multi"] = TowerState.track_cap("a_multi")
-	t._check("P7b tracks: a capped track costs -1 and refuses", S.track_cost("a_multi") == -1 and S.buy_track("a_multi").is_empty())
+	S.tracks["a_range"] = TowerState.track_cap("a_range")
+	t._check("P7b tracks: a capped track costs -1 and refuses", S.track_cost("a_range") == -1 and S.buy_track("a_range").is_empty())
 
 
 static func _fx(t) -> void:
@@ -88,11 +88,11 @@ static func _fx(t) -> void:
 	var A = _run()
 	var B = _run()
 	B.cash = 1.0e9
-	for id in ["a_dmg", "d_hp", "d_dr", "a_multi", "e_kill", "e_icap", "a_crit", "a_critd"]:
+	for id in ["a_dmg", "d_hp", "d_dr", "e_kill", "e_icap", "a_crit", "a_critd"]:
 		B.buy_track(String(id))
 	t._check("P7b tracks: Damage +4% on the Weapon", is_equal_approx(float(_core(B)["dmg"]), float(_core(A)["dmg"]) * 1.04))
 	t._check("P7b tracks: Max HP +5%, Damage Reduction 1%", is_equal_approx(float(B.stats["max_hp"]), float(A.stats["max_hp"]) * 1.05) and is_equal_approx(float(B.stats["dr"]), float(A.stats["dr"]) + 0.01))
-	t._check("P7b tracks: Multishot +1 target, crit +1.5% / +10% crit damage", int(_core(B)["multishot"]) == int(_core(A).get("multishot", 0)) + 1 and is_equal_approx(float(B.stats["crit"]), float(A.stats["crit"]) + 0.015) and is_equal_approx(B.crit_mult(), A.crit_mult() + 0.10))
+	t._check("P7b tracks: crit +1.5% / +10% crit damage (V2 P10: Multishot track removed)", not TrackDB.DEFS.has("a_multi") and is_equal_approx(float(B.stats["crit"]), float(A.stats["crit"]) + 0.015) and is_equal_approx(B.crit_mult(), A.crit_mult() + 0.10))
 	t._check("P7b tracks: Kill Cash +5%, Interest Cap +15%", is_equal_approx(float(B.stats["kill_cash"]), float(A.stats["kill_cash"]) * 1.05) and is_equal_approx(float(B.stats["interest_cap"]), float(A.stats["interest_cap"]) * 1.15))
 	var C = _run()
 	C.cash = 1.0e9

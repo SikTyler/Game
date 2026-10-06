@@ -111,6 +111,10 @@ var fade: float = 0.0
 var tracers: FxPool = FxPool.new(96)  # {a, b, t, color, w}
 var rings: FxPool = FxPool.new(64)    # {pos, r, t, color}
 var pops: FxPool = FxPool.new(24)     # {pos, text, t, color, size}
+## V2 P10 (owner: "see your looting in action"): a loot icon pops over the
+## body that dropped it - {pos, icon, color, text, t}.
+var loot_pops: FxPool = FxPool.new(32)
+const LOOT_POP_S: float = 1.1
 var dmgnums: FxPool = FxPool.new(48)  # {pos, amt, eid, t, size}
 var bolts: FxPool = FxPool.new(24)    # {a, t}
 var juice: Juice = Juice.new()
@@ -729,6 +733,33 @@ func _pop(pos: Vector2, text: String, t: float, col: Color, size: int) -> void:
 	d["size"] = size
 
 
+## Loot icon over the body that dropped it (Scrap, an item, a cache, coins).
+func _loot_pop(ev: Dictionary) -> void:
+	var kind: String = String(ev.get("kind", ""))
+	var icon: String = "cur_scrap"
+	var col: Color = Color.WHITE
+	var text: String = ""
+	match kind:
+		"scrap":
+			text = "+%d" % int(ev.get("n", 1))
+		"item":
+			icon = "icon_gear"
+			col = Kit.rarity_text(drop_rar(ev))
+		"cache":
+			icon = "chest"
+			col = Kit.rarity_text(drop_rar(ev))
+		"coins":
+			icon = "cur_coin"
+			text = "+%d" % int(ev.get("n", ev.get("coins", 1)))
+		_:
+			return
+	var n: Dictionary = loot_pops.take(LOOT_POP_S)
+	n["pos"] = ev.get("pos", TowerState.CENTER)
+	n["icon"] = icon
+	n["color"] = col
+	n["text"] = text
+
+
 ## Floating damage number: hits on one enemy within DMG_MERGE merge.
 func _dmg_num(eid: int, pos: Vector2, amt: float) -> void:
 	var mode: String = String((Settings.normalize(settings)["video"] as Dictionary).get("dmg_numbers", "all"))
@@ -773,6 +804,7 @@ func _clear_fx() -> void:
 	tracers.clear()
 	rings.clear()
 	pops.clear()
+	loot_pops.clear()
 	bolts.clear()
 	dmgnums.clear()
 	if bursts != null:
@@ -1016,6 +1048,9 @@ func _handle(events: Array) -> void:
 			sfx_play(clip)
 		if et == "drop":
 			Intel.on_event(self, ev)   # FB2 Loot Drops feed
+			_loot_pop(ev)
+		elif et == "loot_drop":
+			_loot_pop({"kind": "coins", "n": maxi(1, int(round(float(ev.get("coins", 1.0))))), "pos": ev.get("pos", TowerState.CENTER)})
 			if String(ev.get("kind", "")) in ["item", "cache"]:
 				loot_beams.append({"pos": ev.get("pos", TowerState.CENTER), "rar": drop_rar(ev), "t": 0.0})
 				sfx_play("card_open", 1.4)
@@ -1541,6 +1576,7 @@ func _process(delta: float) -> void:
 	tracers.update(delta)
 	rings.update(delta)
 	pops.update(delta)
+	loot_pops.update(delta)
 	bolts.update(delta)
 	dmgnums.update(delta)
 	for k in slot_pop.keys():

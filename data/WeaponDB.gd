@@ -22,7 +22,7 @@ const DEFS: Dictionary = {
 	"gun":     {"name": "Gatling", "size": 1, "aim": "arc", "arc": 120.0, "pattern": "pierce_round", "dir_mult": 1.2,
 		"dmg": 6.0, "rate": 2.0, "range": 3.0, "p": {}},
 	"mortar":  {"name": "Mortar", "size": 2, "aim": "radial", "arc": 360.0, "pattern": "lob_aoe", "dir_mult": 1.0,
-		"dmg": 18.0, "rate": 0.4, "range": 4.5, "p": {"splash": 1.0, "min_range": 1.5}},
+		"dmg": 18.0, "rate": 0.4, "range": 4.5, "p": {"splash": 1.0, "min_range": 0.8}},   # V2 P10: was 1.5 (bodies now walk through it to the Core)
 	"tesla":   {"name": "Tesla Coil", "size": 1, "aim": "radial", "arc": 360.0, "pattern": "chain", "dir_mult": 1.0,
 		"dmg": 9.0, "rate": 0.8, "range": 3.0, "p": {"chains": 3, "chain_frac": 0.7}},
 	"flak":    {"name": "Flamer", "size": 1, "aim": "fixed", "arc": 50.0, "pattern": "cone_dot", "dir_mult": 1.4,

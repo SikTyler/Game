@@ -70,6 +70,10 @@ var order: PackedInt32Array = PackedInt32Array()   # live slots, spawn order
 var eid_slot: Dictionary = {}                      # eid -> slot
 var max_size: float = 0.0                          # largest body ever stored (query padding)
 var dirty: bool = true                             # positions / order changed since the hash rebuild
+## V2 P10 crowd control falloff: every knockback impulse and slow strength is
+## scaled by this (TowerState.cc_crowd_scale sets it each substep), so a mass
+## horde is never stun-locked while a handful of bodies still can be.
+var cc_scale: float = 1.0
 
 
 static func _kcode(k: String) -> int:
@@ -242,6 +246,7 @@ func kill(s: int) -> void:
 ## Status writes (rules -> C# + mirror). apply_slow keeps the rules' merge:
 ## duration = max, multiplier = min while slowed.
 func apply_slow(s: int, t: float, m: float) -> void:
+	m = 1.0 - (1.0 - m) * cc_scale
 	slow_t[s] = maxf(slow_t[s], t)
 	slow_m[s] = minf(slow_m[s] if slow_t[s] > 0.0 else 1.0, m)
 	world.call("SetSlow", s, slow_t[s], slow_m[s])
@@ -250,6 +255,7 @@ func apply_slow(s: int, t: float, m: float) -> void:
 ## Slow every living body within r of c in one C# call (V2 P3d: Wall auras);
 ## the mirror is patched from the returned slots. Returns them (ascending).
 func slow_radius(c: Vector2, r: float, t: float, m: float) -> PackedInt32Array:
+	m = 1.0 - (1.0 - m) * cc_scale
 	var sl: PackedInt32Array = world.call("SlowIn", c.x, c.y, r, t, m)
 	for s in sl:
 		slow_m[s] = minf(slow_m[s] if slow_t[s] > 0.0 else 1.0, m)
@@ -295,7 +301,7 @@ func knock(s: int, v: Vector2) -> void:
 	if k == "boss" or k == "courier":
 		return
 	var m: float = size[s] / 16.0
-	vel[s] = vel[s] + v / maxf(0.25, m * m)
+	vel[s] = vel[s] + v * cc_scale / maxf(0.25, m * m)
 	world.call("SetVel", s, vel[s].x, vel[s].y)
 	dirty = true
 
@@ -306,7 +312,7 @@ func radial_knock(c: Vector2, r: float, k: float) -> int:
 	if r <= 0.0 or k == 0.0:
 		return 0
 	dirty = true
-	return int(world.call("RadialImpulse", c.x, c.y, r, k))
+	return int(world.call("RadialImpulse", c.x, c.y, r, k * cc_scale))
 
 
 ## One fixed sim step in C# (MASS_HORDE §3/§4): flow-field seek, pressure,

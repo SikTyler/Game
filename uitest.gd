@@ -1206,7 +1206,7 @@ func _run_screen() -> void:
 	var tm0: String = String(S.target_modes[cell])
 	await _frames(2)
 	_check("FB1: clicking a building shows its range circle", int(main.get_meta("range_shown", -1)) == cell and float(BattleUI.range_of(main, cell).get("r", 0.0)) > 0.0)
-	_check("FB1: non-weapon buildings show an aura range", String(BattleUI.preview_range(main, "mine")["kind"]) == "aura")
+	_check("V2 P10: an aura building shows its reach; a global-effect one (Mine) shows none", String(BattleUI.preview_range(main, "amp").get("kind", "")) == "aura" and BattleUI.preview_range(main, "mine").is_empty())
 	_press("Target:")
 	await _frames()
 	_check("RUN: Target button cycles the weapon's mode", String(S.target_modes[cell]) != tm0)

@@ -38,6 +38,8 @@ const DEFS: Dictionary = {
 	"coin":        {"name": "Coin Bonus", "cat": "economy", "max": 20, "base": 60.0, "growth": 1.35, "hall": 1, "effect": "+5% coins", "icon": ["coin", "ffd34d"]},
 	"startcash":   {"name": "Starting Cash", "cat": "economy", "max": 15, "base": 40.0, "growth": 1.40, "hall": 1, "effect": "+$15 cash at run start", "icon": ["coin", "a3e635"]},
 	"interest":    {"name": "Compound Interest", "cat": "economy", "max": 10, "base": 1500.0, "growth": 1.6, "hall": 1, "req": [["coin", 2]], "fx": {"interest": 0.002}, "effect": "+0.2% wave interest", "icon": ["bank", "ffd34d"]},
+	# V2 P10 eco ramp: the long run-cash line (owner: "a lengthy ramp-up requiring heavy investment in research and outpost building")
+	"field_econ":  {"name": "Field Economics", "cat": "economy", "max": 15, "base": 1800.0, "growth": 1.62, "hall": 3, "req": [["coin", 2]], "fx": {"run_cash": 0.10}, "effect": "+10% all run cash (more enhancements, longer runs)", "icon": ["coin", "4ade80"]},
 	"bounty":      {"name": "Clear Bounty", "cat": "economy", "max": 10, "base": 1000.0, "growth": 1.55, "hall": 1, "req": [["coin", 1]], "effect": "+10% coins from cleared waves", "icon": ["star", "ffd34d"]},
 	"offcap":      {"name": "Storage Tech", "cat": "economy", "max": 8, "base": 150.0, "growth": 1.60, "hall": 1, "effect": "+4% Outpost storage", "icon": ["box", "e8c48f"]},
 	"offrate":     {"name": "Logistics Tech", "cat": "economy", "max": 5, "base": 120.0, "growth": 1.50, "hall": 1, "effect": "+5% Outpost production", "icon": ["gear", "a3e635"]},
@@ -85,7 +87,7 @@ const DEFS: Dictionary = {
 const IDS: Array = [
 	"dmg", "hp", "core_theory", "targeting", "optics", "reactor", "aegis", "shielding", "manual",
 	"en_hp", "en_atk", "en_speed", "boss_breaker", "elite_hp", "sapper_damp",
-	"coin", "startcash", "interest", "bounty", "offcap", "offrate", "lab_discount", "lic_mill", "lic_mine", "lic_scav", "lic_core", "lic_adv",
+	"coin", "startcash", "interest", "field_econ", "bounty", "offcap", "offrate", "lab_discount", "lic_mill", "lic_mine", "lic_scav", "lic_core", "lic_adv",
 	"loot_theory", "appraisal", "cache_luck", "scav_rate", "reclaim",
 	"stabilizer", "blacklist", "reroll_disc", "greater_cal", "enchanters_eye", "masterwork_odds", "brand_contracts", "mythic_fusion",
 	"grid", "speed", "xp", "reroll", "banish_r", "draft_lock", "enh_theory", "draft_choices",

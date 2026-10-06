@@ -17,6 +17,7 @@ const DraftPanel := preload("res://ui/DraftPanel.gd")
 const Hotbar := preload("res://ui/Hotbar.gd")
 const Intel := preload("res://ui/Intel.gd")
 const WeaponDB := preload("res://data/WeaponDB.gd")
+const SupportDB := preload("res://data/SupportDB.gd")
 const COMPASS: Array = ["E", "SE", "S", "SW", "W", "NW", "N", "NE"]
 const FirePatterns := preload("res://FirePatterns.gd")
 const Gear := preload("res://Gear.gd")
@@ -238,8 +239,34 @@ static func range_of(m, i: int) -> Dictionary:
 		if int(wd.get("slot", -2)) == i:
 			return _aim_shape(m, wd)
 	if i != TowerState.CORE_SLOT and S.id_at(i) != "":
-		return {"r": TowerState.CELL * (0.5 * float(S.size_at(i)) + 1.0), "kind": "aura"}
+		var fx: Dictionary = (S.stats.get("bfx", {}) as Dictionary).get(i, {})
+		return aura_shape(S.id_at(i), S.size_at(i), int(fx.get("reach", 0.0)))
 	return {}
+
+
+## V2 P10 (owner: "some buildings show a 3x3 radius that don't affect
+## adjacent buildings"): only buildings that reach their neighbours get a
+## shape - the square of cells their aura covers, or a circle for the
+## radius effects (Wall slow, Bounty). Global-effect buildings get none.
+static func aura_shape(id: String, size: int, reach: int = 0) -> Dictionary:
+	var cells: int = 0
+	match id:
+		"armory":
+			cells = 1 + reach
+		"beacon":
+			cells = 4 + reach
+		"hut_engineer", "oilmill":
+			cells = 1
+		"barricade", "gate":
+			return {"r": 1.5 * TowerState.cpx(), "kind": "weapon", "aim": "radial"}   # the Wall slow aura (pc_wall_aura)
+		"bounty":
+			return {"r": (3.0 + float(reach)) * TowerState.cpx(), "kind": "weapon", "aim": "radial"}
+		_:
+			if SupportDB.has(id) and SupportDB.get_def(id).has("aura"):
+				cells = int(SupportDB.get_def(id)["aura"]["r"]) + reach
+	if cells <= 0:
+		return {}
+	return {"r": TowerState.CELL * (0.5 * float(size) + float(cells)), "kind": "aura"}
 
 
 ## The drawn shape of a weapon sheet: {r, kind: weapon, aim, facing, arc_cos, width}.
@@ -266,7 +293,7 @@ static func preview_range(m, id: String, at_i: int = -1) -> Dictionary:
 		var base: Dictionary = {"range": float(d["range"]) * TowerState.cpx(), "pattern": String(d["pattern"]), "aim": String(d["aim"]),
 			"facing": face, "arc_cos": cos(deg_to_rad(float(d["arc"]) * 0.5)), "pierce": float((d["p"] as Dictionary).get("pierce", 0.0)), "lvl": 1}
 		return _aim_shape(m, base)
-	return {"r": TowerState.CELL * 1.5, "kind": "aura"}
+	return aura_shape(id, PickDB.size_of(id))
 
 
 static func draw_reach(m, c: Vector2, rg: Dictionary, col: Color, scale: float = 1.0) -> void:
@@ -693,6 +720,19 @@ static func _draw_fx(m) -> void:
 		if da < 0.5:
 			continue
 		Kit.t_outline(m, Kit.fmt(float(dn["amt"])), dp, int(float(dsz) * pun), Color(dc, da), HORIZONTAL_ALIGNMENT_CENTER, 120.0)
+	# V2 P10 loot pops: the drop's icon rises off the body that dropped it
+	for lp in m.loot_pops.items:
+		var lt: float = float(lp["t"])
+		if lt <= 0.0:
+			continue
+		var la: float = clampf(lt / 0.35, 0.0, 1.0)
+		var age: float = m.LOOT_POP_S - lt
+		var lpos: Vector2 = (lp["pos"] as Vector2) + Vector2(0, -22.0 - 34.0 * minf(1.0, age / 0.6))
+		var sz: float = 26.0 * (1.0 + maxf(0.0, 0.18 - age) * 2.5)
+		m.draw_circle(lpos, sz * 0.62, Color(0.02, 0.03, 0.07, 0.55 * la))
+		Kit.icon(m, String(lp["icon"]), Rect2(lpos - Vector2(sz, sz) * 0.5, Vector2(sz, sz)), Color(lp["color"], la))
+		if String(lp["text"]) != "":
+			Kit.t_outline(m, String(lp["text"]), lpos + Vector2(sz * 0.5 + 2.0, 6.0), 15, Color(Kit.TEXT, la), HORIZONTAL_ALIGNMENT_LEFT, 80.0)
 	for fd3 in m.pops.items:
 		if float(fd3["t"]) <= 0.0:
 			continue

@@ -528,10 +528,10 @@ static func nominal_rate(s: Dictionary, uid: String, con: Dictionary = {}) -> fl
 		"gemmine":
 			# Deep Mine (was the Gem Mine; gems are gone): a big coin generator
 			# on a vein; only Lamps boost its layout.
-			return float(d["rate"]) * (1.0 + 0.25 * float(L - 1)) * (1.0 + lay) * global_mult(s)
+			return float(d["rate"]) * pow(OutpostDB.COIN_LVL, float(L - 1)) * (1.0 + lay) * global_mult(s)
 		"mill":
 			var tm: float = 1.0 + TuneRef.num("pc_mill_tier", OutpostDB.MILL_TIER) * float(Tiers.highest(s) - 1)
-			return TuneRef.num("pc_mill_rate", float(d["rate"])) * (1.0 + 0.25 * float(L - 1)) * (1.0 + lay) * global_mult(s) * tm
+			return TuneRef.num("pc_mill_rate", float(d["rate"])) * pow(OutpostDB.COIN_LVL, float(L - 1)) * (1.0 + lay) * global_mult(s) * tm
 	# Scrap Refinery (+10% per Reforge scrap_p level).
 	return float(d["rate"]) * (1.0 + 0.25 * float(L - 1)) * (1.0 + lay) * global_mult(s) * (1.0 + 0.10 * float(_node(s, "scrap_p")))
 
@@ -784,7 +784,7 @@ static func max_lvl(s: Dictionary, id: String) -> int:
 ## Coins / seconds to go from lvl -> lvl + 1 (lvl 0 = the initial build).
 static func cost(id: String, lvl: int) -> int:
 	var d: Dictionary = OutpostDB.get_def(id)
-	return int(round(float(d.get("coins", 0)) * pow(1.6, float(maxi(1, lvl) - 1))))
+	return int(round(float(d.get("coins", 0)) * pow(float(d.get("growth", 1.6)), float(maxi(1, lvl) - 1))))
 
 
 ## Owner feedback #1: every Outpost build / upgrade is instant.
@@ -1128,7 +1128,7 @@ static func core_part(o: Dictionary, uid: String, con: Dictionary = {}, eff: flo
 
 
 ## The run's share of core_bonus (TowerState pfx keys).
-const RUN_KEYS: Array = ["dmg", "rate", "core_hp", "dr", "crit", "range", "cash", "xp"]
+const RUN_KEYS: Array = ["dmg", "rate", "core_hp", "dr", "crit", "range", "cash", "run_cash", "xp"]
 
 
 ## Run-facing bundle: Barracks troop tier, Archive Insight cap / banish.
