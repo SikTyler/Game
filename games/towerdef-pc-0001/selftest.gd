@@ -8,6 +8,7 @@ const StKit := preload("res://tests/st_kit.gd")
 const StDirectional := preload("res://tests/st_directional.gd")
 const StGear := preload("res://tests/st_gear.gd")
 const StCoreWeapon := preload("res://tests/st_core_weapon.gd")
+const StGearVis := preload("res://tests/st_gearvis.gd")
 const FirePatterns := preload("res://FirePatterns.gd")
 const WeaponDB := preload("res://data/WeaponDB.gd")
 const TowerState := preload("res://TowerState.gd")
@@ -298,6 +299,7 @@ func _initialize() -> void:
 	StDirectional.run(self)
 	StGear.run(self)
 	StCoreWeapon.run(self)
+	StGearVis.run(self)
 
 	if fails.is_empty():
 		print("SELFTEST OK")
