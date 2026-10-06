@@ -11,7 +11,7 @@ const BaseMeta := preload("res://BaseMeta.gd")
 const Drops := preload("res://Drops.gd")
 const Loot := preload("res://Loot.gd")
 const LootDB := preload("res://data/LootDB.gd")
-const Gear := preload("res://Gear.gd")
+const Parts := preload("res://Parts.gd")
 const RarityDB := preload("res://data/RarityDB.gd")
 
 
@@ -105,7 +105,7 @@ static func _engine(t) -> void:
 	var ab: Array = A.abandon()
 	var go: Dictionary = (ab.filter(func(e: Variant) -> bool: return String((e as Dictionary)["t"]) == "game_over"))[0]
 	t._check("P5 run: run end carries the loot tokens with the run's luck and tier", ((go["loot"] as Dictionary)["items"] as Array).size() == 6 and int((go["loot"] as Dictionary)["luck"]) == int(A.luck) and int((go["loot"] as Dictionary)["tier"]) == 1)
-	t._check("P5 run: banking realizes the tokens into items (events in reveal order)", ab.filter(func(e: Variant) -> bool: return String((e as Dictionary)["t"]) == "loot_item").size() == 6 and Gear.count(A.save) == 7)
+	t._check("P5 run: banking realizes the tokens into parts (events in reveal order; 3 starter parts + 6)", ab.filter(func(e: Variant) -> bool: return String((e as Dictionary)["t"]) == "loot_item").size() == 6 and Parts.count(A.save) == 9)
 
 
 # ------------------------------------------------------------------ caches
@@ -122,7 +122,7 @@ static func _caches(t) -> void:
 		for k in 60:
 			var sv: Dictionary = BaseMeta.default_save()
 			for j in k:
-				Gear._rng(Gear.block(sv))   # vary the op stream
+				Parts._rng(Parts.block(sv))   # vary the op stream
 			var ev: Array = _bank_one(String(id), 40, 2, 0, sv)
 			var its: Array = ev.filter(func(e: Variant) -> bool: return String((e as Dictionary)["t"]) == "loot_item")
 			var head: Dictionary = ev[0]
@@ -150,13 +150,23 @@ static func _caches(t) -> void:
 	var sv3: Dictionary = BaseMeta.default_save()
 	var ev4: Array = _bank_one("scrap", 10, 2, 0, sv3)
 	t._check("P5 caches: a Scrap Crate is 6-14 x tier Scrap, no items", ev4.filter(func(e: Variant) -> bool: return String((e as Dictionary)["t"]) == "loot_item").is_empty() and int(sv3["scrap"]) >= 12 and int(sv3["scrap"]) <= 28)
-	var top_t: int = 0
-	var sv6: Dictionary = BaseMeta.default_save()
-	_bank_one("field", 150, 1, 0, sv6)
-	for u in Gear.uids(sv6):
-		for p in Gear.item(sv6, int(u))["perks"]:
-			top_t = maxi(top_t, int((p as Dictionary)["t"]))
-	t._check("P5 caches: drops reach T7 perks at item level 150+ (the Forge caps at T5)", top_t == 7)
+	# V3: a perk's tier sits around its part's rarity; deep drops (item level)
+	# nudge it up
+	var lift: Array = [0.0, 0.0]
+	for li in 2:
+		var sv6: Dictionary = BaseMeta.default_save()
+		var cs6: Array = []
+		for k in 300:
+			cs6.append({"id": "field", "ilvl": 10 if li == 0 else 150})
+		Loot.realize(sv6, {"items": [], "caches": cs6, "luck": 0, "tier": 1})
+		var n6: int = 0
+		for u in Parts.uids(sv6):
+			var it6: Dictionary = Parts.item(sv6, int(u))
+			for p in it6["perks"]:
+				lift[li] = float(lift[li]) + float(int((p as Dictionary)["t"]) - 1 - RarityDB.rank(String(it6["rar"])))
+				n6 += 1
+		lift[li] = float(lift[li]) / float(maxi(1, n6))
+	t._check("P5 caches (V3): deep drops (item level 150) roll higher perk tiers for their rarity than shallow ones", float(lift[1]) > float(lift[0]) + 0.05, str(lift))
 
 
 # ------------------------------------------------------------------ pity + luck
@@ -177,11 +187,11 @@ static func _pity_luck(t) -> void:
 			gap = 0 if RarityDB.at_least(String(e["rar"]), "epic") else gap + 1
 			worst = maxi(worst, gap)
 	t._check("P5 pity: 200 scripted drops never go 30 without an Epic+ (visible pity carries over)", n == 200 and worst < 30 and worst >= 10, str(worst))
-	t._check("P5 pity: drops advance the save's pity counters", int(Gear.block(sv)["pity"]["l"]) > 0 and int(Gear.block(sv)["pity"]["m"]) > 0)
+	t._check("P5 pity: drops advance the save's pity counters", int(Parts.block(sv)["pity"]["l"]) > 0 and int(Parts.block(sv)["pity"]["m"]) > 0)
 	var sv2: Dictionary = BaseMeta.default_save()
-	Gear.block(sv2)["pity"]["e"] = 15
+	Parts.block(sv2)["pity"]["e"] = 15
 	_bank_one("boss", 30, 1, 0, sv2)
-	var ep: int = int(Gear.block(sv2)["pity"]["e"])
+	var ep: int = int(Parts.block(sv2)["pity"]["e"])
 	t._check("P5 pity: a Boss Vault's guaranteed Epic resets Epic pity", ep <= 3, str(ep))
 	# luck: more Epic+ at luck 10 than at luck 0 (300 Field Caches each)
 	var hi: Array = [0, 0]
@@ -204,18 +214,18 @@ static func _bank(t) -> void:
 	var b: Dictionary = a.duplicate(true)
 	var ea: Array = BaseMeta.bank_loot(a, loot.duplicate(true))
 	var eb: Array = BaseMeta.bank_loot(b, loot.duplicate(true))
-	t._check("P5 bank: the same save + the same loot = the same items and Scrap", JSON.stringify(Gear.block(a)["items"]) == JSON.stringify(Gear.block(b)["items"]) and int(a["scrap"]) == int(b["scrap"]) and JSON.stringify(ea) == JSON.stringify(eb))
+	t._check("P5 bank: the same save + the same loot = the same items and Scrap", JSON.stringify(Parts.block(a)["items"]) == JSON.stringify(Parts.block(b)["items"]) and int(a["scrap"]) == int(b["scrap"]) and JSON.stringify(ea) == JSON.stringify(eb))
 	t._check("P5 bank: 2 loose items + 3 + 2 cache items, two cache headers, one Scrap total", Loot.revealed(ea).size() == 7 and ea.filter(func(e: Variant) -> bool: return String((e as Dictionary)["t"]) == "cache_open").size() == 2 and ea.filter(func(e: Variant) -> bool: return String((e as Dictionary)["t"]) == "loot_banked").size() == 1)
 	var nw: bool = true
 	for u in Loot.revealed(ea):
-		nw = nw and bool(Gear.item(a, int(u))["new"]) and String(Gear.item(a, int(u))["src"]) != ""
+		nw = nw and bool(Parts.item(a, int(u))["new"]) and String(Parts.item(a, int(u))["src"]) != ""
 	t._check("P5 bank: banked items are marked NEW with their source", nw)
 	# a full inventory salvages the overflow
 	var f: Dictionary = BaseMeta.default_save()
-	while Gear.count(f) < Gear.INV_CAP:
-		Gear.add_item(f, Gear.make("module", "echo"))
+	while Parts.count(f) < Parts.INV_CAP:
+		Parts.add_item(f, Parts.make("mag_echo"))
 	var sc0: int = int(f["scrap"])
 	var ef: Array = Loot.realize(f, {"items": [], "caches": [{"id": "field", "ilvl": 10}], "luck": 0, "tier": 1})
-	t._check("P5 bank: a full inventory salvages the overflow for Scrap", Gear.count(f) == Gear.INV_CAP and ef.filter(func(e: Variant) -> bool: return String((e as Dictionary)["t"]) == "loot_salvaged").size() == 2 and int(f["scrap"]) > sc0)
+	t._check("P5 bank: a full inventory salvages the overflow for Scrap", Parts.count(f) == Parts.INV_CAP and ef.filter(func(e: Variant) -> bool: return String((e as Dictionary)["t"]) == "loot_salvaged").size() == 2 and int(f["scrap"]) > sc0)
 	var e0: Dictionary = BaseMeta.default_save()
-	t._check("P5 bank: an empty run banks nothing", BaseMeta.bank_loot(e0, Drops.empty_loot()).is_empty() and Gear.count(e0) == 1)
+	t._check("P5 bank: an empty run banks nothing", BaseMeta.bank_loot(e0, Drops.empty_loot()).is_empty() and Parts.count(e0) == 3)

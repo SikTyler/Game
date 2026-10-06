@@ -44,6 +44,7 @@ const EvoDB := preload("res://data/EvoDB.gd")
 const SupportDB := preload("res://data/SupportDB.gd")
 const FirePatterns := preload("res://FirePatterns.gd")
 const Gear := preload("res://Gear.gd")
+const Parts := preload("res://Parts.gd")
 
 const CENTER: Vector2 = Vector2(360, 470)
 const CELL: float = 26.0
@@ -346,6 +347,12 @@ var core_aim_dir: Vector2 = Vector2.UP   # view only: where the turret last fire
 ## wave of it (a fresh run died at wave 7). Threat eids are rescanned every
 ## THREAT_SCAN volleys; manual aim overrides all of it.
 const THREAT_SCAN: int = 4
+## V3 parts: extra barrels (Legendary+ Receivers) fire on their own
+## cooldowns; barrel k of n covers the sector centred TAU*k/n from barrel 0's
+## aim (+-PI/n), so two barrels fire both ways, three at 120 deg.
+var barrel_cd: Array = [0.0, 0.0, 0.0, 0.0]
+var _sector_k: int = 0
+var _sector_n: int = 1
 var thr_flip: bool = false
 var thr_n: int = 0
 var thr_boss: Array = []
@@ -440,9 +447,9 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	# Core (V2: one Core) at its permanent level, firing the equipped Weapon
 	# frame; gear fx (the Weapon + socketed Modules) land in pfx.
 	core_id = CoreDB.ID
-	core_def = Gear.core_def(save)
+	core_def = Parts.core_def(save)
 	core_lvl = Cores.level(save)
-	pfx = Gear.run_fx(save)
+	pfx = Parts.run_fx(save)
 	# V2 P6 Core buildings + V2 P8 research fx
 	for src in [mods.get("outpost_fx", {}), mods.get("lab_fx", {})]:
 		for k in (src as Dictionary).keys():
@@ -456,6 +463,7 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	focus = 0.0
 	thr_flip = false
 	thr_n = 0
+	barrel_cd = [0.0, 0.0, 0.0, 0.0]
 	thr_boss = []
 	thr_spit = []
 	mods["special_dmg"] = float(mods.get("special_dmg", 1.0)) * maxf(0.1, 1.0 + pf("special_dmg"))
@@ -620,7 +628,7 @@ func tf(k: String) -> float:
 
 ## Draft luck now: run luck + Draft Luck enhancements (cap 10).
 func luck_now() -> int:
-	return mini(10, luck + int(xf("draft_luck")))
+	return mini(10, luck + int(xf("draft_luck")) + int(float(pfx.get("draft_luck", 0.0))))
 
 
 ## Mode + modifier selection (validated). Endless needs best wave >= 50.
@@ -1225,64 +1233,74 @@ func compute_stats() -> Dictionary:
 	st["interest_rate"] = float(st["interest_rate"]) + pf("interest")
 	var icap_w1: float = float(st["interest_cap"]) + TRACK_ECO_ICAP * float(eco_lv) + (50.0 if pf("interest") > 0.0 else 0.0)
 	st["interest_cap"] = icap_w1 * e * maxf(0.1, 1.0 + pf("icap"))
-	# The Core's own weapon (always last in `weapons`; the view reads .back()).
-	var core_dmg: float = float(cd["dmg"]) * CoreDB.lvl_mult("dmg", L) * dmg_all * float(adj_dmg[CORE_SLOT]) * (1.0 + TuneRef.num("pc_core_surge_dmg", 0.15) * float(pack_n("pk_core"))) * maxf(0.1, 1.0 + pf("core_dmg")) * pow(TRACK_RATE_DMG, float(tracks["rate"])) * pow(TRACK_ARMOR_DMG, float(arm_n))
-	var core_rate: float = float(cd["rate"]) * pow(TRACK_RATE, float(tracks["rate"])) * pow(TRACK_DMG_RATE, float(tracks["dmg"])) * pow(TRACK_RANGE_RATE, float(tracks["range"])) * rate_all * float(adj_rate[CORE_SLOT]) * (1.0 + TuneRef.num("pc_core_surge_rate", 0.05) * float(pack_n("pk_core"))) * maxf(0.1, 1.0 + pf("rate"))
-	var cw: Dictionary = {"slot": CORE_SLOT, "kind": "core", "attack": String(cd["attack"]), "dmg": core_dmg, "rate": core_rate, "range": core_range, "range_cells": core_range_c}
-	# Parts on the Core attack: primary-target mult, splash, pierce, free pulse.
-	cw["single_mult"] = maxf(0.1, 1.0 + pf("core_single"))
-	cw["pierce"] = int(pf("pierce"))
-	cw["storm_pulse"] = int(pf("storm_pulse"))
-	cw["pulse_mult"] = 1.0 + pf("pulse_dmg")
-	var nosplash: bool = pf("nosplash") > 0.0
-	match String(cd["attack"]):
-		"cannon":
-			cw["splash"] = 0.0 if nosplash else (float(cd["splash"]) + pf("splash")) * px
-			cw["splash_frac"] = float(cd["splash_frac"])
-			cw["barrels"] = 2 if L >= 20 else 1
-		"slag":
-			cw["splash"] = (0.25 if nosplash else (float(cd["splash"]) + pf("splash"))) * px * (1.5 if L >= 20 else 1.0)
-			cw["slow"] = float(cd["slow"])
-			cw["slow_t"] = float(cd["slow_t"])
-		"beam":
-			cw["ramp"] = float(cd["ramp"]) * (1.0 + pf("beam_ramp"))
-			cw["ramp_max"] = 2.0 if L >= 20 else float(cd["ramp_max"])
-			cw["boss_mult"] = 1.0
-			cw["retarget"] = maxf(0.0, pf("retarget"))
-		"pulse":
-			cw["rings"] = (2 if L >= 20 else 1) + int(pf("chain"))
-			cw["knock"] = float(cd["knock"])
-			cw["chain_every"] = int(cd["chain_every"])
-			cw["chain_frac"] = float(cd.get("chain_frac", 0.4)) * (1.0 + pf("chain_dmg"))
-			cw["chain_n"] = int(cd["chain_n"])
-		"scatter":
-			cw["pellets"] = int(cd.get("pellets", 6)) + (2 if L >= 20 else 0)
-			cw["cone"] = float(cd.get("cone", 40.0))
-		"rail":
-			cw["rail_n"] = int(cd.get("pierce", 10)) + int(pf("pierce")) + (4 if L >= 20 else 0)
-		"arc":
-			cw["chain_n"] = mini(TuneRef.int_of("mass_chain_cap", 20), int(cd.get("chain", 5)) + int(pf("chain")) + (2 if L >= 20 else 0))
-			cw["chain_frac"] = minf(0.95, float(cd.get("chain_frac", 0.8)) * (1.0 + pf("chain_dmg")))
-			cw["jump"] = float(cd.get("jump", 70.0))
-		"flame":
-			cw["cone"] = float(cd.get("cone", 50.0)) + (10.0 if L >= 20 else 0.0)
-			cw["flame_burn"] = TuneRef.num("gear_flame_burn", 0.5)
-		"missiles":
-			cw["missiles"] = int(cd.get("missiles", 4)) + (1 if L >= 20 else 0)
-			cw["splash"] = 0.0 if nosplash else (float(cd.get("splash", 0.3)) + pf("splash")) * px
-		"saw":
-			cw["bounces"] = int(cd.get("bounces", 4)) + int(pf("bounce")) + (1 if L >= 20 else 0)
-			cw["bounce_frac"] = float(cd.get("bounce_frac", 0.85))
-			cw["jump"] = float(cd.get("jump", 90.0))
-	# V2 P4 gear on the Weapon: extra volleys, echo, knockback, ricochet
-	# (the Saw folds ricochet into its own bounces; the Pulse into its rings).
-	cw["multishot"] = mini(4, int(pf("multishot")))
-	cw["echo"] = clampf(pf("echo"), 0.0, 0.5)
-	cw["knock_m"] = maxf(0.0, 1.0 + pf("knock"))
-	cw["bounce"] = 0 if String(cd["attack"]) == "saw" else mini(6, int(pf("bounce")))
-	if String(cd["attack"]) == "pulse":
-		cw["rings"] = int(cw["rings"]) + int(cw["multishot"])
-	weapons.append(cw)
+	# The Core's own weapon: V3 parts - one entry per installed barrel (each
+	# with its own attack sheet, cooldown and sector; barrel 0 is the main
+	# one). Barrels are appended last to first, so barrel 0 is always last in
+	# `weapons` (views and tests read .back()).
+	var bsheets: Array = cd.get("barrels", [cd]) if cd.get("barrels", []) is Array and not (cd.get("barrels", []) as Array).is_empty() else [cd]
+	for bk in range(bsheets.size() - 1, -1, -1):
+		var bcd: Dictionary = bsheets[bk]
+		var b_range_c: float = maxf(1.0, core_range_c - float(cd["range"]) + float(bcd["range"]))
+		core_range = b_range_c * px
+		var core_dmg: float = float(bcd["dmg"]) * CoreDB.lvl_mult("dmg", L) * dmg_all * float(adj_dmg[CORE_SLOT]) * (1.0 + TuneRef.num("pc_core_surge_dmg", 0.15) * float(pack_n("pk_core"))) * maxf(0.1, 1.0 + pf("core_dmg")) * pow(TRACK_RATE_DMG, float(tracks["rate"])) * pow(TRACK_ARMOR_DMG, float(arm_n))
+		var core_rate: float = float(bcd["rate"]) * pow(TRACK_RATE, float(tracks["rate"])) * pow(TRACK_DMG_RATE, float(tracks["dmg"])) * pow(TRACK_RANGE_RATE, float(tracks["range"])) * rate_all * float(adj_rate[CORE_SLOT]) * (1.0 + TuneRef.num("pc_core_surge_rate", 0.05) * float(pack_n("pk_core"))) * maxf(0.1, 1.0 + pf("rate"))
+		var cw: Dictionary = {"slot": CORE_SLOT, "kind": "core", "attack": String(bcd["attack"]), "dmg": core_dmg, "rate": core_rate, "range": core_range, "range_cells": b_range_c, "barrel": bk, "nbarrels": bsheets.size()}
+		# Parts on the Core attack: primary-target mult, splash, pierce, free pulse.
+		cw["single_mult"] = maxf(0.1, 1.0 + pf("core_single"))
+		cw["pierce"] = int(pf("pierce"))
+		cw["storm_pulse"] = int(pf("storm_pulse"))
+		cw["pulse_mult"] = 1.0 + pf("pulse_dmg")
+		var nosplash: bool = pf("nosplash") > 0.0
+		match String(bcd["attack"]):
+			"minigun":
+				cw["spread"] = int(bcd.get("spread", 3))
+			"cannon":
+				cw["splash"] = 0.0 if nosplash else (float(bcd["splash"]) + pf("splash")) * px
+				cw["splash_frac"] = float(bcd["splash_frac"])
+				cw["barrels"] = int(bcd.get("barrels", 1)) + (1 if L >= 20 else 0)
+			"slag":
+				cw["splash"] = (0.25 if nosplash else (float(bcd["splash"]) + pf("splash"))) * px * (1.5 if L >= 20 else 1.0)
+				cw["slow"] = float(bcd["slow"])
+				cw["slow_t"] = float(bcd["slow_t"])
+			"beam":
+				cw["ramp"] = float(bcd["ramp"]) * (1.0 + pf("beam_ramp"))
+				cw["ramp_max"] = 2.0 if L >= 20 else float(bcd["ramp_max"])
+				cw["boss_mult"] = 1.0
+				cw["retarget"] = maxf(0.0, pf("retarget"))
+			"pulse":
+				cw["rings"] = (2 if L >= 20 else 1) + int(pf("chain"))
+				cw["knock"] = float(bcd["knock"])
+				cw["chain_every"] = int(bcd["chain_every"])
+				cw["chain_frac"] = float(bcd.get("chain_frac", 0.4)) * (1.0 + pf("chain_dmg"))
+				cw["chain_n"] = int(bcd["chain_n"])
+			"scatter":
+				cw["pellets"] = int(bcd.get("pellets", 6)) + (2 if L >= 20 else 0)
+				cw["cone"] = float(bcd.get("cone", 40.0))
+			"rail":
+				cw["rail_n"] = int(bcd.get("pierce", 10)) + int(pf("pierce")) + (4 if L >= 20 else 0)
+			"arc":
+				cw["chain_n"] = mini(TuneRef.int_of("mass_chain_cap", 20), int(bcd.get("chain", 5)) + int(pf("chain")) + (2 if L >= 20 else 0))
+				cw["chain_frac"] = minf(0.95, float(bcd.get("chain_frac", 0.8)) * (1.0 + pf("chain_dmg")))
+				cw["jump"] = float(bcd.get("jump", 70.0))
+			"flame":
+				cw["cone"] = float(bcd.get("cone", 50.0)) + (10.0 if L >= 20 else 0.0)
+				cw["flame_burn"] = float(bcd.get("flame_burn", TuneRef.num("gear_flame_burn", 0.5)))
+			"missiles":
+				cw["missiles"] = int(bcd.get("missiles", 4)) + (1 if L >= 20 else 0)
+				cw["splash"] = 0.0 if nosplash else (float(bcd.get("splash", 0.3)) + pf("splash")) * px
+			"saw":
+				cw["bounces"] = int(bcd.get("bounces", 4)) + int(pf("bounce")) + (1 if L >= 20 else 0)
+				cw["bounce_frac"] = float(bcd.get("bounce_frac", 0.85))
+				cw["jump"] = float(bcd.get("jump", 90.0))
+		# V2 P4 gear on the Weapon: extra volleys, echo, knockback, ricochet
+		# (the Saw folds ricochet into its own bounces; the Pulse into its rings).
+		cw["multishot"] = mini(4, int(pf("multishot")))
+		cw["echo"] = clampf(pf("echo"), 0.0, 0.5)
+		cw["knock_m"] = maxf(0.0, 1.0 + pf("knock"))
+		cw["bounce"] = 0 if String(bcd["attack"]) == "saw" else mini(6, int(pf("bounce")))
+		if String(bcd["attack"]) == "pulse":
+			cw["rings"] = int(cw["rings"]) + int(cw["multishot"])
+		weapons.append(cw)
 	core_burn = maxf(0.0, pf("burn"))
 	core_slow = clampf(pf("slow_hit"), 0.0, 0.6)
 	core_exec = clampf(pf("execute"), 0.0, 0.25)
@@ -1778,7 +1796,7 @@ func _on_death(ev: Array) -> void:
 	hp = 0.0
 	over = true
 	_sweep_horde_loot(true)
-	loot["luck"] = luck + int(xf("loot_luck"))   # V2 P5: bank-time rarity luck (the run never rolls it); P7b Loot Luck
+	loot["luck"] = luck + int(xf("loot_luck")) + int(float(pfx.get("loot_luck", 0.0)))   # V2 P5: bank-time rarity luck (the run never rolls it); P7b Loot Luck
 	loot["tier"] = tier
 	var cashout: int = int(floor(TuneRef.num("cashout_frac", 0.12) * cash_earned / maxf(1.0, cash_index()) * tier_coin_mult * mod_coin * mode_coin))
 	var coins: int = int(coins_run) + cashout
@@ -2629,10 +2647,14 @@ func _fire(dt: float, ev: Array) -> void:
 			rate *= 2.0
 		elif si != CORE_SLOT and float(buffs.get("frenzy_t", 0.0)) > 0.0:
 			rate *= float((Specials.FX["sp_frenzy"] as Dictionary)["rate"])   # V2 P7d Frenzy
-		var cd: float = float(cooldowns[si]) - dt
+		var bk: int = int(wd.get("barrel", 0)) if si == CORE_SLOT else 0
+		var cd: float = (float(barrel_cd[bk]) if bk > 0 else float(cooldowns[si])) - dt
 		if cd > 0.0:
-			cooldowns[si] = cd
-			if si == CORE_SLOT and String(wd.get("attack", "")) == "beam":
+			if bk > 0:
+				barrel_cd[bk] = cd
+			else:
+				cooldowns[si] = cd
+			if si == CORE_SLOT and bk == 0 and String(wd.get("attack", "")) == "beam":
 				_beam_hold(wd, dt)
 			continue
 		_kb_k = 0.0
@@ -2646,7 +2668,15 @@ func _fire(dt: float, ev: Array) -> void:
 			if pf("queen_hold") > 0.0 and Troops.alive_count(troops) >= 3:
 				cooldowns[si] = 0.0
 				continue
-			if _core_fire(wd, ev):
+			_sector_k = bk
+			_sector_n = int(wd.get("nbarrels", 1))
+			var fired_c: bool = _core_fire(wd, ev)
+			_sector_k = 0
+			_sector_n = 1
+			if bk > 0:
+				barrel_cd[bk] = cd + 1.0 / rate if fired_c else 0.0
+				continue
+			if fired_c:
 				cooldowns[si] = cd + 1.0 / rate
 				core_shots += 1
 				if int(wd.get("storm_pulse", 0)) > 0 and core_shots % 10 == 0:
@@ -2843,6 +2873,11 @@ func _core_target(rng_lim: float, mode_s: String, used: Dictionary, k: int) -> i
 		var a: int = _nearest(aim_pos, AIM_R, used)
 		if a >= 0 and CENTER.distance_to(en.pos[a]) <= rng_lim + en.size[a] * 0.5:
 			t = a
+	if _sector_k > 0 and _sector_n > 1:
+		# an extra barrel: the nearest body in its own sector (else it holds)
+		var sdir: Vector2 = core_aim_dir.rotated(TAU * float(_sector_k) / float(_sector_n))
+		var st: int = eh.nearest_in_cone(CENTER, sdir, PI / float(_sector_n), rng_lim)
+		return st if st >= 0 and not used.has(st) else -1
 	if t < 0 and not aim_on and k == 0 and used.is_empty():
 		t = _core_threat(rng_lim)
 	if t < 0:
@@ -2899,6 +2934,25 @@ func _core_volley(atk: String, wd: Dictionary, ev: Array, targets: Array, used: 
 	var dmg: float = float(wd["dmg"]) * (1.0 + (AIM_FOCUS + float(mods.get("lab_aim", 0.0))) * focus)
 	var mode_s: String = String(target_modes[CORE_SLOT])
 	match atk:
+		"minigun":
+			# V3 Minigun barrel: light rounds, each at a random body among the
+			# nearest `spread` around the main target (no splash)
+			var tgt_m: int = _core_target(rng_lim, mode_s, used, k)
+			if tgt_m < 0:
+				return false
+			var cand: Array = [tgt_m]
+			for ed in eh.candidates(en.pos[tgt_m], 40.0):
+				if ed != tgt_m and en.hp[ed] > 0.0 and cand.size() < int(wd.get("spread", 3)) and CENTER.distance_to(en.pos[ed]) <= rng_lim:
+					cand.append(ed)
+			var te_m: int = int(cand[combat_rng.randi_range(0, cand.size() - 1)])
+			used[te_m] = true
+			var crit_m: bool = _roll_crit(wd)
+			var d_m: float = dmg * (crit_mult() if crit_m else 1.0)
+			_hit_carry(te_m, d_m * float(wd.get("single_mult", 1.0)), ev, crit_m, CENTER, rng_lim)
+			_shred(te_m, wd)
+			targets.append(en.eid[te_m])
+			_pierce(te_m, d_m, wd, ev, targets)
+			ev.append({"t": "shot", "kind": "core", "from": CENTER, "to": en.pos[te_m], "pellet": true})
 		"cannon":
 			var barrels: int = int(wd.get("barrels", 1))
 			var hit_any: bool = false

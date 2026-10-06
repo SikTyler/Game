@@ -69,7 +69,7 @@ const DEFS: Dictionary = {
 	"treasury": {"name": "Treasury", "cat": "core", "size": [2, 2], "power": 1, "coins": 3000, "core": {"run_cash": 0.06}, "relay": 1, "desc": "+6% all run cash per level"},
 	"training": {"name": "Training Grounds", "cat": "core", "size": [2, 2], "power": 1, "coins": 3000, "core": {"xp": 0.03}, "relay": 3, "desc": "+3% run XP per level"},
 	"shrine": {"name": "Fortune Shrine", "cat": "core", "size": [2, 2], "power": 1, "coins": 6000, "core": {"loot_luck": 1.0}, "relay": 3, "desc": "+1 loot luck per level (rarer drops when a run banks)"},
-	"forgeworks": {"name": "Forge Works", "cat": "core", "size": [2, 2], "power": 2, "coins": 5000, "core": {"forge_disc": 0.02}, "relay": 4, "desc": "-2% Forge costs per level"},
+	"forgeworks": {"name": "Forge Works", "cat": "core", "size": [2, 2], "power": 2, "coins": 5000, "core": {"forge_disc": 0.02}, "relay": 4, "desc": "-2% Fabricator prices per level"},
 	# ---- scavenging: gear while you are away (tokens bank like run loot)
 	"scav_post": {"name": "Scavenger Post", "cat": "scavenge", "size": [2, 2], "power": 2, "coins": 4000, "res": "item", "rate": 1.0 / 6.0, "store": 4, "relay": 2,
 		"desc": "Finds an item every 6 h (stores 4)"},
@@ -85,11 +85,16 @@ const DEFS: Dictionary = {
 	"scrapyard": {"name": "Salvage Yard", "cat": "support", "size": [2, 1], "power": 1, "coins": 4000, "res": "", "rate": 0.0, "storage_h": 0.0, "desc": "Salvage yard (Scrap logistics)"},
 	"beaconpost": {"name": "Outpost Beacon", "cat": "support", "size": [1, 1], "power": 1, "coins": 2500, "res": "", "rate": 0.0, "storage_h": 0.0, "desc": "+5% to every building within 2 cells"},
 	"pylon": {"name": "Pylon", "cat": "support", "size": [1, 1], "power": 1, "coins": 1500, "res": "", "rate": 0.0, "relay": 2, "desc": "+5% to buildings 2 cells away, -5% to anything touching it"},
+	# ---- V3 parts workshops
+	"fabricator": {"name": "Fabricator", "cat": "scavenge", "size": [2, 2], "power": 3, "coins": 6000, "res": "", "rate": 0.0, "storage_h": 0.0, "relay": 2,
+		"desc": "Builds parts to order: a rotating shop paid in Scrap. Each level: more offers, faster refreshes, lower prices, rarer stock"},
+	"smelter": {"name": "Smelter", "cat": "scavenge", "size": [2, 2], "power": 2, "coins": 2500, "res": "", "rate": 0.0, "storage_h": 0.0, "relay": 1,
+		"desc": "Melts unwanted parts into Scrap over time. Each level: more furnace slots, faster melts, richer yield"},
 	# ---- links
 	"conduit": {"name": "Conduit", "cat": "links", "size": [1, 1], "power": 0, "coins": 10, "res": "", "rate": 0.0, "storage_h": 0.0, "max_lvl": 1, "desc": "Links buildings to the Relay"},
 }
 const IDS: Array = ["mill", "refinery", "gemmine", "arsenal", "reactor", "bulwark_w", "aegis_a", "optics", "rangefinder", "treasury", "training", "shrine", "forgeworks",
-	"scav_post", "scav_den", "scav_deep", "research", "barracks", "archive", "warehouse", "scrapyard", "beaconpost", "pylon", "conduit"]
+	"scav_post", "scav_den", "scav_deep", "fabricator", "smelter", "research", "barracks", "archive", "warehouse", "scrapyard", "beaconpost", "pylon", "conduit"]
 ## Buildings that accrue stored output (coins / Scrap / tokens).
 const GENERATORS: Array = ["mill", "refinery", "gemmine", "scav_post", "scav_den", "scav_deep"]
 const SCAVENGERS: Array = ["scav_post", "scav_den", "scav_deep"]

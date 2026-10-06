@@ -39,6 +39,10 @@ const DEFS: Dictionary = {
 	"missiles": {"name": "Swarm Missiles", "attack": "missiles", "dmg": 7.0, "rate": 0.6, "range": 5.0,
 		"p": {"missiles": 4, "splash": 0.3}, "desc": "Four seekers at the four nearest enemies; a small blast each",
 		"look": {"body": 4, "barrel": 8, "muzzle": 7}, "affinity": ["w_multishot", "w_splash", "w_range"]},
+	# V3 parts: the Minigun barrel (not in IDS: V2 gear never rolls it)
+	"minigun": {"name": "Minigun", "attack": "minigun", "dmg": 2.6, "rate": 6.0, "range": 3.5,
+		"p": {"spread": 3}, "desc": "Hoses the crowd: six light rounds a second, each at a random body among the nearest three",
+		"look": {"body": 0, "barrel": 2, "muzzle": 4}, "affinity": ["w_rate", "w_dmg", "w_crit"]},
 	"saw": {"name": "Saw Launcher", "attack": "saw", "dmg": 12.0, "rate": 0.9, "range": 4.0,
 		"p": {"bounces": 4, "bounce_frac": 0.85, "jump": 90.0}, "desc": "A saw that ricochets between 5 enemies (x0.85 each) and shreds armor",
 		"look": {"body": 4, "barrel": 9, "muzzle": 8}, "affinity": ["w_bounce", "w_shred", "w_dmg"]},

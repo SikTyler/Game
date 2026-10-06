@@ -26,6 +26,7 @@ const COL: Dictionary = {
 	"optics": Color("ff5fb8"), "rangefinder": Color("39e6ff"), "treasury": Color("ffd34d"), "training": Color("a3e635"),
 	"shrine": Color("c084fc"), "forgeworks": Color("ff9b3d"),
 	"scav_post": Color("ff5fb8"), "scav_den": Color("f472b6"), "scav_deep": Color("e879f9"),
+	"fabricator": Color("39e6ff"), "smelter": Color("ff9b3d"),
 	"research": Color("b69cff"), "barracks": Color("4ade80"), "archive": Color("9fe0ff"), "warehouse": Color("e8c48f"),
 	"scrapyard": Color("e8c48f"), "beaconpost": Color("39e6ff"), "pylon": Color("ffd34d"),
 }
@@ -298,6 +299,34 @@ static func _glyph(ci: CanvasItem, id: String, g: Vector2, R: float, gc: Color, 
 				var d2 := Vector2(cos(an), sin(an))
 				var o0: Vector2 = g + Vector2(0, -0.4) * R
 				ci.draw_line(o0 + d2 * R * (0.15 + 0.35 * sp), o0 + d2 * R * (0.3 + 0.4 * sp), Color(Kit.GOLD, (1.0 - sp) * a), lw)
+		"fabricator":
+			# V3: an assembly arm swinging over a part on the bench
+			_quad(ci, g, R, -0.85, 0.45, 0.85, 0.7, gc.darkened(0.35))
+			_loop(ci, _P(g, R, [Vector2(-0.85, 0.45), Vector2(0.85, 0.45), Vector2(0.85, 0.7), Vector2(-0.85, 0.7)]), gc, lw)
+			var sw: float = sin(t * 1.6) * 0.35
+			var base_p: Vector2 = g + Vector2(-0.6, 0.45) * R
+			var elbow: Vector2 = base_p + Vector2.from_angle(-PI * 0.5 + 0.5 + sw * 0.4) * R * 0.75
+			var tip: Vector2 = elbow + Vector2.from_angle(0.35 + sw) * R * 0.6
+			ci.draw_line(base_p, elbow, gc, lw * 1.4)
+			ci.draw_line(elbow, tip, gc, lw * 1.2)
+			ci.draw_circle(elbow, R * 0.08, hi)
+			var part_c: Vector2 = g + Vector2(0.3, 0.25) * R
+			_loop(ci, _P(part_c, R * 0.22, [Vector2(-1, -0.6), Vector2(1, -0.6), Vector2(1.2, 0.6), Vector2(-1.2, 0.6)]), Color(Kit.GOLD, a), lw)
+			var sp2: float = 0.5 + 0.5 * sin(t * 6.0)
+			_sparkle(ci, tip + Vector2(0, R * 0.08), R * 0.14 * sp2, Color(1, 1, 1, sp2 * a))
+		"smelter":
+			# V3: a crucible pouring molten Scrap
+			ci.draw_colored_polygon(_P(g, R, [Vector2(-0.7, -0.45), Vector2(0.7, -0.45), Vector2(0.5, 0.45), Vector2(-0.5, 0.45)]), dark)
+			_loop(ci, _P(g, R, [Vector2(-0.7, -0.45), Vector2(0.7, -0.45), Vector2(0.5, 0.45), Vector2(-0.5, 0.45)]), gc, lw)
+			var glow: float = 0.6 + 0.4 * sin(t * 2.4)
+			_quad(ci, g, R, -0.55, -0.4, 0.55, -0.18, Color(gc.lightened(0.2), glow * a))
+			var dr: float = fposmod(t * 1.4, 1.0)
+			ci.draw_line(g + Vector2(0.62, -0.42) * R, g + Vector2(0.78, 0.55) * R, Color(Kit.GOLD, 0.85 * a), lw * 1.2)
+			ci.draw_circle(g + Vector2(0.78, 0.55 + 0.25 * dr) * R, R * 0.07 * (1.0 - dr), Color(Kit.GOLD, (1.0 - dr) * a))
+			_quad(ci, g, R, 0.55, 0.62, 0.95, 0.82, gc.darkened(0.3))
+			for k in 3:
+				var fl: float = fposmod(t * 1.1 + float(k) * 0.33, 1.0)
+				ci.draw_line(g + Vector2(-0.35 + 0.35 * float(k), 0.62) * R, g + Vector2(-0.35 + 0.35 * float(k), 0.62 - 0.2 * fl) * R, Color(gc, (1.0 - fl) * a), lw)
 		"scav_post":
 			ci.draw_line(g + Vector2(-0.25, 0.85) * R, g + Vector2(-0.25, 0.0) * R, gc, lw * 1.3)
 			ci.draw_colored_polygon(_P(g, R, [Vector2(-0.6, 0.85), Vector2(0.1, 0.85), Vector2(-0.05, 0.6), Vector2(-0.45, 0.6)]), gc.darkened(0.2))

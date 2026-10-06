@@ -6,9 +6,10 @@ extends SceneTree
 
 const StKit := preload("res://tests/st_kit.gd")
 const StDirectional := preload("res://tests/st_directional.gd")
-const StGear := preload("res://tests/st_gear.gd")
+const StParts := preload("res://tests/st_parts.gd")
+const StPartVis := preload("res://tests/st_partvis.gd")
+const Parts := preload("res://Parts.gd")
 const StCoreWeapon := preload("res://tests/st_core_weapon.gd")
-const StGearVis := preload("res://tests/st_gearvis.gd")
 const StLoot := preload("res://tests/st_loot.gd")
 const StOutpost := preload("res://tests/st_outpost.gd")
 const StCoreLevel := preload("res://tests/st_corelevel.gd")
@@ -311,9 +312,9 @@ func _initialize() -> void:
 	_horde_stages()
 	StKit.run(self)
 	StDirectional.run(self)
-	StGear.run(self)
+	StParts.run(self)
+	StPartVis.run(self)
 	StCoreWeapon.run(self)
-	StGearVis.run(self)
 	StLoot.run(self)
 
 	if fails.is_empty():
@@ -341,7 +342,7 @@ func _meta_stages() -> void:
 	var m4: Dictionary = BaseMeta.normalize(v4)
 	_check("V2 pre-v5 saves reset to fresh v5 defaults (+ reset_v2)", int(m["version"]) == 5 and int(m["coins"]) == 0 and int(m["runs"]) == 0 and int(m["best_wave"]) == 0 and bool(m.get("reset_v2", false)) and int(m4["coins"]) == 0 and int(m4["scrap"]) == 0 and bool(m4.get("reset_v2", false)))
 	_check("V2 reset keeps audio settings", absf(float(m["settings"]["music"]) - 0.3) < 0.001 and bool(m["settings"]["mute"]))
-	_check("V2 removed blocks are gone (cards, crates, parts, cores, keys, core_cores, factory, legacy base)", not m4.has("keys") and not m4.has("core_cores") and not m4.has("cards") and not m4.has("crates") and not m4.has("parts") and not m4.has("cores") and not m4.has("factory") and not m4.has("slots") and not m4.has("unlocked") and not m4.has("gems"))
+	_check("V2 removed blocks are gone (cards, crates, V1 parts, cores, keys, core_cores, factory, legacy base; V3: a fresh 3-part starter kit)", not m4.has("keys") and not m4.has("core_cores") and not m4.has("cards") and not m4.has("crates") and Parts.count(m4) == 3 and not m4.has("cores") and not m4.has("factory") and not m4.has("slots") and not m4.has("unlocked") and not m4.has("gems"))
 	_check("V2 an empty dict is a new game (no reset banner)", not BaseMeta.normalize({}).has("reset_v2") and int(BaseMeta.normalize({})["version"]) == 5)
 	var v2: Dictionary = BaseMeta.normalize({})
 	v2["last_seen"] = NOW
@@ -857,7 +858,12 @@ func _mass_horde_world() -> void:
 ## need x1.25 a level, run cash x0.65, Core regen x0.25 under fire, armor
 ## floor 0.6, Elite contact x0.6, Sapper blast x4.5, mortar min range 0.8 -
 ## so every fingerprint run differs; re-recorded (was c59da9d4).
-const HORDE_FP_GOLDEN: String = "634268cfef2c62bc1b5a18db44b44b7b4d2d27e221037021170f59e36a59bf6e"
+## V3 parts (2026-10-06, deliberate): the Weapon is built from parts; the
+## fingerprint runs every base barrel through the parts save. The 10 frame
+## runs hash exactly as in P10 (single-barrel behaviour unchanged); two runs
+## are added - the Minigun barrel and a Legendary Receiver with two barrels
+## (multi-directional fire) - so the combined hash moves (was 634268cf).
+const HORDE_FP_GOLDEN: String = "fe3b906b387ce3e0d06dfc8f86ad07b00d54c5245f6e0a38d2da191a26409095"
 ## MASS_HORDE §Design content (designed mass waves, the shipping ruleset).
 func _mfresh(seed_value: int = 1234):
 	var S = TowerState.new()

@@ -1,51 +1,71 @@
 extends RefCounted
-## P4b selftest stage: the forged Weapon in the run. The equipped frame
-## decides the Core's attack and sheet (damage x item power), every frame
-## fires its own pattern and kills, every gear fx key changes the run the way
-## its text says, and manual aim retargets the Core (+crit, focus meter).
+## P4b / V3 selftest stage: the Weapon (parts) in the run. The installed
+## Barrel decides the Core's attack and sheet (damage x part power x the
+## Receiver), every barrel fires its own pattern and kills, a Legendary+
+## Receiver fires one barrel per sector, every part fx key changes the run
+## the way its text says, and manual aim retargets the Core (+crit, focus).
 ## `t` is the selftest runner (t._check).
 
 const TowerState := preload("res://TowerState.gd")
-const Gear := preload("res://Gear.gd")
+const Parts := preload("res://Parts.gd")
+const PartDB := preload("res://data/PartDB.gd")
 const FrameDB := preload("res://data/FrameDB.gd")
 const CoreDB := preload("res://data/CoreDB.gd")
 const BaseMeta := preload("res://BaseMeta.gd")
 const AffixDB := preload("res://data/AffixDB.gd")
-const ModuleDB := preload("res://data/ModuleDB.gd")
 
 
 static func run(t) -> void:
 	_sheet(t)
 	_frames(t)
 	_patterns(t)
+	_multi(t)
 	_fx_weapon(t)
 	_fx_body(t)
 	_aim(t)
 	_threat(t)
 
 
-## A run with `weapon` equipped (+ socketed modules), every cell open, no waves.
-static func _run(weapon: Dictionary, mods: Array = [], lvl: int = 1):
+## A save with `barrel` as barrel 0 and `parts` installed; chassis
+## (Receiver / Heart) parts in `parts` go in first so their slots open.
+static func _save(barrel: Dictionary, parts: Array = [], lvl: int = 1) -> Dictionary:
 	var sv: Dictionary = BaseMeta.default_save()
 	sv["core"]["lvl"] = lvl
-	var u: int = Gear.add_item(sv, weapon)
-	Gear.equip(sv, u)
-	for m in mods:
-		Gear.equip(sv, Gear.add_item(sv, m))
+	for m in parts:
+		if PartDB.is_chassis(String((m as Dictionary)["slot"])):
+			Parts.equip(sv, Parts.add_item(sv, m))
+	Parts.equip(sv, Parts.add_item(sv, barrel), 0)
+	for m in parts:
+		if not PartDB.is_chassis(String((m as Dictionary)["slot"])):
+			Parts.equip(sv, Parts.add_item(sv, m))
+	return sv
+
+
+## A run with that loadout, every cell open, no waves.
+static func _run(barrel: Dictionary, parts: Array = [], lvl: int = 1):
 	var S = TowerState.new()
-	S.setup(1234, BaseMeta.normalize(sv))
+	S.setup(1234, BaseMeta.normalize(_save(barrel, parts, lvl)))
 	for i in TowerState.N:
 		S.unlocked[i] = not TowerState.is_core_cell(i)
 	S.spawn_hold = true
 	return S
 
 
-static func _w(base: String, perks: Array = [], rar: String = "common", lvl: int = 1, brand: String = "standard") -> Dictionary:
-	return Gear.make("weapon", base, rar, lvl, perks, brand)
+## A barrel part (`base` is a PartDB barrel, or a FrameDB frame id).
+static func _w(base: String, perks: Array = [], rar: String = "common", lvl: int = 1) -> Dictionary:
+	return Parts.make(base if PartDB.has(base) else _barrel_of(base), rar, lvl, perks)
 
 
+static func _barrel_of(frame: String) -> String:
+	for b in PartDB.bases_of("barrel"):
+		if String(PartDB.get_def(String(b))["frame"]) == frame and not (PartDB.get_def(String(b)) as Dictionary).has("sheet"):
+			return String(b)
+	return "brl_autocannon"
+
+
+## Any other part.
 static func _m(base: String, perks: Array = [], rar: String = "common") -> Dictionary:
-	return Gear.make("module", base, rar, 1, perks)
+	return Parts.make(base, rar, 1, perks)
 
 
 static func _p(id: String, tier: int = 5, q: float = 0.5) -> Dictionary:
@@ -91,25 +111,32 @@ static func _sheet(t) -> void:
 	var S = TowerState.new()
 	S.setup(1234, BaseMeta.normalize({}))
 	var cw: Dictionary = _core(S)
-	t._check("P4 run: a fresh save fires the Standard Issue Autocannon = the base Core sheet", String(cw["attack"]) == "cannon" and is_equal_approx(float(cw["dmg"]), 10.0) and is_equal_approx(float(cw["rate"]), 1.25) and is_equal_approx(float(cw["range"]), 4.0 * TowerState.cpx()) and S.pfx.is_empty() and String(S.core_def["attack_name"]) == "Standard Issue Autocannon")
-	t._check("P4 run: the Core's body stays the CoreDB sheet", is_equal_approx(float(S.stats["max_hp"]), float(CoreDB.get_def()["hp"])) and is_equal_approx(float(S.stats["cash_ps"]), float(CoreDB.get_def()["cash"])))
+	var hp0: float = float(CoreDB.get_def()["hp"])
+	t._check("P4 run: a fresh save fires the starter Autocannon Barrel = the base Core sheet", String(cw["attack"]) == "cannon" and is_equal_approx(float(cw["dmg"]), 10.0) and is_equal_approx(float(cw["rate"]), 1.25) and is_equal_approx(float(cw["range"]), 4.0 * TowerState.cpx()) and S.pfx.is_empty() and String(S.core_def["attack_name"]) == "Autocannon Barrel")
+	t._check("P4 run: the Core's body stays the CoreDB sheet (starter Heart)", is_equal_approx(float(S.stats["max_hp"]), hp0) and is_equal_approx(float(S.stats["cash_ps"]), float(CoreDB.get_def()["cash"])))
 	var L = _run(_w("lance", [], "rare", 5))
 	var lw: Dictionary = _core(L)
-	t._check("P4 run: the equipped frame decides the attack; damage x item power", String(lw["attack"]) == "beam" and is_equal_approx(float(lw["dmg"]), 28.0 * 1.28 * 1.2 * 1.06) and is_equal_approx(float(lw["rate"]), 0.5) and is_equal_approx(float(lw["range"]), 5.5 * TowerState.cpx()))
-	var K = _run(_w("autocannon", [], "common", 1, "kessler"))
-	t._check("P4 run: a brand quirk lands in the run (Kessler +10% dmg, -5% rate)", is_equal_approx(float(_core(K)["dmg"]), 11.0) and is_equal_approx(float(_core(K)["rate"]), 1.25 * 0.95))
-	var O = _run(_w("autocannon"), [_m("overclock")])
-	t._check("P4 run: a socketed module lands in the run (Overclock +25% rate, -15% Core HP)", is_equal_approx(float(_core(O)["rate"]), 1.25 * 1.25) and is_equal_approx(float(O.stats["max_hp"]), 120.0 * 0.85))
+	t._check("P4 run: the installed barrel decides the attack; damage x part power", String(lw["attack"]) == "beam" and is_equal_approx(float(lw["dmg"]), 28.0 * 1.28 * 1.2 * 1.06) and is_equal_approx(float(lw["rate"]), 0.5) and is_equal_approx(float(lw["range"]), 5.5 * TowerState.cpx()))
+	var K = _run(_w("autocannon"), [_m("rcv_heavy")])
+	t._check("V3 run: the Receiver scales the barrel (Heavy: x1.2 dmg, x0.85 rate)", is_equal_approx(float(_core(K)["dmg"]), 12.0) and is_equal_approx(float(_core(K)["rate"]), 1.25 * 0.85))
+	var O = _run(_w("autocannon"), [_m("rcv_overdrive")])
+	t._check("V3 run: a Receiver's own fx lands in the run (Overdrive x1.1 dmg / rate, -8% Core HP)", is_equal_approx(float(_core(O)["dmg"]), 11.0) and is_equal_approx(float(_core(O)["rate"]), 1.25 * 1.1) and is_equal_approx(float(O.stats["max_hp"]), hp0 * 0.92))
+	var U = _run(_w("autocannon"), [_m("rcv_standard", [], "rare")])
+	t._check("V3 run: a rarer Receiver adds half its power to the barrel (Rare: x1.14)", is_equal_approx(float(_core(U)["dmg"]), 10.0 * (0.5 + 0.5 * 1.28)))
+	var H = _run(_w("autocannon"), [_m("hrt_fortress")])
+	t._check("V3 run: the Heart scales the Core body (Fortress: HP x1.25, regen x0.8)", is_equal_approx(float(H.stats["max_hp"]), hp0 * 1.25) and is_equal_approx(float(H.core_def["regen"]), float(CoreDB.get_def()["regen"]) * 0.8))
+	var HE = _run(_w("autocannon"), [_m("hrt_standard", [], "epic")])
+	t._check("V3 run: a rarer Heart raises HP by 15% of its power (Epic: x1.072)", is_equal_approx(float(HE.stats["max_hp"]), hp0 * (0.85 + 0.15 * 1.48)))
 	var sv: Dictionary = BaseMeta.default_save()
 	var snap: String = JSON.stringify(sv)
 	var R = TowerState.new()
 	R.setup(1, sv)
-	t._check("P4 run: setting up a run never writes the save's gear", JSON.stringify(sv) == snap)
+	t._check("P4 run: setting up a run never writes the save's parts", JSON.stringify(sv) == snap)
 	var bare: Dictionary = BaseMeta.default_save()
-	bare.erase("gear")
+	bare.erase("parts")
 	var B = TowerState.new()
 	B.setup(1, bare)
-	t._check("P4 run: a save without gear still fires the starter", String(_core(B)["attack"]) == "cannon" and not bare.has("gear"))
+	t._check("P4 run: a save without parts still fires the starter", String(_core(B)["attack"]) == "cannon" and not bare.has("parts"))
 
 
 # ------------------------------------------------------------------ frames
@@ -117,7 +144,8 @@ static func _sheet(t) -> void:
 static func _frames(t) -> void:
 	var bad: Array = []
 	var nokill: Array = []
-	for id in FrameDB.IDS:
+	for id in PartDB.bases_of("barrel"):
+		var atk: String = String(FrameDB.get_def(String(PartDB.get_def(String(id))["frame"]))["attack"])
 		var S = _run(_w(String(id)))
 		_ready(S)
 		var a: int = _body(S, TowerState.CENTER + Vector2(0, -100))
@@ -126,7 +154,7 @@ static func _frames(t) -> void:
 		var ev: Array = _fire(S)
 		var ca: Array = _evts(ev, "core_attack")
 		var dealt: float = _lost(S, a) + _lost(S, b) + _lost(S, c)
-		if ca.size() != 1 or String(ca[0]["kind"]) != String(FrameDB.get_def(String(id))["attack"]) or dealt <= 0.0 or _evts(ev, "shot").is_empty():
+		if ca.size() != 1 or String(ca[0]["kind"]) != atk or dealt <= 0.0 or _evts(ev, "shot").is_empty():
 			bad.append("%s %s %.1f" % [id, ca, dealt])
 		# field test: 8 weak bodies walking in die within 20 s of real ticks
 		var F = _run(_w(String(id)))
@@ -143,10 +171,10 @@ static func _frames(t) -> void:
 				alive += 1
 		if alive > 0:
 			nokill.append("%s %d alive" % [id, alive])
-	t._check("P4 frames: all 10 frames fire their own attack and damage bodies", bad.is_empty(), str(bad))
-	t._check("P4 frames: every frame clears 8 weak bodies walking in within 20 s", nokill.is_empty(), str(nokill))
+	t._check("V3 barrels: all %d barrels fire their frame's attack and damage bodies" % PartDB.bases_of("barrel").size(), bad.is_empty(), str(bad))
+	t._check("V3 barrels: every barrel clears 8 weak bodies walking in within 20 s", nokill.is_empty(), str(nokill))
 	var w20 = _run(_w("scatter"), [], 20)
-	t._check("P4 frames: Core level 20 upgrades the new frames too (Scatter +2 pellets)", int(_core(w20)["pellets"]) == 8 and int(_core(_run(_w("missiles"), [], 20))["missiles"]) == 5 and int(_core(_run(_w("rail"), [], 20))["rail_n"]) == 14)
+	t._check("P4 frames: Core level 20 upgrades the barrels too (Scatter +2 pellets)", int(_core(w20)["pellets"]) == 8 and int(_core(_run(_w("missiles"), [], 20))["missiles"]) == 5 and int(_core(_run(_w("rail"), [], 20))["rail_n"]) == 14)
 
 
 # ------------------------------------------------------------------ patterns
@@ -211,24 +239,95 @@ static func _patterns(t) -> void:
 	t._check("P4 Saw Launcher: ricochets through 5 bodies at x0.85 and shreds each", cut == 5 and is_equal_approx(_lost(W, int(ws[1])), 12.0 * 0.85) and W.en.shred_n[int(ws[0])] == 1 and _lost(W, int(ws[5])) == 0.0)
 
 
+# ------------------------------------------------------------------ V3 multi-barrel + variants
+
+## Keep only the Core's barrels firing; cooldowns ready.
+static func _ready_all(S) -> void:
+	S.stats["weapons"] = (S.stats["weapons"] as Array).filter(func(w: Variant) -> bool: return int((w as Dictionary)["slot"]) == TowerState.CORE_SLOT)
+	for k in TowerState.N:
+		S.cooldowns[k] = 0.0
+	S.barrel_cd = [0.0, 0.0, 0.0, 0.0]
+
+
+static func _fire_all(S) -> Array:
+	S.eh.rebuild()
+	for k in TowerState.N:
+		S.cooldowns[k] = 0.0
+	S.barrel_cd = [0.0, 0.0, 0.0, 0.0]
+	var ev: Array = []
+	S._fire(0.01, ev)
+	return ev
+
+
+static func _multi(t) -> void:
+	var C = TowerState.CENTER
+	# the Receiver's rarity decides how many barrels it holds
+	var lay: Array = []
+	for r in ["common", "epic", "legendary", "mythic", "exotic"]:
+		lay.append(int(PartDB.layout("receiver", String(r))["barrel"]))
+	t._check("V3 layout: barrels by Receiver rarity: Common-Epic 1, Legendary 2, Mythic 3, Exotic 4", lay == [1, 1, 2, 3, 4], str(lay))
+	# a Legendary Receiver with a 2nd barrel: two Core weapons, barrel 0 last
+	var sv: Dictionary = _save(_w("autocannon"), [_m("rcv_standard", [], "legendary")])
+	var b2: int = Parts.add_item(sv, _w("rail"))
+	Parts.equip(sv, b2)
+	var S = TowerState.new()
+	S.setup(1234, BaseMeta.normalize(sv))
+	S.spawn_hold = true
+	var cws: Array = (S.stats["weapons"] as Array).filter(func(w: Variant) -> bool: return int((w as Dictionary)["slot"]) == TowerState.CORE_SLOT)
+	t._check("V3 multi-barrel: each barrel is its own Core weapon (barrel 0 last, each with its own attack)", cws.size() == 2 and int((cws.back() as Dictionary)["barrel"]) == 0 and String((cws.back() as Dictionary)["attack"]) == "cannon" and String((cws[0] as Dictionary)["attack"]) == "rail" and int((cws[0] as Dictionary)["nbarrels"]) == 2)
+	t._check("V3 multi-barrel: the Core sheet lists every barrel; the name is the Receiver's", (S.core_def["barrels"] as Array).size() == 2 and String(S.core_def["attack_name"]) == String(Parts.equipped(sv, "receiver")[0]["name"]))
+	_ready_all(S)
+	var north: int = _body(S, C + Vector2(0, -80))
+	var south: int = _body(S, C + Vector2(0, 150))
+	var ev: Array = _fire_all(S)
+	_fire_all(S)   # barrel 1 aims opposite barrel 0's last target
+	t._check("V3 multi-barrel: two barrels cover opposite sectors (a body behind the Core is hit too)", _lost(S, north) > 0.0 and _lost(S, south) > 0.0 and _evts(ev, "core_attack").size() >= 1, "%.1f %.1f" % [_lost(S, north), _lost(S, south)])
+	var one = _run(_w("autocannon"))
+	_ready(one)
+	var n1: int = _body(one, C + Vector2(0, -80))
+	var s1: int = _body(one, C + Vector2(0, 150))
+	_fire(one)
+	_fire(one)
+	t._check("V3 multi-barrel: ... while one barrel only takes the nearest", _lost(one, n1) > 0.0 and _lost(one, s1) == 0.0)
+	# an extra barrel with nothing in its sector holds fire
+	var sv2: Dictionary = _save(_w("autocannon"), [_m("rcv_standard", [], "legendary")])
+	Parts.equip(sv2, Parts.add_item(sv2, _w("autocannon")))
+	var Q = TowerState.new()
+	Q.setup(1234, BaseMeta.normalize(sv2))
+	Q.spawn_hold = true
+	_ready_all(Q)
+	_body(Q, C + Vector2(0, -80))
+	_body(Q, C + Vector2(20, -100))
+	_fire_all(Q)
+	var qa: Array = _evts(_fire_all(Q), "core_attack")
+	t._check("V3 multi-barrel: an extra barrel with nothing in its own sector holds fire", qa.size() == 1, str(qa.size()))
+	# Minigun: light rounds spread over the nearest 3 around the target
+	var M = _run(_w("brl_minigun"))
+	_ready(M)
+	var m0: int = _body(M, C + Vector2(0, -80))
+	var m1: int = _body(M, C + Vector2(15, -90))
+	var m2: int = _body(M, C + Vector2(-15, -92))
+	var mfar: int = _body(M, C + Vector2(0, -200))
+	for k in 40:
+		_fire(M)
+	t._check("V3 Minigun: rounds spread over the nearest 3 bodies; a body 110 px past them is untouched", _lost(M, m0) > 0.0 and _lost(M, m1) > 0.0 and _lost(M, m2) > 0.0 and _lost(M, mfar) == 0.0)
+	t._check("V3 Minigun: 6 rounds a second, 2.6 each (x part power)", is_equal_approx(float(_core(M)["rate"]), 6.0) and is_equal_approx(float(_core(M)["dmg"]), 2.6))
+	# variants re-tune their frame
+	var BC = _run(_w("brl_burst"))
+	t._check("V3 Burst Carbine: an Autocannon variant firing 3 rounds at x0.45, no splash", String(_core(BC)["attack"]) == "cannon" and int(_core(BC)["barrels"]) == 3 and is_equal_approx(float(_core(BC)["dmg"]), 4.5) and float(_core(BC)["splash"]) == 0.0)
+	var CO = _run(_w("brl_coil"))
+	t._check("V3 Coilgun: a Rail variant, x2.6 rate, pierces 4", String(_core(CO)["attack"]) == "rail" and int(_core(CO)["rail_n"]) == 4 and is_equal_approx(float(_core(CO)["rate"]), 0.4 * 2.6))
+	var MO = _run(_w("brl_mortar"))
+	t._check("V3 Siege Mortar: a Slag variant, x3.2 dmg, x1.6 range, wide blast", String(_core(MO)["attack"]) == "slag" and is_equal_approx(float(_core(MO)["dmg"]), 16.0) and is_equal_approx(float(_core(MO)["range"]), 3.5 * 1.6 * TowerState.cpx()) and float(_core(MO)["splash"]) > 1.5 * TowerState.cpx())
+	var FR = _run(_w("brl_frost"))
+	t._check("V3 Frost Projector: a Flame cone that slows and never burns", float(_core(FR)["flame_burn"]) == 0.0 and float(FR.core_slow) > 0.0)
+
+
 # ------------------------------------------------------------------ weapon fx
 
 static func _fx_weapon(t) -> void:
 	var C = TowerState.CENTER
-	# multishot: Twin Feed fires a second volley at another body
-	var S0 = _run(_w("autocannon"))
-	var S1 = _run(_w("autocannon"), [_m("twin_feed")])
-	t._check("P4 fx multishot: Twin Feed = 1 extra volley", int(_core(S1)["multishot"]) == 1 and int(_core(S0)["multishot"]) == 0)
-	var mb: Array = []
-	for S in [S0, S1]:
-		_ready(S)
-		mb.append([_body(S, C + Vector2(0, -80)), _body(S, C + Vector2(0, 160))])
-	_fire(S0)
-	_fire(S1)
-	t._check("P4 fx multishot: one body hit without it, both with it", _lost(S0, mb[0][0]) > 0.0 and _lost(S0, mb[0][1]) == 0.0 and _lost(S1, mb[1][0]) > 0.0 and _lost(S1, mb[1][1]) > 0.0)
-	var P1 = _run(_w("pulse"), [_m("twin_feed")])
-	t._check("P4 fx multishot: on a Pulse Nova it adds a ring instead", int(_core(P1)["rings"]) == 2)
-	# echo: the first volley again (50% here) - counts ~half of 200 shots
+	# echo: a barrel perk fires the volley again at its chance
 	var E = _run(_w("autocannon", [_p("w_echo", 7, 1.0)]))
 	_ready(E)
 	_body(E, C + Vector2(0, -80), 1.0e9)
@@ -236,22 +335,22 @@ static func _fx_weapon(t) -> void:
 	for k in 200:
 		echoes += _evts(_fire(E), "core_echo").size()
 	t._check("P4 fx echo: the attack fires twice at its echo chance", is_equal_approx(float(_core(E)["echo"]), AffixDB.value("w_echo", 7, 1.0)) and echoes > int(200.0 * float(_core(E)["echo"]) * 0.5) and echoes < int(200.0 * float(_core(E)["echo"]) * 1.6) + 4, str(echoes))
-	# bounce: Ricochet hits 2 more bodies at x0.7, x0.49
-	var B = _run(_w("autocannon"), [_m("ricochet")])
+	# bounce: Ricochet Rounds hit 1 more body at x0.7
+	var B = _run(_w("autocannon"), [_m("amm_ricochet")])
 	_ready(B)
 	var b0: int = _body(B, C + Vector2(0, -80))
 	var b1: int = _body(B, C + Vector2(0, -140))
 	var b2: int = _body(B, C + Vector2(0, -200))
 	_fire(B)
-	t._check("P4 fx bounce: a hit bounces to 2 more bodies at x0.7 each", is_equal_approx(_lost(B, b0), 10.0) and is_equal_approx(_lost(B, b1), 7.0) and is_equal_approx(_lost(B, b2), 4.9))
-	# burn + slow on hit
-	var H = _run(_w("autocannon", [_p("w_burn")]), [_m("cryo_core")])
+	t._check("V3 ammo: Ricochet Rounds bounce a hit to 1 more body at x0.7", is_equal_approx(_lost(B, b0), 10.0) and is_equal_approx(_lost(B, b1), 7.0) and _lost(B, b2) == 0.0)
+	# burn (barrel perk) + slow (Cryo Rounds)
+	var H = _run(_w("autocannon", [_p("w_burn")]), [_m("amm_cryo")])
 	_ready(H)
 	var h0: int = _body(H, C + Vector2(0, -80))
 	_fire(H)
-	t._check("P4 fx burn / slow: Weapon hits ignite and slow", H.burning.has(h0) and is_equal_approx(H.en.burn_d[h0], 10.0 * float(H.core_burn)) and H.en.slow_t[h0] > 0.0 and H.en.slow_m[h0] < 1.0)
+	t._check("P4 fx burn / slow: hits ignite (perk) and slow (Cryo Rounds)", H.burning.has(h0) and is_equal_approx(H.en.burn_d[h0], 10.0 * float(H.core_burn)) and H.en.slow_t[h0] > 0.0 and H.en.slow_m[h0] < 1.0)
 	var H0 = _run(_w("autocannon"))
-	t._check("P4 fx: a quirk-free loadout has no on-hit hook (no per-hit cost)", not H0._core_hook)
+	t._check("P4 fx: a plain loadout has no on-hit hook (no per-hit cost)", not H0._core_hook)
 	# execute: a non-boss pushed below the threshold dies
 	var X = _run(_w("autocannon", [_p("w_execute", 5)]))
 	_ready(X)
@@ -260,49 +359,74 @@ static func _fx_weapon(t) -> void:
 	var x1: int = _body(X, C + Vector2(0, -80) + Vector2(400, 400), 999.0)
 	_fire(X)
 	t._check("P4 fx execute: a hit leaving a body under the threshold kills it", float(X.core_exec) > 0.06 and X.en.hp[x0] <= 0.0 and _lost(X, x1) == 0.0)
-	# crit damage, knockback
-	var D = _run(_w("autocannon"), [_m("crit_lens")])
-	t._check("P4 fx crit damage: Crit Lens raises the crit multiplier (x2 -> x2.3)", is_equal_approx(D.crit_mult(), 2.3) and is_equal_approx(_run(_w("autocannon")).crit_mult(), 2.0))
-	var KN = _run(_w("autocannon"), [_m("kinetic_ram")])
-	t._check("P4 fx knockback: Kinetic Ram +40% Weapon knockback", is_equal_approx(float(_core(KN)["knock_m"]), 1.4))
+	# crit damage (Hollow Points), knockback (Muzzle Brake on a Rare Receiver)
+	var D = _run(_w("autocannon"), [_m("amm_hollow")])
+	t._check("V3 ammo: Hollow Points raise the crit multiplier (x2 -> x2.3)", is_equal_approx(D.crit_mult(), 2.3) and is_equal_approx(_run(_w("autocannon")).crit_mult(), 2.0))
+	var KN = _run(_w("autocannon"), [_m("rcv_standard", [], "rare"), _m("mzl_brake")])
+	t._check("V3 muzzle: a Muzzle Brake +20% Weapon knockback (needs a Rare Receiver's muzzle slot)", is_equal_approx(float(_core(KN)["knock_m"]), 1.2))
+	# scope range on an Uncommon Receiver
+	var SC = _run(_w("autocannon"), [_m("rcv_standard", [], "uncommon"), _m("scp_long")])
+	t._check("V3 scope: a Long Optic +0.5 cells range", is_equal_approx(float(_core(SC)["range"]), 4.5 * TowerState.cpx()))
+	# power cell on a Rare Receiver vs the same Receiver bare
+	var PR0 = _run(_w("autocannon"), [_m("rcv_standard", [], "rare")])
+	var PR = _run(_w("autocannon"), [_m("rcv_standard", [], "rare"), _m("pow_overclock")])
+	t._check("V3 power: an Overclock Cell +15% rate", is_equal_approx(float(_core(PR)["rate"]), float(_core(PR0)["rate"]) * 1.15))
+	# armor-piercing rounds: +1 pierce
+	var AP = _run(_w("autocannon"), [_m("amm_ap")])
+	t._check("V3 ammo: Armor-Piercing Rounds +1 pierce and armor shred", int(_core(AP)["pierce"]) == 1 and float(AP.stats["shred"]) > 0.0)
+	# part fx cover the whole Weapon: a perk on a barrel buffs every barrel
+	var sv: Dictionary = _save(_w("autocannon", [_p("w_dmg", 3, 0.5)]), [_m("rcv_standard", [], "legendary")])
+	Parts.equip(sv, Parts.add_item(sv, _w("autocannon")))
+	var W2 = TowerState.new()
+	W2.setup(1, BaseMeta.normalize(sv))
+	var cws: Array = (W2.stats["weapons"] as Array).filter(func(w: Variant) -> bool: return int((w as Dictionary)["slot"]) == TowerState.CORE_SLOT)
+	t._check("V3 fx: part fx apply to the whole Weapon (a barrel's perk buffs both barrels)", cws.size() == 2 and is_equal_approx(float((cws[0] as Dictionary)["dmg"]), float((cws[1] as Dictionary)["dmg"])) and float((cws[0] as Dictionary)["dmg"]) > 10.0 * (0.5 + 0.5 * 1.72))
+	# multishot is gone from parts (owner: "remove multishot")
+	t._check("V3 fx: Twin Feed (multishot) never rolls on a part", not Parts.perk_pool("weapon").has("w_multishot") and int(_core(H0)["multishot"]) == 0)
 
 
 # ------------------------------------------------------------------ body fx
 
 static func _fx_body(t) -> void:
 	var base = _run(_w("autocannon"))
-	var S = _run(_w("autocannon"), [_m("shield_gen"), _m("siphon")])
-	t._check("P4 fx shield / lifesteal: Shield Generator +30 shield (and regen), Siphon +1% lifesteal", is_equal_approx(float(S.stats["shield_max"]) - float(base.stats["shield_max"]), 30.0) and float(S.stats["shield_regen"]) > float(base.stats["shield_regen"]) and is_equal_approx(float(S.stats["lifesteal"]) - float(base.stats["lifesteal"]), 0.01))
-	var D = _run(_w("autocannon"), [_m("regen_cell", [_p("m_dr", 5, 0.5)])])
+	var S = _run(_w("autocannon"), [_m("gen_shield"), _m("amm_siphon")])
+	t._check("V3 fx shield / lifesteal: a Shield Generator +25 shield (and shield regen), Siphon Rounds +0.2% lifesteal", is_equal_approx(float(S.stats["shield_max"]) - float(base.stats["shield_max"]), 25.0) and float(S.stats["shield_regen"]) > float(base.stats["shield_regen"]) and is_equal_approx(float(S.stats["lifesteal"]) - float(base.stats["lifesteal"]), 0.002))
+	var D = _run(_w("autocannon"), [_m("plt_basic", [_p("m_dr", 5, 0.5)])])
 	t._check("P4 fx damage reduction: a Dampener perk cuts damage taken", is_equal_approx(float(D.stats["dr"]), AffixDB.value("m_dr", 5, 0.5)))
 	D.hp = 100.0
 	base.hp = 100.0
 	D._core_damage(50.0, [], "core_hit", TowerState.CENTER)
 	base._core_damage(50.0, [], "core_hit", TowerState.CENTER)
 	t._check("P4 fx damage reduction: ... in the Core's damage intake", float(D.hp) > float(base.hp))
-	var XP = _run(_w("autocannon"), [_m("learning_chip")])
-	t._check("P4 fx XP: Learning Chip +10% run XP", is_equal_approx(float(XP.stats["xp_mult"]), float(base.stats["xp_mult"]) * 1.1))
-	var CO = _run(_w("autocannon"), [_m("regen_cell", [_p("m_coin", 5, 0.5)])])
+	var PL = _run(_w("autocannon"), [_m("plt_basic"), _m("gen_basic")])
+	t._check("V3 plating / generator: Steel Plating +10% HP, Repair Generator +15% regen", is_equal_approx(float(PL.stats["max_hp"]), float(base.stats["max_hp"]) * 1.1) and is_equal_approx(float(PL.stats["regen"]), float(base.stats["regen"]) * 1.15))
+	var XP = _run(_w("autocannon"), [_m("hrt_scholar")])
+	t._check("V3 heart: a Scholar Heart +8% run XP", is_equal_approx(float(XP.stats["xp_mult"]), float(base.stats["xp_mult"]) * 1.08))
+	var CO = _run(_w("autocannon"), [_m("plt_basic", [_p("m_coin", 5, 0.5)])])
 	t._check("P4 fx run coins: Golden Touch raises the run's coin multiplier", is_equal_approx(float(CO.coin_mult), float(base.coin_mult) * (1.0 + AffixDB.value("m_coin", 5, 0.5))))
-	var SC = _run(_w("autocannon"), [_m("regen_cell", [_p("m_scrap", 7, 1.0)])])
+	var SC = _run(_w("autocannon"), [_m("plt_basic", [_p("m_scrap", 7, 1.0)])])
 	var bs: int = _body(SC, TowerState.CENTER + Vector2(0, -80), 999.0, "boss")
 	var b0: int = _body(base, TowerState.CENTER + Vector2(0, -80), 999.0, "boss")
 	SC._roll_drops(bs, [])
 	base._roll_drops(b0, [])
 	t._check("P4 fx Scrap find: Salvager raises boss Scrap", int(SC.loot["scrap"]) == int(round(float(base.loot["scrap"]) * (1.0 + AffixDB.value("m_scrap", 7, 1.0)))) and int(SC.loot["scrap"]) > int(base.loot["scrap"]))
-	var LK = _run(_w("autocannon"), [_m("fortune_chip")])
-	t._check("P4 fx luck: Fortune Chip +1 draft luck", int(LK.luck) == int(base.luck) + 1)
+	var LK = _run(_w("autocannon"), [_m("hrt_standard", [], "epic"), _m("ant_draft")])
+	t._check("V3 antenna: a Scout Antenna +1 draft luck (needs an Epic Heart's antenna slot)", int(LK.luck_now()) == int(base.luck_now()) + 1)
+	var CA = _run(_w("autocannon"), [_m("hrt_standard", [], "uncommon"), _m("cap_basic")])
+	var CA0 = _run(_w("autocannon"), [_m("hrt_standard", [], "uncommon")])
+	t._check("V3 capacitor: a Cash Capacitor +10% Core cash", is_equal_approx(float(CA.stats["cash_ps"]), float(CA0.stats["cash_ps"]) * 1.1))
+	# only the slots the chassis opens count
 	var sv: Dictionary = BaseMeta.default_save()
-	for id in ["shield_gen", "siphon"]:
-		Gear.equip(sv, Gear.add_item(sv, _m(String(id))))
-	((sv["gear"]["equipped"] as Dictionary)["sockets"] as Array).append(Gear.add_item(sv, _m("crit_lens")))   # a 3rd socket the Core hasn't opened
+	var cu: int = Parts.add_item(sv, _m("cap_basic"))
+	var why: String = Parts.why_equip(sv, cu)
+	((sv["parts"]["equipped"] as Dictionary)["capacitor"] as Array).append(cu)   # forced into a slot a Common Heart lacks
 	var L1 = TowerState.new()
 	L1.setup(1, sv)
-	t._check("P4 fx: only the sockets the Core level has opened count (2 at L1)", is_equal_approx(L1.crit_mult(), 2.0) and float(L1.stats["shield_max"]) >= 30.0 and Gear.modules(sv).size() == 2)
-	sv["core"]["lvl"] = 5
+	t._check("V3 slots: a Common Heart has no Capacitor slot (install refused, a forced one does nothing)", why.contains("rarer Heart") and is_equal_approx(float(L1.stats["cash_ps"]), float(base.stats["cash_ps"])) and Parts.equipped(sv, "capacitor").is_empty())
+	Parts.equip(sv, Parts.add_item(sv, _m("hrt_standard", [], "uncommon")))
 	var L5 = TowerState.new()
 	L5.setup(1, sv)
-	t._check("P4 fx: ... and Core L5 opens the 3rd", is_equal_approx(L5.crit_mult(), 2.3))
+	t._check("V3 slots: ... an Uncommon Heart opens it", Parts.equipped(sv, "capacitor").size() == 1 and float(L5.stats["cash_ps"]) > float(base.stats["cash_ps"]))
 
 
 # ------------------------------------------------------------------ manual aim
