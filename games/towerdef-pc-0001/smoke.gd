@@ -61,7 +61,6 @@ func _initialize() -> void:
 ## One run with the minimal bot; returns {over, wave, kills, coins, time, fp}.
 static func play(save: Dictionary, seed_value: int, max_s: float = MAX_S) -> Dictionary:
 	var S = TowerState.new()
-	S.mass = true
 	S.mass_lod_cap = LOD
 	S.setup(seed_value, save, NOW0)
 	var t: float = 0.0

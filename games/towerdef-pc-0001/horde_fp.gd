@@ -1,7 +1,10 @@
 extends SceneTree
-## HORDE Phase-1 determinism golden: 120 s seeded sims (one per Core attack —
-## V2: the one Core plus the Slag / Beam / Pulse attack sheets that become
-## Weapon frames in P4 — a full weapon/hut/wall board, waves 12+) fingerprinted with SHA-256 over
+## HORDE determinism golden: 120 s seeded MASS sims (V2 P3d: the designed mass
+## horde is the only ruleset), one per Core attack — the one Core plus the Slag /
+## Beam / Pulse attack sheets that become Weapon frames in P4 — on two boards:
+## an open weapon/hut/wall board (cannon, slag) and the same board with the
+## Core sealed by a Wall ring (beam, pulse: the squeeze path), waves 14+,
+## fingerprinted with SHA-256 over
 ## (wave, kills, cash, hp, every enemy eid/pos/hp) once per sim second, plus
 ## Orbital auto-aim (_densest). Prints HORDE FP <core> <hash> and a combined
 ## hash. selftest.gd embeds the combined value recorded from the Dict
@@ -14,11 +17,15 @@ const BOARD_RC: Array = [[-5, 0, "gun"], [-7, 2, "mortar"], [-5, 5, "tesla"], [-
 	[-4, 3, "hut_infantry"], [-3, 6, "hut_sapper"], [-8, 7, "railgun"], [-3, 0, "barricade"]]
 
 
-static func board() -> Dictionary:
+## `sealed` adds Walls on the 16 cells touching the Core (bodies squeeze through).
+static func board(sealed: bool = false) -> Dictionary:
 	var TS = load("res://TowerState.gd")
 	var out: Dictionary = {}
 	for e in BOARD_RC:
 		out[int(TS.cell(int(e[0]), int(e[1])))] = String(e[2])
+	if sealed:
+		for c in TS.CORE_RING:
+			out[int(c)] = "barricade"
 	return out
 ## Attack sheets swapped onto the Core (V2: one Core; these are P4 frames).
 const SHEETS: Dictionary = {
@@ -63,7 +70,7 @@ static func run_one(core: String) -> String:
 	S.setup(4242, save, 1_700_000_000)
 	if SHEETS.has(core):
 		S.core_def = SHEETS[core]
-	var bd: Dictionary = board()
+	var bd: Dictionary = board(core == "beam" or core == "pulse")
 	for i in bd.keys():
 		S.slots[int(i)] = {"id": String(bd[i]), "perm": 0, "run": 2}
 		S.unlocked[int(i)] = true
@@ -82,14 +89,17 @@ static func run_one(core: String) -> String:
 		if S.pending_place != "":
 			S.cancel_place()
 		S.hp = maxf(S.hp, 5.0)
-		if k == 600:   # a 150-body flood at deterministic positions (cap 220)
+		if k == 600:   # a 150-body flood at deterministic positions
 			var KS: Array = ["drone", "skitter", "hauler", "ranged", "splitter", "elite"]
 			var hm: float = S.hp_mult
-			S.hp_mult = 0.08   # fragile flood: kills, overkill carry, splits
+			var em: float = S.enemy_hp_mod
+			S.hp_mult = 0.08   # fragile flood: kills, overkill carry, splits (elites: classic curve)
+			S.enemy_hp_mod = 0.08   # mass bodies
 			for j in 150:
 				var a: float = TAU * float(j) / 150.0
 				S._spawn(String(KS[j % KS.size()]), [], S.CENTER + Vector2.from_angle(a) * (230.0 + float(j % 7) * 30.0), false)
 			S.hp_mult = hm
+			S.enemy_hp_mod = em
 		S.tick(0.05)
 		if k % 20 == 19:
 			buf.put_32(S.wave)

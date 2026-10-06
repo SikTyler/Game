@@ -223,6 +223,27 @@ public partial class HordeWorld : RefCounted
 
 	static double[] Head(double[] a, int n) { var o = new double[n]; Array.Copy(a, o, n); return o; }
 
+	// V2 P3d: the per-step mirror refresh only pulls what the rules read
+	// (positions, knockback velocity, slows); the rest is pulled on demand.
+	public Godot.Collections.Array PullHot(int n)
+	{
+		n = Math.Min(n, cap);
+		var pos = new Vector2[n];
+		var vel = new Vector2[n];
+		for (int s = 0; s < n; s++)
+		{
+			pos[s] = new Vector2((float)px[s], (float)py[s]);
+			vel[s] = new Vector2((float)vx[s], (float)vy[s]);
+		}
+		return new Godot.Collections.Array { pos, vel, Head(slowT, n), Head(slowM, n) };
+	}
+
+	public Godot.Collections.Array PullCold(int n)
+	{
+		n = Math.Min(n, cap);
+		return new Godot.Collections.Array { Head(curS, n), Head(shockT, n), Head(hitT, n), Head(tauntT, n), Head(atkCd, n), Head(fireCd, n) };
+	}
+
 	// Positions only (the per-step mirror the rules read most).
 	public Vector2[] Positions()
 	{
@@ -732,46 +753,23 @@ public partial class HordeWorld : RefCounted
 			// ---- pass 3: small-small pairs (3x3 cells, at most kmax overlapping
 			// neighbours per body), in cell-sorted order; each body only writes
 			// its own accumulators, so the visiting order cannot change results.
-			for (int k = 0; k < m; k++)
+			// V2 P3d: that independence makes the pass safely parallel (each body
+			// is summed by exactly one worker in a fixed order: bit-identical to
+			// the serial pass) - large crowds split into chunks across cores.
+			pairBigR = bigR; pairDt = dt;
+			if (m >= PAR_MIN)
 			{
-				int i = sIdx[k];
-				double ri = sR[k];
-				if (ri > bigR) continue;
-				double xi = sX[k], yi = sY[k], mi = ri * ri;
-				double dxi = dirX[i], dyi = dirY[i];
-				double vdes = want[i] / dt;
-				double ax = 0.0, ay = 0.0, fr0 = 0.0;
-				int c = cellOf[i];
-				int hx = c % hgw, hy = c / hgw;
-				int xa = hx > 0 ? hx - 1 : 0, xb = hx < hgw - 1 ? hx + 1 : hgw - 1;
-				int seen = 0;
-				for (int yy = (hy > 0 ? hy - 1 : 0); yy <= (hy < hgw - 1 ? hy + 1 : hgw - 1) && seen < kmax; yy++)
+				int chunks = Math.Max(1, Math.Min(64, m / 256));
+				int per = (m + chunks - 1) / chunks;
+				System.Threading.Tasks.Parallel.For(0, chunks, ch =>
 				{
-					int t1 = cstart[yy * hgw + xb + 1];
-					for (int t = cstart[yy * hgw + xa]; t < t1; t++)
-					{
-						double rj = sR[t];
-						if (rj > bigR) continue;
-						double dx = xi - sX[t], dy = yi - sY[t];
-						double rr = ri + rj;
-						double d2 = dx * dx + dy * dy;
-						if (d2 >= rr * rr) continue;
-						int j = sIdx[t];
-						if (j == i) continue;
-						double l = Math.Sqrt(d2);
-						double ux, uy;
-						if (l > 1e-4) { ux = dx / l; uy = dy / l; }
-						else { ux = i > j ? 1.0 : -1.0; uy = 0.0; l = 0.0; }
-						double ov = rr - l;
-						double mj = rj * rj;
-						double w = mj / (mi + mj);
-						ax += ux * ov * w; ay += uy * ov * w;
-						double f = -(dxi * ux + dyi * uy);
-						if (f > 0.0) fr0 += f * ov / rr * w * Yield(sVX[t] * dxi + sVY[t] * dyi, vdes);
-						if (++seen >= kmax) break;
-					}
-				}
-				pushX[i] += ax; pushY[i] += ay; front[i] += fr0;
+					int k1 = Math.Min(m, (ch + 1) * per);
+					for (int k = ch * per; k < k1; k++) PairRow(k);
+				});
+			}
+			else
+			{
+				for (int k = 0; k < m; k++) PairRow(k);
 			}
 		}
 		long tP3 = sw.Elapsed.Ticks;
@@ -883,6 +881,55 @@ public partial class HordeWorld : RefCounted
 		return acts.ToArray();
 	}
 
+	const int PAR_MIN = 4096;
+	double pairBigR = 8.0, pairDt = 0.05;
+
+	// Pass-3 row for the k-th body in cell order (reads step-start copies only,
+	// writes only body i's own push / front accumulators).
+	[MethodImpl(MethodImplOptions.AggressiveOptimization)]
+	void PairRow(int k)
+	{
+		int i = sIdx[k];
+		double ri = sR[k];
+		double bigR = pairBigR;
+		if (ri > bigR) return;
+		double xi = sX[k], yi = sY[k], mi = ri * ri;
+		double dxi = dirX[i], dyi = dirY[i];
+		double vdes = want[i] / pairDt;
+		double ax = 0.0, ay = 0.0, fr0 = 0.0;
+		int c = cellOf[i];
+		int hx = c % hgw, hy = c / hgw;
+		int xa = hx > 0 ? hx - 1 : 0, xb = hx < hgw - 1 ? hx + 1 : hgw - 1;
+		int seen = 0;
+		for (int yy = (hy > 0 ? hy - 1 : 0); yy <= (hy < hgw - 1 ? hy + 1 : hgw - 1) && seen < kmax; yy++)
+		{
+			int t1 = cstart[yy * hgw + xb + 1];
+			for (int t = cstart[yy * hgw + xa]; t < t1; t++)
+			{
+				double rj = sR[t];
+				if (rj > bigR) continue;
+				double dx = xi - sX[t], dy = yi - sY[t];
+				double rr = ri + rj;
+				double d2 = dx * dx + dy * dy;
+				if (d2 >= rr * rr) continue;
+				int j = sIdx[t];
+				if (j == i) continue;
+				double l = Math.Sqrt(d2);
+				double ux, uy;
+				if (l > 1e-4) { ux = dx / l; uy = dy / l; }
+				else { ux = i > j ? 1.0 : -1.0; uy = 0.0; l = 0.0; }
+				double ov = rr - l;
+				double mj = rj * rj;
+				double w = mj / (mi + mj);
+				ax += ux * ov * w; ay += uy * ov * w;
+				double f = -(dxi * ux + dyi * uy);
+				if (f > 0.0) fr0 += f * ov / rr * w * Yield(sVX[t] * dxi + sVY[t] * dyi, vdes);
+				if (++seen >= kmax) break;
+			}
+		}
+		pushX[i] += ax; pushY[i] += ay; front[i] += fr0;
+	}
+
 	// Mass-weighted overlap push between i and j (Jacobi: step-start positions).
 	// `both` applies the mirrored push to j too (big-body pre-pass).
 	// How much a body ahead blocks: 1 when it is not moving along my direction,
@@ -976,6 +1023,19 @@ public partial class HordeWorld : RefCounted
 			n++;
 		}
 		return n;
+	}
+
+	// SlowRadius returning the slowed slots (ascending), so the GDScript mirror
+	// can be patched without one SetSlow call per body (V2 P3d Wall auras).
+	public int[] SlowIn(double x, double y, double r, double t, double m)
+	{
+		var l = Circle(x, y, r, false);
+		foreach (int s in l)
+		{
+			slowM[s] = Math.Min(slowT[s] > 0.0 ? slowM[s] : 1.0, m);
+			slowT[s] = Math.Max(slowT[s], t);
+		}
+		return l.ToArray();
 	}
 
 	// ================================================================ queries (living bodies, ascending slot)

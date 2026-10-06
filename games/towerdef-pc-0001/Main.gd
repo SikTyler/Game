@@ -374,8 +374,6 @@ func start_run(seed_override: int = 0) -> void:
 		return
 	BaseMeta.select_tier(save, view_tier)
 	S = TowerState.new()
-	S.mass = true   # MASS_HORDE §D3: designed mass waves (100s -> 1,000s -> 10,000s)
-	S.horde_mult = TuneRef.horde_mult()   # legacy split knob (§D9): 1 unless Tune legacy_horde_mult
 	_clear_fx()
 	run_missions = 0
 	run_loot = []
@@ -859,7 +857,7 @@ func _handle(events: Array) -> void:
 			"core_hit":
 				juice.add_trauma(0.22)
 				core_flash()
-			# HORDE aggregates (horde_mult > 1): one summary per substep.
+			# HORDE aggregates: one summary per substep.
 			"hits":
 				for h in ev["top"]:
 					var hd: Dictionary = h

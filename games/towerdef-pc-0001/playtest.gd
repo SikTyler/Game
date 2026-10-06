@@ -192,7 +192,6 @@ const H8_WEAPONS: Array = ["gun", "mortar", "tesla", "flak", "railgun", "frost"]
 
 static func _mass_S(seed_value: int, save: Dictionary = {}):
 	var S = TowerState.new()
-	S.mass = true
 	S.setup(seed_value, save if not save.is_empty() else BaseMeta.default_save())
 	return S
 
@@ -242,7 +241,7 @@ static func job_mass(seed0: int) -> Dictionary:
 	var a50: Dictionary = S2.wave_acct.get(50, {})
 	var queued: int = planned - S2.plan_idx
 	var spawned50: int = int(a50.get("spawned", 0))
-	var share_ok: bool = TuneRef.horde_mult() == 1 and S2.horde_mult == 1
+	var share_ok: bool = true   # V2 P3d: no legacy split knob; every body is a whole designed unit
 	var hp_ok: bool = S2.en.count() > 0
 	var n_chk: int = 0
 	for sl in S2.en.order:
@@ -905,8 +904,6 @@ static func _place_cell(S, id: String) -> int:
 
 static func run_once(save: Dictionary, policy: String, seed_value: int) -> Dictionary:
 	var S = TowerState.new()
-	S.mass = true   # MASS_HORDE: the bot plays the shipped designed mass waves (Main does the same)
-	S.horde_mult = preload("res://Tune.gd").horde_mult()   # legacy split knob: 1 (off) as shipped
 	S.mass_lod_cap = BOT_LOD_CAP   # harness-only runtime cap (waves above it compress; see BOT_LOD_CAP)
 	S.setup(seed_value, save)
 	var t: float = 0.0
@@ -1041,8 +1038,6 @@ const LAB_W: Dictionary = {"grid": 0.25, "dmg": 1.0, "hp": 1.0, "coin": 1.0, "sp
 ## One run on `save` (mutated: banks, missions). Returns run facts.
 static func camp_run(save: Dictionary, policy: String, seed_value: int, now: int, perk_pref: String = "", feed_missions: bool = true, opts: Dictionary = {}) -> Dictionary:
 	var S = TowerState.new()
-	S.mass = true   # MASS_HORDE: the bot plays the shipped designed mass waves (Main does the same)
-	S.horde_mult = preload("res://Tune.gd").horde_mult()   # legacy split knob: 1 (off) as shipped
 	S.mass_lod_cap = BOT_LOD_CAP   # harness-only runtime cap (waves above it compress; see BOT_LOD_CAP)
 	S.setup(seed_value, save, now, opts)
 	var t: float = 0.0

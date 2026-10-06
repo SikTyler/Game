@@ -86,7 +86,7 @@ static func _roster_scan(S) -> Dictionary:
 	for k3 in out.keys():
 		var r3: Dictionary = out[k3]
 		if float(r3["hp"]) <= 0.0:
-			if bool(S.mass) and not ["boss", "elite"].has(String(k3)):
+			if not ["boss", "elite"].has(String(k3)):
 				r3["hp"] = float(EnemyDB.mass_def(String(k3))["hp"]) * float(S.mass_hp_scale(String(k3), int(S.wave)))
 			else:
 				r3["hp"] = float(EnemyDB.get_def(String(k3)).get("hp", 1.0)) * float(S.scale()) * float(S.hp_mult)
@@ -173,17 +173,16 @@ static func draw(m, x: float, w: float, y0: float, y1: float) -> void:
 	Kit.head(m, "ENEMIES  ·  wave %d" % int(S.wave), Vector2(x, y + 16), w)
 	m.stat_tips.append([Rect2(x, y, w, 22), "Enemy types in this round (alive now or still to spawn).\nStars = threat (HP scaling this wave; elites +1, bosses +2). NEW = first seen this run."])
 	y += 26.0
-	if bool(S.mass):
-		# The fight in four numbers: bodies alive, arriving, dying, reaching the Core.
-		var fl: Dictionary = flow(S)
-		var cols: Array = [["ALIVE", Kit.fmt(float(fl["alive"])), Kit.ENEMY], ["IN/s", Kit.fmt(float(fl["in"])), Kit.TEXT], ["KILLS/s", Kit.fmt(float(fl["kills"])), Kit.GREEN], ["LEAK/s", "%.1f" % float(fl["leak"]), Kit.ENEMY if float(fl["leak"]) > 0.05 else Kit.DIM]]
-		var cw: float = w / 4.0
-		for ci in 4:
-			var c: Array = cols[ci]
-			Kit.th(m, String(c[0]), Vector2(x + cw * float(ci), y + 12), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, cw)
-			Kit.th(m, String(c[1]), Vector2(x + cw * float(ci), y + 32), 18, c[2], HORIZONTAL_ALIGNMENT_LEFT, cw)
-		m.stat_tips.append([Rect2(x, y, w, 38), "The horde in four numbers (last ~3 s):\nALIVE bodies on the field · IN/s spawning · KILLS/s you deal · LEAK/s reaching the Core (a leaked body pays no cash).\nKeep KILLS/s above IN/s or the tide piles up on the Core."])
-		y += 44.0
+	# The fight in four numbers: bodies alive, arriving, dying, reaching the Core.
+	var fl: Dictionary = flow(S)
+	var cols: Array = [["ALIVE", Kit.fmt(float(fl["alive"])), Kit.ENEMY], ["IN/s", Kit.fmt(float(fl["in"])), Kit.TEXT], ["KILLS/s", Kit.fmt(float(fl["kills"])), Kit.GREEN], ["LEAK/s", "%.1f" % float(fl["leak"]), Kit.ENEMY if float(fl["leak"]) > 0.05 else Kit.DIM]]
+	var cw: float = w / 4.0
+	for ci in 4:
+		var c: Array = cols[ci]
+		Kit.th(m, String(c[0]), Vector2(x + cw * float(ci), y + 12), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, cw)
+		Kit.th(m, String(c[1]), Vector2(x + cw * float(ci), y + 32), 18, c[2], HORIZONTAL_ALIGNMENT_LEFT, cw)
+	m.stat_tips.append([Rect2(x, y, w, 38), "The horde in four numbers (last ~3 s):\nALIVE bodies on the field · IN/s spawning · KILLS/s you deal · LEAK/s reaching the Core (a leaked body pays no cash).\nKeep KILLS/s above IN/s or the tide piles up on the Core."])
+	y += 44.0
 	var rh: float = 34.0
 	var kinds: Array = []
 	for k in ORDER:
@@ -207,7 +206,7 @@ static func draw(m, x: float, w: float, y0: float, y1: float) -> void:
 			_star(m, Vector2(x + 152 + float(j) * 13.0, ry + 10), 6.0, Kit.GOLD if j < st else Color(1, 1, 1, 0.15))
 		Kit.t(m, "HP %s" % Kit.fmt(float(r["hp"])), Vector2(x + 152, ry + 31), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, 90)
 		Kit.t(m, "%d%s" % [int(r["n"]), (" +%d" % int(r["q"])) if int(r["q"]) > 0 else ""], Vector2(x + w, ry + 18), 15, Kit.ENEMY, HORIZONTAL_ALIGNMENT_RIGHT, 80)
-		var d: Dictionary = EnemyDB.mass_def(k) if bool(S.mass) else EnemyDB.get_def(k)
+		var d: Dictionary = EnemyDB.mass_def(k)
 		m.stat_tips.append([Rect2(x, ry, w, rh), "%s  ·  %d star%s\n%s\nHP %s  ·  speed %d  ·  hits for %s\n%d alive, %d still to spawn" % [String(NAMES.get(k, k)), st, "" if st == 1 else "s", String(TRAITS.get(k, "")), Kit.fmt(float(r["hp"])), int(float(d.get("spd", 0.0))), Kit.fmt(float(d.get("dmg", 0.0)) * float(S.hp_mult)), int(r["n"]), int(r["q"])]])
 	if kinds.size() > room:
 		Kit.t(m, "+%d more types" % (kinds.size() - room), Vector2(x + w, y0 + 16), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_RIGHT, 120)

@@ -110,7 +110,8 @@ func _initialize() -> void:
 	var ev: Array = S.tick(0.05)
 	var kinds: Array = ev.map(func(e): return e["t"])
 	_check("core fires a shot", kinds.has("shot"))
-	_check("kill event + cash + xp", kinds.has("kill") and S.cash >= 1.0 and S.xp >= 1.0 and S.kills == 1)
+	# V2 P3d: per-body kill events aggregate into one "kills" summary per substep
+	_check("kills summary + cash + xp", kinds.has("kills") and S.cash >= 1.0 and S.xp >= 1.0 and S.kills == 1)
 
 	# --- Stage 4: enemy reaches the core and damages it ----------------------
 	S = _fresh()
@@ -563,18 +564,21 @@ func _horde_p34() -> void:
 	var d0: float = S.en.pos[0].distance_to(S.en.pos[1])
 	S._move_enemies(0.05, [])
 	_check("P3 separation pushes overlapping bodies apart (deterministic)", S.en.pos[0].distance_to(S.en.pos[1]) > d0)
-	# contact rule: a body behind the front rank never hits the Core
+	# contact rule (MASS §D2 pressure): the front rank and the pile within the
+	# press band behind it hit the Core; bodies beyond the band do not.
 	S = _fresh()
 	S.spawn_hold = true
 	var f: Dictionary = _enemy("drone", TowerState.CENTER + Vector2(0, TowerState.STOP_R), 50.0)
 	var r: Dictionary = _enemy("drone", TowerState.CENTER + Vector2(0, TowerState.STOP_R + 40.0), 50.0)
+	var far: Dictionary = _enemy("drone", TowerState.CENTER + Vector2(0, TowerState.STOP_R + 120.0), 50.0)
 	f["spd"] = 0.0
 	r["spd"] = 0.0
-	S.set_enemies([f, r])
+	far["spd"] = 0.0
+	S.set_enemies([f, r, far])
 	var cev: Array = []
 	S._move_enemies(0.05, cev)
 	var hits: Array = _evts(cev, "core_hit")
-	_check("P3 contact rule: only the touching front rank attacks the Core", hits.size() == 1)
+	_check("P3 contact rule: the front rank + the pile within the press band attack the Core, not beyond", hits.size() == 2)
 	# knockback: impulse, friction, mass resists, bosses immune
 	S = _fresh()
 	S.spawn_hold = true
@@ -794,11 +798,13 @@ func _mass_horde_world() -> void:
 ## 2x2 Mortar / Railgun, flow cells derived from the cell size, sticky face
 ## slides; the fingerprint board was re-laid on the new grid, so the golden
 ## was re-recorded from this build (was c9854a03).
-const HORDE_FP_GOLDEN: String = "e5a407bd2e4e65145a86d0f657e533e6e75612e396a0eaf5aee02e04839a0402"
+## V2 P3d (deliberate): the classic ruleset is gone - the fingerprint runs
+## designed mass waves (wave 14 plan, a fragile 150-body flood), beam / pulse on
+## a Wall-sealed board (the squeeze path); re-recorded (was e5a407bd).
+const HORDE_FP_GOLDEN: String = "ebffce97b4c320ac7be5b7a64cc76b2a0d8aedd084e5c54cf270db8a9b81e214"
 ## MASS_HORDE §Design content (designed mass waves, the shipping ruleset).
 func _mfresh(seed_value: int = 1234):
 	var S = TowerState.new()
-	S.mass = true
 	S.setup(seed_value, BaseMeta.normalize({}))
 	return S
 
@@ -818,7 +824,6 @@ func _mass_content_stages() -> void:
 		kinds20[String((e as Dictionary)["kind"])] = true
 	_check("MASS plan w20: full roster (sapper, shield, splitter, hauler, elites) + boss flag", kinds20.has("sapper") and kinds20.has("shield") and kinds20.has("splitter") and kinds20.has("hauler") and kinds20.has("elite") and bool(p20["boss"]))
 	_check("MASS T3: more bodies than T1 and sappers from wave 1", EnemyDB.tier_b(3) > EnemyDB.tier_b(1) and EnemyDB.mass_mix(1, 3).has("sapper") and not EnemyDB.mass_mix(1, 1).has("sapper"))
-	_check("MASS H3: the legacy split knob ships off (Tune.horde_mult() == 1)", TuneRef.horde_mult() == 1)
 	# ---- H4 + H3: spawned bodies carry designed HP, never a share
 	var ev: Array = []
 	for i in 160:
@@ -1006,62 +1011,26 @@ func _horde_stages() -> void:
 	# order (was spawn order from the retired GDScript hash); still every body.
 	_check("HORDE hash damage(): every live body in radius, slot order", hits == [0, 1, 2])
 	_check("HORDE density counts exact neighbours", S.eh.density(TowerState.CENTER + Vector2(0, -300), 1.0) == 1)
-	# ---- FB1: per-body horde loot is common, low value and capped per wave
-	var SL = _fresh()
-	SL.horde_mult = 4
-	SL.wave = 2
-	var c0: float = SL.coins_run
-	# FB2 (deliberate): drops are now paid from a pool funded by the killed
-	# bodies' own coins (per-wave loot conserved), not on top up to 3 x wave.
-	SL.horde_loot_pool = 6.0
-	for _i in range(20):
-		SL._horde_loot()
-	var dropped: float = SL.coins_run - c0
-	for _i in range(2000):
-		SL._horde_loot()
-	_check("FB1 horde loot: drops happen and cap at 3 x wave per wave", SL.horde_loot_total > 0.0 and is_equal_approx(SL.coins_run - c0, 6.0))
-	_check("FB2 horde loot: common low-value drops (<= 0.25 each) never exceed the pool", dropped <= 20.0 * 0.25 + 0.001 and SL.horde_loot_pool >= 0.0)
-	SL.horde_loot_pool = 1.3
-	var c1: float = SL.coins_run
-	SL._sweep_horde_loot()
-	_check("FB2 horde loot: wave end sweeps the pool (value conserved)", is_equal_approx(SL.coins_run - c1, 1.3) and SL.horde_loot_pool == 0.0)
-	var SZ = _fresh()
-	SZ.spawn_hold = true
-	SZ.horde_mult = 4
-	SZ._spawn("drone", [], TowerState.CENTER + Vector2(0, -400), false, 0.25)
-	_check("FB2 horde bodies: art/hit box scaled back (x4 bodies -> half size)", is_equal_approx(SZ.en.size[SZ.en.order[0]], 8.0))
+	# V2 P3d (deliberate): the legacy split knob (horde_mult) and its per-body
+	# loot pool / scaled bodies are gone with the classic ruleset; mass loot is
+	# covered by the MASS §D5 stages.
 	var SW = _fresh()
 	SW.spawn_hold = true
-	SW.horde_mult = 4
 	var wi: int = _rc(1, 2)
 	SW.slots[wi] = {"id": "barricade", "perm": 0, "run": 1}
 	SW.unlocked[wi] = true
 	SW.recompute()
-	SW._spawn("drone", [], SW.slot_pos(wi) + Vector2(0, -20), false, 0.25)
-	SW._spawn("drone", [], SW.slot_pos(wi) + Vector2(0, -900), false, 0.25)
+	SW._spawn("drone", [], SW.slot_pos(wi) + Vector2(0, -20))
+	SW._spawn("drone", [], SW.slot_pos(wi) + Vector2(0, -900))
 	SW.eh.rebuild()
 	SW._wall_auras([])
 	_check("FB2 Wall aura slows bodies on any side, not far ones", SW.en.slow_t[SW.en.order[0]] > 0.0 and SW.en.slow_t[SW.en.order[1]] == 0.0)
 	var SC = _fresh()
-	_check("FB2 map: horde spawn ring larger, view ring unchanged", SZ.spawn_r() > SC.spawn_r() and is_equal_approx(SZ.view_r(), SC.spawn_r()))
-	# ---- Phase 2: horde_mult conservation + event aggregation
-	var S1 = _fresh()
-	S1.spawn_hold = true
-	S1._spawn("hauler", [], TowerState.CENTER + Vector2(0, -400))
+	_check("FB2 map: the horde spawn ring lies beyond the framed view ring", SC.spawn_r() > SC.view_r())
+	# ---- Phase 2: flat armor split + event aggregation
 	var S4 = _fresh()
 	S4.spawn_hold = true
-	S4.horde_mult = 4
-	S4._spawn("hauler", [], TowerState.CENTER + Vector2(0, -400), false, 0.25)
-	S4._spawn_clones(4)
-	var sum_hp: float = 0.0
-	var sum_cash: float = 0.0
-	var sum_dmg: float = 0.0
-	for sl in S4.en.order:
-		sum_hp += S4.en.hp[sl]
-		sum_cash += S4.en.cash[sl]
-		sum_dmg += S4.en.dmg[sl]
-	_check("HORDE m=4: 4 bodies, HP / cash / contact dmg conserved", S4.en.count() == 4 and absf(sum_hp - S1.en.hp[0] * 1.5) < 1e-6 and absf(sum_cash - S1.en.cash[0]) < 1e-9 and absf(sum_dmg - S1.en.dmg[0] * 1.25) < 1e-6)   # FB2 (deliberate): horde HP x1.5 / dmg x1.25 (pc_horde_hp/dmg); cash still conserved
-	_check("HORDE m=4: body budget scales (MAX_ENEMIES x m)", S4.max_bodies() == TowerState.MAX_ENEMIES * 4 and S1.max_bodies() == TowerState.MAX_ENEMIES)
+	_check("V2 P3d: the body budget is the mass alive cap", S4.max_bodies() == S4.mass_cap)
 	S4.stats["armor"] = 2.0
 	S4.stats["dr"] = 0.0
 	var hp0: float = S4.hp
@@ -1120,7 +1089,9 @@ func _engine_b_stages() -> void:
 	_check("B1 tier 2 multipliers", S.tier == 2 and is_equal_approx(S.hp_mult, 1.5) and is_equal_approx(S.coin_mult, 1.6))
 	S.spawn_hold = true
 	S._spawn("drone", [])
-	_check("B1 enemy hp x tier hp_mult", is_equal_approx(float(S.enemy_list()[0]["hp"]), 6.0 * 1.5 * TowerState.difficulty_hp()))   # FB1: x difficulty
+	# V2 P3d: mass bodies carry a tier's threat in their COUNT (tierB); per-body
+	# HP only takes what tierB does not (mass_tier_hp = max(1, hp_mult / tierB)).
+	_check("B1 tier 2: body HP = mass sheet x mass_hp_scale (tier HP rides on the count)", is_equal_approx(float(S.enemy_list()[0]["hp"]), float(EnemyDB.mass_def("drone")["hp"]) * S.mass_hp_scale("drone", S.wave)) and is_equal_approx(S.mass_tier_hp(), maxf(1.0, 1.5 / EnemyDB.tier_b(2))))
 	S.set_enemies([])
 	S.wave_t = S.wave_time - 0.001
 	S.tick(0.05)
@@ -1196,17 +1167,9 @@ func _engine_b_stages() -> void:
 
 	# --- Stage 22: B4 enemy roster (AC-25..27) --------------------------------
 	_check("ranged gated to wave 8", not Tiers.allows("ranged", 1, 7) and Tiers.allows("ranged", 1, 8))
-	S = _fresh()
-	var seen: Dictionary = {}
-	S.wave = 30
-	for k in 3000:
-		seen[S._roll_kind()] = true
-	_check("T1 rolls ranged but never elite/splitter/mite", seen.has("ranged") and not seen.has("elite") and not seen.has("splitter") and not seen.has("mite"))
-	S.tier = 3
-	seen.clear()
-	for k in 3000:
-		seen[S._roll_kind()] = true
-	_check("T3 rolls elite + splitter, never mite", seen.has("elite") and seen.has("splitter") and not seen.has("mite"))
+	# V2 P3d (deliberate): the classic per-spawn roll (_roll_kind) is gone; the
+	# mass wave mix (EnemyDB.mass_mix) and its elites are covered by the MASS
+	# plan stages.
 	S = _fresh()
 	S.spawn_hold = true
 	S.stats["weapons"] = []
@@ -1215,7 +1178,8 @@ func _engine_b_stages() -> void:
 	S.set_enemy(int(S.enemy_list()[0]["eid"]), {"fire_cd": 2.0})
 	var shots: int = 0
 	for k in 100:
-		shots += _evts(S.tick(0.05), "enemy_shot").size()
+		for ch in _evts(S.tick(0.05), "core_hits"):   # V2 P3d: shots aggregate into core_hits
+			shots += int((ch as Dictionary).get("shots", 0))
 	var rpos: Vector2 = S.enemy_list()[0]["pos"]
 	_check("AC-25 ranged stops at 230", absf(rpos.distance_to(TowerState.CENTER) - 230.0) < 0.5)
 	_check("AC-25 ranged fires every 2s", shots == 2 and S.hp < float(S.stats["max_hp"]))
@@ -1251,7 +1215,7 @@ func _engine_b_stages() -> void:
 	for e in S.enemy_list():
 		if String(e["kind"]) == "mite":
 			mites += 1
-	_check("AC-27 splitter spawns 2 mites once", mites == 2 and _evts(spv, "split").size() == 1)
+	_check("AC-27 Broodsac bursts into mass_brood (6) swarmlings once", mites == TuneRef.int_of("mass_brood", 6) and _evts(spv, "split").size() == 1)
 	for e in S.enemy_list():
 		S.set_enemy(int(e["eid"]), {"hp": 0.0})
 	spv.clear()
@@ -1353,7 +1317,8 @@ func _engine_b_stages() -> void:
 	S.set_enemies([fe])
 	S._fire(0.01, [])
 	_sync(S, [fe])
-	_check("cryo spire: slows 30% + chills (1.5 per pulse, 2/s)", is_equal_approx(float(fe["slow_m"]), 0.7) and float(fe["slow_t"]) > 0.0 and is_equal_approx(999.0 - float(fe["hp"]), 1.5 * TowerState.bld_dmg()))
+	# V2 P3d: the mass Cryo field slows 50% (mass_frost_slow) and chills for 10% of a pulse
+	_check("cryo spire: slows 50% + chills (1.5 x 0.1 per pulse, 2/s) + frost flag", is_equal_approx(float(fe["slow_m"]), 0.5) and float(fe["slow_t"]) > 0.0 and is_equal_approx(999.0 - float(fe["hp"]), 1.5 * TowerState.bld_dmg() * TuneRef.num("mass_frost_dmg", 0.1)))
 	S = _fresh()
 	S.slots[_r(7)] = {"id": "obelisk", "perm": 0, "run": 1}
 	S.recompute()
@@ -1498,10 +1463,12 @@ func _fix_round_stages() -> void:
 	_check("Damage track cost 120 x growth^n", S.upgrade_cost(TowerState.CORE_SLOT) == int(round(120.0 * pow(float(TowerState.TRACKS["dmg"]["growth"]), 2.0))) and is_equal_approx(float(S.stats["overcharge_step"]), 0.40))
 	# Enemy damage ramp 1.06/wave so HP (labs, perks, Overdrive) matters late.
 	S = _fresh()
+	S.spawn_hold = true
+	S._spawn("drone", [])
+	var d1: float = float(_last(S)["dmg"])
 	S.wave = 41
-	var sev: Array = []
-	S._spawn("drone", sev)
-	_check("enemy dmg ramp 1.06^(w-1)", is_equal_approx(float(_last(S)["dmg"]), 4.0 * pow(1.06, 40.0) * TowerState.difficulty_dmg()))   # FB1: x difficulty
+	S._spawn("drone", [])
+	_check("enemy dmg ramp 1.06^(w-1)", is_equal_approx(float(_last(S)["dmg"]), d1 * pow(TuneRef.num("mass_dmg_g", S.dmg_growth), 40.0)) and is_equal_approx(S.dmg_growth, 1.06))
 
 
 ## VFX/gameplay pass: per-weapon targeting modes, hit flash + dmg events,
@@ -1548,8 +1515,11 @@ func _juice_targeting_stages() -> void:
 	var fev: Array = []
 	S._fire(0.01, fev)
 	_sync(S, [weak, strong])
-	_check("fire() honours strongest mode", float(strong["hp"]) < 900.0 and float(weak["hp"]) == 10.0)
-	_check("hit sets hit_t flash + dmg event", float(strong["hit_t"]) > 0.0 and _evts(fev, "dmg").size() >= 1)
+	# V2 P3d: the mass Gatling fires two rounds - the first at the mode's
+	# target (the strongest), the second at the next nearest body.
+	var sh: Array = _evts(fev, "shot")
+	_check("fire() honours strongest mode (first round at the strongest)", float(strong["hp"]) < 900.0 and sh.size() >= 1 and ((sh[0] as Dictionary)["to"] as Vector2).distance_to(strong["pos"] as Vector2) < 20.0)
+	_check("hit sets hit_t flash + counts into the hits summary", float(strong["hit_t"]) > 0.0 and S._hn >= 1)
 	# REDESIGN (deliberate): every building is run-only, so modes are run-scoped.
 	var S2 = TowerState.new()
 	S2.setup(77, S.save)
@@ -1571,7 +1541,7 @@ func _juice_targeting_stages() -> void:
 		t += 0.05
 		S.draft.clear()
 		S.perk_offer.clear()
-	_check("T5 w60 10 s flood: enemy count capped (peak %d)" % peak, peak <= TowerState.MAX_ENEMIES and peak > 50)
+	_check("T5 w60 10 s flood: enemy count capped at the mass alive cap (peak %d)" % peak, peak <= S.mass_cap and peak > 50)
 
 
 ## PC ENGINE package (design/PC_SPEC.md §10 ENGINE, PC-E1..E9).
@@ -1749,9 +1719,9 @@ func _pc_spawn_stages() -> void:
 			if String(en["kind"]) in ["mite", "courier"]:
 				continue
 			var off: Vector2 = (en["pos"] as Vector2) - TowerState.CENTER
-			r_ok = r_ok and absf(off.length() - float(S2.spawn_r())) < 40.0
-			if S2.wave == 1:
-				sectors[posmod(int(floor(rad_to_deg(off.angle()) / 90.0)), 4)] = true
+			# V2 P3d: mass surges land on or just behind the ring (mass_spawn_depth)
+			r_ok = r_ok and off.length() >= float(S2.spawn_r()) - 40.0 and off.length() <= float(S2.spawn_r()) + TuneRef.num("mass_spawn_depth", 140.0) + 40.0
+			sectors[posmod(int(floor(rad_to_deg(off.angle()) / 90.0)), 4)] = true
 		var lw: Dictionary = S2.last_wave_spawned
 		if not lw.is_empty() and not seen.has(int(lw["wave"])):
 			seen[int(lw["wave"])] = true
@@ -1759,7 +1729,7 @@ func _pc_spawn_stages() -> void:
 	_check("PC-E5 wave_telegraph precedes wave_start by pc_telegraph_s", order_ok and lead_ok and start_t.size() >= 25)
 	_check("FB1 telegraph carries total/boss, no quadrants", schema_ok and tele.has(1) and tele.has(25))
 	_check("FB1 telegraph total == actual spawns per wave", tot_ok and seen.size() >= 10)
-	_check("FB1 no lanes: wave 1 spawns on all 4 sides, on the spawn ring", sectors.size() == 4 and r_ok)
+	_check("FB1 no lanes: waves 1-12 spawn on all 4 sides, on / just behind the spawn ring", sectors.size() == 4 and r_ok)
 	_check("PC-E5 boss wave is telegraphed as a boss wave", boss_ok)
 	var a_t: Array = []
 	var b_t: Array = []
@@ -1840,11 +1810,12 @@ func _pc_building_stages() -> void:
 	var ce: Dictionary = _enemy("drone", TowerState.slot_pos(r1) + Vector2(0, -100))
 	S.set_enemies([ce])
 	S.cooldowns[r1] = 0.0
+	S._hcrit = 0
 	fev = []
 	S._fire(0.01, fev)
-	var dm: Array = _evts(fev, "dmg")
 	_sync(S, [ce])
-	_check("PC-E3 crit hit doubles dmg + flags the event", dm.size() == 1 and bool((dm[0] as Dictionary).get("crit", false)) and is_equal_approx(999.0 - float(ce["hp"]), 2.0 * float(cw["dmg"])))
+	# V2 P3d: the Flamer's cone lick is mass_flame_hit of its damage; crits count in the hits summary
+	_check("PC-E3 crit hit doubles dmg + counts as a crit", S._hcrit == 1 and is_equal_approx(999.0 - float(ce["hp"]), 2.0 * float(cw["dmg"]) * TuneRef.num("mass_flame_hit", 0.15)))
 	S = _open_run()
 	S.packs = {"pk_crit": 2}
 	S.recompute()
@@ -1984,13 +1955,15 @@ func _pc_mode_stages() -> void:
 	_check("PC-E6 Glass Core: max HP -50%", is_equal_approx(float(S.stats["max_hp"]), 60.0) and is_equal_approx(S.hp, 60.0))
 	S.spawn_hold = true
 	S._spawn("drone", [])
-	_check("PC-E6 Haste: enemy speed +25%", is_equal_approx(float(S.enemy_list()[0]["spd"]), 45.0 * 1.25))
+	_check("PC-E6 Haste: enemy speed +25%", is_equal_approx(float(S.enemy_list()[0]["spd"]), float(EnemyDB.mass_def("drone")["spd"]) * 1.25))
 	S = _mod_run(["swarm"])
 	S.spawn_hold = true
 	S._spawn("drone", [])
+	S0.spawn_hold = true
+	S0._spawn("drone", [])
 	var p0: int = int(S0._build_plan(3, 0.0)["entries"].size())
 	var p1: int = int(S._build_plan(3, 0.0)["entries"].size())
-	_check("PC-E6 Swarm: -30% HP each, +60% count", is_equal_approx(float(S.enemy_list()[0]["hp"]), 6.0 * 0.7 * TowerState.difficulty_hp()) and float(p1) >= 1.5 * float(p0) and float(p1) <= 1.7 * float(p0))
+	_check("PC-E6 Swarm: -30% HP each, +60% count", is_equal_approx(float(_last(S)["hp"]), float(_last(S0)["hp"]) * 0.7) and float(p1) >= 1.5 * float(p0) and float(p1) <= 1.7 * float(p0))
 	S = _mod_run(["ironclad"])
 	var e1: Dictionary = _enemy("hauler", TowerState.CENTER + Vector2(0, 300))
 	var e2: Dictionary = _enemy("hauler", TowerState.CENTER + Vector2(0, 300))
@@ -2018,15 +1991,10 @@ func _pc_mode_stages() -> void:
 	var pev: Array = S.tick(0.05)
 	_check("PC-E6 Purist suppresses perk_offer", S.wave == 5 and _evts(pev, "perk_offer").is_empty() and S.perk_offer.is_empty() and S.perk_pending == 0)
 	S = _mod_run(["elitist"])
-	var el: bool = false
-	S.wave = 10
-	for k in 2000:
-		el = el or S._roll_kind() == "elite"
-	var el0: bool = false
-	S0.wave = 10
-	for k in 2000:
-		el0 = el0 or S0._roll_kind() == "elite"
-	_check("PC-E6 Elite Guard: elites from T1", el and not el0)
+	# V2 P3d: mass waves carry elites from wave 5 on any tier; Elite Guard triples them.
+	var el: int = int(S._build_mass_plan(10, 0.0)["elites"])
+	var el0: int = int(S0._build_mass_plan(10, 0.0)["elites"])
+	_check("PC-E6 Elite Guard: x3 elites in a wave (%d vs %d)" % [el, el0], el0 > 0 and el == 3 * el0)
 	S = _mod_run(["nolabs"], lab)
 	_check("PC-E6 Fresh Start: lab bonuses off", is_equal_approx(float(_weapon(S, "core")["dmg"]), float(_weapon(S0, "core")["dmg"])) and float(_weapon(SL, "core")["dmg"]) > float(_weapon(S0, "core")["dmg"]) and is_equal_approx(S.cash, 0.0))
 	# PC-E7 endless.
@@ -2051,10 +2019,12 @@ func _pc_mode_stages() -> void:
 	_check("PC-E7 mutation offer at wave 25 (3 distinct)", E.wave == 25 and mo.size() == 1 and E.mutation_offer.size() == 3 and E.mutation_offer[0] != E.mutation_offer[1] and E.mutation_offer[1] != E.mutation_offer[2] and is_equal_approx(E.time_scale(), 1.0))   # FB1: sim stays live
 	E.mutation_offer = ["m_vigor", "m_rush", "m_horde"]
 	var cm0: float = E.run_coin_mult()
+	E._spawn("drone", [])
+	var vh0: float = float(_last(E)["hp"])
 	var tk: Array = E.choose_mutation(0)
 	E._spawn("drone", [])
-	var vh: float = float(_last(E)["hp"]) / E.scale()
-	_check("PC-E7 mutation pays +15% coins and buffs enemies", _evts(tk, "mutation_taken").size() == 1 and is_equal_approx(E.run_coin_mult(), cm0 * 1.15) and is_equal_approx(vh, 6.0 * 1.2 * TowerState.difficulty_hp()) and E.mutation_offer.is_empty())
+	var vh: float = float(_last(E)["hp"]) / vh0
+	_check("PC-E7 mutation pays +15% coins and buffs enemies (+20% HP)", _evts(tk, "mutation_taken").size() == 1 and is_equal_approx(E.run_coin_mult(), cm0 * 1.15) and is_equal_approx(vh, 1.2) and E.mutation_offer.is_empty())
 	N0.mode = "normal"
 	N0.wave = 49
 	N0.wave_t = N0.wave_time - 0.001
@@ -2848,10 +2818,12 @@ func _draft_stages() -> void:
 	S.draft = [Draft.card_for("pk_arsenal", S._draft_ctx(""))]
 	var pev: Array = S.choose_card(0)
 	_check("DRAFT pack applies at once (+12% dmg) + pick_applied", is_equal_approx(float(_weapon(S, "core")["dmg"]), dmg0 * 1.12) and _evts(pev, "pick_applied").size() == 1 and S.picks_taken == ["pk_arsenal"])
+	S._spawn("drone", [])
+	var gh0: float = float(_last(S)["hp"])
 	S.draft = [Draft.card_for("pk_gambit", S._draft_ctx(""))]
 	S.choose_card(0)
 	S._spawn("drone", [])
-	_check("DRAFT Gambit +40% dmg, enemies +15% HP", is_equal_approx(float(_weapon(S, "core")["dmg"]), dmg0 * 1.12 * 1.4) and is_equal_approx(float(_last(S)["hp"]), 6.0 * 1.15 * TowerState.difficulty_hp()))
+	_check("DRAFT Gambit +40% dmg, enemies +15% HP", is_equal_approx(float(_weapon(S, "core")["dmg"]), dmg0 * 1.12 * 1.4) and is_equal_approx(float(_last(S)["hp"]), gh0 * 1.15))
 	S.packs = {"pk_core": 1, "pk_overclock": 1, "pk_fort": 1, "pk_optics": 1}
 	S.recompute()
 	var cw: Dictionary = _weapon(S, "core")
@@ -2966,13 +2938,15 @@ func _troop_stages() -> void:
 	var sev: Array = []
 	S._drain_troop_events(sev)
 	_check("TROOP 3 Riflemen spawn at the hut", S.troops.size() == 3 and _evts(sev, "troop_spawn").size() == 3 and (S.troops[0]["pos"] as Vector2) == TowerState.slot_pos(_rc(2, 3)))
-	var anchor: Vector2 = S.troops[0]["anchor"]
-	_check("TROOP anchor (post) sits outside the wall on the hut's side", anchor.distance_to(TowerState.CENTER) > TowerState.STOP_R and anchor.y < TowerState.CENTER.y)
+	# V2 P3d (horde-only): Riflemen guard the whole perimeter - anchor = the
+	# Core, idle at a post just outside the grid on the hut's side.
+	var anchor: Vector2 = S.troops[0]["post"]
+	_check("TROOP post sits outside the wall on the hut's side (anchor = the Core)", anchor.distance_to(TowerState.CENTER) > S.grid_half_px() and anchor.y < TowerState.CENTER.y and (S.troops[0]["anchor"] as Vector2) == TowerState.CENTER)
 	S.stats["weapons"] = [S.stats["weapons"].back()]
 	S.stats["weapons"].back()["range"] = 1.0   # silence the Core
 	for k in 60:
 		S.tick(0.1)
-	_check("TROOP idle troops walk out to the anchor", (S.troops[0]["pos"] as Vector2).distance_to(anchor) < 2.0)
+	_check("TROOP idle troops walk out to their post", (S.troops[0]["pos"] as Vector2).distance_to(anchor) < 2.0)
 	var foe: Dictionary = _enemy("hauler", anchor + Vector2(0, -150), 200.0)
 	foe["eid"] = 900
 	foe["spd"] = 0.0
@@ -3111,7 +3085,7 @@ func _insight_drop_stages() -> void:
 	var kev: Array = []
 	K._spawn_courier(kev)
 	var cour: Dictionary = _last(K)
-	_check("COURIER spawn event, 2x drone HP, 3x speed", _evts(kev, "courier_spawn").size() == 1 and String(cour["kind"]) == "courier" and is_equal_approx(float(cour["max_hp"]), 12.0 * TowerState.difficulty_hp()) and is_equal_approx(float(cour["spd"]), 135.0))
+	_check("COURIER spawn event, mass sheet HP, 140 px/s", _evts(kev, "courier_spawn").size() == 1 and String(cour["kind"]) == "courier" and is_equal_approx(float(cour["max_hp"]), float(EnemyDB.mass_def("courier")["hp"]) * K.mass_hp_scale("courier", K.wave)) and is_equal_approx(float(cour["spd"]), float(EnemyDB.mass_def("courier")["spd"])))
 	var min_d: float = INF
 	var esc: Array = []
 	for k in 200:
@@ -3137,8 +3111,10 @@ func _insight_drop_stages() -> void:
 			marked_seen = marked_seen or bool((en as Dictionary).get("marked", false))
 	_check("MARK marked elites appear from w8", marked_seen and not _plan_has_mark(M, 7))
 	M.spawn_hold = true
+	M._spawn("drone", [])
+	var mh0: float = float(_last(M)["max_hp"])
 	M._spawn("drone", [], Vector2.INF, true)
-	_check("MARK marked enemy x3 HP + flag", bool(_last(M)["marked"]) and is_equal_approx(float(_last(M)["max_hp"]), 18.0 * TowerState.difficulty_hp()))   # FB1: x difficulty
+	_check("MARK marked enemy x3 HP + flag", bool(_last(M)["marked"]) and is_equal_approx(float(_last(M)["max_hp"]), mh0 * 3.0))
 
 
 func _plan_has_mark(S, w: int) -> bool:
@@ -3162,7 +3138,7 @@ func _snapshot_stages() -> void:
 	S.specials = [{"id": "sp_orbital", "copies": 1, "cd": 0.0, "charges": 1}]
 	S.recompute()
 	var snap2: Dictionary = S.power_snapshot()
-	_check("SNAP lists building DPS, troops, orbital DPS", (snap2["buildings"] as Array).size() == 1 and is_equal_approx(float(snap2["buildings"][0]["dps"]), 12.0 * TowerState.bld_dmg()) and (snap2["troops"] as Array).size() == 3 and float(snap2["specials"][0]["dps"]) > 0.0)
+	_check("SNAP lists building DPS, troops, orbital DPS", (snap2["buildings"] as Array).size() == 1 and is_equal_approx(float(snap2["buildings"][0]["dps"]), 12.0 * TowerState.bld_dmg() * float(TowerState.MASS_CROWD["gun"])) and (snap2["troops"] as Array).size() == 3 and float(snap2["specials"][0]["dps"]) > 0.0)
 	_check("SNAP power ratio rises with the board", PowerModel.power_ratio(snap2, 1, 1) > r0 and r0 > 2.0)
 
 

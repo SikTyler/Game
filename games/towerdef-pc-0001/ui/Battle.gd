@@ -457,6 +457,7 @@ static func rpos(m, en, es: int) -> Vector2:
 	var S = m.S
 	if S == null:
 		return p
+	en.ensure_cold()   # V2 P3d: cur_s is pulled on demand (at most once per step)
 	var cs: float = en.cur_s[es]
 	if cs <= 0.0:
 		return p

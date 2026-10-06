@@ -247,6 +247,16 @@ func apply_slow(s: int, t: float, m: float) -> void:
 	world.call("SetSlow", s, slow_t[s], slow_m[s])
 
 
+## Slow every living body within r of c in one C# call (V2 P3d: Wall auras);
+## the mirror is patched from the returned slots. Returns them (ascending).
+func slow_radius(c: Vector2, r: float, t: float, m: float) -> PackedInt32Array:
+	var sl: PackedInt32Array = world.call("SlowIn", c.x, c.y, r, t, m)
+	for s in sl:
+		slow_m[s] = minf(slow_m[s] if slow_t[s] > 0.0 else 1.0, m)
+		slow_t[s] = maxf(slow_t[s], t)
+	return sl
+
+
 ## Warlord surge (MASS_HORDE §D1): a speed-up that never overrides a slow
 ## (a slowed body stays slowed; an unslowed one runs at x m for t seconds).
 func haste(s: int, t: float, m: float) -> void:
@@ -323,13 +333,27 @@ func _configure(center: Vector2, stop_r: float, side: int, cell: float) -> void:
 		world.call("Configure", center.x, center.y, stop_r, side, cell)
 
 
-## Refresh the GDScript mirror from the C# world (one packed pull).
+## Refresh the GDScript mirror from the C# world after a step. V2 P3d: only
+## the fields the rules read every step (pos, vel, slows); the cold ones
+## (cur_s, shock_t, hit_t, taunt_t, atk_cd, fire_cd) refresh on demand via
+## ensure_cold() - dict views, tests and the view's interpolation call it.
 func pull() -> void:
 	var n: int = capacity()
-	var r: Array = world.call("Pull", n)
-	pos = r[0]; vel = r[1]; cur_s = r[2]; slow_t = r[3]; slow_m = r[4]
-	shock_t = r[5]; hit_t = r[6]; taunt_t = r[7]; atk_cd = r[8]; fire_cd = r[9]
+	var r: Array = world.call("PullHot", n)
+	pos = r[0]; vel = r[1]; slow_t = r[2]; slow_m = r[3]
+	cold_stale = true
 	dirty = true
+
+
+var cold_stale: bool = false
+
+
+func ensure_cold() -> void:
+	if not cold_stale:
+		return
+	var r: Array = world.call("PullCold", capacity())
+	cur_s = r[0]; shock_t = r[1]; hit_t = r[2]; taunt_t = r[3]; atk_cd = r[4]; fire_cd = r[5]
+	cold_stale = false
 
 
 ## Spawn-order reap split in C#: [alive order, dead slots in spawn order].
@@ -384,6 +408,7 @@ func fill(s: int, d: Dictionary) -> void:
 
 ## Debug / test / tool view of one body (a fresh copy, not a live reference).
 func get_dict(s: int) -> Dictionary:
+	ensure_cold()
 	var d: Dictionary = {
 		"kind": kind[s], "pos": pos[s], "hp": hp[s], "max_hp": max_hp[s], "spd": spd[s], "dmg": dmg[s],
 		"cash": cash[s], "xp": xp[s], "coin": coin[s], "size": size[s], "atk_cd": atk_cd[s],
