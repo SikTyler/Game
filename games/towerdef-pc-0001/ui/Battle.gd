@@ -18,6 +18,9 @@ const Intel := preload("res://ui/Intel.gd")
 const WeaponDB := preload("res://data/WeaponDB.gd")
 const COMPASS: Array = ["E", "SE", "S", "SW", "W", "NW", "N", "NE"]
 const FirePatterns := preload("res://FirePatterns.gd")
+const Gear := preload("res://Gear.gd")
+const GearVis := preload("res://GearVis.gd")
+const Cores := preload("res://Cores.gd")
 
 const ENEMY2: Color = Kit.MAGENTA
 const SHIELD: Color = Color("7fd8ff")
@@ -302,12 +305,17 @@ static func _draw_ranges(m) -> void:
 
 
 # ===================================================================== draw
+## The world canvas transform of this frame (GearVis draws through it).
+static var _base: Transform2D = Transform2D.IDENTITY
+
+
 static func draw(m, off: Vector2) -> void:
 	var S = m.S
 	var fr: Rect2 = m.field_rect()
 	_draw_field_bg(m, fr)
 	if S != null:
-		m.draw_set_transform_matrix(Transform2D(0.0, off) * m.world_xform())
+		_base = Transform2D(0.0, off) * m.world_xform()
+		m.draw_set_transform_matrix(_base)
 		if m.gore != null and String(m.gore.get("level")) != "off":
 			var gt: Texture2D = m.gore.call("ground_texture")
 			if gt != null:
@@ -420,11 +428,39 @@ static func _draw_grid(m) -> void:
 	var cr: float = c * 1.45   # the 3x3 Core footprint
 	Kit.glow(m, C, cr * 2.2, Kit.CYAN, 0.12 + 0.06 * pulse)
 	m.draw_circle(C, cr + 6.0 + 3.0 * pulse, Color(1, 1, 1, 0.05))
-	if not Kit.icon(m, "core_bastion", Rect2(C - Vector2(cr, cr), Vector2(cr, cr) * 2.0)):
-		m.draw_circle(C, cr, Kit.RUST)
+	# V2 P4: the player's Core (look, socketed Modules) with the forged Weapon
+	# as a turret that turns to where it fires (or to the cursor while aiming)
+	var want: float = ((S.aim_pos - C) if bool(S.aim_on) else (S.core_aim_dir as Vector2)).angle()
+	m.turret_ang = lerp_angle(float(m.turret_ang), want, 0.35)
+	var pods: Array = []
+	var mods: Array = Gear.modules(m.save)
+	for k in Gear.sockets_for(Cores.level(m.save)):
+		pods.append(mods[k] if k < mods.size() else {})
+	GearVis.draw_core(m, Cores.look(m.save), pods, Gear.weapon(m.save), C, cr, float(m.turret_ang), m.t_anim, _base)
 	if float(S.shield) > 0.0:
 		var smax: float = maxf(1.0, float(S.stats.get("shield_max", 1.0)))
 		m.draw_arc(C, cr + 6.0, -PI * 0.5, -PI * 0.5 + TAU * clampf(float(S.shield) / smax, 0.0, 1.0), 48, SHIELD, 3.0)
+	_draw_reticle(m, S)
+
+
+## V2 P4 manual aim: a reticle on the aim point (AIM_R ring, crosshair) whose
+## gold arc is the focus meter (+30% damage when full).
+static func _draw_reticle(m, S) -> void:
+	if not bool(S.aim_on) and float(S.focus) <= 0.0:
+		return
+	var p: Vector2 = S.aim_pos
+	var r: float = float(TowerState.AIM_R)
+	var a: float = 1.0 if bool(S.aim_on) else 0.4
+	m.draw_line(TowerState.CENTER, p, Color(Kit.MAGENTA, 0.18 * a), 2.0)
+	m.draw_arc(p, r, 0.0, TAU, 32, Color(Kit.MAGENTA, 0.8 * a), 2.0)
+	for k in 4:
+		var d: Vector2 = Vector2.from_angle(float(k) * PI * 0.5)
+		m.draw_line(p + d * (r * 0.45), p + d * (r * 1.25), Color(Kit.MAGENTA, 0.9 * a), 2.0)
+	var f: float = clampf(float(S.focus), 0.0, 1.0)
+	if f > 0.0:
+		m.draw_arc(p, r + 6.0, -PI * 0.5, -PI * 0.5 + TAU * f, 40, Color(Kit.GOLD, a), 4.0)
+	if f >= 1.0:
+		m.draw_circle(p, 4.0 + 1.5 * sin(m.t_anim * 10.0), Kit.GOLD)
 
 
 static func _draw_world(m) -> void:

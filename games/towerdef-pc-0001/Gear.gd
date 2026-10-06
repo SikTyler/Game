@@ -1039,3 +1039,73 @@ static func weapon_sheet(s: Dictionary) -> Dictionary:
 	for k in p.keys():
 		out[k] = p[k]
 	return out
+
+
+# ------------------------------------------------------------------ text
+
+## pfx key -> [label, format] for loadout / item readouts.
+const FX_TEXT: Dictionary = {
+	"core_dmg": ["Weapon damage", "pct"], "dmg": ["All damage", "pct"], "rate": ["Weapon attack rate", "pct"],
+	"range": ["Weapon range", "cells"], "crit": ["Crit chance", "pct"], "crit_dmg": ["Crit damage", "pct"],
+	"pierce": ["Pierce", "int"], "splash": ["Splash radius", "cells"], "chain": ["Chain jumps / rings", "int"],
+	"chain_dmg": ["Chain damage", "pct"], "multishot": ["Extra volleys", "int"], "bounce": ["Ricochets", "int"],
+	"burn": ["Burn per second (of hit)", "pct"], "slow_hit": ["Slow on hit", "pct"], "knock": ["Knockback", "pct"],
+	"boss": ["Damage vs elites / bosses", "pct"], "normal_dmg": ["Damage vs the horde", "pct"], "execute": ["Execute below HP", "pct"],
+	"shred": ["Shred per hit", "pct"], "echo": ["Echo chance", "pct"], "core_single": ["Main-target damage", "pct"],
+	"beam_ramp": ["Beam ramp", "pct"], "pulse_dmg": ["Pulse damage", "pct"], "core_hp": ["Core max HP", "pct"],
+	"regen": ["Core regen", "pct"], "armor": ["Core armor", "flat"], "shield": ["Core shield", "flat"],
+	"lifesteal": ["Lifesteal", "pct"], "reflect": ["Thorns", "pct"], "dr": ["Damage reduction", "pct"],
+	"kill_cash": ["Kill cash", "pct"], "cash_flat": ["Cash per second", "flat"], "cash": ["Cash per second", "pct"],
+	"interest": ["Interest", "pct"], "xp": ["Run XP", "pct"], "luck": ["Luck", "int"], "bld_dmg": ["Building damage", "pct"],
+	"bld_rate": ["Building attack rate", "pct"], "troop_dmg": ["Troop damage", "pct"], "troop_hp": ["Troop HP", "pct"],
+	"special_dmg": ["Special damage", "pct"], "scrap_find": ["Scrap from runs", "pct"], "coin_run": ["Coins from runs", "pct"],
+}
+
+
+## "+12% Weapon damage" / "-15% Core max HP" / "+0.40 cells Weapon range" / "+2 Extra volleys".
+static func fx_text(key: String, v: float) -> String:
+	var d: Array = FX_TEXT.get(key, [key, "flat"])
+	var sg: String = "+" if v >= 0.0 else "-"
+	var a: float = absf(v)
+	match String(d[1]):
+		"pct":
+			var p: float = a * 100.0
+			return "%s%s%% %s" % [sg, ("%.1f" % p) if p < 10.0 else str(int(round(p))), String(d[0])]
+		"int":
+			return "%s%d %s" % [sg, int(round(a)), String(d[0])]
+		"cells":
+			return "%s%.2f %s (cells)" % [sg, a, String(d[0])]
+	return "%s%s %s" % [sg, ("%.1f" % a) if a < 100.0 else str(int(round(a))), String(d[0])]
+
+
+## Sorted readout lines of an fx dict (biggest magnitude first, zeros dropped).
+static func fx_lines(fx: Dictionary) -> Array:
+	var keys: Array = fx.keys().filter(func(k: Variant) -> bool: return absf(float(fx[k])) > 1e-6)
+	keys.sort_custom(func(a: Variant, b: Variant) -> bool: return String(a) < String(b))
+	var out: Array = []
+	for k in keys:
+		out.append(fx_text(String(k), float(fx[k])))
+	return out
+
+
+## One item's own fx (perks + brand quirk + a module's built-in fx).
+static func item_fx(it: Dictionary) -> Dictionary:
+	var fx: Dictionary = {}
+	if String(it.get("kind", "")) == "module":
+		fx = module_fx(it)
+	_item_fx(fx, it, 1.0 if String(it.get("kind", "")) == "weapon" else MODULE_QUIRK)
+	return fx
+
+
+## Rough damage-per-second of a weapon on its own (the Forge's compare line):
+## frame damage x power x its damage / rate / crit / volley fx.
+static func est_dps(it: Dictionary) -> float:
+	if String(it.get("kind", "")) != "weapon":
+		return 0.0
+	var fd: Dictionary = FrameDB.get_def(String(it["base"]))
+	var fx: Dictionary = item_fx(it)
+	var d: float = float(fd["dmg"]) * power(it) * maxf(0.1, 1.0 + float(fx.get("core_dmg", 0.0)) + float(fx.get("dmg", 0.0)))
+	var r: float = float(fd["rate"]) * maxf(0.1, 1.0 + float(fx.get("rate", 0.0)))
+	var c: float = clampf(float(fx.get("crit", 0.0)), 0.0, 1.0)
+	var cm: float = 2.0 + float(fx.get("crit_dmg", 0.0))
+	return d * r * (1.0 + c * (cm - 1.0)) * (1.0 + float(fx.get("multishot", 0.0))) * (1.0 + float(fx.get("echo", 0.0)))

@@ -23,9 +23,11 @@ const Kit := preload("res://ui/Kit.gd")
 const ReforgeView := preload("res://ui/ReforgeView.gd")
 const OutpostView := preload("res://ui/OutpostView.gd")
 const CoreView := preload("res://ui/CoreView.gd")
+const ForgeView := preload("res://ui/ForgeView.gd")
+const Gear := preload("res://Gear.gd")
 
 ## Tab hotkeys: [action, tab].
-const TAB_KEYS: Array = [["tab_base", "play"], ["tab_outpost", "outpost"], ["tab_core", "core"], ["tab_labs", "research"], ["tab_missions", "missions"], ["tab_reforge", "reforge"]]
+const TAB_KEYS: Array = [["tab_base", "play"], ["tab_outpost", "outpost"], ["tab_core", "core"], ["tab_forge", "forge"], ["tab_labs", "research"], ["tab_missions", "missions"], ["tab_reforge", "reforge"]]
 const START_W: float = 250.0
 
 
@@ -41,6 +43,8 @@ static func badge(m, id: String) -> bool:
 			return Reforge.can_reforge(s)
 		"core":
 			return Cores.can_level(s)
+		"forge":
+			return Gear.new_count(s) > 0
 	return false
 
 
@@ -51,15 +55,15 @@ static func is_home(tab: String) -> bool:
 
 ## Top menu (left): OUTPOST (home), CORE, FORGE, RESEARCH, REFORGE; the
 ## deploy cluster (tier, Modes, PLAY) sits right. Missions moved to the top
-## bar (Desktop). The Forge tab is shown locked until the gear engine (P4).
+## bar (Desktop).
 const NAV: Array = [
-	["core", "CORE", "core_open", "The Core: level, stats (and soon its Weapon, Modules and look)"],
-	["forge", "FORGE", "icon_gear", "The Forge (coming soon): forge, merge, upgrade and reroll your Weapon and Modules"],
+	["core", "CORE", "core_open", "The Core: its Weapon, Module sockets, look and level"],
+	["forge", "FORGE", "icon_gear", "The Forge: forge, upgrade, merge, reroll and lock your Weapons and Modules"],
 	["research", "RESEARCH", "icon_lab", "Research: permanent upgrades (instant)"],
 	["reforge", "REFORGE", "rf_root", "Core Reforge: reset for Shards and permanent nodes"],
 ]
 ## Tabs not playable yet (shown locked).
-const LOCKED: Array = ["forge"]
+const LOCKED: Array = []
 const OUTPOST_W: float = 172.0
 
 
@@ -136,6 +140,8 @@ static func build(m) -> void:
 	match String(m.tab):
 		"core":
 			CoreView.build(m)
+		"forge":
+			ForgeView.build(m)
 		"research":
 			_build_research(m)
 		"missions":
@@ -169,6 +175,8 @@ static func draw(m) -> void:
 		match String(m.tab):
 			"core":
 				CoreView.draw(m, cr)
+			"forge":
+				ForgeView.draw(m, cr)
 			"research":
 				_draw_research(m, cr)
 			"missions":

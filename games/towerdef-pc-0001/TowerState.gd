@@ -299,6 +299,7 @@ const FOCUS_DOWN_S: float = 1.5
 var aim_on: bool = false
 var aim_pos: Vector2 = Vector2.ZERO
 var focus: float = 0.0
+var core_aim_dir: Vector2 = Vector2.UP   # view only: where the turret last fired (never hashed)
 ## Gear on-hit fx of the Core's own hits (compute_stats): burn dps share,
 ## slow, execute threshold; _core_hook is false for a quirk-free loadout.
 var core_burn: float = 0.0
@@ -2511,13 +2512,16 @@ func _core_fire(wd: Dictionary, ev: Array) -> bool:
 ## Core's targeting mode for the first volley and the nearest unused body for
 ## the extra ones.
 func _core_target(rng_lim: float, mode_s: String, used: Dictionary, k: int) -> int:
+	var t: int = -1
 	if aim_on:
 		var a: int = _nearest(aim_pos, AIM_R, used)
 		if a >= 0 and CENTER.distance_to(en.pos[a]) <= rng_lim + en.size[a] * 0.5:
-			return a
-	if k == 0 and used.is_empty():
-		return pick_target(CENTER, rng_lim, mode_s)
-	return _nearest(CENTER, rng_lim, used)
+			t = a
+	if t < 0:
+		t = pick_target(CENTER, rng_lim, mode_s) if k == 0 and used.is_empty() else _nearest(CENTER, rng_lim, used)
+	if t >= 0 and k == 0:
+		core_aim_dir = _dir_to(CENTER, en.pos[t])
+	return t
 
 
 static func _dir_to(from: Vector2, to: Vector2) -> Vector2:

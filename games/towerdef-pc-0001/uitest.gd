@@ -27,6 +27,7 @@ const Labs := preload("res://Labs.gd")
 const Missions := preload("res://Missions.gd")
 const Outpost := preload("res://Outpost.gd")
 const Cores := preload("res://Cores.gd")
+const Gear := preload("res://Gear.gd")
 const Reforge := preload("res://Reforge.gd")
 const Specials := preload("res://Specials.gd")
 const OutpostDB := preload("res://data/OutpostDB.gd")
@@ -118,6 +119,11 @@ func _mouse(pos: Vector2, button: MouseButton, pressed: bool) -> void:
 	ev.position = pos
 	ev.global_position = pos
 	root.push_input(ev, true)
+
+
+## A held LMB press, or its release (manual aim).
+func _hold(pos: Vector2, pressed: bool) -> void:
+	_mouse(pos, MOUSE_BUTTON_LEFT, pressed)
 
 
 ## One wheel notch at pos (up = true / down = false).
@@ -292,6 +298,7 @@ func _run() -> void:
 	_check("tier < back to tier 1", int(main.save["tier"]) == 1)
 
 	await _core_tab()
+	await _forge()
 	await _outpost()
 	await _research_missions()
 	await _home()
@@ -329,6 +336,142 @@ func _core_tab() -> void:
 	await _frames()
 	_check("CORE: Level up is disabled when broke", _find("CORE LEVEL").disabled)
 	main.save["coins"] = 50000
+	# ---- P4 Loadout / Look / Levels
+	main._rebuild_ui()
+	await _frames()
+	_check("P4 CORE: Loadout tab shows the Weapon slot and 2 sockets (Core Lv %d)" % Cores.level(main.save), main.core_tab == "loadout" and _find("core:weapon") != null and _find("core:sock:0") != null and _find("core:sock:1") != null and _find("core:sock:%d" % Gear.sockets_for(Cores.level(main.save))) == null)
+	var mu: int = Gear.add_item(main.save, Gear.make("module", "shield_gen", "rare"))
+	_press("core:sock:1")
+	await _frames()
+	_check("P4 CORE: clicking a socket lists Modules to pick", main.core_sock == 1 and _find("core:pick:%d" % mu) != null)
+	_press("core:pick:%d" % mu)
+	await _frames()
+	_check("P4 CORE: picking a Module sockets it (run fx include it)", int((Gear.block(main.save)["equipped"]["sockets"] as Array)[1]) == mu and float(Gear.run_fx(main.save).get("shield", 0.0)) > 0.0)
+	_check("P4 CORE: a filled socket offers EMPTY THIS SOCKET", _find("core:unsock") != null)
+	_press("core:unsock")
+	await _frames()
+	_check("P4 CORE: ... which empties it", int((Gear.block(main.save)["equipped"]["sockets"] as Array)[1]) == 0)
+	var wu: int = Gear.add_item(main.save, Gear.make("weapon", "arc", "uncommon"))
+	_press("core:weapon")
+	await _frames()
+	_press("core:pick:%d" % wu)
+	await _frames()
+	_check("P4 CORE: the Weapon slot takes a picked Weapon", int(Gear.block(main.save)["equipped"]["weapon"]) == wu)
+	_audit("core loadout")
+	_press("CORETAB Look")
+	await _frames()
+	_press("core:shell:3")
+	await _frames()
+	_press("core:col:p:ff3ea5")
+	await _frames()
+	_check("P4 CORE Look: shell and colour pickers change the Core's look", main.core_tab == "look" and int(Cores.look(main.save)["shell"]) == 3 and String(Cores.look(main.save)["p"]) == "ff3ea5" and _find("CORE LEVEL") != null)
+	_audit("core look")
+	_press("CORETAB Levels")
+	await _frames()
+	_check("P4 CORE Levels: the level button stays", main.core_tab == "levels" and _find("CORE LEVEL") != null)
+	_press("CORETAB Loadout")
+	await _frames()
+
+
+# ================================================================== FORGE (V2 P4)
+func _forge() -> void:
+	var s: Dictionary = main.save
+	s["coins"] = 3_000_000
+	s["scrap"] = 50_000
+	_key(KEY_J)
+	await _frames()
+	_check("P4 FORGE: J opens the Forge", main.tab == "forge" and _find("forge:new:rail") != null and _find("forge:item:%d" % int(Gear.block(s)["equipped"]["weapon"])) != null)
+	_audit("forge")
+	var n0: int = Gear.count(main.save)
+	var c0: int = int(main.save["coins"])
+	_press("forge:new:rail")
+	await _frames()
+	var u: int = main.forge_sel
+	var it: Dictionary = Gear.item(main.save, u)
+	_check("P4 FORGE: forging a Rail Driver adds it and selects it (1500 coins + 40 Scrap)", Gear.count(main.save) == n0 + 1 and String(it.get("base", "")) == "rail" and int(main.save["coins"]) == c0 - 1500 and _find("forge:upgrade") != null)
+	_audit("forge card")
+	_press("forge:lock:0")
+	await _frames()
+	_check("P4 FORGE: LOCK locks a perk; its REROLL is disabled", bool(((Gear.item(main.save, u)["perks"] as Array)[0] as Dictionary)["lock"]) and _find("forge:reroll:0").disabled)
+	_press("forge:lock:0")
+	await _frames()
+	var sc0: int = int(main.save["scrap"])
+	_press("forge:reroll:0")
+	await _frames()
+	var of: Dictionary = Gear.block(main.save)["offer"]
+	_check("P4 FORGE: REROLL pays Scrap and opens take / keep", not of.is_empty() and int(main.save["scrap"]) < sc0 and _find("forge:take:0") != null and _find("forge:take:1") != null and _find("forge:keep") != null)
+	_audit("forge reroll")
+	var want: String = String((of["cands"][0] as Dictionary)["id"])
+	_press("forge:take:0")
+	await _frames()
+	_check("P4 FORGE: TAKE swaps the perk in and closes the offer", String(((Gear.item(main.save, u)["perks"] as Array)[0] as Dictionary)["id"]) == want and (Gear.block(main.save)["offer"] as Dictionary).is_empty() and _find("forge:take:0") == null)
+	_press("forge:upgrade")
+	await _frames()
+	_check("P4 FORGE: UPGRADE raises the level", int(Gear.item(main.save, u)["lvl"]) == 2)
+	_press("forge:equip")
+	await _frames()
+	_check("P4 FORGE: EQUIP mounts it on the Core", int(Gear.block(main.save)["equipped"]["weapon"]) == u and _find("forge:equip").disabled)
+	# merge 3 commons
+	var m3: Array = []
+	for k in 3:
+		m3.append(Gear.add_item(main.save, Gear.make("weapon", "saw", "common")))
+	main._rebuild_ui()
+	await _frames()
+	_press("forge:item:%d" % int(m3[0]))
+	await _frames()
+	_check("P4 FORGE: clicking a tile selects it", main.forge_sel == int(m3[0]))
+	_press("forge:merge")
+	await _frames()
+	_check("P4 FORGE: MERGE opens the merge panel with the perk-slot choices", (main.forge_merge as Array).size() == 3 and _find("forge:merge:pick:0") != null and _find("forge:merge:cancel") != null)
+	_audit("forge merge")
+	var used: Array = (main.forge_merge as Array).duplicate()
+	_press("forge:merge:pick:0")
+	await _frames()
+	_check("P4 FORGE: picking merges into Uncommon (the other two consumed)", String(Gear.item(main.save, int(m3[0]))["rar"]) == "uncommon" and used.size() == 3 and not Gear.has_item(Gear.block(main.save), int(used[1])) and not Gear.has_item(Gear.block(main.save), int(used[2])) and main.forge_merge.is_empty())
+	# imprint: copy the Rail's perk 0 onto the Saw
+	var donor_perk: String = String(((Gear.item(main.save, u)["perks"] as Array)[0] as Dictionary)["id"])
+	var dn: int = Gear.add_item(main.save, Gear.make("weapon", "rail", "common", 1, [{"id": "w_boss", "t": 3, "q": 0.5, "lock": false}]))
+	main._rebuild_ui()
+	await _frames()
+	_press("forge:imprint")
+	await _frames()
+	_press("forge:item:%d" % dn)
+	await _frames()
+	_check("P4 FORGE: IMPRINT then a donor tile lists perk -> slot choices", main.forge_imprint == int(m3[0]) and main.forge_donor == dn and _findp("forge:imp:0:") != null)
+	_audit("forge imprint")
+	_press("forge:imp:0:0")
+	await _frames()
+	_check("P4 FORGE: imprinting copies the perk and destroys the donor", String(((Gear.item(main.save, int(m3[0]))["perks"] as Array)[0] as Dictionary)["id"]) == "w_boss" and not Gear.has_item(Gear.block(main.save), dn) and donor_perk != "")
+	# salvage: Rare asks twice
+	var rm: int = Gear.add_item(main.save, Gear.make("module", "echo", "rare"))
+	main._rebuild_ui()
+	await _frames()
+	_press("forge:item:%d" % rm)
+	await _frames()
+	var sc1: int = int(main.save["scrap"])
+	_press("forge:salvage")
+	await _frames()
+	_check("P4 FORGE: SALVAGE on a Rare asks to confirm first", Gear.has_item(Gear.block(main.save), rm) and _find("forge:salvage").text.begins_with("CONFIRM"))
+	_press("forge:salvage")
+	await _frames()
+	_check("P4 FORGE: ... and the second press salvages for Scrap", not Gear.has_item(Gear.block(main.save), rm) and int(main.save["scrap"]) == sc1 + 25)
+	_press("forge:filter:module")
+	await _frames()
+	var only_mod: bool = true
+	for b in _all_buttons():
+		var key: String = _label(b as Button)
+		if key.begins_with("forge:item:"):
+			only_mod = only_mod and String(Gear.item(main.save, int(key.substr(11))).get("kind", "")) == "module"
+	_check("P4 FORGE: the Modules filter shows only modules", main.forge_filter == "module" and only_mod)
+	_press("forge:kind:module")
+	await _frames()
+	_check("P4 FORGE: the Forge panel switches to the 23 Modules", _find("forge:new:overclock") != null and _find("forge:new:rail") == null)
+	_audit("forge modules")
+	_press("forge:filter:all")
+	await _frames()
+	_check("P4 FORGE: the nav shows a badge for new gear", Hub.badge(main, "forge") == (Gear.new_count(main.save) > 0))
+	main.save["coins"] = 50000
+	main.save["scrap"] = 2000
 
 
 # ================================================================= OUTPOST
@@ -511,7 +654,7 @@ func _home() -> void:
 	await _frames()
 	_check("V2 home: Outpost map + top menu Core / Research / Missions / Reforge", _findp("OPBUILD ") != null and _find("DSTART") != null and _find("DTAB Core") != null and _find("DTAB Research") != null and _find("DTAB Missions") != null and _find("DTAB Reforge") != null and _find("DTAB Core Bay") == null and _find("DTAB Crates") == null and _find("DTAB Cards") == null)
 	var fg: Button = _find("DTAB Forge")
-	_check("P2 nav: OUTPOST / CORE / FORGE / RESEARCH / REFORGE, Forge shown locked until the gear engine", fg != null and fg.disabled and fg.tooltip_text.contains("Forge") and _find("DTAB Outpost").text == "OUTPOST")
+	_check("P2 nav: OUTPOST / CORE / FORGE / RESEARCH / REFORGE (P4: the Forge is open)", fg != null and not fg.disabled and fg.tooltip_text.contains("Forge") and _find("DTAB Outpost").text == "OUTPOST")
 	var mb: Button = _find("DTAB Missions")
 	_check("P2 nav: Missions is a top-bar button", mb != null and mb.position.y < float(main.TOP_H) and mb.position.x > Hub.start_rect(main).position.x - 700.0)
 	for nv in [["DTAB Core", "core"], ["DTAB Research", "research"], ["DTAB Missions", "missions"], ["DTAB Reforge", "reforge"]]:
@@ -678,6 +821,18 @@ func _run_screen() -> void:
 			kill_tip = true
 	_check("FB1: enemies killed is shown in the right Core panel", kill_tip)
 	_check("FB1: the left bar is the Perks menu (no Build/Info)", load("res://ui/DraftPanel.gd").perk_rows(main).is_empty())
+	# ---- P4 manual aim: hold LMB on open field -> the Core aims there
+	var ap: Vector2 = main.w2s(TowerState.CENTER + Vector2(150, -110))
+	_motion(ap)
+	_hold(ap, true)
+	var t0: int = Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < 400 and not bool(S.aim_on):
+		await process_frame
+	_check("P4 AIM: holding LMB on the open field takes manual aim", bool(S.aim_on) and (S.aim_pos as Vector2).distance_to(main.s2w(ap)) < 2.0 and main.sel < 0)
+	await _frames(3)
+	_hold(ap, false)
+	await _frames(2)
+	_check("P4 AIM: releasing hands the Core back to auto-fire", not bool(S.aim_on) and not main.aim_down)
 	for res in [Vector2i(1280, 720), Vector2i(1280, 800)]:
 		root.size = res
 		await _frames(3)
@@ -729,8 +884,8 @@ func _run_screen() -> void:
 	_motion(_cell_scr(TowerState.CORE_SLOT))
 	await _frames(3)
 	# V2 (deliberate): one Core, no traits — the tooltip names the Core and the
-	# equipped Weapon (P4: the starter is the Standard Issue Autocannon).
-	_check("RUN: hovering the Core shows its level + equipped Weapon", main.tipbox.visible and main.tip_label.text.contains("Core") and main.tip_label.text.contains("Standard Issue Autocannon"), main.tip_label.text)
+	# equipped Weapon (P4: whatever the Forge / Core tabs equipped above).
+	_check("RUN: hovering the Core shows its level + equipped Weapon", main.tipbox.visible and main.tip_label.text.contains("Core") and main.tip_label.text.contains(String(Gear.weapon(main.save)["name"])), main.tip_label.text)
 	# draft: cards, reroll, banish, Q pick, place
 	S.grant_draft()
 	S.draft[0] = load("res://Draft.gd").card_for("gun", S._draft_ctx(""))

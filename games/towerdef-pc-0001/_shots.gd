@@ -54,8 +54,52 @@ func _initialize() -> void:
 	var s: Dictionary = main.save
 	main.set_tab("play")
 	await _shot("%s/02_home_outpost.png" % outdir)
+	# V2 P4 gear: a varied inventory (seeded drops), an Epic weapon and modules equipped
+	var GR = load("res://Gear.gd")
+	var GG = load("res://GearGen.gd")
+	var rr := RandomNumberGenerator.new()
+	rr.seed = 4242
+	var best: int = 0
+	for k in 26:
+		var it: Dictionary = GG.roll(rr, "drop", {"ilvl": 70, "luck": 6.0}, {})
+		it["lvl"] = 1 + (k * 7) % 14
+		it["mw"] = int(it["lvl"]) / 5
+		var u: int = GR.add_item(s, it)
+		if String(it["kind"]) == "weapon" and (best == 0 or load("res://data/RarityDB.gd").rank(String(it["rar"])) > load("res://data/RarityDB.gd").rank(String(GR.item(s, best)["rar"]))):
+			best = u
+	GR.equip(s, best)
+	var socks: int = 0
+	for u in GR.uids(s, "module"):
+		if socks < GR.sockets_for(Cores.level(s)):
+			GR.equip(s, int(u))
+			socks += 1
+	Cores.set_look(s, "shell", 5)
+	Cores.set_look(s, "trim", 2)
 	main.set_tab("core")
 	await _shot("%s/03_core.png" % outdir)
+	main.core_tab = "look"
+	main._rebuild_ui()
+	await _shot("%s/03b_core_look.png" % outdir)
+	main.core_tab = "loadout"
+	main.core_sock = 1
+	main._rebuild_ui()
+	main.set_tab("forge")
+	main.forge_sel = best
+	main._rebuild_ui()
+	await _shot("%s/04_forge.png" % outdir)
+	s["scrap"] = 5000
+	GR.reroll(s, best, 0)
+	main._rebuild_ui()
+	await _shot("%s/04b_forge_reroll.png" % outdir)
+	GR.reroll_choose(s, -1)
+	main.forge_kind = "module"
+	main.forge_filter = "module"
+	main.forge_sel = int(GR.uids(s, "module")[0])
+	main._rebuild_ui()
+	await _shot("%s/04c_forge_modules.png" % outdir)
+	main.forge_kind = "weapon"
+	main.forge_filter = "all"
+	main.core_sock = -1
 	# Outpost: developed (the bot's build plan over a few sessions), armed ghost, plot
 	s["coins"] = 400000
 	var t: int = T0
@@ -215,6 +259,13 @@ func _initialize() -> void:
 	await _wait(3)
 	await _shot("%s/16b_aim.png" % outdir)
 	main.aim_special = -1
+	# V2 P4 manual aim: reticle + focus ring, the turret on the cursor
+	S.set_aim(TowerState.CENTER + Vector2(-170, 90), true)
+	S.focus = 0.7
+	main._rebuild_ui()
+	await _wait(8)
+	await _shot("%s/16c_manual_aim.png" % outdir)
+	S.set_aim(TowerState.CENTER, false)
 	main.set_overlay("pause")
 	await _shot("%s/17_pause.png" % outdir)
 	main.set_overlay("")

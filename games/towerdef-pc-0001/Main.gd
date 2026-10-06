@@ -44,6 +44,11 @@ const WeaponDB := preload("res://data/WeaponDB.gd")
 const Fonts := preload("res://ui/Fonts.gd")
 const NeonTheme := preload("res://ui/NeonTheme.gd")
 const Roll := preload("res://vfx/Roll.gd")
+const Gear := preload("res://Gear.gd")
+const RarityDB := preload("res://data/RarityDB.gd")
+const FrameDB := preload("res://data/FrameDB.gd")
+const ModuleDB := preload("res://data/ModuleDB.gd")
+const AffixDB := preload("res://data/AffixDB.gd")
 
 const GOLD: Color = Kit.GOLD
 const GEM: Color = Kit.GEM
@@ -161,6 +166,25 @@ var op_bp_text: String = ""
 var op_focus: Vector2i = Vector2i(4, 4)   # keyboard / pad map cursor
 # Reforge
 var rf_confirm: int = 0              # two-step confirm
+# V2 P4 Forge / Core screens (ForgeView, CoreView)
+var forge_sel: int = 0               # selected item uid
+var forge_filter: String = "all"     # all | weapon | module
+var forge_page: int = 0
+var forge_kind: String = "weapon"    # Forge-new panel: weapon | module
+var forge_merge: Array = []          # [base, a, b] while the merge panel is open
+var forge_imprint: int = 0           # target uid while imprinting
+var forge_donor: int = 0
+var forge_confirm: int = 0           # salvage two-step confirm (Rare+)
+var forge_t: float = -10.0           # t_anim of the last forge / merge (reveal beam)
+var core_tab: String = "loadout"     # loadout | look | levels
+var core_sock: int = -1              # -1 the Weapon slot, 0.. a Module socket
+var core_page: int = 0
+# V2 P4 manual aim (run): hold LMB on open field, or deflect the right stick
+var aim_down: bool = false
+var aim_t: float = 0.0
+var pad_aim: bool = false
+var turret_ang: float = -PI * 0.5     # drawn turret angle (eases toward the engine's aim)
+const AIM_HOLD_S: float = 0.15
 var credits_scroll: float = 0.0
 
 
@@ -756,7 +780,31 @@ func ev_text(e: Dictionary) -> String:
 			return "Core Reforged! +%d shards" % int(e["shards"])
 		"shard_node":
 			return "%s -> Lv%d" % [String((ReforgeDB.NODES[String(e["id"])] as Dictionary)["name"]), int(e["lvl"])]
+		"gear_forge":
+			return "Forged a %s %s!" % [String(RarityDB.get_def(String(e["rar"]))["name"]), _gear_name(e)]
+		"gear_upgrade":
+			if e.has("mw"):
+				return ("JACKPOT MASTERWORK! Lv%d" if bool(e.get("jackpot", false)) else "MASTERWORK! Lv%d") % int(e["lvl"])
+			return "Upgraded to Lv%d" % int(e["lvl"])
+		"gear_merge":
+			return "Merged into %s!" % String(RarityDB.get_def(String(e["to"]))["name"])
+		"gear_salvage":
+			return "Salvaged: +%d Scrap" % int(e["scrap"])
+		"gear_imprint":
+			return "Perk imprinted"
+		"gear_reroll_take":
+			return "New perk: %s" % String(AffixDB.get_def(String((e["perk"] as Dictionary)["id"])).get("name", ""))
+		"gear_equip":
+			return "Equipped %s" % String(Gear.item(save, int(e["uid"])).get("name", ""))
+		"core_look":
+			return ""
 	return ""
+
+
+func _gear_name(e: Dictionary) -> String:
+	var kind: String = String(e.get("kind", "weapon"))
+	var base: String = String(e.get("base", ""))
+	return String((FrameDB.get_def(base) if kind == "weapon" else ModuleDB.get_def(base)).get("name", base))
 
 
 ## Audio for meta (hub) events: event -> clip only.
@@ -771,8 +819,14 @@ func _meta_sfx(ev: Array) -> void:
 				sfx_play("upgrade")
 			"op_placed", "decor_placed", "op_moved", "plot_open":
 				sfx_play("place")
-			"tier_unlocked", "set_complete", "core_unlocked", "reforge":
+			"tier_unlocked", "set_complete", "core_unlocked", "reforge", "gear_merge":
 				sfx_play("levelup")
+			"gear_upgrade":
+				sfx_play("levelup" if (x as Dictionary).has("mw") else "upgrade")
+			"gear_reroll", "gear_lock", "gear_equip", "gear_imprint", "gear_reroll_take":
+				sfx_play("upgrade")
+			"gear_salvage":
+				sfx_play("coin")
 			"offline", "mission_claimed", "streak_claimed", "mission_bonus", "collect":
 				sfx_play("coin")
 
@@ -1025,6 +1079,8 @@ func _input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseMotion:
 		mouse_pos = (event as InputEventMouseMotion).position
+		if S != null and screen == "run" and bool(S.aim_on) and not pad_aim:
+			S.set_aim(s2w(mouse_pos), true)
 		if op_pan:
 			var dlt: Vector2 = (event as InputEventMouseMotion).relative
 			if mouse_pos.distance_to(op_pan_from) > 6.0:
@@ -1036,6 +1092,8 @@ func _input(event: InputEvent) -> void:
 	var mb: InputEventMouseButton = event
 	mouse_pos = mb.position
 	if mb.button_index == MOUSE_BUTTON_LEFT and not mb.pressed:
+		if aim_down:
+			end_aim()
 		if drag_card >= 0 or op_drag:
 			_end_drag(mb.position)
 			get_viewport().set_input_as_handled()
@@ -1126,7 +1184,49 @@ func tap_at(pos: Vector2) -> void:
 			place_at(u)
 		return
 	sel = pick_at(wp)
+	if sel < 0 or (S.id_at(sel) == "" and not TowerState.is_core_cell(sel)):
+		aim_down = true   # held >= AIM_HOLD_S off any building: manual aim (V2 P4)
+		aim_t = 0.0
 	_rebuild_ui()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and aim_down:
+		end_aim()
+
+
+## V2 P4 manual aim release (mouse up / stick centred): auto-fire resumes.
+func end_aim() -> void:
+	aim_down = false
+	aim_t = 0.0
+	if S != null and bool(S.aim_on):
+		S.set_aim(s2w(mouse_pos), false)
+
+
+## Per-frame aim input: the LMB hold timer and the pad's right stick.
+func _aim_input(delta: float) -> void:
+	if S == null or screen != "run" or overlay != "":
+		if aim_down or pad_aim:
+			aim_down = false
+			pad_aim = false
+			if S != null:
+				S.set_aim(TowerState.CENTER, false)
+		return
+	if aim_down:
+		# the release event ends the hold (_input: a press captures the mouse,
+		# so the release arrives even outside the window; focus loss ends it too)
+		aim_t += delta
+		if aim_t >= AIM_HOLD_S and not bool(S.aim_on):
+			S.set_aim(s2w(mouse_pos), true)
+			sel = -1
+	var rs := Vector2(Input.get_joy_axis(0, JOY_AXIS_RIGHT_X), Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y))
+	if rs.length() > Keybinds.DEADZONE:
+		pad_aim = true
+		var cw: Dictionary = (S.stats["weapons"] as Array).back()
+		S.set_aim(TowerState.CENTER + rs.normalized() * float(cw.get("range", 200.0)) * 0.75, true)
+	elif pad_aim:
+		pad_aim = false
+		S.set_aim(TowerState.CENTER, false)
 
 
 func begin_drag_card(idx: int) -> void:
@@ -1194,6 +1294,7 @@ func _process(delta: float) -> void:
 	if fade > 0.0:
 		fade = maxf(0.0, fade - delta)
 		fader.modulate = Color(1, 1, 1, 0.9 * fade / FADE_TIME)
+	_aim_input(delta)
 	if screen == "run" and S != null and overlay == "" and not _draft_hold():
 		var t0: int = Time.get_ticks_usec()
 		var tev: Array = S.tick(juice.engine_delta(delta))
