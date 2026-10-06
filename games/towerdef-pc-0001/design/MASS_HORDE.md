@@ -703,3 +703,72 @@ knot just before capture, F3 overlay and gore full.
   tint and density shading override each other (flash > slow > density/surge).
 - `Intel.roster` still scans bodies in GDScript (S7).
 - Real GPU numbers (owner's RTX 5080) still to be measured with F3.
+
+---
+
+## §V2 notes — Corehold V2 "Forge & Outpost" (2026-10, `V2_PROGRESS.md` has the full log)
+The V2 redesign kept the mass horde as the run's spine and changed what the crowd meets.
+These notes record what moved in this document's sections; the dated phase log, test
+ledger and golden-hash history live in `V2_PROGRESS.md`.
+
+### N1. Structures have no HP (P3a; replaces A4 / D1's building attacks)
+- Bodies never attack buildings. A body pressing a face whose cheapest route runs through
+  it **squeezes** through (per-body `sqz`, no push-out, own motion x`horde_squeeze` 0.35)
+  and ends the squeeze once clear. `ACT_BLD`, building HP, repair and destruction are gone.
+- Sappers ignore structures and detonate on the Core only (`horde_sapper_core` x6); Spitters
+  only ever shoot the Core. Barricade became the 1x1 **Wall** (slows bodies near it).
+- H9 (fluid sanity) still holds: 70% of a crowd flows around an open wall, none through.
+
+### N2. Finer board and footprints (P3b)
+- `CELL` 52 → 26 px, `SIDE` 11 → 21 (441 cells), a 3x3 Core on `CORE_SLOT` 220,
+  `STOP_R` 44. The run grid opens 7 → 21 cells a side by research; the range unit stays
+  78 px, so view framing and weapon reach are as before.
+- Flow-field resolution is derived from the cell (`FLOW_PER_CELL` / `FLOW_MARGIN`); the
+  building scan uses a dilated near-building mask so far bodies skip it.
+
+### N3. Directional weapons (P3c, P7d1)
+- 18 weapons: radial (360°, x0.85 damage), arc (traverse limit around the facing) and fixed
+  cones / lanes (x1.4–1.8, fire only when a body is in the shape). C# queries
+  `InCone`, `NearestInCone`, `InLine`, `CountInLine` keep cone / lane work off GDScript.
+- Facing is `rot` 0–7 (45°), away from the Core by default; Z / wheel rotates.
+- Consequence for the horde (P9): an all-directional board leaves bearings open, so bodies
+  from an uncovered side walk straight to the Core. That is the intended placement game
+  for players; the playtest bot now spreads facings (below).
+
+### N4. The classic ruleset is gone (P3d; closes D9)
+`horde_mult`, `_spawn_clones`, the classic plan / spawn / reap and the split-model gates are
+deleted. `horde_fp` runs mass sims on two boards (open, and Wall-sealed for the squeeze
+path). `horde_prof`: 10k bodies + 40 buildings 6.81 ms a tick (gate ≤ 8 ms).
+
+### N5. Core threat priority (P9)
+On auto-fire the Core's first volley takes an **Elite or Boss in contact** with the Core,
+else every other volley the **nearest Spitter in range** (`TowerState._core_threat`; eids
+rescanned every 4 volleys; manual aim overrides it). Before it, Spitters parked at
+`ranged_stop` 230 px piled up 23 deep while the cannon shot the nearest mite, and one
+wave-5 Elite on the Core took 70 of a fresh Core's 126 HP.
+
+### N6. Balance defaults (P9; supersedes C3 / C6 numbers where they differ)
+- Contact damage `DIFF_DMG` 1.5 → 0.9; body HP `mass_hp_k` 0.5 → 0.35; per-wave body HP
+  track `mass_hp_track` 1.006 → 1.03 (softer start, steeper climb); XP need base 4 (x1.18
+  a level); tier unlock base 40 (T2 @ wave 60 … T8 @ wave 120).
+- Fresh first runs (16 seeds, fixed bot): median wave 16, ~400 s, minimum wave 7 — the
+  FB2 300–480 s band. C6's "first runs die at wave ~12–15" is now ~16.
+- The first-run goal stays T1 wave 20 (`RUN_GOAL_WAVE`, the "RUN COMPLETE" offer).
+
+### N7. Playtest (P9; replaces C7's job list)
+`playtest.gd` was rewritten for V2: jobs `main` (10-day campaign, day rows, day-3 / day-8
+snapshots), `fresh`, `mass` (H1–H10 at 1:1, no harness LOD), and A/B jobs on the snapshots:
+`gear`, `corebld`, `xp`, `dir`, `weapons_a/b`, `perks`. Harness LOD (`BOT_LOD_CAP` 1200)
+still applies to campaign runs only.
+- Bot fix (P9): placement used the lowest free inner-ring index, which put every weapon on
+  the north row facing north; a directional weapon now takes the inner-ring cell whose
+  default facing is furthest from the facings already covered. Balance numbers taken
+  before this fix are void.
+- Gate results: `V2_PROGRESS.md` §P9 gate table.
+
+### N8. View (P9 visual audit)
+- Gore ground layer now fades (`Gore.FADE_MULT` 0.93, half-life ~30 s; closes V7's first
+  item) and is drawn dimmed so bodies read over it.
+- Damage numbers: hits on one body within 0.1 s merge (as before), and a hit within 30 px
+  of a young number adds to it (`Main.DMG_NEAR`); numbers are outlined and dropped below
+  half alpha.
