@@ -159,7 +159,7 @@ static func run_mods(s: Dictionary) -> Dictionary:
 	return {
 		"rf_dmg": float(rm["rf_dmg"]), "rf_hp": float(rm["rf_hp"]), "rf_coin": float(rm["rf_coin"]),
 		"barracks_tier": int(om.get("barracks_tier", 0)), "barracks_bonus": float(om.get("barracks_bonus", 0.0)),
-		"insight_cap": int(om.get("insight_cap", 0)), "banish": int(om.get("banish", 0)),
+		"insight_cap": int(om.get("insight_cap", 0)), "banish": int(om.get("banish", 0)) + int(lm["banish"]),
 		"outpost_fx": (om.get("outpost_fx", {}) as Dictionary).duplicate(),
 		"tier": t, "hp_mult": Tiers.hp_mult(t), "coin_mult": Tiers.coin_mult(t),
 		"boss_every": Tiers.boss_every(t),
@@ -168,6 +168,10 @@ static func run_mods(s: Dictionary) -> Dictionary:
 		"start_cash": int(lm["start_cash"]) + int(rm["rf_start_cash"]), "rerolls": int(lm["rerolls"]),
 		"speed": sp, "grid_lvl": Labs.level(s, "grid"),
 		"allow_new_bldg": int(s.get("runs", 0)) >= 2,
+		# V2 P8 research: run fx (pf), enemy cuts, levels (TrackDB unlocks)
+		"lab_fx": Labs.run_fx(s), "lab_enemy": Labs.enemy(s), "res": Labs.levels(s),
+		"lab_aim": float(lm["aim"]), "lab_bounty": float(lm["bounty"]), "lab_items": float(lm["items"]),
+		"lab_locks": int(lm["locks"]), "lab_choices": int(lm["choices"]),
 	}
 
 

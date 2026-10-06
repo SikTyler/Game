@@ -214,8 +214,8 @@ static func _build_card(m, s: Dictionary, g: Dictionary) -> void:
 				("Unlock: rerolls may change this perk again" if locked else "Lock: rerolls keep this perk (each lock x4 reroll cost)") + "\nLock slots: %d / %d" % [Gear.locks_on(it), Gear.lock_slots(s)] + ("" if why_l == "" else "\n" + why_l),
 				why_l == "", Kit.GOLD if locked else Kit.NEUTRAL, "forge:lock:%d" % i, "", 15)
 			var why_r: String = Gear.why_reroll(s, uid, i)
-			Kit.btn(m, "%s" % Kit.fmt(float(Gear.reroll_cost(it))), Rect2(pr.end.x - 106.0, pr.position.y, 106.0, 44.0), func() -> void: _act(m, Gear.reroll(m.save, uid, idx)),
-				"Reroll this perk for %d Scrap: pick one of %d new perks or keep it (never above T5)%s" % [Gear.reroll_cost(it), Gear.reroll_options(s), "" if why_r == "" else "\n" + why_r],
+			Kit.btn(m, "%s" % Kit.fmt(float(Gear.reroll_cost(it, s))), Rect2(pr.end.x - 106.0, pr.position.y, 106.0, 44.0), func() -> void: _act(m, Gear.reroll(m.save, uid, idx)),
+				"Reroll this perk for %d Scrap: pick one of %d new perks or keep it (never above T5)%s" % [Gear.reroll_cost(it, s), Gear.reroll_options(s), "" if why_r == "" else "\n" + why_r],
 				why_r == "", Kit.MAGENTA, "forge:reroll:%d" % i, "cur_scrap", 15)
 	elif not of.is_empty() and int(of["uid"]) == uid:
 		var cands: Array = of["cands"]
@@ -271,8 +271,8 @@ static func _build_card(m, s: Dictionary, g: Dictionary) -> void:
 	Kit.btn(m, "EQUIPPED" if eq else "EQUIP", _act_rect(m, 0), func() -> void: _act(m, Gear.equip(m.save, uid)),
 		("Mount on the Core's centre" if String(it["kind"]) == "weapon" else "Socket into the first free Module slot") + ("" if why_e == "" else "\n" + why_e), not eq and why_e == "", Kit.GREEN, "forge:equip", "", 17)
 	var why_u: String = Gear.why_upgrade(s, uid)
-	Kit.btn(m, "UPGRADE %s" % Kit.fmt(float(Gear.upgrade_cost(it))), _act_rect(m, 1), func() -> void: _act(m, Gear.upgrade(m.save, uid)),
-		"+1 level (+5%% power) for %d coins. Every 5th level is a MASTERWORK: +6%% power and a perk +1 tier (jackpot %d%%: +2 tiers or a bonus perk)%s" % [Gear.upgrade_cost(it), int(round(Gear.jackpot_chance(s) * 100.0)), "" if why_u == "" else "\n" + why_u],
+	Kit.btn(m, "UPGRADE %s" % Kit.fmt(float(Gear.upgrade_cost(it, m.save))), _act_rect(m, 1), func() -> void: _act(m, Gear.upgrade(m.save, uid)),
+		"+1 level (+5%% power) for %d coins. Every 5th level is a MASTERWORK: +6%% power and a perk +1 tier (jackpot %d%%: +2 tiers or a bonus perk)%s" % [Gear.upgrade_cost(it, m.save), int(round(Gear.jackpot_chance(s) * 100.0)), "" if why_u == "" else "\n" + why_u],
 		why_u == "", Kit.GOLD, "forge:upgrade", "cur_coin", 16)
 	var ms: Array = merge_set(m)
 	var why_m: String = "Need two more %s %ss (not favourites)" % [_rar_name(String(it["rar"])), String(it["kind"])] if ms.is_empty() else Gear.why_merge(s, ms, uid)
@@ -285,8 +285,8 @@ static func _build_card(m, s: Dictionary, g: Dictionary) -> void:
 		m._rebuild_ui(), "Copy one perk from another %s onto this one (the donor is destroyed; %d Scrap)" % [String(it["kind"]), Gear.imprint_cost(it)], int(m.forge_imprint) != uid, Kit.LAB, "forge:imprint", "", 17)
 	var why_s: String = Gear.why_salvage(s, uid)
 	var arm: bool = int(m.forge_confirm) == uid
-	Kit.btn(m, ("CONFIRM +%d" if arm else "SALVAGE +%d") % Gear.salvage_value(it), _act_rect(m, 4), func() -> void: _salvage(m, uid),
-		"Break it down for %d Scrap%s%s" % [Gear.salvage_value(it), "" if RarityDB.rank(String(it["rar"])) < RarityDB.rank("rare") else " (Rare+ asks twice)", "" if why_s == "" else "\n" + why_s], why_s == "", Kit.ENEMY, "forge:salvage", "cur_scrap", 16)
+	Kit.btn(m, ("CONFIRM +%d" if arm else "SALVAGE +%d") % Gear.salvage_value(it, m.save), _act_rect(m, 4), func() -> void: _salvage(m, uid),
+		"Break it down for %d Scrap%s%s" % [Gear.salvage_value(it, m.save), "" if RarityDB.rank(String(it["rar"])) < RarityDB.rank("rare") else " (Rare+ asks twice)", "" if why_s == "" else "\n" + why_s], why_s == "", Kit.ENEMY, "forge:salvage", "cur_scrap", 16)
 	var fav: bool = bool(it.get("fav", false))
 	Kit.btn(m, "UNFAVOURITE" if fav else "FAVOURITE", _act_rect(m, 5), func() -> void: _act(m, Gear.set_fav(m.save, uid, not fav)), "Favourites can't be salvaged, merged away or used as an imprint donor", true, Kit.MAGENTA if fav else Kit.NEUTRAL, "forge:fav", "", 15)
 

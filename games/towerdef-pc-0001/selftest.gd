@@ -16,6 +16,7 @@ const StMerge := preload("res://tests/st_merge.gd")
 const StTracks := preload("res://tests/st_tracks.gd")
 const StEvents := preload("res://tests/st_events.gd")
 const StContent := preload("res://tests/st_content.gd")
+const StResearch := preload("res://tests/st_research.gd")
 const FirePatterns := preload("res://FirePatterns.gd")
 const WeaponDB := preload("res://data/WeaponDB.gd")
 const TowerState := preload("res://TowerState.gd")
@@ -425,7 +426,8 @@ func _meta_stages() -> void:
 	_check("AC-20 queues 1/2/3 at Hall L1/L4/L8, 0 without a Hall", qok == [1, 1, 2, 2, 3, 3] and Labs.slots(nohall) == 0 and Labs.start(nohall, "dmg", NOW).is_empty())
 	# V2 (deliberate): Part Analysis / Crate Theory are gone with parts and crates -> 10.
 	# V2 P6 (deliberate): + Core Theory (gates Core levels 10 / 20 / 30 / 40 / 50)
-	_check("AC-20 every LabDB project + Grid + Core Theory (no part / crate research)", LabDB.IDS.size() == 11 and LabDB.DEFS.has("core_theory") and LabDB.DEFS.has("grid") and not LabDB.DEFS.has("labspeed") and not LabDB.DEFS.has("part_analysis") and not LabDB.DEFS.has("crate_theory") and String(LabDB.DEFS["offcap"]["name"]) == "Storage Tech" and String(LabDB.DEFS["offrate"]["name"]) == "Logistics Tech")
+	# V2 P8 (deliberate): the research tree is 49 projects in 7 categories (st_research checks them).
+	_check("AC-20 every LabDB project + Grid + Core Theory (no part / crate research)", LabDB.IDS.size() == 49 and LabDB.DEFS.has("core_theory") and LabDB.DEFS.has("grid") and not LabDB.DEFS.has("labspeed") and not LabDB.DEFS.has("part_analysis") and not LabDB.DEFS.has("crate_theory") and String(LabDB.DEFS["offcap"]["name"]) == "Storage Tech" and String(LabDB.DEFS["offrate"]["name"]) == "Logistics Tech")
 	# V2 P3b/P8 (deliberate): 26 px cells, grid 7x7 -> 21x21 in 7 steep steps.
 	_check("V2 grid research 7..21 in 7 steps, costs 2k/10k/50k/200k/750k/2.5M/8M", LabDB.max_of("grid") == 7 and Labs.cost("grid", 0) == 2000 and Labs.cost("grid", 3) == 200000 and Labs.cost("grid", 6) == 8000000 and TowerState.grid_for_level(0) == 7 and TowerState.grid_for_level(1) == 9 and TowerState.grid_for_level(4) == 15 and TowerState.grid_for_level(7) == 21)
 	L["research"]["lvls"]["dmg"] = 30
@@ -1614,7 +1616,9 @@ func _pc_board_stages() -> void:
 	# FEEDBACK-1 (deliberate): the run grid is a Research unlock (V2 P3b: 7x7
 	# -> 9x9 ... -> 21x21 small cells, Core centred); Core tracks never open rings.
 	var S1 = TowerState.new()
-	S1.setup(3, BaseMeta.default_save())
+	var sv1: Dictionary = BaseMeta.default_save()
+	sv1["research"]["lvls"]["enh_theory"] = 3   # V2 P8 (deliberate): every track open
+	S1.setup(3, sv1)
 	S1.cash = 1.0e9
 	var e2c: int = _at(-4, 0)   # ring 3: just outside the 7x7 start grid
 	_check("PC-E1 run: per-cell unlock is gone", S1.unlock_plot(e2c).is_empty() and not bool(S1.unlocked[e2c]))
@@ -2360,7 +2364,7 @@ func _pc_shell_stages() -> void:
 		"ACH_ALL_SYNERGY": [{}, [{"t": "synergies", "n": AchievementDB.SYNERGY_TARGET}], -1.0],
 		"ACH_ECO_ONLY": [{}, [{"t": "game_over", "wave": 30, "build": ["", "mine", "bounty"]}], -1.0],
 		"ACH_NO_ECO": [{}, [{"t": "game_over", "wave": 60, "build": ["gun", "", "armory"]}], -1.0],
-		"ACH_LABS_MAX": [{"research": {"lvls": {"speed": 3}, "running": []}}, [{"t": "meta"}], -1.0],
+		"ACH_LABS_MAX": [{"research": {"lvls": {"speed": 4}, "running": []}}, [{"t": "meta"}], -1.0],
 		"ACH_FIRST_REFORGE": [{"reforge": {"count": 1, "nodes": {}}}, [{"t": "meta"}], -1.0],
 		"ACH_REFORGE_5": [{"reforge": {"count": 5, "nodes": {}}}, [{"t": "meta"}], -1.0],
 		"ACH_GEM_MINE": [{"outpost": {"buildings": {"1": {"id": "gemmine", "built": true}}, "plots": []}}, [{"t": "meta"}], -1.0],
@@ -3216,6 +3220,7 @@ func _engine_meta_stages() -> void:
 	StTracks.run(self)
 	StEvents.run(self)
 	StContent.run(self)
+	StResearch.run(self)
 	_reforge_stages()
 
 

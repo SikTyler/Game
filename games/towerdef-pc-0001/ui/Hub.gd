@@ -1,7 +1,7 @@
 extends RefCounted
 ## The hub between runs (V2): a nav row under the top bar — Outpost (home),
 ## Core, Forge, Research, Reforge — and the deploy cluster (tier, modes,
-## PLAY); Missions is a top-bar button. This file owns the nav and the Research and Missions tabs; the
+## PLAY); Missions is a top-bar button. This file owns the nav and the Missions tab (Research: ResearchView); the
 ## Outpost lives in OutpostView, the Core in CoreView, Reforge in
 ## ReforgeView. View only: buttons call pure modules and hand the returned
 ## events to Main.meta_act().
@@ -24,6 +24,7 @@ const ReforgeView := preload("res://ui/ReforgeView.gd")
 const OutpostView := preload("res://ui/OutpostView.gd")
 const CoreView := preload("res://ui/CoreView.gd")
 const ForgeView := preload("res://ui/ForgeView.gd")
+const ResearchView := preload("res://ui/ResearchView.gd")
 const Gear := preload("res://Gear.gd")
 
 ## Tab hotkeys: [action, tab].
@@ -143,7 +144,7 @@ static func build(m) -> void:
 		"forge":
 			ForgeView.build(m)
 		"research":
-			_build_research(m)
+			ResearchView.build(m)
 		"missions":
 			_build_missions(m)
 		"reforge":
@@ -178,7 +179,7 @@ static func draw(m) -> void:
 			"forge":
 				ForgeView.draw(m, cr)
 			"research":
-				_draw_research(m, cr)
+				ResearchView.draw(m, cr)
 			"missions":
 				_draw_missions(m, cr)
 			"reforge":
@@ -197,54 +198,6 @@ static func badge_dot(m, p: Vector2) -> void:
 	m.draw_circle(p, 9.0, Color(Kit.MAGENTA, 0.25 + 0.15 * sin(m.t_anim * 4.0)))
 	m.draw_circle(p, 5.5, Kit.MAGENTA)
 	m.draw_circle(p + Vector2(-1.5, -1.5), 1.8, Color(1, 1, 1, 0.8))
-
-
-# ================================================================= RESEARCH
-static func _lab_rect(m, k: int) -> Rect2:
-	var cr: Rect2 = m.content_rect()
-	var cols: int = 4
-	var w: float = (cr.size.x - 40.0 - float(cols - 1) * 14.0) / float(cols)
-	var top: float = cr.position.y + 90.0
-	var h: float = minf(150.0, (cr.end.y - top - 20.0 - 2.0 * 14.0) / 3.0)
-	return Rect2(cr.position.x + 20.0 + float(k % cols) * (w + 14.0), top + float(k / cols) * (h + 14.0), w, h)
-
-
-static func _build_research(m) -> void:
-	var s: Dictionary = m.save
-	for k in LabDB.IDS.size():
-		var id: String = LabDB.IDS[k]
-		var d: Dictionary = LabDB.DEFS[id]
-		var lvl: int = Labs.level(s, id)
-		var tip: String = "%s  Lv%d/%d\n%s\nNext: %s coins (instant)" % [String(d["name"]), lvl, LabDB.max_of(id), String(d["effect"]), Kit.fmt(float(Labs.cost(id, lvl)))]
-		Kit.hit(m, _lab_rect(m, k), func() -> void: m.meta_act(Labs.start(m.save, id, m.now())), tip, "LAB " + id, Labs.can_start(s, id), Kit.LAB)
-
-
-static func _draw_research(m, cr: Rect2) -> void:
-	var s: Dictionary = m.save
-	Kit.t(m, "RESEARCH", Vector2(cr.position.x + 20, cr.position.y + 40), 26, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, 500.0)
-	Kit.t(m, "Instant, permanent upgrades. Needs a Research Hall in the Outpost.", Vector2(cr.position.x + 220, cr.position.y + 38), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, cr.size.x - 240)
-	for k in LabDB.IDS.size():
-		var id2: String = LabDB.IDS[k]
-		var d2: Dictionary = LabDB.DEFS[id2]
-		var r2: Rect2 = _lab_rect(m, k)
-		var lvl: int = Labs.level(s, id2)
-		var mx: int = LabDB.max_of(id2)
-		var ok: bool = Labs.can_start(s, id2)
-		Kit.panel(m, r2, Kit.LAB if ok else Kit.EDGE, Kit.CARD if ok else Kit.PANEL)
-		var ft: float = float(m.t_anim) - float(m.res_focus_t)
-		if String(m.res_focus) == id2 and ft < 2.5:
-			Kit.panel_glow(m, r2.grow(3.0), Kit.GOLD, Color(Kit.GOLD, 0.08), 1.0 + 1.5 * (0.5 + 0.5 * sin(ft * 9.0)), 3)
-		if not Kit.icon(m, "lab_" + id2, Rect2(r2.position.x + 12, r2.position.y + 14, 52, 52), Color.WHITE if ok or lvl >= mx else Color(1, 1, 1, 0.5)):
-			Kit.icon(m, "icon_lab", Rect2(r2.position.x + 12, r2.position.y + 14, 52, 52), Color.WHITE if ok else Color(1, 1, 1, 0.5))
-		Kit.t(m, String(d2["name"]), Vector2(r2.position.x + 76, r2.position.y + 34), 19, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, r2.size.x - 90)
-		Kit.t(m, "Lv %d / %d" % [lvl, mx], Vector2(r2.end.x - 12, r2.position.y + 34), 15, Kit.DIM, HORIZONTAL_ALIGNMENT_RIGHT, 100.0)
-		Kit.wrap(m, String(d2["effect"]), Vector2(r2.position.x + 76, r2.position.y + 48), 14, Kit.DIM, r2.size.x - 90, 2)
-		var status: String = "%s coins  ·  instant" % Kit.fmt(float(Labs.cost(id2, lvl)))
-		var sc: Color = Kit.GOLD
-		if lvl >= mx:
-			status = "MAX"
-			sc = Kit.GREEN
-		Kit.t(m, status, Vector2(r2.position.x + 76, r2.end.y - 14), 16, sc, HORIZONTAL_ALIGNMENT_LEFT, r2.size.x - 90)
 
 
 # ================================================================= MISSIONS

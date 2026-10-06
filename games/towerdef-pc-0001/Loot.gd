@@ -47,8 +47,9 @@ static func realize(s: Dictionary, loot: Dictionary, scrap_mult: float = 1.0) ->
 			cs = r.randi_range(int(sc_rng[0]), int(sc_rng[1])) * tier
 		scrap += cs
 		var rolled: Array = []
+		var cluck: float = luck + 2.0 * float(Labs.level(s, "cache_luck"))   # V2 P8 Cache Luck
 		for k in int(d["items"]):
-			rolled.append(GearGen.roll(r, "drop", {"ilvl": int(cd.get("ilvl", 1)), "luck": luck, "bans": g["bans"]}, g["pity"]))
+			rolled.append(GearGen.roll(r, "drop", {"ilvl": int(cd.get("ilvl", 1)), "luck": cluck, "bans": g["bans"]}, g["pity"]))
 		var mn: String = String(d["min"])
 		if mn != "" and not rolled.is_empty():
 			var best: int = 0
@@ -90,7 +91,7 @@ static func _keep(s: Dictionary, it: Dictionary, cache: String, src: String) -> 
 	var uid: int = Gear.add_item(s, it)
 	if uid > 0:
 		return {"uid": uid, "scrap": 0, "ev": [{"t": "loot_item", "uid": uid, "rar": String(it["rar"]), "kind": String(it["kind"]), "base": String(it["base"]), "src": src, "cache": cache}]}
-	var v: int = Gear.salvage_value(it)
+	var v: int = Gear.salvage_value(it, s)
 	return {"uid": 0, "scrap": v, "ev": [{"t": "loot_salvaged", "rar": String(it["rar"]), "scrap": v}]}
 
 

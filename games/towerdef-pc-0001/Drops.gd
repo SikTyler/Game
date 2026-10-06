@@ -18,7 +18,7 @@ static func empty_loot() -> Dictionary:
 
 
 ## Roll the drops for one kill. ctx: {tier, wave, drop_mult (Insight in_drop:
-## 1+x), items_left (this wave's item allowance)}. `lrng` = the loot stream
+## 1+x), items_left (this wave's item allowance), item_mult (Loot Theory)}. `lrng` = the loot stream
 ## (tokens); `rng` = drop_rng (Scrap). Fixed call order per source.
 static func roll(rng: RandomNumberGenerator, source: String, ctx: Dictionary, lrng: RandomNumberGenerator = null) -> Array:
 	var out: Array = []
@@ -38,7 +38,7 @@ static func roll(rng: RandomNumberGenerator, source: String, ctx: Dictionary, lr
 		"elite":
 			if rng.randf() < TuneRef.num("pc_elite_scrap_p", 0.25) * dm:
 				out.append({"kind": "scrap", "n": t, "source": "elite"})
-			if lrng != null and lrng.randf() < LootDB.ITEM_P * dm and int(ctx.get("items_left", 1)) > 0:
+			if lrng != null and lrng.randf() < LootDB.ITEM_P * dm * maxf(0.0, float(ctx.get("item_mult", 1.0))) and int(ctx.get("items_left", 1)) > 0:
 				out.append({"kind": "item", "src": "elite", "ilvl": il, "source": "elite"})
 	return out
 

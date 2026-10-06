@@ -209,6 +209,7 @@ var op_pulse_t: float = -10.0
 var op_flash: String = ""            # palette entry flashing (a building not built yet)
 var op_flash_t: float = -10.0
 var res_focus: String = ""           # research card pulsing
+var res_cat: String = "core"          # Research tab category (LabDB.CATS)
 var res_focus_t: float = -10.0
 var credits_scroll: float = 0.0
 

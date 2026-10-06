@@ -143,6 +143,30 @@ func _initialize() -> void:
 	_quiet()
 	main.set_tab("research")
 	await _shot("%s/06_research.png" % outdir)
+	# V2 P8: a mid-game tree (Hall 5, some research done, a prerequisite pulsing)
+	var rl: Dictionary = s["research"]["lvls"]
+	var rkeep: Dictionary = rl.duplicate()
+	for kv in [["loot_theory", 4], ["appraisal", 2], ["stabilizer", 1], ["reroll_disc", 2], ["greater_cal", 1], ["lab_discount", 2]]:
+		rl[String(kv[0])] = int(kv[1])
+	var hkeep: Dictionary = {}
+	for k in s["outpost"]["buildings"].keys():
+		if String(s["outpost"]["buildings"][k]["id"]) == "research":
+			hkeep[k] = int(s["outpost"]["buildings"][k]["lvl"])
+			s["outpost"]["buildings"][k]["lvl"] = 5
+	main.res_cat = "forge"
+	main.res_focus = "blacklist"
+	main.res_focus_t = main.t_anim
+	main._rebuild_ui()
+	await _shot("%s/06b_research_forge.png" % outdir)
+	main.res_cat = "economy"
+	main.res_focus = ""
+	main._rebuild_ui()
+	await _shot("%s/06c_research_economy.png" % outdir)
+	for k in rkeep.keys():
+		rl[k] = rkeep[k]
+	for k in hkeep.keys():
+		s["outpost"]["buildings"][k]["lvl"] = hkeep[k]
+	main.res_cat = "core"
 	var lst: Array = Missions.list(s)
 	(lst[0] as Dictionary)["prog"] = int((lst[0] as Dictionary)["target"])
 	(lst[1] as Dictionary)["prog"] = int((lst[1] as Dictionary)["target"]) / 2

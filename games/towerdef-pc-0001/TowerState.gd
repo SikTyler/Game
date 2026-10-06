@@ -402,6 +402,12 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 			rm[k] = 0.0
 		rm["start_cash"] = 0
 		rm["rerolls"] = 0
+		for k in ["lab_fx", "lab_enemy"]:
+			rm[k] = {}
+		for k in ["lab_aim", "lab_bounty", "lab_items"]:
+			rm[k] = 0.0
+		for k in ["lab_locks", "lab_choices"]:
+			rm[k] = 0
 	_apply_mods(rm)
 	_apply_challenge()
 	wave_time = TuneRef.num("wave_time", wave_time)
@@ -418,9 +424,10 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	core_def = Gear.core_def(save)
 	core_lvl = Cores.level(save)
 	pfx = Gear.run_fx(save)
-	var ofx: Dictionary = mods.get("outpost_fx", {})   # V2 P6 Core buildings
-	for k in ofx.keys():
-		pfx[k] = float(pfx.get(k, 0.0)) + float(ofx[k])
+	# V2 P6 Core buildings + V2 P8 research fx
+	for src in [mods.get("outpost_fx", {}), mods.get("lab_fx", {})]:
+		for k in (src as Dictionary).keys():
+			pfx[k] = float(pfx.get(k, 0.0)) + float((src as Dictionary)[k])
 	coin_mult *= maxf(0.1, 1.0 + pf("coin_run"))
 	aim_on = false
 	aim_pos = CENTER
@@ -631,6 +638,11 @@ func _refresh_enemy_mods() -> void:
 	# V2 P7c: Directive costs on the enemy side
 	enemy_hp_mod *= DirectiveDB.enemy_mult(directives, "hp")
 	count_mult *= DirectiveDB.enemy_mult(directives, "count")
+	# V2 P8: enemy research (Weak Points, Blunting, Mire Field)
+	var le: Dictionary = mods.get("lab_enemy", {})
+	enemy_hp_mod *= 1.0 - clampf(float(le.get("hp", 0.0)), 0.0, 0.5)
+	enemy_dmg_mod *= 1.0 - clampf(float(le.get("dmg", 0.0)), 0.0, 0.5)
+	enemy_spd_mod *= 1.0 - clampf(float(le.get("spd", 0.0)), 0.0, 0.5)
 
 
 ## SPEC B1: fold the meta bundle into run multipliers. TowerState never reads
@@ -1954,7 +1966,7 @@ func _mass_try_clear(w: int, ev: Array) -> void:
 	var cg: float = float(a["pool"]) * TuneRef.num("mass_clear", 0.3) * kept * cash_index() * run_cash_mult() * kill_cash_mod
 	cash += cg
 	cash_earned += cg
-	var coins: float = float(a["cclear"]) * kept
+	var coins: float = float(a["cclear"]) * kept * (1.0 + float(mods.get("lab_bounty", 0.0)))
 	coins_run += coins
 	coins_wave += coins
 	_mass_sweep_loot(a)
@@ -2136,6 +2148,10 @@ func _spawn_mass(kind: String, ev: Array, at: Vector2, marked: bool, pw: int, lo
 		"elite":
 			en.shield[e] = TuneRef.int_of("elite_shield_base", 3) + pw / 10 + elite_shield_add
 			en.max_shield[e] = en.shield[e]
+			var ecut: float = clampf(float((mods.get("lab_enemy", {}) as Dictionary).get("elite", 0.0)), 0.0, 0.5)
+			if ecut > 0.0:   # V2 P8 Elite Profiling
+				en.hp[e] = en.hp[e] * (1.0 - ecut)
+				en.max_hp[e] = en.hp[e]
 		"ranged":
 			en.fire_cd[e] = TuneRef.num("ranged_fire", 2.0)
 		"shield":
@@ -2171,6 +2187,7 @@ func add_enemy(d: Dictionary) -> int:
 ## slots are 0..n-1 in list order.
 func set_enemies(list: Array) -> void:
 	en.clear()
+	burning = PackedInt32Array()   # slot lists die with the store
 	for d in list:
 		add_enemy(d)
 
@@ -2269,7 +2286,7 @@ func _move_enemies(dt: float, ev: Array) -> void:
 				en.hp[e] = 0.0
 				en.flags[e] = en.flags[e] | EnemyStore.F_BOOM
 				_leak(e)
-				var bamt: float = en.dmg[e] * TuneRef.num("horde_sapper_core", 6.0)
+				var bamt: float = en.dmg[e] * TuneRef.num("horde_sapper_core", 6.0) * (1.0 - clampf(float((mods.get("lab_enemy", {}) as Dictionary).get("sapper", 0.0)), 0.0, 0.6))
 				ev.append({"t": "sapper_blast", "slot": CORE_SLOT, "dmg": bamt, "pos": en.pos[e]})
 				_core_damage(bamt, ev, "core_hit", en.pos[e], -1, _armor_share(e))
 			EnemyStore.ACT_SHOT:
@@ -2708,6 +2725,8 @@ func _burn_step(dt: float, ev: Array) -> void:
 	var keep: PackedInt32Array = PackedInt32Array()
 	var lit: Array = []
 	for b in burning:
+		if b < 0 or b >= en.hp.size():
+			continue   # a slot the store no longer has
 		if en.hp[b] <= 0.0 or en.burn_t[b] <= 0.0 or not en.world.call("IsLive", b):
 			en.burn_t[b] = 0.0
 			continue
@@ -2796,7 +2815,7 @@ static func _dir_to(from: Vector2, to: Vector2) -> Vector2:
 
 func _core_volley(atk: String, wd: Dictionary, ev: Array, targets: Array, used: Dictionary, k: int) -> bool:
 	var rng_lim: float = float(wd["range"])
-	var dmg: float = float(wd["dmg"]) * (1.0 + AIM_FOCUS * focus)
+	var dmg: float = float(wd["dmg"]) * (1.0 + (AIM_FOCUS + float(mods.get("lab_aim", 0.0))) * focus)
 	var mode_s: String = String(target_modes[CORE_SLOT])
 	match atk:
 		"cannon":
@@ -3305,7 +3324,7 @@ func _roll_drops(ed: int, ev: Array, ks: float = -1.0) -> void:
 	elif kind == "elite" or en.is_marked(ed):
 		src = "elite"
 	var ctx: Dictionary = {"tier": tier, "wave": wave, "drop_mult": 1.0 + float(ins.get("in_drop", 0.0)), "share": ks if ks >= 0.0 else en.share[ed],
-		"items_left": LootDB.wave_cap(tier) - int(wave_items.get(wave, 0))}
+		"items_left": LootDB.wave_cap(tier) - int(wave_items.get(wave, 0)), "item_mult": 1.0 + float(mods.get("lab_items", 0.0))}
 	var drops: Array = Drops.roll(drop_rng, src, ctx, loot_rng)
 	for d1 in drops:
 		if String((d1 as Dictionary)["kind"]) == "item":
@@ -3477,7 +3496,12 @@ func _slot_spins(ev: Array) -> void:
 		ev.append({"t": "slot_spin", "slot": i, "mult": mul, "cash": c})
 
 
-## Lock / unlock draft card idx (max MAX_LOCKS): kept by rerolls, carried to
+## Draft card locks: MAX_LOCKS + the Draft Lock research.
+func lock_cap() -> int:
+	return MAX_LOCKS + clampi(int(mods.get("lab_locks", 0)), 0, 1)
+
+
+## Lock / unlock draft card idx (max lock_cap()): kept by rerolls, carried to
 ## the next hand when another card is taken.
 func toggle_lock(idx: int) -> Array:
 	if idx < 0 or idx >= draft.size():
@@ -3489,7 +3513,7 @@ func toggle_lock(idx: int) -> Array:
 		c.erase("lock")
 	else:
 		var n: int = draft.filter(func(x: Variant) -> bool: return bool((x as Dictionary).get("lock", false)) and String((x as Dictionary).get("kind", "")) != "evo").size()
-		if n >= MAX_LOCKS:
+		if n >= lock_cap():
 			return []
 		c["lock"] = true
 	return [{"t": "draft_lock", "idx": idx, "lock": bool(c.get("lock", false))}]
@@ -3617,7 +3641,7 @@ func _draft_ctx(guarantee: String) -> Dictionary:
 		"hut_max": hut_max(), "t1": _t1_ids(),
 		"packs": packs, "specials": sp, "banished": banished, "luck": luck_now(),
 		"eco_mult": 1.0,
-		"choices": 3 + mini(1, _reforge_node("wide_draft")) + _directive_choices(),
+		"choices": 3 + mini(1, _reforge_node("wide_draft")) + _directive_choices() + clampi(int(mods.get("lab_choices", 0)), 0, 2),
 		"insight_p": TuneRef.num("pc_insight_p", 0.01) * (1.0 + float(luck) * 0.05),
 		"insight_ok": insight_found.size() < ins_cap, "insight_blocked": blocked,
 		"guarantee": guarantee, "weapons": _weapon_buildings(),
@@ -4046,10 +4070,12 @@ func buy_tracks(t: String, n: int) -> Array:
 	return ev
 
 
-## P8 research unlocks (TrackDB `unlock`): every track is open until then.
+## V2 P8 research unlocks (TrackDB `unlock` = [research id, level]).
 func track_unlocked(t: String) -> bool:
-	var u: String = String((TRACKS.get(t, {}) as Dictionary).get("unlock", ""))
-	return u == "" or int(mods.get("res_" + u, 0)) > 0
+	var u: Variant = (TRACKS.get(t, {}) as Dictionary).get("unlock", [])
+	if not (u is Array) or (u as Array).size() < 2:
+		return true
+	return int((mods.get("res", {}) as Dictionary).get(String(u[0]), 0)) >= int(u[1])
 
 
 ## Legacy view hook: the Core cell buys the Damage track; buildings level only

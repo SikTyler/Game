@@ -6,7 +6,8 @@ extends RefCounted
 ## tracks (od): big steps with a drawback each (their effects live in
 ## TowerState.compute_stats), base 300, growth 2.5, cap 4.
 ##   {tree, name, base, growth, cap, step{}, desc, [od, minus], [unlock]}
-## `unlock` (P8): a research id that must be >= 1 to buy the track.
+## `unlock` (P8): [research id, level] the save needs before the track can be
+## bought (Enhancement Theory I / II / III open three tracks each).
 ## Tune pc_track_cap_<id> / pc_track_growth_<id> override a track.
 
 const TREES: Array = [["attack", "Attack"], ["defense", "Defense"], ["economy", "Economy"]]
@@ -19,11 +20,11 @@ const DEFS: Dictionary = {
 	"a_critd":  {"tree": "attack", "name": "Crit Damage", "base": 50.0, "growth": 1.42, "cap": 20, "step": {"crit_dmg": 0.10}, "desc": "+10% crit damage"},
 	"a_range":  {"tree": "attack", "name": "Range", "base": 60.0, "growth": 1.45, "cap": 15, "step": {"range": 0.10}, "desc": "+0.1 cell Weapon range"},
 	"a_multi":  {"tree": "attack", "name": "Multishot", "base": 300.0, "growth": 2.20, "cap": 3, "step": {"multishot": 1.0}, "desc": "+1 Weapon target per volley"},
-	"a_pierce": {"tree": "attack", "name": "Pierce", "base": 120.0, "growth": 1.80, "cap": 5, "step": {"pierce": 1.0}, "desc": "Weapon shots pierce +1 body"},
+	"a_pierce": {"tree": "attack", "name": "Pierce", "base": 120.0, "growth": 1.80, "cap": 5, "step": {"pierce": 1.0}, "desc": "Weapon shots pierce +1 body", "unlock": ["enh_theory", 3]},
 	"a_splash": {"tree": "attack", "name": "Splash", "base": 60.0, "growth": 1.45, "cap": 10, "step": {"splash": 0.05}, "desc": "+0.05 cell blast radius on splash Weapons"},
-	"a_chain":  {"tree": "attack", "name": "Chain & Bounce", "base": 150.0, "growth": 1.90, "cap": 4, "step": {"chain": 1.0, "bounce": 1.0}, "desc": "+1 chain jump and +1 ricochet"},
+	"a_chain":  {"tree": "attack", "name": "Chain & Bounce", "base": 150.0, "growth": 1.90, "cap": 4, "step": {"chain": 1.0, "bounce": 1.0}, "desc": "+1 chain jump and +1 ricochet", "unlock": ["enh_theory", 2]},
 	"a_boss":   {"tree": "attack", "name": "Boss Damage", "base": 55.0, "growth": 1.42, "cap": 15, "step": {"boss": 0.06}, "desc": "+6% damage to bosses"},
-	"a_exec":   {"tree": "attack", "name": "Execute", "base": 80.0, "growth": 1.50, "cap": 10, "step": {"execute": 0.01}, "desc": "Weapon hits finish bodies under +1% HP"},
+	"a_exec":   {"tree": "attack", "name": "Execute", "base": 80.0, "growth": 1.50, "cap": 10, "step": {"execute": 0.01}, "desc": "Weapon hits finish bodies under +1% HP", "unlock": ["enh_theory", 1]},
 	"dmg":      {"tree": "attack", "name": "Overcharge", "od": true, "base": 300.0, "growth": 2.5, "cap": 4, "step": {}, "desc": "x1.40 Core + building damage", "minus": "-12% Core attack rate"},
 	"rate":     {"tree": "attack", "name": "Overclock", "od": true, "base": 300.0, "growth": 2.5, "cap": 4, "step": {}, "desc": "+30% Core attack rate", "minus": "-9% Core damage"},
 	"range":    {"tree": "attack", "name": "Long Barrel", "od": true, "base": 300.0, "growth": 2.5, "cap": 4, "step": {}, "desc": "+0.75 Core range", "minus": "-8% Core attack rate"},
@@ -33,22 +34,22 @@ const DEFS: Dictionary = {
 	"d_armor":  {"tree": "defense", "name": "Armor", "base": 50.0, "growth": 1.45, "cap": 15, "step": {"armor": 1.0}, "desc": "+1 armor (flat off every hit)"},
 	"d_dr":     {"tree": "defense", "name": "Damage Reduction", "base": 60.0, "growth": 1.45, "cap": 20, "step": {"dr": 0.01}, "desc": "-1% damage taken (60% cap)"},
 	"d_shield": {"tree": "defense", "name": "Shield", "base": 60.0, "growth": 1.45, "cap": 15, "step": {"shield": 20.0}, "desc": "+20 shield, +2 shield regen"},
-	"d_thorns": {"tree": "defense", "name": "Thorns", "base": 50.0, "growth": 1.42, "cap": 15, "step": {"reflect": 0.05}, "desc": "Reflect +5% of Core hits to the attacker"},
-	"d_steal":  {"tree": "defense", "name": "Lifesteal", "base": 70.0, "growth": 1.50, "cap": 10, "step": {"lifesteal": 0.002}, "desc": "+0.2% of damage dealt heals the Core"},
+	"d_thorns": {"tree": "defense", "name": "Thorns", "base": 50.0, "growth": 1.42, "cap": 15, "step": {"reflect": 0.05}, "desc": "Reflect +5% of Core hits to the attacker", "unlock": ["enh_theory", 3]},
+	"d_steal":  {"tree": "defense", "name": "Lifesteal", "base": 70.0, "growth": 1.50, "cap": 10, "step": {"lifesteal": 0.002}, "desc": "+0.2% of damage dealt heals the Core", "unlock": ["enh_theory", 1]},
 	"d_knock":  {"tree": "defense", "name": "Knockback", "base": 40.0, "growth": 1.40, "cap": 10, "step": {"knock": 0.10}, "desc": "+10% Weapon knockback"},
 	"d_slow":   {"tree": "defense", "name": "Frost Rounds", "base": 50.0, "growth": 1.45, "cap": 10, "step": {"slow_hit": 0.03}, "desc": "Weapon hits slow bodies +3%"},
-	"d_last":   {"tree": "defense", "name": "Last Stand", "base": 400.0, "growth": 3.0, "cap": 1, "step": {"last_stand": 1.0}, "desc": "Below 30% HP: 2 s immunity, once per wave"},
+	"d_last":   {"tree": "defense", "name": "Last Stand", "base": 400.0, "growth": 3.0, "cap": 1, "step": {"last_stand": 1.0}, "desc": "Below 30% HP: 2 s immunity, once per wave", "unlock": ["enh_theory", 2]},
 	"armor":    {"tree": "defense", "name": "Fortress", "od": true, "base": 300.0, "growth": 2.5, "cap": 4, "step": {}, "desc": "+30% HP, +1 regen, +2 armor", "minus": "-9% Core damage"},
 	# ---- Economy ---------------------------------------------------------
 	"e_kill":   {"tree": "economy", "name": "Kill Cash", "base": 40.0, "growth": 1.40, "cap": 20, "step": {"kill_cash": 0.05}, "desc": "+5% kill cash"},
 	"e_flow":   {"tree": "economy", "name": "Cash Flow", "base": 40.0, "growth": 1.40, "cap": 20, "step": {"cash": 0.05}, "desc": "+5% cash per second"},
 	"e_int":    {"tree": "economy", "name": "Interest", "base": 60.0, "growth": 1.45, "cap": 10, "step": {"interest": 0.005}, "desc": "+0.5% wave interest"},
-	"e_icap":   {"tree": "economy", "name": "Interest Cap", "base": 50.0, "growth": 1.42, "cap": 15, "step": {"icap": 0.15}, "desc": "+15% interest cap"},
+	"e_icap":   {"tree": "economy", "name": "Interest Cap", "base": 50.0, "growth": 1.42, "cap": 15, "step": {"icap": 0.15}, "desc": "+15% interest cap", "unlock": ["enh_theory", 3]},
 	"e_xp":     {"tree": "economy", "name": "XP Gain", "base": 40.0, "growth": 1.40, "cap": 20, "step": {"xp": 0.05}, "desc": "+5% XP (faster drafts)"},
 	"e_loot":   {"tree": "economy", "name": "Loot Luck", "base": 120.0, "growth": 1.80, "cap": 5, "step": {"loot_luck": 1.0}, "desc": "+1 luck on the loot this run banks"},
 	"e_draft":  {"tree": "economy", "name": "Draft Luck", "base": 120.0, "growth": 1.80, "cap": 5, "step": {"draft_luck": 1.0}, "desc": "+1 draft luck (rarer cards)"},
-	"e_free":   {"tree": "economy", "name": "Lucky Purchase", "base": 80.0, "growth": 1.50, "cap": 10, "step": {"free_buy": 0.03}, "desc": "+3% chance an enhancement is free"},
-	"e_scrap":  {"tree": "economy", "name": "Scrap Find", "base": 50.0, "growth": 1.42, "cap": 15, "step": {"scrap_find": 0.10}, "desc": "+10% Scrap from drops"},
+	"e_free":   {"tree": "economy", "name": "Lucky Purchase", "base": 80.0, "growth": 1.50, "cap": 10, "step": {"free_buy": 0.03}, "desc": "+3% chance an enhancement is free", "unlock": ["enh_theory", 1]},
+	"e_scrap":  {"tree": "economy", "name": "Scrap Find", "base": 50.0, "growth": 1.42, "cap": 15, "step": {"scrap_find": 0.10}, "desc": "+10% Scrap from drops", "unlock": ["enh_theory", 2]},
 	"e_coin":   {"tree": "economy", "name": "Coin Bonus", "base": 70.0, "growth": 1.50, "cap": 15, "step": {"coin_run": 0.03}, "desc": "+3% coins this run"},
 	"eco":      {"tree": "economy", "name": "Eco Engine", "od": true, "base": 300.0, "growth": 2.5, "cap": 4, "step": {}, "desc": "+3 cash/s, interest cap +40", "minus": "-8% Core max HP"},
 }
@@ -84,3 +85,13 @@ static func fx_of(lvls: Dictionary) -> Dictionary:
 		for k in st.keys():
 			out[k] = float(out.get(k, 0.0)) + float(st[k]) * float(n)
 	return out
+
+
+## "Enhancement Theory II" for a gated track ("" when always open).
+static func unlock_label(id: String) -> String:
+	var u: Variant = get_def(id).get("unlock", [])
+	if not (u is Array) or (u as Array).size() < 2:
+		return ""
+	var roman: Array = ["", "I", "II", "III", "IV", "V"]
+	var lv: int = int(u[1])
+	return "%s %s" % ["Enhancement Theory" if String(u[0]) == "enh_theory" else String(u[0]), roman[lv] if lv < roman.size() else str(lv)]

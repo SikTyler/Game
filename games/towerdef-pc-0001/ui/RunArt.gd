@@ -81,7 +81,12 @@ static func _spec(id: String) -> Array:
 static func draw(ci: CanvasItem, id: String, r: Rect2, mod: Color = Color.WHITE) -> bool:
 	if not knows(id):
 		return false
-	var sp: Array = _spec(id)
+	draw_spec(ci, _spec(id), r, mod, hash(id))
+	return true
+
+
+## A tile for an explicit [glyph, colour hex] (research cards use LabDB.icon).
+static func draw_spec(ci: CanvasItem, sp: Array, r: Rect2, mod: Color = Color.WHITE, seed_v: int = 0) -> void:
 	var col: Color = Color(String(sp[1])) * mod
 	col.a = mod.a
 	var a: float = mod.a
@@ -95,8 +100,7 @@ static func draw(ci: CanvasItem, id: String, r: Rect2, mod: Color = Color.WHITE)
 	ci.draw_style_box(sb, sq.grow(-s * 0.04))
 	var g: Vector2 = sq.get_center()
 	var R: float = s * 0.30
-	_glyph(ci, String(sp[0]), g, R, col, a, hash(id))
-	return true
+	_glyph(ci, String(sp[0]), g, R, col, a, seed_v)
 
 
 static func _P(g: Vector2, R: float, pts: Array) -> PackedVector2Array:

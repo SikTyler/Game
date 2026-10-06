@@ -20,7 +20,11 @@ static func run(t) -> void:
 
 static func _run():
 	var S = TowerState.new()
-	S.setup(55, BaseMeta.normalize({}))
+	# V2 P8 (deliberate): Enhancement Theory III opens every track here; the
+	# research gating itself is checked in st_research.
+	var sv: Dictionary = BaseMeta.normalize({})
+	sv["research"]["lvls"]["enh_theory"] = 3
+	S.setup(55, sv)
 	S.spawn_hold = true
 	S.draft_queue.clear()
 	return S

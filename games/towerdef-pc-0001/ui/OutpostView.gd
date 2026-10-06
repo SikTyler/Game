@@ -532,7 +532,7 @@ static func build(m) -> void:
 		var id: String = ids[k]
 		var r: Rect2 = pal_entry(m, k)
 		var cc: Dictionary = cost_of(id)
-		var lim_ok: bool = is_decor(id) or Outpost.count_of(o, id) < OutpostDB.limit(id, int(o["relay_lvl"]))
+		var lim_ok: bool = is_decor(id) or Outpost.count_of(o, id) < Outpost.limit_of(s, id)
 		var ok: bool = Outpost.can_afford(s, int(cc["coins"])) and lim_ok
 		var tip: String = "%s\n%s\n%s coins%s  ·  click, then click the map (or drag it there)" % [name_of(id), String(DESC.get(id, "Decor: +1% Charm per 10 pieces; tags buff neighbours")), Kit.fmt(float(cc["coins"])), ("" if is_decor(id) else "  ·  power %d" % int(OutpostDB.get_def(id).get("power", 0)))]
 		Kit.hit(m, r, func() -> void: _press_palette(m, id), tip, "OPBUILD " + id, ok, Kit.GREEN)
@@ -1138,7 +1138,7 @@ static func _draw_palette(m, s: Dictionary, o: Dictionary) -> void:
 		var id: String = ids[k]
 		var r: Rect2 = pal_entry(m, k)
 		var cc: Dictionary = cost_of(id)
-		var lim: int = 99 if is_decor(id) else OutpostDB.limit(id, int(o["relay_lvl"]))
+		var lim: int = 99 if is_decor(id) else Outpost.limit_of(s, id)
 		var n: int = 0 if is_decor(id) else Outpost.count_of(o, id)
 		var ok: bool = Outpost.can_afford(s, int(cc["coins"])) and n < lim
 		var armed: bool = m.op_arm == id

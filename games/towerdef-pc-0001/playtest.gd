@@ -1145,13 +1145,13 @@ static func _labs_spend(save: Dictionary, now: int, frac: float = 0.5) -> void:
 		var best_sc: float = INF
 		for idv in LAB_PRIO:
 			var id: String = idv
-			if Labs.is_running(save, id) or Labs.level(save, id) >= LabDB.max_of(id):
+			if Labs.is_running(save, id) or Labs.level(save, id) >= LabDB.max_of(id) or not Labs.is_open(save, id):
 				continue
-			var sc: float = float(Labs.cost(id, Labs.level(save, id))) * float(LAB_W[id])
+			var sc: float = float(Labs.price(save, id)) * float(LAB_W[id])
 			if sc < best_sc:
 				best_sc = sc
 				best = id
-		if best == "" or float(Labs.cost(best, Labs.level(save, best))) > frac * float(save["coins"]):
+		if best == "" or float(Labs.price(save, best)) > frac * float(save["coins"]):
 			break
 		Labs.start(save, best, now)
 

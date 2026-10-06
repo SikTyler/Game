@@ -5,7 +5,8 @@ extends RefCounted
 ## level / cap and the next level's cash cost (green when affordable).
 ## Overdrive tracks (the big trade-offs) carry a magenta rim and their
 ## drawback in the tooltip. Tile keys "TRACK <name>", tabs "ETAB <tree>",
-## mode "EMODE"; Shift+1-5 buys the open tree's first five tracks.
+## mode "EMODE"; Shift+1-5 buys the open tree's first five tracks. Tracks
+## gated by Enhancement Theory research (V2 P8) show "Needs Theory II" etc.
 
 const TowerState := preload("res://TowerState.gd")
 const TrackDB := preload("res://data/TrackDB.gd")
@@ -63,6 +64,8 @@ static func tip(m, tid: String) -> String:
 	var lines: Array = [head, "Per level: %s" % String(d["desc"])]
 	if TrackDB.is_od(tid):
 		lines.append("Drawback per level: %s" % String(d.get("minus", "")))
+	if not S.track_unlocked(tid):
+		lines.append("LOCKED: research %s in the Research Hall" % TrackDB.unlock_label(tid))
 	lines.append("Level %d / %d  ·  %s" % [lv, TowerState.track_cap(tid), ("next $%s" % Kit.fmt(float(c))) if c >= 0 else "maxed"])
 	lines.append("Buy mode %s (toggle at the top right)" % mode_label(int(m.enh_mode)))
 	return "\n".join(PackedStringArray(lines))
@@ -96,6 +99,7 @@ static func draw(m) -> void:
 		var lv: int = int(S.tracks.get(tid, 0))
 		var can: bool = c >= 0 and S.cash >= float(c) and S.track_unlocked(tid)
 		var od: bool = TrackDB.is_od(tid)
+		var locked: bool = not S.track_unlocked(tid)
 		var rim: Color = Kit.MAGENTA if od else (Kit.GREEN if can else Kit.EDGE)
 		Kit.panel(m, r, rim, Kit.tint(Kit.GREEN, 0.12) if can else (Kit.tint(Kit.MAGENTA, 0.08) if od else Kit.PANEL), 1)
 		# level bar along the bottom edge
@@ -105,6 +109,10 @@ static func draw(m) -> void:
 		var ty: float = r.position.y + maxf(16.0, r.size.y * 0.46)
 		Kit.t(m, String(d["name"]), Vector2(r.position.x + 7, ty), 14, Kit.TEXT if (can or lv > 0) else Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 14)
 		var ly: float = r.end.y - 6.0
+		if locked:
+			# V2 P8: research-gated track - the Theory that opens it
+			Kit.t(m, TrackDB.unlock_label(tid).replace("Enhancement Theory", "Needs Theory"), Vector2(r.position.x + 7, ly), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 14)
+			continue
 		Kit.t(m, ("Lv %d" % lv) if c >= 0 else "MAX", Vector2(r.position.x + 7, ly), 14, Kit.DIM if c >= 0 else Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, r.size.x * 0.5)
 		if c >= 0:
 			Kit.t(m, "$" + Kit.fmt(float(c)), Vector2(r.end.x - 7, ly), 14, Kit.GREEN if can else Kit.DIM, HORIZONTAL_ALIGNMENT_RIGHT, r.size.x * 0.6)

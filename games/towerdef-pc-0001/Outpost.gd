@@ -256,11 +256,38 @@ static func place_error(s: Dictionary, id: String, x: int, y: int, rot: int, ski
 			return "occupied"
 	if id == "gemmine" and not _on_vein(cells):
 		return "needs_vein"
-	if not is_decor and int(o["relay_lvl"]) < OutpostDB.relay_req(id):
+	if not is_decor and int(o["relay_lvl"]) < relay_req_of(s, id):
 		return "relay"
-	if not is_decor and skip == "" and count_of(o, id) >= OutpostDB.limit(id, int(o["relay_lvl"])):
+	if not is_decor and skip == "" and count_of(o, id) >= limit_of(s, id):
 		return "limit"
 	return ""
+
+
+## V2 P8 licences: how many of `id` this save may place (Relay limit +
+## Mill / Mine / Scavenger / Core Works Licence research).
+static func limit_of(s: Dictionary, id: String) -> int:
+	var lim: int = OutpostDB.limit(id, int(_o(s)["relay_lvl"]))
+	if id == "conduit":
+		return lim
+	match id:
+		"mill":
+			lim += _research_lvl(s, "lic_mill")
+		"gemmine":
+			lim += _research_lvl(s, "lic_mine")
+	if OutpostDB.SCAVENGERS.has(id):
+		lim += _research_lvl(s, "lic_scav")
+	if OutpostDB.CORE_IDS.has(id):
+		lim += _research_lvl(s, "lic_core")
+	return lim
+
+
+## Relay level `id` needs here: Advanced Licensing opens buildings that need
+## Relay 3+ one level earlier per level (never below 2).
+static func relay_req_of(s: Dictionary, id: String) -> int:
+	var r: int = OutpostDB.relay_req(id)
+	if r >= 3:
+		r = maxi(2, r - clampi(_research_lvl(s, "lic_adv"), 0, 2))
+	return r
 
 
 # -------------------------------------------------------- connectivity
@@ -495,7 +522,8 @@ static func nominal_rate(s: Dictionary, uid: String, con: Dictionary = {}) -> fl
 	var L: int = int(b["lvl"])
 	var lay: float = float(layout_bonus(o, uid, con)["total"])
 	if OutpostDB.SCAVENGERS.has(id):
-		return float(d["rate"]) * (1.0 + 0.25 * float(L - 1)) * (1.0 + lay) * global_mult(s)
+		# V2 P8 Scavenging research: +6% per level
+		return float(d["rate"]) * (1.0 + 0.25 * float(L - 1)) * (1.0 + lay) * global_mult(s) * (1.0 + 0.06 * float(_research_lvl(s, "scav_rate")))
 	match id:
 		"gemmine":
 			# Deep Mine (was the Gem Mine; gems are gone): a big coin generator

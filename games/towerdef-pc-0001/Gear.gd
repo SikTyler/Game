@@ -396,20 +396,26 @@ static func locks_on(it: Dictionary) -> int:
 	return n
 
 
-static func upgrade_cost(it: Dictionary) -> int:
-	return int(round(UP_BASE * _rm(it) * pow(UP_GROWTH, float(int(it["lvl"]) - 1))))
+## Upgrade coins; with a save, Greater Calibration research cuts 5% / level.
+static func upgrade_cost(it: Dictionary, s: Dictionary = {}) -> int:
+	var disc: float = 0.05 * float(mini(5, _lab(s, "greater_cal"))) if not s.is_empty() else 0.0
+	return int(round(UP_BASE * _rm(it) * pow(UP_GROWTH, float(int(it["lvl"]) - 1)) * (1.0 - disc)))
 
 
-static func reroll_cost(it: Dictionary) -> int:
-	return int(round(RR_BASE * _rm(it) * pow(RR_GROWTH, float(int(it["rr"]))) * pow(RR_LOCK, float(locks_on(it)))))
+## Reroll Scrap; with a save, Reroll Discount research cuts 8% / level.
+static func reroll_cost(it: Dictionary, s: Dictionary = {}) -> int:
+	var disc: float = 0.08 * float(mini(5, _lab(s, "reroll_disc"))) if not s.is_empty() else 0.0
+	return int(round(RR_BASE * _rm(it) * pow(RR_GROWTH, float(int(it["rr"]))) * pow(RR_LOCK, float(locks_on(it))) * (1.0 - disc)))
 
 
 static func imprint_cost(it: Dictionary) -> int:
 	return int(round(IMPRINT_BASE * _rm(it)))
 
 
-static func salvage_value(it: Dictionary) -> int:
-	return int(round(float(RarityDB.get_def(String(it["rar"]))["salvage"]) * (1.0 + 0.1 * float(int(it["lvl"]) - 1))))
+## Salvage Scrap; with a save, Reclamation research adds 10% / level.
+static func salvage_value(it: Dictionary, s: Dictionary = {}) -> int:
+	var bonus: float = 0.10 * float(mini(5, _lab(s, "reclaim"))) if not s.is_empty() else 0.0
+	return int(round(float(RarityDB.get_def(String(it["rar"]))["salvage"]) * (1.0 + 0.1 * float(int(it["lvl"]) - 1)) * (1.0 + bonus)))
 
 
 static func forge_cost(s: Dictionary) -> Dictionary:
@@ -531,8 +537,8 @@ static func why_upgrade(s: Dictionary, uid: int) -> String:
 		return "No such item"
 	if int(it["lvl"]) >= max_lvl_of(String(it["rar"])):
 		return "Max level - merge to raise the cap"
-	if int(s.get("coins", 0)) < upgrade_cost(it):
-		return "Need %d coins" % upgrade_cost(it)
+	if int(s.get("coins", 0)) < upgrade_cost(it, s):
+		return "Need %d coins" % upgrade_cost(it, s)
 	return ""
 
 
@@ -543,7 +549,7 @@ static func upgrade(s: Dictionary, uid: int) -> Array:
 		return []
 	var g: Dictionary = block(s)
 	var it: Dictionary = get_item(g, uid)
-	var c: int = upgrade_cost(it)
+	var c: int = upgrade_cost(it, s)
 	s["coins"] = int(s["coins"]) - c
 	it["lvl"] = int(it["lvl"]) + 1
 	var ev: Dictionary = {"t": "gear_upgrade", "uid": uid, "lvl": int(it["lvl"]), "coins": c}
@@ -591,8 +597,8 @@ static func why_reroll(s: Dictionary, uid: int, idx: int) -> String:
 		return "Locked perks don't reroll"
 	if bool(p.get("sig", false)):
 		return "A signature perk can't be rerolled"
-	if int(s.get("scrap", 0)) < reroll_cost(it):
-		return "Need %d Scrap" % reroll_cost(it)
+	if int(s.get("scrap", 0)) < reroll_cost(it, s):
+		return "Need %d Scrap" % reroll_cost(it, s)
 	return ""
 
 
@@ -603,7 +609,7 @@ static func reroll(s: Dictionary, uid: int, idx: int) -> Array:
 		return []
 	var g: Dictionary = block(s)
 	var it: Dictionary = get_item(g, uid)
-	var c: int = reroll_cost(it)
+	var c: int = reroll_cost(it, s)
 	s["scrap"] = int(s["scrap"]) - c
 	it["rr"] = int(it["rr"]) + 1
 	var cur: Dictionary = (it["perks"] as Array)[idx]
@@ -875,7 +881,7 @@ static func salvage(s: Dictionary, uid: int) -> Array:
 	if why_salvage(s, uid) != "":
 		return []
 	var g: Dictionary = block(s)
-	var v: int = salvage_value(get_item(g, uid))
+	var v: int = salvage_value(get_item(g, uid), s)
 	_remove(g, uid)
 	s["scrap"] = int(s.get("scrap", 0)) + v
 	return [{"t": "gear_salvage", "uid": uid, "scrap": v}]

@@ -671,6 +671,41 @@ func _research_missions() -> void:
 	# FEEDBACK-1 (deliberate): research is instant — no queue, no Rush.
 	_check("RES: click a project researches it instantly", Labs.level(main.save, "dmg") == 1 and not Labs.is_running(main.save, "dmg") and int(main.save["coins"]) == lc - Labs.cost("dmg", 0))
 	_check("RES: no Rush button (no timers, no gems)", _find("Rush") == null)
+	# V2 P8: category tabs, Hall rows, prerequisite chips, Lab Discount
+	_check("P8 RES: 7 category tabs, Core first", _find("RTAB Core") != null and _find("RTAB QOL") != null and main.res_cat == "core" and _find("LAB optics") != null)
+	_press("RTAB Loot")
+	await _frames()
+	_check("P8 RES: a tab shows its category", main.res_cat == "loot" and _find("LAB loot_theory") != null and _find("LAB dmg") == null)
+	_audit("research loot")
+	_check("P8 RES: a Hall-3 project is locked behind a Research Hall chip", _find("req:bld:research") != null and not Labs.can_start(main.save, "loot_theory") and _find("LAB loot_theory").disabled)
+	var hall_keep: Dictionary = {}
+	for k in main.save["outpost"]["buildings"].keys():
+		if String(main.save["outpost"]["buildings"][k]["id"]) == "research":
+			hall_keep[k] = int(main.save["outpost"]["buildings"][k]["lvl"])
+			main.save["outpost"]["buildings"][k]["lvl"] = 3
+	main.save["coins"] = int(main.save["coins"]) + 50000
+	main._rebuild_ui()
+	await _frames()
+	_check("P8 RES: Appraisal names its prerequisite (Loot Theory) with a chip", _find("req:res:loot_theory") != null and _find("LAB appraisal").disabled)
+	_press("LAB loot_theory")
+	await _frames()
+	_check("P8 RES: researching the prerequisite opens the next card", Labs.level(main.save, "loot_theory") == 1 and _find("req:res:loot_theory") == null and not _find("LAB appraisal").disabled)
+	_press("RTAB Core")
+	await _frames()
+	_press("req:res:targeting")
+	await _frames()
+	_check("P8 RES: a prerequisite chip in another card focuses that project", main.res_focus == "targeting" and main.res_cat == "core")
+	main.save["research"]["lvls"]["lab_discount"] = 5
+	main._rebuild_ui()
+	await _frames()
+	_check("P8 RES: Lab Discount shows in the price tooltips", _find("LAB hp").tooltip_text.contains("Lab Discount -15%"), _find("LAB hp").tooltip_text)
+	main.save["research"]["lvls"]["lab_discount"] = 0
+	main.save["research"]["lvls"]["loot_theory"] = 0
+	for k in hall_keep.keys():
+		main.save["outpost"]["buildings"][k]["lvl"] = int(hall_keep[k])
+	main.res_cat = "core"
+	main._rebuild_ui()
+	await _frames()
 	_check("V2: no Cards / Crates / Core Bay / Factory tech left", _findp("CARD ") == null and _find("Open Chest") == null and _findp("FTECH") == null)
 	_key(KEY_M)
 	await _frames()

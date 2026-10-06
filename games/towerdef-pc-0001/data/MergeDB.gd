@@ -381,7 +381,7 @@ const TEMPLATES: Dictionary = {
 		"t2": [
 			{"name": "Amplified Field", "desc": "+50% to its aura", "fx": {"power": 0.50}},
 			{"name": "Wide Field", "desc": "+1 cell reach", "fx": {"reach": 1.0}},
-			{"name": "Resonant Field", "desc": "+30% to its aura, +1 reach at T3 merges", "fx": {"power": 0.30}},
+			{"name": "Resonant Field", "desc": "+25% to its aura, +1 cell reach", "fx": {"power": 0.25, "reach": 1.0}},
 		],
 		"t3": [
 			{"name": "Overcharged Field", "desc": "+100% to its aura", "fx": {"power": 1.0}},
