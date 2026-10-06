@@ -150,6 +150,9 @@ var drag_card: int = -1              # run: draft card being dragged onto the gr
 var bld_drag: int = -1               # run: placed building pressed (V2 P7a drag-merge)
 var enh_tree: String = "attack"      # run: open Core Enhancement tree (V2 P7b)
 var enh_mode: int = 1                # run: buy 1 / 5 / 0 = MAX levels per click
+var supply_show: Dictionary = {}     # run: the Supply Drop on screen (V2 P7c)
+var supply_t0: float = -99.0
+var supply_clicks: int = 0
 var drag_start: Vector2 = Vector2.ZERO
 var aim_special: int = -1            # run: targeted special waiting for a field click
 var banish_mode: bool = false        # run: next card click banishes
@@ -1112,8 +1115,31 @@ func _handle(events: Array) -> void:
 				sfx_play("click", 0.9 + 0.15 * float(int(ev["tier"])))
 				_pop(S.fp_pos(int(ev["slot"])) + Vector2(0, -40), "T%d!" % int(ev["tier"]), 1.2, GOLD, 34)
 				rebuild = true
-			"merge_offer", "mod_taken":
+			"merge_offer", "mod_taken", "directive_offer", "draft_lock", "evo_ready":
 				rebuild = true
+				if String(ev["t"]) == "evo_ready":
+					_pop(S.fp_pos(int(ev["slot"])) + Vector2(0, -44), "EVOLUTION READY", 1.6, GOLD, 26)
+			"directive_taken":
+				_pop(TowerState.CENTER + Vector2(0, -230), String(ev["name"]), 1.6, Kit.MAGENTA, 32)
+				juice.shake(0.8)
+				rebuild = true
+			"evolved":
+				_pop(S.fp_pos(int(ev["slot"])) + Vector2(0, -46), String(ev["name"]).to_upper() + "!", 1.8, GOLD, 34)
+				juice.shake(1.4)
+				level_burst = 0.6
+				sfx_play("levelup", 0.8)
+				rebuild = true
+			"combo_tier":
+				if bool(ev["up"]) and int(ev["tier"]) >= 1:
+					_pop(TowerState.CENTER + Vector2(0, -200), "COMBO x%.2f" % float(ev["mult"]), 1.0, [Kit.CYAN, Kit.GREEN, GOLD, Kit.MAGENTA][mini(3, int(ev["tier"]) - 1)], 24 + 4 * int(ev["tier"]))
+					sfx_play("click", 1.0 + 0.15 * float(int(ev["tier"])))
+					if int(ev["tier"]) >= 3:
+						juice.shake(0.4 * float(int(ev["tier"])))
+			"supply_drop":
+				supply_show = ev
+				supply_t0 = t_anim
+				supply_clicks = 0
+				sfx_play("card_open", 1.0)
 			"perk_taken":
 				_pop(TowerState.CENTER + Vector2(0, -230), String(ev["name"]), 1.4, GOLD, 30)
 				rebuild = true
@@ -1389,6 +1415,26 @@ func core_flash() -> void:
 	flash_cd = FLASH_CD
 
 
+## V2 P7c Supply Drop sound: a click per reel stop (rising), then the payout.
+func _supply_tick() -> void:
+	if supply_show.is_empty():
+		return
+	var age: float = t_anim - supply_t0
+	var stops: Array = Battle.SUPPLY_STOP
+	while supply_clicks < 3 and age >= float(stops[supply_clicks]):
+		sfx_play("click", 1.0 + 0.2 * float(supply_clicks))
+		supply_clicks += 1
+	if supply_clicks == 3 and age >= float(stops[2]) + 0.25:
+		supply_clicks = 4
+		if bool(supply_show.get("jackpot", false)):
+			sfx_play("levelup", 1.2)
+			juice.shake(2.0)
+		else:
+			sfx_play("coin", 1.1)
+	if age > Battle.SUPPLY_SHOW:
+		supply_show = {}
+
+
 func _process(delta: float) -> void:
 	t_anim += delta
 	_update_rolls(delta)
@@ -1401,6 +1447,7 @@ func _process(delta: float) -> void:
 		fade = maxf(0.0, fade - delta)
 		fader.modulate = Color(1, 1, 1, 0.9 * fade / FADE_TIME)
 	_aim_input(delta)
+	_supply_tick()
 	if overlay == "loot":
 		LootReveal.tick(self)
 	for b in loot_beams:

@@ -30,7 +30,7 @@ const PickDB := preload("res://data/PickDB.gd")
 
 
 const WEAPONS: Array = ["gun", "mortar", "tesla", "flak", "railgun", "frost"]
-const REWARD: Dictionary = {"new": "building", "pack": "perk", "insight": "perk", "special": "ability"}
+const REWARD: Dictionary = {"new": "building", "pack": "perk", "insight": "perk", "special": "ability", "evo": "evolution"}
 
 
 ## The reward type of a card kind (building / upgrade / perk / ability).

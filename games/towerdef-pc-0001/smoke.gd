@@ -83,6 +83,8 @@ class Bot:
 	static func step(S) -> void:
 		if S.mutation_offer.size() > 0:
 			S.choose_mutation(0)
+		if S.directive_offer.size() > 0:
+			S.choose_directive(0)
 		if S.perk_offer.size() > 0:
 			S.choose_perk(0)
 		if S.draft.size() > 0:

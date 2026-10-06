@@ -14,6 +14,7 @@ const StOutpost := preload("res://tests/st_outpost.gd")
 const StCoreLevel := preload("res://tests/st_corelevel.gd")
 const StMerge := preload("res://tests/st_merge.gd")
 const StTracks := preload("res://tests/st_tracks.gd")
+const StEvents := preload("res://tests/st_events.gd")
 const FirePatterns := preload("res://FirePatterns.gd")
 const WeaponDB := preload("res://data/WeaponDB.gd")
 const TowerState := preload("res://TowerState.gd")
@@ -831,7 +832,10 @@ func _mass_horde_world() -> void:
 ## V2 P7a (deliberate): run buildings use merge tiers (x1.8 per tier, pattern
 ## extras at T2 = the old L3) and the fingerprint board's "level 2" buildings
 ## are now T2 (was x1.35); re-recorded (was f7c5cf7d).
-const HORDE_FP_GOLDEN: String = "0048784eda10a8d8535e45882563830f3d927fb49e6f4471835ee16563f34d24"
+## V2 P7c (deliberate): the kill-streak combo multiplies kill cash and XP and
+## a Supply Drop pays out every 7th wave (its own stream), so the run's cash
+## / XP / draft queue differ; re-recorded (was 0048784e).
+const HORDE_FP_GOLDEN: String = "59f5e00c36affbae95b898bcf084a3b5616e291cffb47ccc36b3a50076470f87"
 ## MASS_HORDE §Design content (designed mass waves, the shipping ruleset).
 func _mfresh(seed_value: int = 1234):
 	var S = TowerState.new()
@@ -2804,6 +2808,8 @@ func _draft_stages() -> void:
 	S.spawn_hold = true
 	var opened: Array = []
 	var guar: Dictionary = {}
+	var dirs: Array = []
+	var supply_w: Array = []
 	for w in range(1, 13):
 		S.wave_t = S.wave_time - 0.001
 		var ev: Array = S.tick(0.05)
@@ -2811,19 +2817,22 @@ func _draft_stages() -> void:
 			opened.append(w)
 			if String(d["guarantee"]) == "epic":
 				guar[w] = true
-		while S.draft.size() > 0 or S.pending_place != "" or S.perk_offer.size() > 0:
+		for d in _evts(ev, "directive_offer"):
+			dirs.append(w)
+		for d in _evts(ev, "supply_drop"):
+			supply_w.append(w)   # its CARD reels queue drafts, its XP can level up
+		while S.draft.size() > 0 or S.pending_place != "" or S.perk_offer.size() > 0 or S.directive_offer.size() > 0:
 			S.draft.clear()
 			S.pending_place = ""
 			S.perk_offer.clear()
+			S.directive_offer = []
 			var ev2: Array = []
 			S._check_queue(ev2)
 			for d in _evts(ev2, "draft_offer"):
 				opened.append(w)
-				if String(d["guarantee"]) == "epic":
-					guar[w] = true
-	# V2 P7a (deliberate): cleared waves open no drafts (XP level-ups do);
-	# only the boss wave's Epic+ hand remains.
-	_check("V2 P7a DRAFT cadence: only boss w10's Epic+ hand comes from waves (%s)" % str(opened), opened == [10] and guar.has(10))
+	# V2 P7a/P7c (deliberate): cleared waves open no drafts (XP level-ups do);
+	# the boss wave offers a Directive instead; a Supply Drop's CARD reels queue drafts.
+	_check("V2 P7c DRAFT cadence: waves open drafts only via a Supply Drop (cards / XP); boss w10 = a Directive (%s / %s)" % [str(opened), str(dirs)], dirs == [10] and guar.is_empty() and opened.all(func(x: Variant) -> bool: return supply_w.has(x)))
 	# Reroll pricing: 1 free per draft, then banked, then 10 doubling x1.10^(w-1).
 	S = _fresh()
 	S.spawn_hold = true
@@ -3198,6 +3207,7 @@ func _engine_meta_stages() -> void:
 	StCoreLevel.run(self)
 	StMerge.run(self)
 	StTracks.run(self)
+	StEvents.run(self)
 	_reforge_stages()
 
 

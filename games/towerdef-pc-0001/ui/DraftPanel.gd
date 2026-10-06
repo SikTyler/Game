@@ -13,6 +13,8 @@ const PickDB := preload("res://data/PickDB.gd")
 const PerkDB := preload("res://data/PerkDB.gd")
 const ModifierDB := preload("res://data/ModifierDB.gd")
 const MergeDB := preload("res://data/MergeDB.gd")
+const DirectiveDB := preload("res://data/DirectiveDB.gd")
+const EvoDB := preload("res://data/EvoDB.gd")
 const Kit := preload("res://ui/Kit.gd")
 
 const FAM_LABEL: Dictionary = {"building": "BUILDING", "hut": "TROOP HUT", "pack": "UPGRADE PACK", "special": "SPECIAL ATTACK", "insight": "INSIGHT"}
@@ -22,6 +24,8 @@ static func _offer(m) -> Dictionary:
 	var S = m.S
 	if S.mutation_offer.size() > 0:
 		return {"kind": "mutation", "ids": S.mutation_offer}
+	if S.directive_offer.size() > 0:
+		return {"kind": "directive", "ids": S.directive_offer}
 	if not S.merge_offer.is_empty():
 		return {"kind": "mod", "ids": MergeDB.offer(String(S.merge_offer["id"]), int(S.merge_offer["tier"]))}
 	if S.perk_offer.size() > 0:
@@ -29,6 +33,14 @@ static func _offer(m) -> Dictionary:
 	if S.draft.size() > 0:
 		return {"kind": "draft", "ids": S.draft}
 	return {}
+
+
+## Display def of a draft card (PickDB, or the EvoDB evolution).
+static func card_def(cd: Dictionary) -> Dictionary:
+	if String(cd.get("kind", "")) == "evo":
+		var e: Dictionary = EvoDB.get_def(String(cd.get("weapon", "")))
+		return {"name": String(e.get("name", "")), "desc": "EVOLVES your T3 %s: %s" % [String(PickDB.get_def(String(cd.get("weapon", ""))).get("name", "")), String(e.get("desc", ""))], "tags": ["dps"], "rarity": "legendary", "fam": "evolution"}
+	return PickDB.get_def(String(cd.get("id", "")))
 
 
 static func card_rect(m, k: int, n: int) -> Rect2:
@@ -51,9 +63,18 @@ static func build(m) -> void:
 			match String(off["kind"]):
 				"draft":
 					var cd: Dictionary = ids[k]
-					var tip: String = "%s\n%s\n%s" % [String(PickDB.get_def(String(cd["id"])).get("name", "")), String(PickDB.get_def(String(cd["id"])).get("desc", "")), String(card_type(m, cd)["how"])]
+					var cdef: Dictionary = card_def(cd)
+					var tip: String = "%s\n%s\n%s" % [String(cdef.get("name", "")), String(cdef.get("desc", "")), String(card_type(m, cd)["how"])]
 					var hb: Button = Kit.hit(m, r, func() -> void: _press_card(m, idx), tip, "DCARD %d %s" % [k, String(cd["id"])], true, Kit.ENEMY if m.banish_mode else Kit.GOLD)
 					hb.set_meta("card", k)
+					# V2 P7c: lock toggle (kept by rerolls, carried to the next hand)
+					if String(cd.get("kind", "")) != "evo":
+						var locked: bool = bool(cd.get("lock", false))
+						Kit.btn(m, "", lock_rect(r), func() -> void: m._handle(S.toggle_lock(idx)); m._rebuild_ui(), "Unlock this card" if locked else "Lock this card: rerolls keep it, and it waits for your next hand if you take another (max %d)" % TowerState.MAX_LOCKS, true, Kit.GOLD if locked else Kit.NEUTRAL, "DLOCK %d" % k, "slot_locked", 14)
+				"directive":
+					var did: String = String(ids[k])
+					var dd: Dictionary = DirectiveDB.get_def(did)
+					Kit.hit(m, r, func() -> void: m._handle(S.choose_directive(idx)); m._rebuild_ui(), "%s\n%s\nCOST: %s\nClick to take this Directive for the rest of the run" % [String(dd["name"]), String(dd["desc"]), String(dd["cost"])], "DDIR %d" % k, true, Kit.MAGENTA)
 				"perk":
 					var pid: String = String(ids[k])
 					var d: Dictionary = PerkDB.get_def(pid)
@@ -88,6 +109,10 @@ static func card_type(m, cd: Dictionary) -> Dictionary:
 	var nm: String = String(PickDB.get_def(id).get("name", id))
 	var kind: String = String(cd.get("kind", ""))
 	var rw: String = String(cd.get("reward", ""))
+	if kind == "evo":
+		return {"type": "EVOLUTION", "col": Kit.GOLD, "icon": "icon_tier",
+			"sub": "Your T3 %s evolves" % String(PickDB.get_def(String(cd.get("weapon", ""))).get("name", "")),
+			"how": "EVOLUTION: click to evolve that weapon now"}
 	if kind == "new":
 		var dup: bool = bool(cd.get("dup", false))
 		if bool(cd.get("merge", false)):
@@ -109,6 +134,10 @@ static func card_type(m, cd: Dictionary) -> Dictionary:
 		sub = "Permanent insight  ·  banked at run end"
 	return {"type": "PERK", "col": Kit.GOLD, "icon": "icon_streak", "sub": sub,
 		"how": "PERK: click to take it now (no placing)"}
+
+
+static func lock_rect(r: Rect2) -> Rect2:
+	return Rect2(r.end.x - 40, r.position.y + 32, 32, 30)
 
 
 static func _press_card(m, k: int) -> void:
@@ -133,6 +162,8 @@ static func draw(m) -> void:
 			title = "GOLD PERK — level %d" % int(S.level)
 		elif kind == "mutation":
 			title = "ENDLESS MUTATION"
+		elif kind == "directive":
+			title = "BOSS DOWN: PICK A DIRECTIVE"
 		elif kind == "mod":
 			title = "MERGED: %s T%d" % [String(PickDB.get_def(String(S.merge_offer["id"])).get("name", "")).to_upper(), int(S.merge_offer["tier"])]
 		elif kind == "draft":
@@ -153,6 +184,9 @@ static func draw(m) -> void:
 				"mutation":
 					var md: Dictionary = ModifierDB.MUTATIONS.get(String(ids[k]), {})
 					_draw_simple(m, r, "icon_endless", "MUTATION", String(md.get("name", "")), String(md.get("desc", "")), Kit.MAG, k)
+				"directive":
+					var dd2: Dictionary = DirectiveDB.get_def(String(ids[k]))
+					_draw_simple(m, r, "icon_endless", "DIRECTIVE  ·  rest of the run", String(dd2["name"]), "%s\nCOST: %s" % [String(dd2["desc"]), String(dd2["cost"])], Kit.MAGENTA, k)
 				"mod":
 					var mo2: Dictionary = ids[k]
 					var t3: bool = int(S.merge_offer["tier"]) >= 3
@@ -176,21 +210,24 @@ static func draw(m) -> void:
 static func _draw_card(m, r: Rect2, cd: Dictionary, k: int) -> void:
 	var S = m.S
 	var id: String = String(cd["id"])
-	var d: Dictionary = PickDB.get_def(id)
+	var d: Dictionary = card_def(cd)
+	var evo: bool = String(cd.get("kind", "")) == "evo"
 	var fam: String = String(cd.get("fam", d.get("fam", "")))
 	var rar: String = String(cd.get("rarity", d.get("rarity", "common")))
 	var rc: Color = Kit.rarity_col(rar)
 	var dragging: bool = m.drag_card == k and m.mouse_pos.distance_to(m.drag_start) > 12.0
 	var fill: Color = Color(rc.darkened(0.82), 0.95)
-	if fam == "insight":
+	if fam == "insight" or evo:
 		var g: float = 0.5 + 0.5 * sin(m.t_anim * 4.0)
 		m.draw_rect(r.grow(4.0 + 3.0 * g), Color(rc, 0.18))
+	if bool(cd.get("lock", false)) and not evo:
+		m.draw_rect(r.grow(5.0), Color(Kit.GOLD, 0.35), false, 3.0)
 	Kit.panel(m, r, Kit.ENEMY if m.banish_mode else rc, fill, 3)
 	if dragging:
 		m.draw_rect(r, Color(0, 0, 0, 0.45))
 	var isz: float = minf(r.size.y - 44.0, 92.0)
 	Kit.panel(m, Rect2(r.position.x + 10, r.position.y + 34, isz, isz), Color(rc, 0.5), Kit.BG2, 1)
-	Kit.icon(m, id, Rect2(r.position.x + 14, r.position.y + 38, isz - 8, isz - 8))
+	Kit.icon(m, String(cd.get("weapon", id)) if evo else id, Rect2(r.position.x + 14, r.position.y + 38, isz - 8, isz - 8))
 	# Owner feedback #1: a type banner (icon + colour + label) on every card.
 	var ct: Dictionary = card_type(m, cd)
 	var tcol: Color = ct["col"]
@@ -279,6 +316,9 @@ static func perk_rows(m) -> Array:
 	for iid in S.insight_found:
 		var idf: Dictionary = PickDB.get_def(String(iid))
 		out.append({"sec": "INSIGHTS", "col": Kit.RARITY["insight"], "icon": String(iid), "name": String(idf.get("name", iid)), "n": "", "desc": String(idf.get("desc", "")) + "\nBanked permanently at run end"})
+	for did in S.directives:
+		var ddf: Dictionary = DirectiveDB.get_def(String(did))
+		out.append({"sec": "DIRECTIVES", "col": Kit.MAGENTA, "icon": "icon_endless", "name": String(ddf.get("name", did)), "n": "", "desc": "%s\nCost: %s" % [String(ddf.get("desc", "")), String(ddf.get("cost", ""))]})
 	for mid in S.mutations_taken:
 		var md: Dictionary = ModifierDB.MUTATIONS.get(String(mid), {})
 		out.append({"sec": "MUTATIONS", "col": Kit.MAG, "icon": "icon_endless", "name": String(md.get("name", mid)), "n": "", "desc": String(md.get("desc", ""))})

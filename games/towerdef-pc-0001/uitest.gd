@@ -1068,6 +1068,44 @@ func _run_screen() -> void:
 	S.recompute()
 	main.sel = -1
 	main._rebuild_ui()
+	# V2 P7c: Directive pick, card locks, an evolution card, Supply Drop, combo
+	S.directive_offer = ["dr_bullet", "dr_gold", "dr_luck"]
+	main._rebuild_ui()
+	await _frames()
+	_check("P7c RUN: a Directive offer fills the left panel (3 cards)", _findp("DDIR 0") != null and _findp("DDIR 2") != null)
+	_audit("directive")
+	_press("DDIR 1")
+	await _frames()
+	_check("P7c RUN: clicking a Directive takes it for the run", S.directives == ["dr_gold"] and S.directive_offer.is_empty())
+	S.draft_queue.clear()
+	S.grant_draft()
+	main._rebuild_ui()
+	await _frames()
+	var lk_id: String = String((S.draft[1] as Dictionary)["id"]) if S.draft.size() > 1 else ""
+	_press("DLOCK 1")
+	await _frames()
+	_check("P7c RUN: the lock button locks a draft card", S.draft.size() > 1 and bool((S.draft[1] as Dictionary).get("lock", false)))
+	_press("Reroll")
+	await _frames()
+	_check("P7c RUN: Reroll keeps the locked card", S.draft.size() > 1 and String((S.draft[1] as Dictionary)["id"]) == lk_id)
+	S.draft[0] = load("res://data/EvoDB.gd").card("gun", int(twins[0]))
+	main._rebuild_ui()
+	await _frames()
+	_check("P7c RUN: an evolution card shows as EVOLUTION", _findp("DCARD 0 evo_gun") != null and String(DP.card_type(main, S.draft[0])["type"]) == "EVOLUTION")
+	_audit("evolution card")
+	S.draft.clear()
+	S.carry_cards = []
+	S.combo = 450.0
+	S._combo_check([])
+	main._handle([{"t": "supply_drop", "reels": ["cash", "cash", "star"], "pays": {"cash": 1234.0}, "jackpot": false, "wave": int(S.wave)}])
+	main._rebuild_ui()
+	await _frames(3)
+	_check("P7c RUN: a Supply Drop shows the slot machine; combo tier 3 shows", not main.supply_show.is_empty() and S.combo_tier == 3 and BattleUI.supply_text(main.supply_show) == "+$" + Kit.fmt(1234.0))
+	_audit("supply drop + combo")
+	main.supply_show = {}
+	S.combo = 0.0
+	S._combo_check([])
+	main._rebuild_ui()
 	# target mode on a selected weapon
 	_click(_cell_scr(cell))
 	await _frames()

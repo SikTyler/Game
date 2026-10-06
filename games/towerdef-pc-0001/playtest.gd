@@ -821,6 +821,8 @@ static func bot_step(S, policy: String, perk_pref: String = "") -> Array:
 	var ev: Array = []
 	if S.mutation_offer.size() > 0:
 		ev.append_array(S.choose_mutation(_pick_mutation(S)))
+	if S.directive_offer.size() > 0:
+		ev.append_array(S.choose_directive(0))   # V2 P7c (P9: a real Directive policy)
 	if S.perk_offer.size() > 0:
 		var bp: int = 0
 		var bs: int = -99

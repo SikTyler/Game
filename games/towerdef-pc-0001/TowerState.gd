@@ -39,6 +39,8 @@ const EnemyHash := preload("res://EnemyHash.gd")
 const WeaponDB := preload("res://data/WeaponDB.gd")
 const MergeDB := preload("res://data/MergeDB.gd")
 const TrackDB := preload("res://data/TrackDB.gd")
+const DirectiveDB := preload("res://data/DirectiveDB.gd")
+const EvoDB := preload("res://data/EvoDB.gd")
 const FirePatterns := preload("res://FirePatterns.gd")
 const Gear := preload("res://Gear.gd")
 
@@ -85,6 +87,18 @@ const TRACK_IDS: Array = TrackDB.IDS
 const TRACKS: Dictionary = TrackDB.DEFS
 ## V2 P7a: a gold perk offer every GOLD_EVERY XP levels.
 const GOLD_EVERY: int = 5
+## V2 P7c kill-streak combo: the meter adds every kill and decays with time
+## constant COMBO_TAU (a steady R kills/s holds it near R x TAU); tiers
+## [meter, cash + XP multiplier].
+const COMBO_TAU: float = 2.5
+const COMBO_TIERS: Array = [[20.0, 1.10], [100.0, 1.25], [400.0, 1.50], [1500.0, 2.0]]
+## V2 P7c Supply Drop: a 3-reel slot spin every SUPPLY_EVERY waves (its own
+## seeded stream). Symbols [id, weight]; 1 / 2 / 3 of a kind pay x1 / x3 / x8.
+const SUPPLY_EVERY: int = 7
+const SUPPLY_SYMS: Array = [["cash", 30.0], ["xp", 25.0], ["reroll", 15.0], ["card", 12.0], ["cache", 10.0], ["star", 8.0]]
+const SUPPLY_PAY: Array = [0, 1, 3, 8]
+## V2 P7c: draft cards the player may lock (kept by rerolls, carried over).
+const MAX_LOCKS: int = 2
 ## Per-level track multipliers (gain / drawback).
 const DIFF_HP: float = 2.5
 const DIFF_DMG: float = 1.5
@@ -252,6 +266,18 @@ var count_mult: float = 1.0
 var draft: Array = []
 var pending_place: String = ""
 var merges: int = 0                # merges this run (stats)
+# V2 P7c
+var directives: Array = []         # Directives taken (boss rewards)
+var directive_offer: Array = []    # open Directive pick (3 ids)
+var directive_pending: int = 0
+var dfx: Dictionary = {}           # Directive fx (read through pf)
+var supply_rng: RandomNumberGenerator = RandomNumberGenerator.new()
+var supply_last: Dictionary = {}   # the last Supply Drop (view)
+var supply_n: int = 0
+var combo: float = 0.0             # kill-streak meter
+var combo_tier: int = 0
+var carry_cards: Array = []        # locked draft cards carried to the next hand ([{card, at}])
+var evo_done: Dictionary = {}      # anchor -> true once its evolution was offered
 var merge_offer: Dictionary = {}  # V2 P7a: {slot, tier, mods: [...]} the mod pick a merge opened
 var over: bool = false
 
@@ -362,6 +388,7 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	combat_rng.seed = seed_value ^ 0x00C0_BA75
 	loot_rng.seed = seed_value ^ 0x1007_CA5E
 	horde_rng.seed = seed_value ^ 0x40AD_1007
+	supply_rng.seed = seed_value ^ 0x5A99_17D0
 	run_seed = seed_value
 	save = save_data
 	now_unix = now
@@ -494,6 +521,16 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	draft_queue = [""]   # V2 P7a: the opening draft
 	draft_guarantee = ""
 	merges = 0
+	directives = []
+	directive_offer = []
+	directive_pending = 0
+	dfx = {}
+	supply_last = {}
+	supply_n = 0
+	combo = 0.0
+	combo_tier = 0
+	carry_cards = []
+	evo_done = {}
 	buffs = {"overdrive_t": 0.0, "magnet_t": 0.0, "repair_t": 0.0, "repair_rate": 0.0, "warp_t": 0.0}
 	orbitals = []
 	special_casts = 0
@@ -522,7 +559,12 @@ func _reforge_node(id: String) -> int:
 
 ## One summed part fx value (0 when no equipped part carries the key).
 func pf(k: String) -> float:
-	return float(pfx.get(k, 0.0)) + float(tfx.get(k, 0.0))
+	return float(pfx.get(k, 0.0)) + float(tfx.get(k, 0.0)) + float(dfx.get(k, 0.0))
+
+
+## Run-time extras only (enhancements + Directives): keys the setup reads once.
+func xf(k: String) -> float:
+	return float(tfx.get(k, 0.0)) + float(dfx.get(k, 0.0))
 
 
 ## V2 P7b: the Core Enhancement part of pf alone.
@@ -532,7 +574,7 @@ func tf(k: String) -> float:
 
 ## Draft luck now: run luck + Draft Luck enhancements (cap 10).
 func luck_now() -> int:
-	return mini(10, luck + int(tf("draft_luck")))
+	return mini(10, luck + int(xf("draft_luck")))
 
 
 ## Mode + modifier selection (validated). Endless needs best wave >= 50.
@@ -573,6 +615,9 @@ func _refresh_enemy_mods() -> void:
 	enemy_spd_mod = (1.25 if modifiers.has("haste") else 1.0) * (1.0 + 0.1 * float(n.get("m_rush", 0)))
 	enemy_dmg_mod = 1.0 + 0.25 * float(n.get("m_fangs", 0))
 	elite_shield_add = 2 * int(n.get("m_plating", 0))
+	# V2 P7c: Directive costs on the enemy side
+	enemy_hp_mod *= DirectiveDB.enemy_mult(directives, "hp")
+	count_mult *= DirectiveDB.enemy_mult(directives, "count")
 
 
 ## SPEC B1: fold the meta bundle into run multipliers. TowerState never reads
@@ -811,9 +856,24 @@ func tier_mult(i: int) -> float:
 ## Summed fx of the merge mods on the building at i.
 func mod_fx(i: int) -> Dictionary:
 	var s: Dictionary = slots[i]
-	if s.is_empty() or (s.get("mods", []) as Array).is_empty():
+	if s.is_empty():
 		return {}
-	return MergeDB.fx_of(String(s["id"]), s["mods"])
+	var out: Dictionary = {} if (s.get("mods", []) as Array).is_empty() else MergeDB.fx_of(String(s["id"]), s["mods"])
+	if bool(s.get("evo", false)) and EvoDB.has(String(s["id"])):
+		var efx: Dictionary = EvoDB.get_def(String(s["id"]))["fx"]
+		for k in efx.keys():
+			out[k] = float(out.get(k, 0.0)) + float(efx[k])
+	return out
+
+
+## Display name of the building at i (an evolved weapon's evolution name).
+func name_at(i: int) -> String:
+	var id: String = id_at(i)
+	if id == "":
+		return ""
+	if bool((slots[i] as Dictionary).get("evo", false)) and EvoDB.has(id):
+		return String(EvoDB.get_def(id)["name"])
+	return String(PickDB.get_def(id).get("name", id))
 
 
 ## Pattern level of a tier (the L1..L5 extras: T1 = 1, T2 = 3, T3 = 5).
@@ -1302,7 +1362,7 @@ func time_scale() -> float:
 
 ## Coins multiplier for everything earned this run (tier × lab × card × perks).
 func run_coin_mult() -> float:
-	return coin_mult * float(stats.get("perk_coin", 1.0)) * mutation_coin() * (1.0 + tf("coin_run"))
+	return coin_mult * float(stats.get("perk_coin", 1.0)) * mutation_coin() * (1.0 + xf("coin_run"))
 
 
 func mutation_coin() -> float:
@@ -1446,6 +1506,11 @@ func _step(sub: float, ev: Array) -> void:
 			interest_t -= 15.0
 			_pay_interest(ev)
 	_tick_buffs(dt, ev)
+	if combo > 0.0:
+		combo *= exp(-dt / COMBO_TAU)
+		if combo < 0.5:
+			combo = 0.0
+		_combo_check(ev)
 	_move_enemies(dt, ev)
 	_fire(dt, ev)
 	_src = ""
@@ -1543,10 +1608,10 @@ func _enter_wave(w: int) -> void:
 
 
 ## V2 P7a: drafts come from XP level-ups (_check_level) and the opening
-## draft; a cleared boss wave still guarantees an Epic+ hand.
+## draft. V2 P7c: a cleared boss wave offers a Directive instead.
 func _queue_drafts(cleared: int) -> void:
-	if cleared % boss_every == 0:
-		draft_queue.append("epic")
+	if cleared % boss_every == 0 and directives.size() < DirectiveDB.IDS.size():
+		directive_pending += 1
 
 
 func _advance_wave(ev: Array) -> void:
@@ -1568,6 +1633,8 @@ func _advance_wave(ev: Array) -> void:
 		_enter_wave(wave + 1)
 		ev.append({"t": "wave_skip", "skipped": skipped, "wave": wave, "coins": c})
 	_wave_coins(wave, 1.0)
+	if wave % SUPPLY_EVERY == 0:
+		_supply_drop(ev)
 	recompute()   # cash/s, building HP and troops scale with the wave
 	_drain_troop_events(ev)
 	ev.append({"t": "wave", "wave": wave})
@@ -1602,7 +1669,7 @@ func _on_death(ev: Array) -> void:
 	hp = 0.0
 	over = true
 	_sweep_horde_loot(true)
-	loot["luck"] = luck + int(tf("loot_luck"))   # V2 P5: bank-time rarity luck (the run never rolls it); P7b Loot Luck
+	loot["luck"] = luck + int(xf("loot_luck"))   # V2 P5: bank-time rarity luck (the run never rolls it); P7b Loot Luck
 	loot["tier"] = tier
 	var cashout: int = int(floor(TuneRef.num("cashout_frac", 0.12) * cash_earned / maxf(1.0, cash_index()) * tier_coin_mult * mod_coin * mode_coin))
 	var coins: int = int(coins_run) + cashout
@@ -3061,6 +3128,8 @@ func _reap_mass(alive: PackedInt32Array, dead_in: PackedInt32Array, ev: Array, c
 	var shatter: Array = []
 	var dead: PackedInt32Array = PackedInt32Array()
 	var kc_mult: float = float(stats.get("kill_cash", 1.0)) * run_cash_mult() * kill_cash_mod * magnet
+	var cmb: float = combo_mult()   # V2 P7c kill-streak combo
+	var streak: int = 0
 	for ed in dead_in:
 		dead.append(ed)
 		var pos: Vector2 = en.pos[ed]
@@ -3082,10 +3151,11 @@ func _reap_mass(alive: PackedInt32Array, dead_in: PackedInt32Array, ev: Array, c
 				var bd: Dictionary = b
 				if (bd["pos"] as Vector2).distance_to(pos) <= float(bd["r"]):
 					bm += float(bd["mult"])
-			gain = en.cash[ed] * ci * bm * kc_mult
+			gain = en.cash[ed] * ci * bm * kc_mult * cmb
 			cash += gain
 			cash_earned += gain
-			xp += en.xp[ed] * float(stats["xp_mult"])
+			xp += en.xp[ed] * float(stats["xp_mult"]) * cmb
+			streak += wt
 			var cg: float = en.coin[ed] * (run_coin_mult() if kind == "courier" else 1.0)
 			if not a.is_empty() and cg > 0.0:
 				var fund: float = cg * HORDE_LOOT_FUND
@@ -3139,6 +3209,9 @@ func _reap_mass(alive: PackedInt32Array, dead_in: PackedInt32Array, ev: Array, c
 					break
 	for w2 in waves.keys():
 		_mass_try_clear(int(w2), ev)
+	if streak > 0:
+		combo += float(streak)
+		_combo_check(ev)
 
 
 func _mass_sweep_loot(a: Dictionary) -> void:
@@ -3189,13 +3262,200 @@ func _boss_bounty(pos: Vector2, ev: Array) -> void:
 
 func _check_queue(ev: Array) -> void:
 	_check_mutation(ev)
+	_check_directive(ev)
 	_check_level(ev)
+	_check_evo(ev)
 	_check_draft(ev)
 	_check_perk(ev)
 
 
 func _busy() -> bool:
-	return draft.size() > 0 or pending_place != "" or not merge_offer.is_empty() or perk_offer.size() > 0 or mutation_offer.size() > 0
+	return draft.size() > 0 or pending_place != "" or not merge_offer.is_empty() or perk_offer.size() > 0 or mutation_offer.size() > 0 or directive_offer.size() > 0
+
+
+# ------------------------------------------------------- V2 P7c run events
+## Kill-streak combo multiplier on kill cash and XP (COMBO_TIERS).
+func combo_mult() -> float:
+	return 1.0 if combo_tier <= 0 else float((COMBO_TIERS[combo_tier - 1] as Array)[1])
+
+
+func _combo_tier_of(v: float) -> int:
+	var t: int = 0
+	for k in COMBO_TIERS.size():
+		if v >= float((COMBO_TIERS[k] as Array)[0]):
+			t = k + 1
+	return t
+
+
+func _combo_check(ev: Array) -> void:
+	var t: int = _combo_tier_of(combo)
+	if t != combo_tier:
+		var up: bool = t > combo_tier
+		combo_tier = t
+		ev.append({"t": "combo_tier", "tier": t, "mult": combo_mult(), "up": up})
+
+
+## Draft choices the taken Directives add.
+func _directive_choices() -> int:
+	var n: int = 0
+	for id in directives:
+		n += int(DirectiveDB.get_def(String(id)).get("choices", 0))
+	return n
+
+
+func _check_directive(ev: Array) -> void:
+	if directive_pending <= 0 or _busy():
+		return
+	directive_pending -= 1
+	directive_offer = DirectiveDB.offer(draft_rng, directives)
+	if not directive_offer.is_empty():
+		ev.append({"t": "directive_offer", "ids": directive_offer.duplicate(), "wave": wave})
+
+
+## Take Directive k of the open offer: its fx join the run, its enemy cost too.
+func choose_directive(k: int) -> Array:
+	if k < 0 or k >= directive_offer.size():
+		return []
+	var id: String = String(directive_offer[k])
+	directive_offer = []
+	directives.append(id)
+	dfx = DirectiveDB.fx_of(directives)
+	_refresh_enemy_mods()
+	recompute()
+	var d: Dictionary = DirectiveDB.get_def(id)
+	var ev: Array = [{"t": "directive_taken", "id": id, "name": String(d["name"]), "desc": String(d["desc"]), "cost": String(d["cost"])}]
+	_check_queue(ev)
+	return ev
+
+
+func _supply_sym() -> String:
+	var tot: float = 0.0
+	for sy in SUPPLY_SYMS:
+		tot += float((sy as Array)[1])
+	var r: float = supply_rng.randf() * tot
+	for sy in SUPPLY_SYMS:
+		r -= float((sy as Array)[1])
+		if r < 0.0:
+			return String((sy as Array)[0])
+	return "cash"
+
+
+## Supply Drop (every SUPPLY_EVERY waves): spin 3 reels and pay out. Each
+## symbol pays x1 / x3 / x8 for 1 / 2 / 3 of a kind; three stars = JACKPOT.
+func _supply_drop(ev: Array) -> void:
+	supply_n += 1
+	_supply_pay([_supply_sym(), _supply_sym(), _supply_sym()], ev)
+
+
+## Pay a Supply Drop's reels (tests call it with fixed reels).
+func _supply_pay(reels: Array, ev: Array) -> void:
+	var counts: Dictionary = {}
+	for r in reels:
+		counts[r] = int(counts.get(r, 0)) + 1
+	var pays: Dictionary = {}
+	var jackpot: bool = int(counts.get("star", 0)) >= 3
+	for sym in counts.keys():
+		var m: int = int(SUPPLY_PAY[int(counts[sym])])
+		match String(sym):
+			"cash":
+				var c: float = 120.0 * cash_index() * float(m)
+				cash += c
+				cash_earned += c
+				pays["cash"] = c
+			"xp":
+				var x: float = 0.35 * xp_need() * float(m)
+				xp += x
+				pays["xp"] = x
+			"reroll":
+				rerolls_left += m
+				pays["reroll"] = m
+			"card":
+				for k in mini(3, m):
+					draft_queue.append("rare" if m >= 3 else "")
+				pays["card"] = mini(3, m)
+			"cache":
+				var il: int = LootDB.ilvl(wave, tier)
+				for k in mini(3, m):
+					Drops.add(loot, [{"kind": "cache", "cache": "elite" if m >= 3 else "field", "ilvl": il, "source": "supply"}])
+				pays["cache"] = mini(3, m)
+			"star":
+				if int(counts[sym]) == 2:
+					perk_pending += 1
+					pays["star"] = 1
+	if jackpot:
+		var jc: float = 400.0 * cash_index()
+		cash += jc
+		cash_earned += jc
+		draft_queue.append("epic")
+		Drops.add(loot, [{"kind": "cache", "cache": "elite", "ilvl": LootDB.ilvl(wave, tier), "source": "supply"}])
+		pays["jackpot"] = jc
+	supply_last = {"reels": reels, "pays": pays, "jackpot": jackpot, "wave": wave}
+	ev.append({"t": "supply_drop", "reels": reels, "pays": pays, "jackpot": jackpot, "wave": wave})
+
+
+## Lock / unlock draft card idx (max MAX_LOCKS): kept by rerolls, carried to
+## the next hand when another card is taken.
+func toggle_lock(idx: int) -> Array:
+	if idx < 0 or idx >= draft.size():
+		return []
+	var c: Dictionary = draft[idx]
+	if String(c.get("kind", "")) == "evo":
+		return []
+	if bool(c.get("lock", false)):
+		c.erase("lock")
+	else:
+		var n: int = draft.filter(func(x: Variant) -> bool: return bool((x as Dictionary).get("lock", false)) and String((x as Dictionary).get("kind", "")) != "evo").size()
+		if n >= MAX_LOCKS:
+			return []
+		c["lock"] = true
+	return [{"t": "draft_lock", "idx": idx, "lock": bool(c.get("lock", false))}]
+
+
+## Put carried (locked) cards back into the open hand: re-validated against
+## the run now (a building may have become a merge, or be unplaceable).
+func _apply_carry() -> void:
+	if carry_cards.is_empty():
+		return
+	var ctx: Dictionary = _draft_ctx("")
+	for cc in carry_cards:
+		var old: Dictionary = (cc as Dictionary)["card"]
+		var nc: Dictionary = old if String(old.get("kind", "")) == "evo" else Draft.card_for(String(old["id"]), ctx)
+		if nc.is_empty():
+			continue
+		nc["lock"] = true
+		# its old slot, or the next one not holding an evolution / another lock
+		var slot: int = int((cc as Dictionary)["at"])
+		while slot < draft.size() and (String((draft[slot] as Dictionary).get("kind", "")) == "evo" or bool((draft[slot] as Dictionary).get("lock", false))):
+			slot += 1
+		# never two copies of an id in one hand
+		for k in draft.size():
+			if k != slot and String((draft[k] as Dictionary)["id"]) == String(nc["id"]) and not bool((draft[k] as Dictionary).get("lock", false)):
+				var used: Array = draft.duplicate()
+				used.append(nc)
+				var rep_c: Dictionary = Draft.replace_card(draft_rng, ctx, used, k)
+				if not rep_c.is_empty():
+					draft[k] = rep_c
+		if slot < draft.size():
+			draft[slot] = nc
+		else:
+			draft.append(nc)
+	carry_cards = []
+
+
+## Evolution check: a T3 weapon with its EvoDB partner touching it queues a
+## draft led by its evolution card (once per anchor).
+func _check_evo(ev: Array) -> void:
+	for i in N:
+		var id: String = id_at(i)
+		if id == "" or not EvoDB.has(id) or tier_at(i) < lvl_cap() or evo_done.has(i) or bool((slots[i] as Dictionary).get("evo", false)):
+			continue
+		var partner: String = String(EvoDB.get_def(id)["partner"])
+		for n in adjacent(i):
+			if id_at(int(n)) == partner:
+				evo_done[i] = true
+				draft_queue.push_front("evo:%d" % i)
+				ev.append({"t": "evo_ready", "slot": i, "id": id, "name": String(EvoDB.get_def(id)["name"])})
+				break
 
 
 ## Endless mutation pick (every 25 waves): 3 distinct, non-maxed mutations.
@@ -3273,7 +3533,7 @@ func _draft_ctx(guarantee: String) -> Dictionary:
 		"hut_max": hut_max(), "t1": _t1_ids(),
 		"packs": packs, "specials": sp, "banished": banished, "luck": luck_now(),
 		"eco_mult": 1.0,
-		"choices": 3 + mini(1, _reforge_node("wide_draft")),
+		"choices": 3 + mini(1, _reforge_node("wide_draft")) + _directive_choices(),
 		"insight_p": TuneRef.num("pc_insight_p", 0.01) * (1.0 + float(luck) * 0.05),
 		"insight_ok": insight_found.size() < ins_cap, "insight_blocked": blocked,
 		"guarantee": guarantee, "weapons": _weapon_buildings(),
@@ -3301,7 +3561,21 @@ func _check_draft(ev: Array) -> void:
 	if _busy() or draft_queue.is_empty():
 		return
 	draft_guarantee = String(draft_queue.pop_front())
-	draft = Draft.roll_hand(draft_rng, _draft_ctx(draft_guarantee))
+	var evo: Dictionary = {}
+	if draft_guarantee.begins_with("evo:"):
+		var es: int = int(draft_guarantee.substr(4))
+		draft_guarantee = "legendary"
+		if EvoDB.has(id_at(es)) and not bool((slots[es] as Dictionary).get("evo", false)):
+			evo = EvoDB.card(id_at(es), es)
+			evo["lock"] = true
+	draft = Draft.roll_hand(draft_rng, _draft_ctx("" if not evo.is_empty() else draft_guarantee))
+	if not evo.is_empty():
+		draft_guarantee = ""
+		if draft.is_empty():
+			draft = [evo]
+		else:
+			draft[0] = evo
+	_apply_carry()
 	free_reroll = true
 	paid_rerolls = 0
 	if draft.is_empty():
@@ -3346,11 +3620,23 @@ func choose_card(idx: int, arg: int = -1) -> Array:
 	if idx < 0 or idx >= draft.size():
 		return ev
 	var card: Dictionary = draft[idx]
+	# V2 P7c: locked cards the player did not take wait for the next hand
+	carry_cards = []
+	for k in draft.size():
+		var ck: Dictionary = draft[k]
+		if k != idx and bool(ck.get("lock", false)) and String(ck.get("kind", "")) != "evo":
+			carry_cards.append({"card": ck, "at": k})
 	draft.clear()
 	var id: String = card["id"]
 	var kind: String = String(card["kind"])
 	picks_taken.append(id)
 	match kind:
+		"evo":
+			var es: int = int(card["slot"])
+			if EvoDB.has(id_at(es)):
+				(slots[es] as Dictionary)["evo"] = true
+				recompute()
+				ev.append({"t": "evolved", "slot": es, "id": id_at(es), "name": String(EvoDB.get_def(id_at(es))["name"])})
 		"new":
 			# V2 P7a: placed on a free cell, or dropped on a T1 twin to merge
 			pending_place = id
@@ -3402,7 +3688,13 @@ func reroll_draft() -> Array:
 	else:
 		cash -= float(cost)
 		paid_rerolls += 1
+	var kept: Array = []
+	for k in draft.size():
+		if bool((draft[k] as Dictionary).get("lock", false)):
+			kept.append({"card": draft[k], "at": k})
 	draft = Draft.roll_hand(draft_rng, _draft_ctx(draft_guarantee))
+	carry_cards = kept
+	_apply_carry()
 	ev.append({"t": "draft_reroll", "cards": draft.duplicate(true), "left": rerolls_left, "cost": cost, "next_cost": reroll_cost()})
 	return ev
 

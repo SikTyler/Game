@@ -274,6 +274,26 @@ func _initialize() -> void:
 		await _shot("%s/16d_merge_mods.png" % outdir, false)
 		if not S.merge_offer.is_empty():
 			main._handle(S.choose_mod(0))
+	# V2 P7c: a Supply Drop jackpot (reels stopped, payout up) with a hot combo,
+	# then a boss Directive pick
+	main.sel = -1
+	S.combo = 450.0
+	S._combo_check([])
+	var spe: Array = []
+	S._supply_pay(["star", "star", "star"], spe)
+	main._handle(spe)
+	main.supply_t0 = main.t_anim - 2.3
+	_quiet()
+	main._rebuild_ui()
+	await _wait(2)
+	await _shot("%s/16e_supply_drop.png" % outdir, false)
+	main.supply_show = {}
+	S.draft.clear()
+	S.directive_offer = ["dr_bullet", "dr_gold", "dr_overdrive"]
+	main._rebuild_ui()
+	await _wait(2)
+	await _shot("%s/16f_directive.png" % outdir, false)
+	main._handle(S.choose_directive(0))
 	main.sel = -1
 	var orb: int = -1
 	for k in S.specials.size():

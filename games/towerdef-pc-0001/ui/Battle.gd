@@ -212,7 +212,9 @@ static func cell_text(m, i: int) -> String:
 	var aim: String = ""
 	if WeaponDB.directional(id):
 		aim = "\n%s, facing %s  ·  [%s] or wheel turns it" % ["Arc %d deg" % int(WeaponDB.DEFS[id]["arc"]) if WeaponDB.aim_of(id) == "arc" else ("Fixed lane" if float(WeaponDB.DEFS[id]["arc"]) == 0.0 else "Fixed cone %d deg" % int(WeaponDB.DEFS[id]["arc"])), COMPASS[S.rot_at(i)], Kit.hint(m, "rotate")]
-	return "%s  T%d / %d  (%s)\n%s%s%s" % [String(d["name"]), S.tier_at(i), TowerState.lvl_cap(), String(d["rarity"]).capitalize(), String(d["desc"]), aim, up]
+	if bool((S.slots[i] as Dictionary).get("evo", false)):
+		up += "\nEVOLVED: %s" % String(TowerState.EvoDB.get_def(id).get("desc", ""))
+	return "%s  T%d / %d  (%s)\n%s%s%s" % [S.name_at(i), S.tier_at(i), TowerState.lvl_cap(), String(d["rarity"]).capitalize(), String(d["desc"]), aim, up]
 
 
 # ================================================================== ranges
@@ -687,9 +689,18 @@ static func _draw_fx(m) -> void:
 
 
 ## Field banners: incoming wave, placement / aim prompts, Insight fanfare.
+## V2 P7c: Supply Drop reel symbols [label, colour].
+const SUPPLY_SYM: Dictionary = {"cash": ["$", Color("4ade80")], "xp": ["XP", Color("39e6ff")], "reroll": ["REROLL", Color("a78bfa")],
+	"card": ["CARD", Color("ff3ea5")], "cache": ["CACHE", Color("f59e0b")], "star": ["★", Color("ffd34d")]}
+const SUPPLY_STOP: Array = [0.9, 1.4, 1.9]
+const SUPPLY_SHOW: float = 4.2
+
+
 static func _draw_field_hud(m, fr: Rect2) -> void:
 	var S = m.S
 	var cx: float = fr.get_center().x
+	_draw_combo(m, fr)
+	_draw_supply(m, fr)
 	if not S.next_plan.is_empty():
 		var txt: String = "WAVE %d INCOMING  ·  %d enemies%s" % [int(S.next_plan.get("wave", 0)), (S.next_plan.get("entries", []) as Array).size(), "  ·  BOSS" if bool(S.next_plan.get("boss", false)) else ""]
 		Kit.panel(m, Rect2(cx - 230, fr.position.y + 12, 460, 40), Kit.ENEMY, Color(0.16, 0.06, 0.07, 0.9))
@@ -962,3 +973,79 @@ static func _draw_results(m) -> void:
 		Kit.t(m, "No loot this run — elites, bosses, Couriers and every 5th wave drop it.", Vector2(lx, ly + 22), 15, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w)
 	if loot_count(m) == 0:
 		Kit.t(m, "Spend coins on the Core, the Outpost and Research", Vector2(cx, r.end.y - 96), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
+
+
+## V2 P7c combo meter: under the wave banner while a streak is on.
+static func _draw_combo(m, fr: Rect2) -> void:
+	var S = m.S
+	if float(S.combo) < 1.0:
+		return
+	var tiers: Array = TowerState.COMBO_TIERS
+	var t: int = int(S.combo_tier)
+	var nxt: float = float((tiers[mini(t, tiers.size() - 1)] as Array)[0])
+	var prev: float = 0.0 if t <= 0 else float((tiers[t - 1] as Array)[0])
+	var fr2: float = 1.0 if t >= tiers.size() else clampf((float(S.combo) - prev) / maxf(1.0, nxt - prev), 0.0, 1.0)
+	var col: Color = [Kit.DIM, Kit.CYAN, Kit.GREEN, Kit.GOLD, Kit.MAGENTA][mini(t, 4)]
+	var r := Rect2(fr.end.x - 236, fr.position.y + 60, 220, 44)
+	Kit.panel(m, r, col if t > 0 else Kit.EDGE, Color(0.04, 0.06, 0.11, 0.88), 2 if t > 0 else 1)
+	var pulse: float = 1.0 + (0.08 * sin(m.t_anim * 10.0) if t >= 3 else 0.0)
+	Kit.th(m, ("COMBO  x%.2f" % S.combo_mult()) if t > 0 else "COMBO", Vector2(r.position.x + 10, r.position.y + 20), int(16.0 * pulse), col if t > 0 else Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, 150.0)
+	Kit.t(m, "%d" % int(S.combo), Vector2(r.end.x - 10, r.position.y + 20), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_RIGHT, 70.0)
+	Kit.bar_glow(m, Rect2(r.position.x + 10, r.position.y + 28, r.size.x - 20, 8), fr2, col if t > 0 else Kit.CYAN)
+	m.stat_tips.append([r, "Kill-streak combo: kills fill it, it drains over ~2.5 s.\nx1.10 / x1.25 / x1.50 / x2.00 kill cash and XP at %s kills" % ", ".join(PackedStringArray(tiers.map(func(x: Variant) -> String: return "%d" % int((x as Array)[0]))))])
+
+
+## V2 P7c Supply Drop: a 3-reel slot machine over the field; reels stop one
+## by one (rising clicks, Main), then the payout.
+static func _draw_supply(m, fr: Rect2) -> void:
+	var sd: Dictionary = m.supply_show
+	if sd.is_empty():
+		return
+	var age: float = float(m.t_anim) - float(m.supply_t0)
+	if age > SUPPLY_SHOW:
+		return
+	var a: float = clampf(minf(age * 4.0, (SUPPLY_SHOW - age) * 2.0), 0.0, 1.0)
+	var cx: float = fr.get_center().x
+	var jp: bool = bool(sd.get("jackpot", false))
+	var r := Rect2(cx - 220, fr.position.y + 110, 440, 190)
+	var rim: Color = Kit.GOLD if jp else Kit.MAGENTA
+	Kit.glow(m, r.get_center(), 260.0, rim, 0.18 * a)
+	Kit.panel_glow(m, r, Color(rim, a), Color(0.06, 0.04, 0.10, 0.95 * a), 1.4, 3)
+	Kit.th(m, "SUPPLY DROP", Vector2(cx, r.position.y + 30), 22, Color(Kit.GOLD, a), HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
+	var reels: Array = sd.get("reels", [])
+	var keys: Array = SUPPLY_SYM.keys()
+	for k in 3:
+		var rr := Rect2(r.position.x + 28 + float(k) * 132.0, r.position.y + 46, 120, 84)
+		m.draw_rect(rr, Color(0.02, 0.02, 0.05, a))
+		m.draw_rect(rr, Color(rim, 0.7 * a), false, 2.0)
+		var stopped: bool = age >= float(SUPPLY_STOP[k])
+		var sym: String = String(reels[k]) if stopped and k < reels.size() else String(keys[int(age * 18.0 + float(k) * 3.0) % keys.size()])
+		var sc: Array = SUPPLY_SYM.get(sym, ["?", Kit.TEXT])
+		var yoff: float = 0.0 if stopped else fposmod(age * 600.0, 30.0) - 15.0
+		if stopped:
+			Kit.glow(m, rr.get_center(), 60.0, sc[1], 0.35 * a)
+		Kit.th(m, String(sc[0]), Vector2(rr.get_center().x, rr.get_center().y + 10 + yoff), 26 if String(sc[0]).length() <= 2 else 18, Color(sc[1], a * (1.0 if stopped else 0.6)), HORIZONTAL_ALIGNMENT_CENTER, rr.size.x)
+	if age >= float(SUPPLY_STOP[2]) + 0.25:
+		var txt: String = supply_text(sd)
+		Kit.th(m, txt, Vector2(cx, r.end.y - 22), 20 if jp else 17, Color(Kit.GOLD if jp else Kit.TEXT, a), HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 20)
+
+
+## Payout line of a Supply Drop ("JACKPOT!" / "$640 · +2 rerolls" ...).
+static func supply_text(sd: Dictionary) -> String:
+	var p: Dictionary = sd.get("pays", {})
+	var parts: Array = []
+	if bool(sd.get("jackpot", false)):
+		parts.append("JACKPOT!  $%s + Epic draft + Elite Cache" % Kit.fmt(float(p.get("jackpot", 0.0))))
+	if p.has("cash"):
+		parts.append("+$%s" % Kit.fmt(float(p["cash"])))
+	if p.has("xp"):
+		parts.append("+%d XP" % int(float(p["xp"])))
+	if p.has("reroll"):
+		parts.append("+%d reroll%s" % [int(p["reroll"]), "" if int(p["reroll"]) == 1 else "s"])
+	if p.has("card"):
+		parts.append("+%d draft%s" % [int(p["card"]), "" if int(p["card"]) == 1 else "s"])
+	if p.has("cache"):
+		parts.append("+%d cache%s" % [int(p["cache"]), "" if int(p["cache"]) == 1 else "s"])
+	if p.has("star"):
+		parts.append("+1 gold perk")
+	return "  ·  ".join(PackedStringArray(parts))
