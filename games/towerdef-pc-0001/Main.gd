@@ -148,6 +148,8 @@ var last_seed: int = 0
 var menu_msg: String = ""
 var drag_card: int = -1              # run: draft card being dragged onto the grid
 var bld_drag: int = -1               # run: placed building pressed (V2 P7a drag-merge)
+var enh_tree: String = "attack"      # run: open Core Enhancement tree (V2 P7b)
+var enh_mode: int = 1                # run: buy 1 / 5 / 0 = MAX levels per click
 var drag_start: Vector2 = Vector2.ZERO
 var aim_special: int = -1            # run: targeted special waiting for a field click
 var banish_mode: bool = false        # run: next card click banishes
@@ -607,10 +609,16 @@ func toggle_banish() -> void:
 		_rebuild_ui()
 
 
+## V2 P7b: buys 1 / 5 / MAX levels of an enhancement (the panel's mode).
 func buy_track(t: String) -> void:
 	if S != null:
-		_handle(S.buy_track(t))
+		_handle(S.buy_tracks(t, int(enh_mode) if int(enh_mode) > 0 else 999))
 		_rebuild_ui()
+
+
+func cycle_enh_mode() -> void:
+	enh_mode = 5 if enh_mode == 1 else (0 if enh_mode == 5 else 1)
+	_rebuild_ui()
 
 
 ## Hotkeys 1-4: cast a special; a targeted one (Orbital) arms the aim cursor —

@@ -12,6 +12,7 @@ const ModifierDB := preload("res://data/ModifierDB.gd")
 const AchievementDB := preload("res://data/AchievementDB.gd")
 const CreditsDB := preload("res://data/CreditsDB.gd")
 const PickDB := preload("res://data/PickDB.gd")
+const TrackDB := preload("res://data/TrackDB.gd")
 const CoreDB := preload("res://data/CoreDB.gd")
 const MetaSave := preload("res://MetaSave.gd")
 const Settings := preload("res://Settings.gd")
@@ -456,9 +457,10 @@ static func _run_action(m, event: InputEvent) -> bool:
 		if _pressed(m, event, "ability_%d" % (k + 1)):
 			_offer_pick(m, k)
 			return true
-	for k in TowerState.TRACK_IDS.size():
+	var tids: Array = TrackDB.tree_ids(String(m.enh_tree))   # V2 P7b: the open tree
+	for k in mini(5, tids.size()):
 		if _pressed(m, event, "track_%d" % (k + 1)):
-			m.buy_track(String(TowerState.TRACK_IDS[k]))
+			m.buy_track(String(tids[k]))
 			return true
 	if _pressed(m, event, "rotate"):
 		m.rotate_weapon(1)
@@ -470,7 +472,7 @@ static func _run_action(m, event: InputEvent) -> bool:
 		m.toggle_banish()
 		return true
 	if _pressed(m, event, "upgrade"):
-		m.buy_track("dmg")
+		m.buy_track("a_dmg")
 		return true
 	if _pressed(m, event, "speed_up"):
 		m.cycle_speed(1)

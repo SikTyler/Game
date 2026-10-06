@@ -59,7 +59,7 @@ const LABELS: Dictionary = {
 	"hotbar_5": "Hotbar 5", "hotbar_6": "Hotbar 6", "hotbar_7": "Hotbar 7", "hotbar_8": "Hotbar 8",
 	"hotbar_9": "Hotbar 9", "hotbar_10": "Hotbar 10", "hotbar_prev": "Hotbar previous", "hotbar_next": "Hotbar next",
 	"ability_1": "Draft pick 1", "ability_2": "Draft pick 2", "ability_3": "Draft pick 3", "ability_4": "Draft pick 4 / Outpost rotate",
-	"track_1": "Core Enhancement: Damage", "track_2": "Core Enhancement: Rate", "track_3": "Core Enhancement: Range", "track_4": "Core Enhancement: Eco", "track_5": "Core Enhancement: Armor",
+	"track_1": "Core Enhancement 1 (open tree)", "track_2": "Core Enhancement 2 (open tree)", "track_3": "Core Enhancement 3 (open tree)", "track_4": "Core Enhancement 4 (open tree)", "track_5": "Core Enhancement 5 (open tree)",
 	"reroll": "Reroll draft", "banish": "Banish mode (draft)",
 	"upgrade": "Upgrade (Outpost / Core)", "sell": "Demolish / salvage", "confirm": "Place / confirm", "cancel": "Cancel / back", "info": "Cell info",
 	"toggle_left": "Toggle left panel", "toggle_right": "Toggle right panel",

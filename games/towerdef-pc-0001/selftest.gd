@@ -13,6 +13,7 @@ const StLoot := preload("res://tests/st_loot.gd")
 const StOutpost := preload("res://tests/st_outpost.gd")
 const StCoreLevel := preload("res://tests/st_corelevel.gd")
 const StMerge := preload("res://tests/st_merge.gd")
+const StTracks := preload("res://tests/st_tracks.gd")
 const FirePatterns := preload("res://FirePatterns.gd")
 const WeaponDB := preload("res://data/WeaponDB.gd")
 const TowerState := preload("res://TowerState.gd")
@@ -1434,7 +1435,7 @@ func _engine_b_stages() -> void:
 	_check("AC-24 Frenzy + Hair Trigger rate, regen 0", is_equal_approx(float(_weapon(S, "core")["rate"]), base_rate * 1.45) and is_equal_approx(float(S.stats["regen"]), 0.0))
 	S.perks_taken = ["p_greed", "p_miser", "p_bloodmoon"]
 	S.recompute()
-	_check("AC-24 economy tradeoffs", is_equal_approx(S.run_coin_mult(), 1.5 * TuneRef.num("perk_bloodmoon", 1.25)) and is_equal_approx(S.run_cash_mult(), 1.5) and is_equal_approx(float(S.stats["xp_mult"]), 0.7) and S.upgrade_cost(TowerState.CORE_SLOT) == 84)   # FB1: Damage track base 120 (x0.7 Miser)
+	_check("AC-24 economy tradeoffs", is_equal_approx(S.run_coin_mult(), 1.5 * TuneRef.num("perk_bloodmoon", 1.25)) and is_equal_approx(S.run_cash_mult(), 1.5) and is_equal_approx(float(S.stats["xp_mult"]), 0.7) and S.upgrade_cost(TowerState.CORE_SLOT) == 210)   # V2 P7b: Overcharge base 300 (x0.7 Miser)
 	var worst: bool = true
 	var tr: Array = ["p_glass", "p_greed", "p_fort", "p_frenzy", "p_miser", "p_bloodmoon"]
 	for mask in 64:
@@ -1492,11 +1493,12 @@ func _fix_round_stages() -> void:
 	S.recompute()
 	var g0: float = float(_weapon(S, "gun")["dmg"])
 	var c0: float = float(_weapon(S, "core")["dmg"])
-	S.cash = 1000.0
+	S.cash = 5000.0
 	S.upgrade(TowerState.CORE_SLOT)
 	S.upgrade(TowerState.CORE_SLOT)
 	_check("Damage track: 2 levels -> Core + buildings x1.40^2", S.core_run_lvl == 2 and is_equal_approx(float(_weapon(S, "gun")["dmg"]), g0 * 1.96) and is_equal_approx(float(_weapon(S, "core")["dmg"]), c0 * 1.96))
-	_check("Damage track cost 120 x growth^n", S.upgrade_cost(TowerState.CORE_SLOT) == int(round(120.0 * pow(float(TowerState.TRACKS["dmg"]["growth"]), 2.0))) and is_equal_approx(float(S.stats["overcharge_step"]), 0.40))
+	# V2 P7b (deliberate): the Damage track is the Overcharge Overdrive, 300 x 2.5^n
+	_check("Overcharge (Damage Overdrive) cost 300 x 2.5^n", S.upgrade_cost(TowerState.CORE_SLOT) == int(round(300.0 * pow(2.5, 2.0))) and is_equal_approx(float(S.stats["overcharge_step"]), 0.40))
 	# Enemy damage ramp 1.06/wave so HP (labs, perks, Overdrive) matters late.
 	S = _fresh()
 	S.spawn_hold = true
@@ -1607,10 +1609,12 @@ func _pc_board_stages() -> void:
 	var e2c: int = _at(-4, 0)   # ring 3: just outside the 7x7 start grid
 	_check("PC-E1 run: per-cell unlock is gone", S1.unlock_plot(e2c).is_empty() and not bool(S1.unlocked[e2c]))
 	var rev: Array = []
+	var want: int = 0
 	for t in TowerState.TRACK_IDS:
+		want += mini(3, TowerState.track_cap(String(t)))
 		for k in 3:
 			rev.append_array(S1.buy_track(String(t)))
-	_check("FB1 run: tracks never open grid cells", not bool(S1.unlocked[e2c]) and _evts(rev, "ring_open").is_empty() and S1.track_total() == 15)
+	_check("FB1 run: tracks never open grid cells", not bool(S1.unlocked[e2c]) and _evts(rev, "ring_open").is_empty() and S1.track_total() == want)
 	var gsz: Array = []
 	var gopen: Array = []
 	for lv in 8:
@@ -2524,31 +2528,33 @@ func _core_stages() -> void:
 ## §2.2 cash tracks: costs, effects, caps, head_start, kill-cash index.
 func _track_stages() -> void:
 	var S = _fresh()
-	_check("TRACK 5 tracks start at 0 (head_start 0)", S.tracks == {"dmg": 0, "rate": 0, "range": 0, "eco": 0, "armor": 0})
-	# FEEDBACK-1 (deliberate): few, big, expensive levels with a drawback each.
-	_check("TRACK base costs 120/140/180/100/120", S.track_cost("dmg") == 120 and S.track_cost("rate") == 140 and S.track_cost("range") == 180 and S.track_cost("eco") == 100 and S.track_cost("armor") == 120)
-	_check("FB1 every track names its drawback, caps <= 8", TowerState.TRACK_IDS.all(func(t: Variant) -> bool: return String((TowerState.TRACKS[t] as Dictionary).get("minus", "")) != "" and TowerState.track_cap(String(t)) <= 8))
+	# V2 P7b (deliberate): the five V1 tracks are the Overdrive tracks of the
+	# three enhancement trees (base 300, growth 2.5, cap 4); st_tracks covers
+	# the standard tracks.
+	_check("TRACK every enhancement starts at 0 (head_start 0)", S.tracks.size() == TowerState.TRACK_IDS.size() and S.tracks.values().all(func(v: Variant) -> bool: return int(v) == 0))
+	_check("TRACK Overdrive base costs 300 each", S.track_cost("dmg") == 300 and S.track_cost("rate") == 300 and S.track_cost("range") == 300 and S.track_cost("eco") == 300 and S.track_cost("armor") == 300)
+	_check("FB1 every Overdrive names its drawback, cap 4", ["dmg", "rate", "range", "eco", "armor"].all(func(t: Variant) -> bool: return String((TowerState.TRACKS[t] as Dictionary).get("minus", "")) != "" and TowerState.track_cap(String(t)) == 4))
 	S.cash = 1.0e9
 	for t in ["rate", "range", "eco", "armor"]:
 		S.buy_track(String(t))
-	_check("TRACK cost grows by its growth", S.track_cost("rate") == int(round(140.0 * float(TowerState.TRACKS["rate"]["growth"]))) and S.track_cost("eco") == int(round(100.0 * float(TowerState.TRACKS["eco"]["growth"]))) and S.track_cost("armor") == int(round(120.0 * float(TowerState.TRACKS["armor"]["growth"]))))
+	_check("TRACK cost grows by its growth", S.track_cost("rate") == int(round(300.0 * 2.5)) and S.track_cost("eco") == int(round(300.0 * 2.5)) and S.track_cost("armor") == int(round(300.0 * 2.5)))
 	var cw: Dictionary = _weapon(S, "core")
 	_check("TRACK Rate +30% (Range -8% rate), Range +0.75 cell", is_equal_approx(float(cw["rate"]), 1.25 * 1.30 * 0.92) and is_equal_approx(float(cw["range"]), 4.75 * TowerState.cpx()))
 	_check("TRACK Eco +3 cash/s, interest cap +40", is_equal_approx(float(S.stats["cash_ps"] ), 5.0) and is_equal_approx(float(S.stats["interest_cap"]), 90.0))
 	_check("TRACK Armor +30% HP (Eco -8% HP), +1 regen, +2 armor", is_equal_approx(float(S.stats["max_hp"]), 120.0 * 1.3 * 0.92) and is_equal_approx(float(S.stats["regen"]), 2.0) and is_equal_approx(float(S.stats["armor"]), 4.0))
 	var S0 = _fresh()
 	_check("FB1 Rate and Armor cost Core dmg (-9% each)", is_equal_approx(float(cw["dmg"]), float(_weapon(S0, "core")["dmg"]) * 0.91 * 0.91))
-	S.tracks["range"] = 6
+	S.tracks["range"] = 4
 	S.recompute()
-	_check("TRACK capped (range 6) -> cost -1, buy refused", S.track_cost("range") == -1 and S.buy_track("range").is_empty())
+	_check("TRACK capped (range 4) -> cost -1, buy refused", S.track_cost("range") == -1 and S.buy_track("range").is_empty())
 	S.packs = {"pk_logistics": 2}
 	S.recompute()
-	_check("TRACK Logistics packs -12% cost each", S.track_cost("dmg") == int(round(120.0 * 0.88 * 0.88)))
+	_check("TRACK Logistics packs -12% cost each", S.track_cost("dmg") == int(round(300.0 * 0.88 * 0.88)))
 	var hs: Dictionary = BaseMeta.default_save()
 	hs["reforge"] = {"count": 1, "nodes": {"head_start": 3}}
 	var H = TowerState.new()
 	H.setup(1, BaseMeta.normalize(hs))
-	_check("TRACK starting level = Reforge head_start", int(H.tracks["dmg"]) == 3 and int(H.tracks["armor"]) == 3 and H.core_run_lvl == 3)
+	_check("TRACK starting level = Reforge head_start (Overdrives only)", int(H.tracks["dmg"]) == 3 and int(H.tracks["armor"]) == 3 and H.core_run_lvl == 3 and int(H.tracks["a_dmg"]) == 0)
 	# Kill cash x 1.10^(w-1) x (1 + 0.5(t-1)).
 	S = _fresh()
 	S.spawn_hold = true
@@ -3191,6 +3197,7 @@ func _engine_meta_stages() -> void:
 	StOutpost.run(self)
 	StCoreLevel.run(self)
 	StMerge.run(self)
+	StTracks.run(self)
 	_reforge_stages()
 
 

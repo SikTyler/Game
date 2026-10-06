@@ -23,17 +23,10 @@ const GearVis := preload("res://GearVis.gd")
 const Cores := preload("res://Cores.gd")
 const LootDB := preload("res://data/LootDB.gd")
 const RarityDB := preload("res://data/RarityDB.gd")
+const EnhancePanel := preload("res://ui/EnhancePanel.gd")
 
 const ENEMY2: Color = Kit.MAGENTA
 const SHIELD: Color = Color("7fd8ff")
-const TRACK_ICON: Dictionary = {"dmg": "pk_arsenal", "rate": "pk_overclock", "range": "pk_optics", "eco": "pk_ledger", "armor": "pk_fort"}
-const TRACK_TIP: Dictionary = {
-	"dmg": "Damage enhancement: x1.08 Core and building damage per level",
-	"rate": "Rate enhancement: +3% Core attack rate per level",
-	"range": "Range enhancement: +0.1 cell Core range per level",
-	"eco": "Eco enhancement: +0.4 cash/s and +5 interest cap per level",
-	"armor": "Armor enhancement: +5% Core HP, +0.2 regen and +0.5 armor per level",
-}
 
 
 static func speed_str(v: float) -> String:
@@ -51,17 +44,7 @@ static func build(m) -> void:
 		return
 	DraftPanel.build(m)
 	Hotbar.build(m)
-	var rr: Rect2 = m.right_rect()
-	var x: float = rr.position.x + 16.0
-	var w: float = rr.size.x - 32.0
-	var ty: float = track_y(m)
-	var th: float = track_h(m)
-	for k in TowerState.TRACK_IDS.size():
-		var tid: String = TowerState.TRACK_IDS[k]
-		var c: int = S.track_cost(tid)
-		var td: Dictionary = TowerState.TRACKS[tid]
-		var tip: String = "%s\nLevel %d / %d  ·  next $%d\n%s  ·  %s" % [String(TRACK_TIP[tid]), int(S.tracks[tid]), int(S.track_cap(tid)), maxi(0, c), String(td["desc"]), String(td.get("minus", ""))]
-		Kit.hit(m, Rect2(x, ty + k * (th + 6.0), w, th), func() -> void: m.buy_track(tid), tip, "TRACK " + String(td["name"]), c >= 0 and S.cash >= float(c), Kit.GREEN)
+	EnhancePanel.build(m)   # V2 P7b: Core Enhancement trees
 	# V2 P7a: Merge (keyboard / pad path to drag-merge) under any selected
 	# building that has a same-id, same-tier twin
 	if m.sel >= 0 and m.sel != TowerState.CORE_SLOT and S.id_at(m.sel) != "" and S.merge_partner(m.sel) >= 0:
@@ -876,21 +859,7 @@ static func _draw_right(m) -> void:
 		Kit.row(m, String(rw[0]), String(rw[1]), Vector2(x + float(k % 2) * (cw2 + 12.0), y + sh * float(k / 2)), cw2, Kit.TEXT, String(rw[2]), 14)
 	y += sh * float((rows.size() + 1) / 2) + 6.0
 	Intel.draw(m, x, w, y, track_y(m) - 58.0)
-	# tracks
-	var ty: float = track_y(m)
-	var th: float = track_h(m)
-	Kit.head(m, "CORE ENHANCEMENTS  (cash, this run)", Vector2(x, ty - 30), w)
-	for k in TowerState.TRACK_IDS.size():
-		var tid: String = TowerState.TRACK_IDS[k]
-		var td: Dictionary = TowerState.TRACKS[tid]
-		var r := Rect2(x, ty + k * (th + 6.0), w, th)
-		var c: int = S.track_cost(tid)
-		var can: bool = c >= 0 and S.cash >= float(c)
-		Kit.panel(m, r, Kit.GREEN if can else Kit.EDGE, Kit.tint(Kit.GREEN, 0.12) if can else Kit.PANEL)
-		Kit.icon(m, String(TRACK_ICON[tid]), Rect2(r.position.x + 8, r.position.y + (th - 36) * 0.5, 36, 36), Color.WHITE if can else Color(1, 1, 1, 0.5))
-		Kit.t(m, "%s  Lv %d" % [String(td["name"]), int(S.tracks[tid])], Vector2(r.position.x + 52, r.position.y + th * 0.45), 18, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w - 150)
-		Kit.t(m, "%s  ·  %s" % [String(td["desc"]), String(td.get("minus", ""))], Vector2(r.position.x + 52, r.position.y + th * 0.45 + 18), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w - 150)
-		Kit.t(m, ("$%s" % Kit.fmt(float(c))) if c >= 0 else "MAX", Vector2(r.end.x - 10, r.position.y + th * 0.45), 18, Kit.GREEN if can else Kit.DIM, HORIZONTAL_ALIGNMENT_RIGHT, 100.0)
+	EnhancePanel.draw(m)   # V2 P7b
 
 
 static func _draw_results(m) -> void:

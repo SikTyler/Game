@@ -34,6 +34,7 @@ extends SceneTree
 # or "PLAYTEST FAIL: ..." (exit 1). Clears user:// saves at start and end.
 
 const TowerState := preload("res://TowerState.gd")
+const TrackDB := preload("res://data/TrackDB.gd")
 const BaseMeta := preload("res://BaseMeta.gd")
 const BuildingDB := preload("res://data/BuildingDB.gd")
 const MetaSave := preload("res://MetaSave.gd")
@@ -749,6 +750,11 @@ static func _perk_score(policy: String, id: String) -> int:
 ## Track priority weights per policy: cheapest weighted cost wins.
 static func _track_weight(S, policy: String, t: String) -> float:
 	var hp_frac: float = S.hp / maxf(1.0, float(S.stats["max_hp"]))
+	# V2 P7b: standard enhancement tracks by tree (P9 rewrites the bot policy)
+	if not TrackDB.is_od(t):
+		var tree: String = String(TrackDB.get_def(t).get("tree", "attack"))
+		var tw: float = {"attack": 1.0, "defense": 0.9 if hp_frac < 0.5 else 1.5, "economy": 0.8 if S.wave < 30 else 2.0}.get(tree, 1.0)
+		return tw * (99.0 if policy == "weapon" and tree == "economy" else 1.0)
 	match policy:
 		"eco":
 			return {"eco": 0.4, "dmg": 1.0, "rate": 1.4, "range": 3.0, "armor": 1.6}[t]

@@ -38,6 +38,7 @@ const EnemyStore := preload("res://EnemyStore.gd")
 const EnemyHash := preload("res://EnemyHash.gd")
 const WeaponDB := preload("res://data/WeaponDB.gd")
 const MergeDB := preload("res://data/MergeDB.gd")
+const TrackDB := preload("res://data/TrackDB.gd")
 const FirePatterns := preload("res://FirePatterns.gd")
 const Gear := preload("res://Gear.gd")
 
@@ -75,20 +76,13 @@ const TARGET_MODES: Array = ["nearest", "first", "strongest", "weakest"]
 const HIT_FLASH: float = 0.12   # view reads e["hit_t"] for the white hit flash
 const ECO_IDS: Array = ["mine", "oilmill", "bounty", "vault", "refinery"]
 const BOSSY: Array = ["boss", "elite"]
-## Core cash tracks (REDESIGN_SPEC §2.2). cost(next) = base * growth^lvl.
-## Growth tuned up from the spec's 1.16-1.20 (playtest pacing: with kill
-## cash x1.10/wave the spec values hit every cap by ~w40); Tune keys
-## pc_track_growth_<id> override.
-const TRACK_IDS: Array = ["dmg", "rate", "range", "eco", "armor"]
-## Owner feedback #1: few, BIG, expensive levels, each with a real drawback
-## (no spam-click increments). Per level: "desc" is the gain, "minus" the cost.
-const TRACKS: Dictionary = {
-	"dmg": {"name": "Damage", "base": 120.0, "growth": 3.0, "cap": 6, "desc": "x1.40 Core + building dmg", "minus": "-12% Core attack rate"},
-	"rate": {"name": "Rate", "base": 140.0, "growth": 3.0, "cap": 6, "desc": "+30% Core attack rate", "minus": "-9% Core dmg"},
-	"range": {"name": "Range", "base": 180.0, "growth": 3.2, "cap": 5, "desc": "+0.75 Core range", "minus": "-8% Core attack rate"},
-	"eco": {"name": "Eco", "base": 100.0, "growth": 2.9, "cap": 6, "desc": "+3 cash/s, interest cap +40", "minus": "-8% Core max HP"},
-	"armor": {"name": "Armor", "base": 120.0, "growth": 3.0, "cap": 6, "desc": "+30% HP, +1 regen, +2 armor", "minus": "-9% Core dmg"},
-}
+## Core cash tracks: cost(next) = base * growth^lvl (Tune keys
+## pc_track_growth_<id> / pc_track_cap_<id> override).
+## V2 P7b: Core Enhancements are TrackDB's three trees (Attack / Defense /
+## Economy); the five V1 tracks (dmg rate range eco armor) are its Overdrive
+## tracks with the big trade-offs below. Standard tracks feed `tfx` (pf).
+const TRACK_IDS: Array = TrackDB.IDS
+const TRACKS: Dictionary = TrackDB.DEFS
 ## V2 P7a: a gold perk offer every GOLD_EVERY XP levels.
 const GOLD_EVERY: int = 5
 ## Per-level track multipliers (gain / drawback).
@@ -294,6 +288,7 @@ var couriers: int = 0
 var couriers_caught: int = 0
 var ins: Dictionary = {}          # Insight values {in_dmg: 0.01, ...}
 var pfx: Dictionary = {}          # summed gear fx (V2 P4: Gear.run_fx of the save's loadout)
+var tfx: Dictionary = {}          # V2 P7b: Core Enhancement fx (TrackDB steps x levels)
 ## V2 P4 manual aim: while the player holds fire on a point, the Core's Weapon
 ## takes the body nearest the cursor (within AIM_R, in range) with +15% crit,
 ## and a focus meter fills over 4 s to +30% damage (drains when released).
@@ -409,7 +404,8 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	var head: int = _reforge_node("head_start")
 	tracks = {}
 	for t in TRACK_IDS:
-		tracks[t] = mini(head, track_cap(t))
+		tracks[t] = mini(head, track_cap(t)) if TrackDB.is_od(String(t)) else 0
+	tfx = TrackDB.fx_of(tracks)
 	core_run_lvl = int(tracks["dmg"])
 	# Insight (permanent, banked from earlier runs).
 	ins = {}
@@ -526,7 +522,17 @@ func _reforge_node(id: String) -> int:
 
 ## One summed part fx value (0 when no equipped part carries the key).
 func pf(k: String) -> float:
-	return float(pfx.get(k, 0.0))
+	return float(pfx.get(k, 0.0)) + float(tfx.get(k, 0.0))
+
+
+## V2 P7b: the Core Enhancement part of pf alone.
+func tf(k: String) -> float:
+	return float(tfx.get(k, 0.0))
+
+
+## Draft luck now: run luck + Draft Luck enhancements (cap 10).
+func luck_now() -> int:
+	return mini(10, luck + int(tf("draft_luck")))
 
 
 ## Mode + modifier selection (validated). Endless needs best wave >= 50.
@@ -1067,7 +1073,7 @@ func compute_stats() -> Dictionary:
 	st["kill_cash"] = (1.0 + 0.05 * float(pack_n("pk_ledger")) + float(st.get("kill_cash_mod", 0.0))) * (1.0 + float(ins.get("in_cash", 0.0))) * maxf(0.1, 1.0 + pf("kill_cash"))
 	st["interest_rate"] = float(st["interest_rate"]) + pf("interest")
 	var icap_w1: float = float(st["interest_cap"]) + TRACK_ECO_ICAP * float(eco_lv) + (50.0 if pf("interest") > 0.0 else 0.0)
-	st["interest_cap"] = icap_w1 * e
+	st["interest_cap"] = icap_w1 * e * maxf(0.1, 1.0 + pf("icap"))
 	# The Core's own weapon (always last in `weapons`; the view reads .back()).
 	var core_dmg: float = float(cd["dmg"]) * CoreDB.lvl_mult("dmg", L) * dmg_all * float(adj_dmg[CORE_SLOT]) * (1.0 + TuneRef.num("pc_core_surge_dmg", 0.15) * float(pack_n("pk_core"))) * maxf(0.1, 1.0 + pf("core_dmg")) * pow(TRACK_RATE_DMG, float(tracks["rate"])) * pow(TRACK_ARMOR_DMG, float(arm_n))
 	var core_rate: float = float(cd["rate"]) * pow(TRACK_RATE, float(tracks["rate"])) * pow(TRACK_DMG_RATE, float(tracks["dmg"])) * pow(TRACK_RANGE_RATE, float(tracks["range"])) * rate_all * float(adj_rate[CORE_SLOT]) * (1.0 + TuneRef.num("pc_core_surge_rate", 0.05) * float(pack_n("pk_core"))) * maxf(0.1, 1.0 + pf("rate"))
@@ -1296,7 +1302,7 @@ func time_scale() -> float:
 
 ## Coins multiplier for everything earned this run (tier × lab × card × perks).
 func run_coin_mult() -> float:
-	return coin_mult * float(stats.get("perk_coin", 1.0)) * mutation_coin()
+	return coin_mult * float(stats.get("perk_coin", 1.0)) * mutation_coin() * (1.0 + tf("coin_run"))
 
 
 func mutation_coin() -> float:
@@ -1596,7 +1602,7 @@ func _on_death(ev: Array) -> void:
 	hp = 0.0
 	over = true
 	_sweep_horde_loot(true)
-	loot["luck"] = luck      # V2 P5: bank-time rarity luck (the run never rolls it)
+	loot["luck"] = luck + int(tf("loot_luck"))   # V2 P5: bank-time rarity luck (the run never rolls it); P7b Loot Luck
 	loot["tier"] = tier
 	var cashout: int = int(floor(TuneRef.num("cashout_frac", 0.12) * cash_earned / maxf(1.0, cash_index()) * tier_coin_mult * mod_coin * mode_coin))
 	var coins: int = int(coins_run) + cashout
@@ -3265,7 +3271,7 @@ func _draft_ctx(guarantee: String) -> Dictionary:
 	return {
 		"owned": owned, "copies": copies, "free": free and not at_cap(), "free_outer": free_outer and not at_cap(), "huts": hut_count(),
 		"hut_max": hut_max(), "t1": _t1_ids(),
-		"packs": packs, "specials": sp, "banished": banished, "luck": luck,
+		"packs": packs, "specials": sp, "banished": banished, "luck": luck_now(),
 		"eco_mult": 1.0,
 		"choices": 3 + mini(1, _reforge_node("wide_draft")),
 		"insight_p": TuneRef.num("pc_insight_p", 0.01) * (1.0 + float(luck) * 0.05),
@@ -3630,26 +3636,46 @@ func cancel_place() -> Array:
 	return ev
 
 
-## Buy one level of a Core cash track (REDESIGN §2.2, owner feedback #1:
-## few, big, expensive levels with a drawback each).
+## Buy one level of a Core Enhancement (V2 P7b: TrackDB; Lucky Purchase may
+## refund it, rolled on the draft stream only when that track is owned).
 func buy_track(t: String) -> Array:
 	var ev: Array = []
-	if over or not TRACKS.has(t):
+	if over or not TRACKS.has(t) or not track_unlocked(t):
 		return ev
 	var c: int = track_cost(t)
 	if c < 0 or cash < float(c):
 		return ev
-	cash -= float(c)
+	var free: bool = tf("free_buy") > 0.0 and draft_rng.randf() < tf("free_buy")
+	if not free:
+		cash -= float(c)
 	tracks[t] = int(tracks[t]) + 1
+	tfx = TrackDB.fx_of(tracks)
 	core_run_lvl = int(tracks["dmg"])
 	recompute()
-	ev.append({"t": "track", "track": t, "level": int(tracks[t]), "cost": c})
+	ev.append({"t": "track", "track": t, "level": int(tracks[t]), "cost": 0 if free else c, "free": free})
 	ev.append({"t": "upgraded", "slot": CORE_SLOT, "level": int(tracks[t]), "track": t})
 	return ev
 
 
+## Buy up to n levels of track t (the panel's x5 / MAX); stops when broke.
+func buy_tracks(t: String, n: int) -> Array:
+	var ev: Array = []
+	for k in n:
+		var e1: Array = buy_track(t)
+		if e1.is_empty():
+			break
+		ev.append_array(e1)
+	return ev
+
+
+## P8 research unlocks (TrackDB `unlock`): every track is open until then.
+func track_unlocked(t: String) -> bool:
+	var u: String = String((TRACKS.get(t, {}) as Dictionary).get("unlock", ""))
+	return u == "" or int(mods.get("res_" + u, 0)) > 0
+
+
 ## Legacy view hook: the Core cell buys the Damage track; buildings level only
-## through duplicate draft picks now.
+## through merges.
 func upgrade(i: int) -> Array:
 	if i == CORE_SLOT:
 		return buy_track("dmg")
