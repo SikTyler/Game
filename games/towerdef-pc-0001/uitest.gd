@@ -1095,7 +1095,7 @@ func _run_screen() -> void:
 	_audit("evolution card")
 	S.draft.clear()
 	S.carry_cards = []
-	S.combo = 450.0
+	S.combo = 1200.0   # tier 3 (400-1500), with room for a few frames of decay
 	S._combo_check([])
 	main._handle([{"t": "supply_drop", "reels": ["cash", "cash", "star"], "pays": {"cash": 1234.0}, "jackpot": false, "wave": int(S.wave)}])
 	main._rebuild_ui()

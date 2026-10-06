@@ -11,6 +11,7 @@ extends RefCounted
 ## smaller requests are logged in `small_text` and uitest fails on them.
 
 const Art := preload("res://ArtDB.gd")
+const RunArt := preload("res://ui/RunArt.gd")
 const Keybinds := preload("res://Keybinds.gd")
 const Fonts := preload("res://ui/Fonts.gd")
 const Beam := preload("res://vfx/Beam.gd")
@@ -287,7 +288,7 @@ static func bar_glow(m, r: Rect2, frac: float, col: Color, ticks: int = 0, back:
 static func icon(m, id: String, r: Rect2, mod: Color = Color.WHITE) -> bool:
 	var tx: Texture2D = Art.tex(id)
 	if tx == null:
-		return false
+		return RunArt.draw(m, id, r, mod)   # V2 P7d: procedural icons for new run content
 	m.draw_texture_rect(tx, r, false, mod)
 	return true
 

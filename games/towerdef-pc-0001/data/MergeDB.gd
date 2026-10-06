@@ -95,6 +95,139 @@ const MODS: Dictionary = {
 			{"name": "Shatter Field", "desc": "+250% chill damage", "fx": {"dmg": 2.5}},
 		],
 	},
+	# ---- V2 P7d weapons ---------------------------------------------------
+	"pulse": {
+		"t2": [
+			{"name": "Wide Pulse", "desc": "+0.8 range", "fx": {"range": 0.8}},
+			{"name": "Heavy Pulse", "desc": "+40% damage", "fx": {"dmg": 0.40}},
+			{"name": "Rapid Pulse", "desc": "+35% pulse rate", "fx": {"rate": 0.35}},
+		],
+		"t3": [
+			{"name": "Shock Ring", "desc": "+80% damage, knockback x2", "fx": {"dmg": 0.80, "knock": 1.0}},
+			{"name": "Resonance", "desc": "+60% rate, +0.5 range", "fx": {"rate": 0.60, "range": 0.5}},
+		],
+	},
+	"missile": {
+		"t2": [
+			{"name": "Extra Pods", "desc": "+2 missiles per salvo", "fx": {"missiles": 2.0}},
+			{"name": "HE Warheads", "desc": "+50% blast radius", "fx": {"splash": 0.50}},
+			{"name": "Fast Reload", "desc": "+35% salvo rate", "fx": {"rate": 0.35}},
+		],
+		"t3": [
+			{"name": "Swarm Rack", "desc": "+4 missiles per salvo", "fx": {"missiles": 4.0}},
+			{"name": "Bunker Busters", "desc": "+80% damage, +10% crit", "fx": {"dmg": 0.80, "crit": 0.10}},
+		],
+	},
+	"spike": {
+		"t2": [
+			{"name": "Barbs", "desc": "+60% damage", "fx": {"dmg": 0.60}},
+			{"name": "Long Spikes", "desc": "+0.6 range", "fx": {"range": 0.6}},
+			{"name": "Pistons", "desc": "+35% stab rate", "fx": {"rate": 0.35}},
+		],
+		"t3": [
+			{"name": "Impaler", "desc": "+150% damage", "fx": {"dmg": 1.5}},
+			{"name": "Thicket", "desc": "+1 range, +40% damage", "fx": {"range": 1.0, "dmg": 0.40}},
+		],
+	},
+	"mines": {
+		"t2": [
+			{"name": "Shaped Charge", "desc": "+40% damage", "fx": {"dmg": 0.40}},
+			{"name": "Wide Blast", "desc": "+40% blast radius", "fx": {"splash": 0.40}},
+			{"name": "Quick Seed", "desc": "+35% laying rate", "fx": {"rate": 0.35}},
+		],
+		"t3": [
+			{"name": "Carpet Mines", "desc": "+70% laying rate", "fx": {"rate": 0.70}},
+			{"name": "Thermobaric", "desc": "+90% damage, +30% blast", "fx": {"dmg": 0.90, "splash": 0.30}},
+		],
+	},
+	"scatter": {
+		"t2": [
+			{"name": "Full Choke", "desc": "+3 pellets", "fx": {"pellets": 3.0}},
+			{"name": "Slugs", "desc": "+35% damage", "fx": {"dmg": 0.35}},
+			{"name": "Pump Action", "desc": "+30% fire rate", "fx": {"rate": 0.30}},
+		],
+		"t3": [
+			{"name": "Dragon Breath", "desc": "+6 pellets", "fx": {"pellets": 6.0}},
+			{"name": "Wide Spread", "desc": "Cone 60 -> 100 deg, +40% damage", "fx": {"arc": 40.0, "dmg": 0.40}},
+		],
+	},
+	"laser": {
+		"t2": [
+			{"name": "Focusing Array", "desc": "Ramps to x4 (was x3)", "fx": {"ramp": 1.0}},
+			{"name": "Wide Beam", "desc": "+60% beam width", "fx": {"pierce": 5.0}},
+			{"name": "Hot Emitter", "desc": "+35% damage", "fx": {"dmg": 0.35}},
+		],
+		"t3": [
+			{"name": "Death Ray", "desc": "Ramps to x5, +30% damage", "fx": {"ramp": 2.0, "dmg": 0.30}},
+			{"name": "Prism Split", "desc": "+70% damage, +1 range", "fx": {"dmg": 0.70, "range": 1.0}},
+		],
+	},
+	"saw": {
+		"t2": [
+			{"name": "Ricochet Edge", "desc": "+2 bounces", "fx": {"bounces": 2.0}},
+			{"name": "Serrated", "desc": "+40% damage", "fx": {"dmg": 0.40}},
+			{"name": "Spinner", "desc": "+30% fire rate", "fx": {"rate": 0.30}},
+		],
+		"t3": [
+			{"name": "Buzzsaw Storm", "desc": "+4 bounces, +20% damage", "fx": {"bounces": 4.0, "dmg": 0.20}},
+			{"name": "Diamond Blade", "desc": "+90% damage, +10% crit", "fx": {"dmg": 0.90, "crit": 0.10}},
+		],
+	},
+	"arcproj": {
+		"t2": [
+			{"name": "Long Arcs", "desc": "+3 jumps", "fx": {"chains": 3.0}},
+			{"name": "Forked", "desc": "+1 fork", "fx": {"arcs": 1.0}},
+			{"name": "High Voltage", "desc": "+35% damage", "fx": {"dmg": 0.35}},
+		],
+		"t3": [
+			{"name": "Ball Lightning", "desc": "+2 forks, +3 jumps", "fx": {"arcs": 2.0, "chains": 3.0}},
+			{"name": "Arc Flash", "desc": "+80% damage, +30% rate", "fx": {"dmg": 0.80, "rate": 0.30}},
+		],
+	},
+	"sonic": {
+		"t2": [
+			{"name": "Bass Drop", "desc": "Knockback x1.6", "fx": {"knock": 0.60}},
+			{"name": "Wide Horn", "desc": "Cone 70 -> 100 deg", "fx": {"arc": 30.0}},
+			{"name": "Overdrive", "desc": "+50% damage", "fx": {"dmg": 0.50}},
+		],
+		"t3": [
+			{"name": "Sonic Boom", "desc": "+120% damage, +0.5 range", "fx": {"dmg": 1.2, "range": 0.5}},
+			{"name": "Shock Front", "desc": "Knockback x2.2, +40% rate", "fx": {"knock": 1.2, "rate": 0.40}},
+		],
+	},
+	"harpoon": {
+		"t2": [
+			{"name": "Barbed Tip", "desc": "x4 on elites / bosses (was x2.5)", "fx": {"elite": 1.5}},
+			{"name": "Winch", "desc": "+35% fire rate", "fx": {"rate": 0.35}},
+			{"name": "Long Line", "desc": "+1.5 range", "fx": {"range": 1.5}},
+		],
+		"t3": [
+			{"name": "Whaler", "desc": "+100% damage, x5 on elites", "fx": {"dmg": 1.0, "elite": 1.0}},
+			{"name": "Twin Launcher", "desc": "+70% fire rate, +15% crit", "fx": {"rate": 0.70, "crit": 0.15}},
+		],
+	},
+	"plasma": {
+		"t2": [
+			{"name": "Hotter Plasma", "desc": "+60% burn", "fx": {"burn": 0.60}},
+			{"name": "Wide Field", "desc": "+50% lane width", "fx": {"pierce": 5.0}},
+			{"name": "Long Fence", "desc": "+1.5 range", "fx": {"range": 1.5}},
+		],
+		"t3": [
+			{"name": "Star Core", "desc": "+120% burn, +30% damage", "fx": {"burn": 1.2, "dmg": 0.30}},
+			{"name": "Overcharge", "desc": "+60% rate, +1 range", "fx": {"rate": 0.60, "range": 1.0}},
+		],
+	},
+	"flakburst": {
+		"t2": [
+			{"name": "Big Shells", "desc": "+40% burst radius", "fx": {"splash": 0.40}},
+			{"name": "Proximity Fuse", "desc": "+35% damage", "fx": {"dmg": 0.35}},
+			{"name": "Autoloader", "desc": "+35% fire rate", "fx": {"rate": 0.35}},
+		],
+		"t3": [
+			{"name": "Cluster Flak", "desc": "+80% radius, +30% damage", "fx": {"splash": 0.80, "dmg": 0.30}},
+			{"name": "Flak Curtain", "desc": "+70% rate, traverse 120 -> 200 deg", "fx": {"rate": 0.70, "arc": 80.0}},
+		],
+	},
 	"armory": {
 		"t2": [
 			{"name": "Ammo Racks", "desc": "+50% to its damage buff", "fx": {"power": 0.50}},
@@ -242,6 +375,7 @@ const MODS: Dictionary = {
 
 ## Every fx key a mod may carry (the content check in st_merge).
 const FX_KEYS: Array = ["dmg", "rate", "range", "crit", "pierce", "splash", "knock", "chains", "arcs", "rounds", "cone", "burn",
+	"missiles", "pellets", "bounces", "ramp", "elite",
 	"slow", "boss", "arc", "power", "reach", "quiet", "armor", "regen", "kill_cash", "xp", "interest", "cap", "cash",
 	"adj_dmg", "troop_dmg", "troop_hp"]
 

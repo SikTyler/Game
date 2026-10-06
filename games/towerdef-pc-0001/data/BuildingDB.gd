@@ -27,6 +27,19 @@ const DEFS: Dictionary = {
 	"obelisk":      {"name": "Siphon Obelisk", "cat": "support", "coin": 0, "desc": "1% of all damage dealt heals the Core"},
 	"hut_infantry": {"name": "Rifle Barracks", "cat": "support", "coin": 0, "desc": "3 Riflemen guard the whole perimeter and taunt"},
 	"hut_sapper":   {"name": "Sapper Den",     "cat": "support", "coin": 0, "desc": "2 Sappers charge elites and bosses and explode"},
+	# V2 P7d weapons (PickDB holds the draft text).
+	"pulse":     {"name": "Pulse Emitter",   "cat": "weapon", "coin": 0, "desc": "Radial pulse around it"},
+	"missile":   {"name": "Missile Battery", "cat": "weapon", "coin": 0, "desc": "Homing missiles with small blasts"},
+	"spike":     {"name": "Spike Pylon",     "cat": "weapon", "coin": 0, "desc": "Stabs every body next to it"},
+	"mines":     {"name": "Minelayer",       "cat": "weapon", "coin": 0, "desc": "Seeds mines under the horde"},
+	"scatter":   {"name": "Scatter Gun",     "cat": "weapon", "coin": 0, "desc": "Fixed cone of pellets"},
+	"laser":     {"name": "Laser Lance",     "cat": "weapon", "coin": 0, "desc": "Fixed lane beam that ramps up"},
+	"saw":       {"name": "Saw Launcher",    "cat": "weapon", "coin": 0, "desc": "Ricocheting saw blades"},
+	"arcproj":   {"name": "Arc Projector",   "cat": "weapon", "coin": 0, "desc": "Forked lightning in an arc"},
+	"sonic":     {"name": "Sonic Cannon",    "cat": "weapon", "coin": 0, "desc": "Shock wave cone that hurls the pile back"},
+	"harpoon":   {"name": "Harpoon",         "cat": "weapon", "coin": 0, "desc": "Heavy bolt, deadly on elites"},
+	"plasma":    {"name": "Plasma Fence",    "cat": "weapon", "coin": 0, "desc": "Sets its lane burning"},
+	"flakburst": {"name": "Flak Burst",      "cat": "weapon", "coin": 0, "desc": "Airbursts over the crowd"},
 }
 
 const IDS: Array = ["gun", "mortar", "tesla", "armory", "bulwark", "mine", "oilmill", "bounty"]

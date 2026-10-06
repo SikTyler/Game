@@ -36,6 +36,19 @@ const DEFS: Dictionary = {
 	"refinery":  {"fam": "building", "name": "Refinery", "rarity": "rare", "tags": ["eco"], "max": 5, "desc": "+15% XP (each level-up = a free reroll), +0.5 cash/s"},
 	"frost":     {"fam": "building", "name": "Cryo Spire", "rarity": "rare", "tags": ["control"], "max": 5, "desc": "Slows 30% within 2.5 cells, 3 dmg/s"},
 	"obelisk":   {"fam": "building", "name": "Siphon Obelisk", "rarity": "legendary", "tags": ["sustain"], "max": 5, "desc": "1% of all damage dealt heals the Core"},
+	# ---- V2 P7d weapons (12) -------------------------------------------------
+	"pulse":     {"fam": "building", "name": "Pulse Emitter", "rarity": "rare", "tags": ["aoe"], "max": 5, "desc": "Radial pulse: 6 dmg to every body within 2.2 cells, 0.7/s, a small shove"},
+	"missile":   {"fam": "building", "name": "Missile Battery", "rarity": "epic", "tags": ["dps", "aoe"], "max": 5, "size": 2, "desc": "2x2. 4 homing missiles (12 dmg + small blasts) at the nearest bodies, range 5"},
+	"spike":     {"fam": "building", "name": "Spike Pylon", "rarity": "common", "tags": ["aoe", "control"], "max": 5, "desc": "Stabs every body within 1.6 cells: 3 dmg, 2/s"},
+	"mines":     {"fam": "building", "name": "Minelayer", "rarity": "rare", "tags": ["aoe"], "max": 5, "desc": "Seeds a mine under the nearest body: a 28-dmg blast (0.8 cell) after 1 s"},
+	"scatter":   {"fam": "building", "name": "Scatter Gun", "rarity": "common", "tags": ["dps"], "max": 5, "desc": "Fixed 60 deg cone (x1.4): 6 pellets of 6 dmg at the nearest bodies in it"},
+	"laser":     {"fam": "building", "name": "Laser Lance", "rarity": "epic", "tags": ["dps"], "max": 5, "size": 2, "desc": "2x2 fixed lane (x1.6): a beam through the whole lane, ramping to x3 while it keeps firing"},
+	"saw":       {"fam": "building", "name": "Saw Launcher", "rarity": "rare", "tags": ["dps"], "max": 5, "desc": "Arc 140 deg (x1.2): a 12-dmg saw that ricochets through 4 more bodies"},
+	"arcproj":   {"fam": "building", "name": "Arc Projector", "rarity": "rare", "tags": ["aoe"], "max": 5, "desc": "Arc 100 deg (x1.3): forked lightning, 4 jumps per fork"},
+	"sonic":     {"fam": "building", "name": "Sonic Cannon", "rarity": "rare", "tags": ["control"], "max": 5, "desc": "Fixed 70 deg cone (x1.4): a shock wave that hits the pile and hurls it back"},
+	"harpoon":   {"fam": "building", "name": "Harpoon", "rarity": "rare", "tags": ["dps"], "max": 5, "desc": "Arc 90 deg (x1.3): one 40-dmg bolt, x2.5 on elites and bosses, slows it 40%"},
+	"plasma":    {"fam": "building", "name": "Plasma Fence", "rarity": "epic", "tags": ["control", "aoe"], "max": 5, "desc": "Fixed lane (x1.5): sets every body on its line burning for 2 s"},
+	"flakburst": {"fam": "building", "name": "Flak Burst", "rarity": "common", "tags": ["aoe"], "max": 5, "desc": "Arc 120 deg (x1.2): airbursts over the crowd (9 dmg, 0.5-cell blasts)"},
 	# ---- troop huts (3) ------------------------------------------------------
 	"hut_infantry": {"fam": "hut", "name": "Rifle Barracks", "rarity": "common", "tags": ["troop"], "max": 5, "desc": "3 Riflemen guard the whole perimeter from their post; they taunt nearby enemies"},
 	"hut_sapper":   {"fam": "hut", "name": "Sapper Den", "rarity": "rare", "tags": ["troop", "aoe"], "max": 5, "desc": "2 Sappers charge elites and bosses first and explode (x2 vs armored)"},
@@ -66,7 +79,8 @@ const DEFS: Dictionary = {
 	"in_drop":  {"fam": "insight", "name": "Insight: Scavenger", "rarity": "insight", "tags": [], "step": 0.01, "cap": 0.15, "desc": "+1% part drop chance, permanently (cap 15%)"},
 }
 
-const BUILDINGS: Array = ["gun", "mortar", "tesla", "flak", "railgun", "armory", "beacon", "bulwark", "aegis", "barricade", "mine", "oilmill", "bounty", "vault", "refinery", "frost", "obelisk"]
+const BUILDINGS: Array = ["gun", "mortar", "tesla", "flak", "railgun", "armory", "beacon", "bulwark", "aegis", "barricade", "mine", "oilmill", "bounty", "vault", "refinery", "frost", "obelisk",
+	"pulse", "missile", "spike", "mines", "scatter", "laser", "saw", "arcproj", "sonic", "harpoon", "plasma", "flakburst"]
 const HUTS: Array = ["hut_infantry", "hut_sapper"]
 const PACKS: Array = ["pk_arsenal", "pk_overclock", "pk_fort", "pk_ledger", "pk_optics", "pk_crit", "pk_logistics", "pk_core", "pk_barracks", "pk_gambit"]
 const SPECIALS: Array = ["sp_orbital", "sp_emp", "sp_repair", "sp_overdrive", "sp_magnet", "sp_timewarp"]

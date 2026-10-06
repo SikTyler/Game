@@ -37,6 +37,10 @@ const Stats := preload("res://Stats.gd")
 const Kit := preload("res://ui/Kit.gd")
 const Desktop := preload("res://ui/Desktop.gd")
 const Battle := preload("res://ui/Battle.gd")
+const RunArt := preload("res://ui/RunArt.gd")
+## V2 P7d: the new weapons borrow the nearest existing shot sound.
+const SHOT_CLIP: Dictionary = {"pulse": "tesla", "missile": "mortar", "spike": "gun", "mines": "mortar", "scatter": "gun", "laser": "tesla",
+	"saw": "gun", "arcproj": "tesla", "sonic": "mortar", "harpoon": "core", "plasma": "tesla", "flakburst": "mortar"}
 const Intel := preload("res://ui/Intel.gd")
 const Hub := preload("res://ui/Hub.gd")
 const OutpostView := preload("res://ui/OutpostView.gd")
@@ -967,7 +971,7 @@ func _handle(events: Array) -> void:
 		var et: String = String(ev["t"])
 		var clip: String = String(EVENT_CLIP.get(et, ""))
 		if et == "shot":
-			clip = "shot_" + String(ev["kind"])
+			clip = "shot_" + String(SHOT_CLIP.get(String(ev["kind"]), ev["kind"]))
 		if clip != "":
 			sfx_play(clip)
 		if et == "drop":
@@ -988,12 +992,15 @@ func _handle(events: Array) -> void:
 						col = Color("ff6b6b")
 					"flak":
 						col = Color("c8f07a")
-				if kind == "frost":
+					_:
+						if RunArt.GLYPH.has(kind):
+							col = Color(String((RunArt.GLYPH[kind] as Array)[1]))   # V2 P7d weapons
+				if kind in ["frost", "pulse", "spike"]:
 					_ring(ev["from"], float(ev.get("radius", 60.0)), 0.3, col)
 				else:
-					_tracer(ev["from"], ev["to"], col, 4.0 if kind in ["mortar", "railgun"] else 2.0)
-				if kind == "mortar":
-					_ring(ev["to"], float(ev.get("radius", 40.0)), 0.3, Kit.RUST)
+					_tracer(ev["from"], ev["to"], col, 4.0 if kind in ["mortar", "railgun", "laser", "harpoon"] else 2.0)
+				if kind in ["mortar", "missile", "flakburst"] and ev.has("radius"):
+					_ring(ev["to"], float(ev.get("radius", 40.0)), 0.3, col if kind != "mortar" else Kit.RUST)
 			"core_attack":
 				Battle.core_attack_fx(self, ev)
 			"dmg":

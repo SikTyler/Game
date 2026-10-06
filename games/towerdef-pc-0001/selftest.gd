@@ -15,6 +15,7 @@ const StCoreLevel := preload("res://tests/st_corelevel.gd")
 const StMerge := preload("res://tests/st_merge.gd")
 const StTracks := preload("res://tests/st_tracks.gd")
 const StEvents := preload("res://tests/st_events.gd")
+const StContent := preload("res://tests/st_content.gd")
 const FirePatterns := preload("res://FirePatterns.gd")
 const WeaponDB := preload("res://data/WeaponDB.gd")
 const TowerState := preload("res://TowerState.gd")
@@ -835,7 +836,9 @@ func _mass_horde_world() -> void:
 ## V2 P7c (deliberate): the kill-streak combo multiplies kill cash and XP and
 ## a Supply Drop pays out every 7th wave (its own stream), so the run's cash
 ## / XP / draft queue differ; re-recorded (was 0048784e).
-const HORDE_FP_GOLDEN: String = "59f5e00c36affbae95b898bcf084a3b5616e291cffb47ccc36b3a50076470f87"
+## V2 P7d (deliberate): 12 more weapons join the draft pool, so the
+## fingerprint run's card-0 picks differ; re-recorded (was 59f5e00c).
+const HORDE_FP_GOLDEN: String = "8912cd95bd3414af173f048a22fedb3f74f45ab807c16e03ca214418a02e3395"
 ## MASS_HORDE §Design content (designed mass waves, the shipping ruleset).
 func _mfresh(seed_value: int = 1234):
 	var S = TowerState.new()
@@ -1940,7 +1943,8 @@ func _pc_building_stages() -> void:
 	for id in PickDB.BUILDINGS + PickDB.HUTS:
 		ids_ok = ids_ok and String(BuildingDB.get_def(String(id)).get("name", "")) != "" and String(PickDB.get_def(String(id)).get("desc", "")) != ""
 	# V2 (deliberate): no air (Drone Nest gone), no crates (Appraiser Insight gone).
-	_check("REDESIGN 17 buildings + 2 huts named in BuildingDB + PickDB", ids_ok and PickDB.BUILDINGS.size() == 17 and PickDB.HUTS.size() == 2 and PickDB.PACKS.size() == 10 and PickDB.SPECIALS.size() == 6 and PickDB.INSIGHT.size() == 6)
+	# V2 P7d (deliberate): 12 more weapons (29 buildings); st_content checks the rest of the content.
+	_check("REDESIGN 29 buildings + 2 huts named in BuildingDB + PickDB", ids_ok and PickDB.BUILDINGS.size() == 29 and PickDB.HUTS.size() == 2 and PickDB.PACKS.size() == 10 and PickDB.SPECIALS.size() == 6 and PickDB.INSIGHT.size() == 6)
 
 
 ## PC-E4 move / swap buildings.
@@ -3208,6 +3212,7 @@ func _engine_meta_stages() -> void:
 	StMerge.run(self)
 	StTracks.run(self)
 	StEvents.run(self)
+	StContent.run(self)
 	_reforge_stages()
 
 

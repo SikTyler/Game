@@ -29,7 +29,8 @@ extends RefCounted
 const PickDB := preload("res://data/PickDB.gd")
 
 
-const WEAPONS: Array = ["gun", "mortar", "tesla", "flak", "railgun", "frost"]
+const WEAPONS: Array = ["gun", "mortar", "tesla", "flak", "railgun", "frost",
+	"pulse", "missile", "spike", "mines", "scatter", "laser", "saw", "arcproj", "sonic", "harpoon", "plasma", "flakburst"]
 const REWARD: Dictionary = {"new": "building", "pack": "perk", "insight": "perk", "special": "ability", "evo": "evolution"}
 
 

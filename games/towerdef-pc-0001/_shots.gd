@@ -295,6 +295,25 @@ func _initialize() -> void:
 	await _shot("%s/16f_directive.png" % outdir, false)
 	main._handle(S.choose_directive(0))
 	main.sel = -1
+	# V2 P7d: the new arsenal on the grid (procedural icons) + new draft cards
+	var Dr = load("res://Draft.gd")
+	var newbies: Array = ["pulse", "spike", "scatter", "harpoon", "sonic", "flakburst", "arcproj", "plasma"]
+	for nid in newbies:
+		for fc in S.free_slots():
+			if S.can_place(int(fc), String(nid)) and TowerState.ring_of(int(fc)) <= 3:
+				S.slots[int(fc)] = {"id": String(nid), "tier": 1, "rot": S.default_rot(int(fc), String(nid)), "mods": []}
+				S.recompute()
+				break
+	S.draft = []
+	for cid in ["missile", "laser", "saw"]:
+		var cc: Dictionary = Dr.card_for(String(cid), S._draft_ctx(""))
+		if not cc.is_empty():
+			S.draft.append(cc)
+	_quiet()
+	main._rebuild_ui()
+	await _wait(6)
+	await _shot("%s/16g_new_arsenal.png" % outdir, false)
+	S.draft = []
 	var orb: int = -1
 	for k in S.specials.size():
 		if String((S.specials[k] as Dictionary)["id"]) == "sp_orbital":

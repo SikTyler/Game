@@ -278,6 +278,7 @@ var combo: float = 0.0             # kill-streak meter
 var combo_tier: int = 0
 var carry_cards: Array = []        # locked draft cards carried to the next hand ([{card, at}])
 var evo_done: Dictionary = {}      # anchor -> true once its evolution was offered
+var beam_ramps: Dictionary = {}    # V2 P7d: Laser Lance ramp per anchor (x1 -> x3)
 var merge_offer: Dictionary = {}  # V2 P7a: {slot, tier, mods: [...]} the mod pick a merge opened
 var over: bool = false
 
@@ -531,6 +532,7 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	combo_tier = 0
 	carry_cards = []
 	evo_done = {}
+	beam_ramps = {}
 	buffs = {"overdrive_t": 0.0, "magnet_t": 0.0, "repair_t": 0.0, "repair_rate": 0.0, "warp_t": 0.0}
 	orbitals = []
 	special_casts = 0
@@ -1245,6 +1247,14 @@ func _weapon_sheet(i: int, id: String, m2: float, dm: float, rate_m: float, rng_
 			w["range"] = (float(d["range"]) + rng_c) * px
 			w["slow"] = float(p["slow"])
 			w["slow_t"] = float(p["slow_t"])
+		"spike", "pulse":
+			# auras: no ring reach bonus
+			w["range"] = (float(d["range"]) + rng_c) * px
+	# V2 P7d: the newer weapons' pattern params ride on the sheet (blast in
+	# cells -> px; lob_r stays in cells, the pattern scales it)
+	for k in p.keys():
+		if not w.has(k):
+			w[k] = float(p[k]) * px if String(k) == "blast" else p[k]
 	return w
 
 
@@ -1259,7 +1269,7 @@ func _apply_merge_mods(w: Dictionary, fx: Dictionary, px: float) -> void:
 	if fx.has("arc"):
 		var d: Dictionary = WeaponDB.get_def(String(w["kind"]))
 		w["arc_cos"] = cos(deg_to_rad(minf(359.0, float(d["arc"]) + float(fx["arc"])) * 0.5))
-	for k in ["pierce", "chains", "arcs", "rounds", "boss"]:
+	for k in ["pierce", "chains", "arcs", "rounds", "boss", "missiles", "pellets", "bounces", "ramp", "elite"]:
 		if fx.has(k):
 			w[k + "_add"] = float(fx[k])
 	for k2 in ["splash", "knock", "cone", "burn"]:
@@ -1559,17 +1569,21 @@ func _tick_buffs(dt: float, ev: Array) -> void:
 			continue
 		var c: Vector2 = od["pos"]
 		var n: int = 0
-		_src = "special"
+		_src = String(od.get("src", "special"))
 		_kb_k = 0.0
 		_blockable = false
+		var cap_n: int = en.hp.size()
 		for s in eh.candidates(c, float(od["r"]) + en.max_size * 0.5):
+			# the hash is from the last step: skip a slot the store no longer has
+			if s < 0 or s >= cap_n:
+				continue
 			if en.hp[s] > 0.0 and en.pos[s].distance_to(c) <= float(od["r"]) + en.size[s] * 0.5:
 				_hit(s, float(od["dmg"]), ev)
 				n += 1
 		_src = ""
 		ev.append({"t": "orbital_hit", "pos": c, "r": float(od["r"]), "hits": n})
 		# §D4 knockback special: the strike's shock wave parts the sea.
-		var pushed: int = en.radial_knock(c, float(od["r"]) * 2.0, TuneRef.num("horde_knock", 60.0) * TuneRef.num("mass_orbital_knock", 3.0))
+		var pushed: int = en.radial_knock(c, float(od["r"]) * 2.0, TuneRef.num("horde_knock", 60.0) * float(od.get("knock", TuneRef.num("mass_orbital_knock", 3.0))))
 		if pushed >= 500:
 			ev.append({"t": "part_sea", "n": pushed, "pos": c})
 	orbitals = keep
@@ -2530,11 +2544,9 @@ func _fire(dt: float, ev: Array) -> void:
 		_kb_from = from
 		_src = kind
 		var pattern: String = String(wd.get("pattern", "pierce_round"))
-		if pattern == "aura_slow":
-			if FirePatterns.aura_slow(self, wd, from, ev):
-				cooldowns[si] = cd + 1.0 / rate
-			else:
-				cooldowns[si] = 0.0
+		if FirePatterns.AURAS.has(pattern):
+			var hit_any: bool = FirePatterns.aura_slow(self, wd, from, ev) if pattern == "aura_slow" else FirePatterns.aura_hit(self, wd, from, ev)
+			cooldowns[si] = (cd + 1.0 / rate) if hit_any else 0.0
 			continue
 		var tgt: int = -1
 		if String(wd.get("aim", "radial")) == "fixed":
@@ -2542,6 +2554,7 @@ func _fire(dt: float, ev: Array) -> void:
 			# stands in its cone / lane.
 			if not FirePatterns.shape_occupied(self, wd, from):
 				cooldowns[si] = 0.0
+				beam_ramps.erase(si)   # V2 P7d: an idle Laser Lance cools down
 				continue
 		else:
 			tgt = pick_target_for(wd, from, String(target_modes[si]) if si < target_modes.size() else "nearest")

@@ -20,7 +20,13 @@ const TuneRef := preload("res://Tune.gd")
 const EnemyStore := preload("res://EnemyStore.gd")
 
 const BOSSY: Array = ["boss", "elite"]
-const PATTERNS: Array = ["pierce_round", "lob_aoe", "chain", "cone_dot", "pierce_line", "aura_slow"]
+const PATTERNS: Array = ["pierce_round", "lob_aoe", "chain", "cone_dot", "pierce_line", "aura_slow",
+	"nova", "aura_dmg", "homing", "mine", "cone_burst", "cone_knock", "beam_ramp", "lane_burn", "bounce", "heavy"]
+## Patterns that hit everything around the weapon (no target pick).
+const AURAS: Array = ["aura_slow", "nova", "aura_dmg"]
+## Fixed weapons: cone shapes / lane shapes (shape_occupied).
+const CONES: Array = ["cone_dot", "cone_burst", "cone_knock"]
+const LANES: Array = ["pierce_line", "beam_ramp", "lane_burn"]
 
 
 static func fire(S, pattern: String, wd: Dictionary, from: Vector2, aim: Vector2, te: int, dmg: float, crit: bool, ev: Array) -> void:
@@ -33,6 +39,22 @@ static func fire(S, pattern: String, wd: Dictionary, from: Vector2, aim: Vector2
 			lob_aoe(S, wd, from, te, dmg, crit, ev)
 		"chain":
 			chain(S, wd, from, te, dmg, crit, ev)
+		"homing":
+			homing(S, wd, from, te, dmg, crit, ev)
+		"mine":
+			mine(S, wd, from, te, dmg, crit, ev)
+		"cone_burst":
+			cone_burst(S, wd, from, aim, dmg, crit, ev)
+		"cone_knock":
+			cone_knock(S, wd, from, aim, dmg, crit, ev)
+		"beam_ramp":
+			beam_ramp(S, wd, from, aim, dmg, crit, ev)
+		"lane_burn":
+			lane_burn(S, wd, from, aim, dmg, crit, ev)
+		"bounce":
+			bounce(S, wd, from, te, dmg, crit, ev)
+		"heavy":
+			heavy(S, wd, from, te, dmg, crit, ev)
 		_:
 			pierce_round(S, wd, from, te, dmg, crit, ev)
 
@@ -40,11 +62,11 @@ static func fire(S, pattern: String, wd: Dictionary, from: Vector2, aim: Vector2
 ## Is a fixed weapon's shape (its cone or lane along the facing) occupied?
 static func shape_occupied(S, wd: Dictionary, from: Vector2) -> bool:
 	var aim: Vector2 = wd["facing"]
-	match String(wd["pattern"]):
-		"pierce_line":
-			return S.eh.count_in_line(from, from + aim * float(wd["range"]), float(wd.get("pierce", 0.0)) + S.en.max_size * 0.5) > 0
-		"cone_dot":
-			return S.eh.nearest_in_cone(from, aim, acos(clampf(float(wd["arc_cos"]), -1.0, 1.0)), cone_len(S, wd)) >= 0
+	var pt: String = String(wd["pattern"])
+	if LANES.has(pt):
+		return S.eh.count_in_line(from, from + aim * float(wd["range"]), float(wd.get("pierce", 0.0)) + S.en.max_size * 0.5) > 0
+	if CONES.has(pt):
+		return S.eh.nearest_in_cone(from, aim, acos(clampf(float(wd["arc_cos"]), -1.0, 1.0)), cone_len(S, wd) if pt == "cone_dot" else float(wd["range"])) >= 0
 	return true
 
 
@@ -103,11 +125,11 @@ static func lob_aoe(S, wd: Dictionary, from: Vector2, te: int, dmg: float, crit:
 	var en = S.en
 	var tpos: Vector2 = en.pos[te]
 	var lvl: int = int(wd.get("lvl", 1))
-	var rad: float = TuneRef.num("mass_mortar_r", 0.75) * S.cpx() * (1.0 + 0.2 * float(lvl - 1)) * float(wd.get("splash_m", 1.0))
+	var rad: float = float(wd.get("lob_r", TuneRef.num("mass_mortar_r", 0.75))) * S.cpx() * (1.0 + 0.2 * float(lvl - 1)) * float(wd.get("splash_m", 1.0))
 	for ed in S.eh.candidates(tpos, rad):
 		if en.hp[ed] > 0.0 and en.pos[ed].distance_to(tpos) <= rad:
 			S._hit(ed, dmg, ev, crit)
-	var pushed: int = en.radial_knock(tpos, rad * 1.5, TuneRef.num("horde_knock", 60.0) * TuneRef.num("mass_mortar_knock", 2.0) * float(wd.get("knock_m", 1.0)))
+	var pushed: int = en.radial_knock(tpos, rad * 1.5, TuneRef.num("horde_knock", 60.0) * float(wd.get("lob_knock", TuneRef.num("mass_mortar_knock", 2.0))) * float(wd.get("knock_m", 1.0)))
 	if pushed >= 500:
 		ev.append({"t": "part_sea", "n": pushed, "pos": tpos})
 	ev.append({"t": "shot", "kind": String(wd["kind"]), "from": from, "to": tpos, "radius": rad})
@@ -120,7 +142,7 @@ static func chain(S, wd: Dictionary, from: Vector2, te: int, dmg: float, crit: b
 	var en = S.en
 	var lvl: int = int(wd.get("lvl", 1))
 	var ca: int = int(wd.get("chains_add", 0.0))
-	var n: int = mini(TuneRef.int_of("mass_chain_cap", 20) + ca, TuneRef.int_of("mass_chain", 6) + 3 * (lvl - 1) + int(S.pf("chain")) + ca)
+	var n: int = mini(TuneRef.int_of("mass_chain_cap", 20) + ca, int(wd.get("chain_base", TuneRef.int_of("mass_chain", 6))) + 3 * (lvl - 1) + int(S.pf("chain")) + ca)
 	var arcs: int = TuneRef.int_of("mass_tesla_arcs", 3) + int(wd.get("arcs_add", 0.0))
 	var jr: float = TuneRef.num("mass_chain_r", 70.0)
 	var hit: Dictionary = {}
@@ -233,3 +255,169 @@ static func aura_slow(S, wd: Dictionary, from: Vector2, ev: Array) -> bool:
 	if any:
 		ev.append({"t": "shot", "kind": String(wd["kind"]), "from": from, "to": from, "radius": frange})
 	return any
+
+
+# ======================================================== V2 P7d patterns
+## Radial aura weapons (Pulse Emitter nova, Spike Pylon stabs): every body
+## within range takes the hit; the nova also shoves them a little. True when
+## any was hit (the cooldown only runs when it hits something).
+static func aura_hit(S, wd: Dictionary, from: Vector2, ev: Array) -> bool:
+	var en = S.en
+	var r: float = float(wd["range"])
+	var nova: bool = String(wd["pattern"]) == "nova"
+	var dmg: float = float(wd["dmg"])
+	var crit: bool = S._roll_crit(wd)
+	if crit:
+		dmg *= S.crit_mult()
+	var any: bool = false
+	for ed in S.eh.candidates(from, r):
+		if en.hp[ed] > 0.0 and from.distance_to(en.pos[ed]) <= r + en.size[ed] * 0.5:
+			S._hit(ed, dmg, ev, crit)
+			any = true
+	if any:
+		if nova:
+			en.radial_knock(from, r, TuneRef.num("horde_knock", 60.0) * 0.6 * float(wd.get("knock_m", 1.0)))
+		ev.append({"t": "shot", "kind": String(wd["kind"]), "from": from, "to": from, "radius": r})
+	return any
+
+
+## Missile Battery (radial homing): the target plus the nearest bodies in
+## range, one missile each (4 + mods), each with a small blast (50%).
+static func homing(S, wd: Dictionary, from: Vector2, te: int, dmg: float, crit: bool, ev: Array) -> void:
+	var en = S.en
+	var n: int = int(wd.get("missiles", 4)) + int(wd.get("missiles_add", 0.0))
+	var aims: Array = [te]
+	for t2 in S.eh.nearest_n(from, n + 1, float(wd["range"])):
+		if aims.size() >= n:
+			break
+		if t2 != te:
+			aims.append(t2)
+	var br: float = float(wd.get("blast", 0.4 * S.cpx())) * float(wd.get("splash_m", 1.0))
+	for ai in aims:
+		var tp: Vector2 = en.pos[int(ai)]
+		S._hit(int(ai), dmg, ev, crit)
+		for ed in S.eh.candidates(tp, br):
+			if ed != int(ai) and en.hp[ed] > 0.0 and en.pos[ed].distance_to(tp) <= br:
+				S._hit(ed, dmg * 0.5, ev)
+		ev.append({"t": "shot", "kind": String(wd["kind"]), "from": from, "to": tp, "radius": br})
+
+
+## Minelayer (radial): a mine under the target that blows after its fuse
+## (TowerState.orbitals: the delayed-blast list the Orbital Strike uses).
+static func mine(S, wd: Dictionary, from: Vector2, te: int, dmg: float, crit: bool, ev: Array) -> void:
+	var tp: Vector2 = S.en.pos[te]
+	var br: float = float(wd.get("blast", 0.8 * S.cpx())) * float(wd.get("splash_m", 1.0))
+	S.orbitals.append({"pos": tp, "t": float(wd.get("fuse", 1.0)), "dmg": dmg, "r": br, "src": String(wd["kind"]), "knock": 1.0})
+	ev.append({"t": "shot", "kind": String(wd["kind"]), "from": from, "to": tp})
+
+
+## Scatter Gun (fixed cone): a fan of pellets, one per body nearest first.
+static func cone_burst(S, wd: Dictionary, from: Vector2, dir: Vector2, dmg: float, crit: bool, ev: Array) -> void:
+	var en = S.en
+	var half: float = acos(clampf(float(wd["arc_cos"]), -1.0, 1.0))
+	var n: int = int(wd.get("pellets", 6)) + int(wd.get("pellets_add", 0.0))
+	var on: Array = []
+	for ed in S.eh.cone(from, dir, half, float(wd["range"])):
+		if en.hp[ed] > 0.0:
+			on.append([from.distance_squared_to(en.pos[ed]), ed])
+	on.sort_custom(func(x: Array, y: Array) -> bool: return float(x[0]) < float(y[0]) or (float(x[0]) == float(y[0]) and int(x[1]) < int(y[1])))
+	var k: int = 0
+	for x in on:
+		if k >= n:
+			break
+		S._hit(int((x as Array)[1]), dmg, ev, crit)
+		k += 1
+	# leftover pellets land on the nearest again (a tight crowd eats the fan)
+	if k > 0 and k < n:
+		S._hit(int((on[0] as Array)[1]), dmg * float(n - k) * 0.5, ev, crit)
+	ev.append({"t": "shot", "kind": String(wd["kind"]), "from": from, "to": from + dir * float(wd["range"]), "cone": rad_to_deg(half * 2.0)})
+
+
+## Sonic Cannon (fixed cone): a shock wave - every body in the cone is hit
+## and the pile is hurled back from the cannon.
+static func cone_knock(S, wd: Dictionary, from: Vector2, dir: Vector2, dmg: float, crit: bool, ev: Array) -> void:
+	var en = S.en
+	var half: float = acos(clampf(float(wd["arc_cos"]), -1.0, 1.0))
+	var reach: float = float(wd["range"])
+	for ed in S.eh.cone(from, dir, half, reach):
+		if en.hp[ed] > 0.0:
+			S._hit(ed, dmg, ev, crit)
+	en.radial_knock(from + dir * reach * 0.35, reach * 0.8, TuneRef.num("horde_knock", 60.0) * float(wd.get("knock", 2.5)) * float(wd.get("knock_m", 1.0)))
+	ev.append({"t": "shot", "kind": String(wd["kind"]), "from": from, "to": from + dir * reach, "cone": rad_to_deg(half * 2.0)})
+
+
+## Laser Lance (fixed lane): a beam through the whole lane whose damage
+## ramps while it keeps firing (x1 -> x`ramp`, +0.25 per shot; resets when
+## the lane empties - TowerState._fire).
+static func beam_ramp(S, wd: Dictionary, from: Vector2, dir: Vector2, dmg: float, crit: bool, ev: Array) -> void:
+	var en = S.en
+	var si: int = int(wd["slot"])
+	var top: float = float(wd.get("ramp", 3.0)) + float(wd.get("ramp_add", 0.0))
+	var m: float = minf(top, float(S.beam_ramps.get(si, 1.0)))
+	S.beam_ramps[si] = minf(top, m + 0.25)
+	var reach: float = float(wd["range"])
+	var w: float = float(wd.get("pierce", 8.0))
+	for ed in S.eh.line(from, from + dir * reach, w + en.max_size * 0.5 + 1.0):
+		if en.hp[ed] <= 0.0:
+			continue
+		var rel: Vector2 = en.pos[ed] - from
+		var along: float = rel.dot(dir)
+		if along < 0.0 or along > reach or absf(rel.cross(dir)) > w + en.size[ed] * 0.5:
+			continue
+		S._hit(ed, dmg * m, ev, crit)
+	ev.append({"t": "shot", "kind": String(wd["kind"]), "from": from, "to": from + dir * reach, "ramp": m})
+
+
+## Plasma Fence (fixed lane): everything on the line catches fire (burn for
+## burn_s seconds at 60% of the damage per second) plus a light touch.
+static func lane_burn(S, wd: Dictionary, from: Vector2, dir: Vector2, dmg: float, crit: bool, ev: Array) -> void:
+	var en = S.en
+	var reach: float = float(wd["range"])
+	var w: float = float(wd.get("pierce", 10.0))
+	var bs: float = float(wd.get("burn_s", 2.0))
+	for ed in S.eh.line(from, from + dir * reach, w + en.max_size * 0.5 + 1.0):
+		if en.hp[ed] <= 0.0:
+			continue
+		var rel: Vector2 = en.pos[ed] - from
+		var along: float = rel.dot(dir)
+		if along < 0.0 or along > reach or absf(rel.cross(dir)) > w + en.size[ed] * 0.5:
+			continue
+		S._hit(ed, dmg * 0.2, ev, crit)
+		S._ignite(ed, bs, dmg * 0.6 * float(wd.get("burn_m", 1.0)))
+	ev.append({"t": "shot", "kind": String(wd["kind"]), "from": from, "to": from + dir * reach})
+
+
+## Saw Launcher (arc): the blade hits its target then ricochets to the
+## nearest unhit body within 1.2 cells, 4 more times (+ mods), x0.85 each.
+static func bounce(S, wd: Dictionary, from: Vector2, te: int, dmg: float, crit: bool, ev: Array) -> void:
+	var en = S.en
+	var n: int = int(wd.get("bounces", 4)) + int(wd.get("bounces_add", 0.0))
+	var jr: float = 1.2 * S.cpx()
+	var hit: Dictionary = {}
+	var ce: int = te
+	var d: float = dmg
+	var prev: Vector2 = from
+	var k: int = 0
+	while ce >= 0 and k <= n:
+		hit[ce] = true
+		var cp: Vector2 = en.pos[ce]
+		if en.hp[ce] > 0.0:
+			S._hit(ce, d, ev, crit)
+		ev.append({"t": "shot", "kind": String(wd["kind"]), "from": prev, "to": cp})
+		prev = cp
+		d *= 0.85
+		k += 1
+		ce = S._nearest(cp, jr, hit)
+
+
+## Harpoon (arc): one heavy bolt, x`elite` on elites / bosses, and the
+## struck body is slowed hard for 1.5 s.
+static func heavy(S, wd: Dictionary, from: Vector2, te: int, dmg: float, crit: bool, ev: Array) -> void:
+	var en = S.en
+	var m: float = 1.0
+	if BOSSY.has(en.kind[te]) or en.is_marked(te):
+		m = float(wd.get("elite", 2.5)) + float(wd.get("elite_add", 0.0))
+	S._hit(te, dmg * m, ev, crit)
+	if en.hp[te] > 0.0:
+		en.apply_slow(te, 1.5, 1.0 - float(wd.get("slow", 0.4)))
+	ev.append({"t": "shot", "kind": String(wd["kind"]), "from": from, "to": en.pos[te]})
