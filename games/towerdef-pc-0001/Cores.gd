@@ -7,7 +7,12 @@ extends RefCounted
 ## buildings and research (CoreLevelDB).
 
 const CoreDB := preload("res://data/CoreDB.gd")
+const CoreLevelDB := preload("res://data/CoreLevelDB.gd")
 const TuneRef := preload("res://Tune.gd")
+const Outpost := preload("res://Outpost.gd")
+const OutpostDB := preload("res://data/OutpostDB.gd")
+const Labs := preload("res://Labs.gd")
+const LabDB := preload("res://data/LabDB.gd")
 
 
 ## Core look (CoreView "Look" tab, GearVis): shell silhouette, inner ring,
@@ -101,14 +106,65 @@ static func max_level(s: Dictionary) -> int:
 
 
 static func level_cost(lvl: int) -> Dictionary:
-	return {"coins": int(round(TuneRef.num("pc_core_cost_base", 250.0) * pow(TuneRef.num("pc_core_cost_growth", 1.18), float(maxi(1, lvl) - 1))))}
+	return {"coins": CoreLevelDB.cost(lvl)}
+
+
+## Does the save meet one requirement [kind, id, n]? (CoreLevelDB)
+static func req_have(s: Dictionary, req: Array) -> int:
+	match String(req[0]):
+		"bld":
+			return Outpost.level_of(s, String(req[1])) if s.get("outpost", null) is Dictionary else 0
+		"relay":
+			return int((s.get("outpost", {}) as Dictionary).get("relay_lvl", 1)) if s.get("outpost", null) is Dictionary else 1
+		"res":
+			return Labs.level(s, String(req[1]))
+	return 0
+
+
+## Readable requirement: "Arsenal Lv3", "Core Relay Lv4", "Core Theory II".
+static func req_label(req: Array) -> String:
+	var n: int = int(req[2])
+	match String(req[0]):
+		"bld":
+			return "%s Lv%d" % [String(OutpostDB.get_def(String(req[1])).get("name", req[1])), n]
+		"relay":
+			return "Core Relay Lv%d" % n
+		"res":
+			var nm: String = String((LabDB.DEFS.get(String(req[1]), {}) as Dictionary).get("name", req[1]))
+			return "%s %s" % [nm, ["", "I", "II", "III", "IV", "V", "VI"][clampi(n, 0, 6)]]
+	return String(req[1])
+
+
+## Unmet requirements to reach `to_lvl` (default: the next level):
+## [{req: [kind, id, n], have, label}].
+static func missing(s: Dictionary, to_lvl: int = -1) -> Array:
+	var tl: int = to_lvl if to_lvl > 0 else level(s) + 1
+	var out: Array = []
+	for r in CoreLevelDB.reqs_for(tl):
+		var h: int = req_have(s, r)
+		if h < int((r as Array)[2]):
+			out.append({"req": r, "have": h, "label": req_label(r)})
+	return out
+
+
+## Why the Core can't level now ("" = it can).
+static func why_level(s: Dictionary) -> String:
+	var lv: int = level(s)
+	if lv >= max_level(s):
+		return "Max level"
+	var miss: Array = missing(s)
+	if not miss.is_empty():
+		var names: Array = []
+		for m in miss:
+			names.append(String((m as Dictionary)["label"]))
+		return "Core Lv%d needs: %s" % [lv + 1, ", ".join(names)]
+	if int(s.get("coins", 0)) < int(level_cost(lv)["coins"]):
+		return "Need %d coins" % int(level_cost(lv)["coins"])
+	return ""
 
 
 static func can_level(s: Dictionary, _id: String = "") -> bool:
-	var lv: int = level(s)
-	if lv >= max_level(s):
-		return false
-	return int(s.get("coins", 0)) >= int(level_cost(lv)["coins"])
+	return why_level(s) == ""
 
 
 ## Spend coins on a permanent Core level.

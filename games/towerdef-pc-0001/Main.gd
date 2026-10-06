@@ -193,6 +193,13 @@ var reveal_fired: int = 0
 var reveal_skip: bool = false
 var reveal_page: int = 0
 var loot_beams: Array = []          # [{pos, col, t}] item / cache drops in the run
+# V2 P6 requirement jumps (Kit.req_chip -> jump_to): what to pulse / flash
+var op_pulse: String = ""            # Outpost uid ("relay") pulsing after a jump
+var op_pulse_t: float = -10.0
+var op_flash: String = ""            # palette entry flashing (a building not built yet)
+var op_flash_t: float = -10.0
+var res_focus: String = ""           # research card pulsing
+var res_focus_t: float = -10.0
 var credits_scroll: float = 0.0
 
 
@@ -816,6 +823,32 @@ func drop_rar(ev: Dictionary) -> String:
 	if String(ev.get("kind", "")) == "cache":
 		return {"scrap": "common", "field": "uncommon", "elite": "rare", "boss": "epic", "reliquary": "legendary"}.get(String(ev.get("cache", "")), "common")
 	return "common"
+
+
+## A requirement chip's jump (V2 P6): a building that exists -> select it,
+## centre the Outpost camera on it and pulse it; one not built yet -> open
+## its palette category and flash the entry; a research -> open Research and
+## pulse its card.
+func jump_to(kind: String, id: String) -> void:
+	match kind:
+		"bld", "relay":
+			set_tab("outpost")
+			var uid: String = "relay" if kind == "relay" else OutpostView.uid_of(self, id)
+			if uid != "":
+				op_sel = uid
+				op_pulse = uid
+				op_pulse_t = t_anim
+				OutpostView.focus_on(self, uid)
+			else:
+				op_cat = OutpostView.cat_of(id)
+				op_arm = ""
+				op_flash = id
+				op_flash_t = t_anim
+		"res":
+			set_tab("research")
+			res_focus = id
+			res_focus_t = t_anim
+	_rebuild_ui()
 
 
 ## Open the casino reveal over this run's banked items (results screen).

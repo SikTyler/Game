@@ -231,6 +231,9 @@ static func _draw_research(m, cr: Rect2) -> void:
 		var mx: int = LabDB.max_of(id2)
 		var ok: bool = Labs.can_start(s, id2)
 		Kit.panel(m, r2, Kit.LAB if ok else Kit.EDGE, Kit.CARD if ok else Kit.PANEL)
+		var ft: float = float(m.t_anim) - float(m.res_focus_t)
+		if String(m.res_focus) == id2 and ft < 2.5:
+			Kit.panel_glow(m, r2.grow(3.0), Kit.GOLD, Color(Kit.GOLD, 0.08), 1.0 + 1.5 * (0.5 + 0.5 * sin(ft * 9.0)), 3)
 		if not Kit.icon(m, "lab_" + id2, Rect2(r2.position.x + 12, r2.position.y + 14, 52, 52), Color.WHITE if ok or lvl >= mx else Color(1, 1, 1, 0.5)):
 			Kit.icon(m, "icon_lab", Rect2(r2.position.x + 12, r2.position.y + 14, 52, 52), Color.WHITE if ok else Color(1, 1, 1, 0.5))
 		Kit.t(m, String(d2["name"]), Vector2(r2.position.x + 76, r2.position.y + 34), 19, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, r2.size.x - 90)

@@ -371,6 +371,39 @@ func _core_tab() -> void:
 	_check("P4 CORE Levels: the level button stays", main.core_tab == "levels" and _find("CORE LEVEL") != null)
 	_press("CORETAB Loadout")
 	await _frames()
+	# ---- P6 milestone requirements: chips that jump to what is missing
+	var lv_keep: int = Cores.level(main.save)
+	var coins_keep: int = int(main.save["coins"])
+	main.save["core"]["lvl"] = 4
+	main.save["coins"] = 1_000_000
+	main._rebuild_ui()
+	await _frames()
+	_check("P6 CORE: Level up is blocked at L4 without an Arsenal; a chip names it", _find("CORE LEVEL").disabled and _find("req:bld:arsenal") != null and _find("CORE LEVEL").tooltip_text.contains("Arsenal"))
+	_audit("core requirements")
+	_press("req:bld:arsenal")
+	await _frames()
+	_check("P6 JUMP: an unbuilt building opens its palette category and flashes it", main.tab == "outpost" and main.op_cat == "core" and main.op_flash == "arsenal" and _find("OPBUILD arsenal") != null)
+	var ev_a: Array = Outpost.place(main.save, "arsenal", 9, 10, 0, T0)
+	var au: String = String(ev_a[0]["uid"]) if not ev_a.is_empty() else ""
+	_key(KEY_K)
+	await _frames()
+	_check("P6 CORE: the met requirement unlocks Level up", not _find("CORE LEVEL").disabled)
+	_press("req:bld:arsenal")
+	await _frames()
+	_check("P6 JUMP: a built building is selected, centred and pulsed", main.tab == "outpost" and au != "" and main.op_sel == au and main.op_pulse == au and main.op_cam != Vector2.ZERO)
+	main.op_cam = Vector2.ZERO
+	main.op_sel = ""
+	main.save["core"]["lvl"] = 9
+	_key(KEY_K)
+	await _frames()
+	_press("req:res:core_theory")
+	await _frames()
+	_check("P6 JUMP: a research requirement opens Research and pulses it", main.tab == "research" and main.res_focus == "core_theory")
+	main.save["core"]["lvl"] = lv_keep
+	main.save["coins"] = coins_keep
+	main.op_cat = "prod"
+	_key(KEY_K)
+	await _frames()
 
 
 # ================================================================== FORGE (V2 P4)

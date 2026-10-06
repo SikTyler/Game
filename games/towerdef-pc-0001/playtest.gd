@@ -1038,8 +1038,8 @@ const SESSION_H: Array = [8, 8, 16, 16]        # 2 sessions x 2 runs; 8 h / 16 h
 const NOW0: int = 1767225600                   # 2026-01-01 00:00 UTC (a day boundary)
 ## FEEDBACK-1: Grid Expansion is the first research a player buys (bigger
 ## board = more buildings); Lab Speed is gone (research is instant).
-const LAB_PRIO: Array = ["grid", "dmg", "hp", "coin", "speed", "startcash", "xp", "offrate", "offcap", "reroll"]
-const LAB_W: Dictionary = {"grid": 0.25, "dmg": 1.0, "hp": 1.0, "coin": 1.0, "speed": 0.6, "startcash": 1.6, "xp": 1.8, "offrate": 2.0, "offcap": 2.0, "reroll": 2.5}
+const LAB_PRIO: Array = ["grid", "core_theory", "dmg", "hp", "coin", "speed", "startcash", "xp", "offrate", "offcap", "reroll"]
+const LAB_W: Dictionary = {"grid": 0.25, "core_theory": 0.3, "dmg": 1.0, "hp": 1.0, "coin": 1.0, "speed": 0.6, "startcash": 1.6, "xp": 1.8, "offrate": 2.0, "offcap": 2.0, "reroll": 2.5}
 
 ## One run on `save` (mutated: banks, missions). Returns run facts.
 static func camp_run(save: Dictionary, policy: String, seed_value: int, now: int, perk_pref: String = "", feed_missions: bool = true, opts: Dictionary = {}) -> Dictionary:

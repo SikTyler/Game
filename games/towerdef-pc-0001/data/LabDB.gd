@@ -18,9 +18,10 @@ const DEFS: Dictionary = {
 	"offcap":    {"name": "Storage Tech",  "max": 8,  "base": 150.0, "growth": 1.60, "effect": "+4% Outpost storage"},
 	"offrate":   {"name": "Logistics Tech", "max": 5, "base": 120.0, "growth": 1.50, "effect": "+5% Outpost production"},
 	"reroll":    {"name": "Draft Reroll",  "max": 3,  "base": 250.0, "growth": 3.0,  "effect": "+1 free draft reroll per run"},
+	"core_theory": {"name": "Core Theory", "max": 5, "costs": [5000, 40000, 250000, 1500000, 8000000], "effect": "Unlocks Core levels 10 / 20 / 30 / 40 / 50"},
 }
 
-const IDS: Array = ["grid", "speed", "dmg", "hp", "coin", "xp", "startcash", "offcap", "offrate", "reroll"]
+const IDS: Array = ["grid", "speed", "dmg", "hp", "coin", "xp", "startcash", "offcap", "offrate", "reroll", "core_theory"]
 
 const SPEED_STEPS: Array = [1.0, 1.5, 2.0, 2.5]
 

@@ -12,6 +12,7 @@ extends RefCounted
 ## buttons call Cores / Gear and hand the events to Main.meta_act().
 
 const Cores := preload("res://Cores.gd")
+const CoreLevelDB := preload("res://data/CoreLevelDB.gd")
 const CoreDB := preload("res://data/CoreDB.gd")
 const Gear := preload("res://Gear.gd")
 const GearVis := preload("res://GearVis.gd")
@@ -67,12 +68,35 @@ static func build(m) -> void:
 	var c: int = int(Cores.level_cost(lv)["coins"])
 	var maxed: bool = lv >= Cores.max_level(s)
 	var label: String = "MAX LEVEL" if maxed else "Level up  ·  %s coins" % Kit.fmt(float(c))
-	Kit.btn(m, label, level_rect(m), func() -> void: m.meta_act(Cores.try_level(m.save)), level_tip(lv), Cores.can_level(s), Kit.GOLD, "CORE LEVEL", "cur_coin", 22)
+	var why: String = Cores.why_level(s)
+	Kit.btn(m, label, level_rect(m), func() -> void: m.meta_act(Cores.try_level(m.save)), level_tip(lv) + ("" if why == "" or maxed else "\n" + why), Cores.can_level(s), Kit.GOLD, "CORE LEVEL", "cur_coin", 22)
+	# the next milestone's requirements: chips that jump to what's missing
+	var reqs: Array = milestone_reqs(s)
+	for k in reqs.size():
+		var rq: Array = reqs[k]
+		var met: bool = Cores.req_have(s, rq) >= int(rq[2])
+		var kind: String = String(rq[0])
+		var rid: String = String(rq[1])
+		Kit.req_chip(m, chip_rect(m, k, reqs.size()), kind, rid, Cores.req_label(rq), met, func() -> void: m.jump_to(kind, rid),
+			("%s - done" % Cores.req_label(rq)) if met else ("%s (have %d) - click to go there" % [Cores.req_label(rq), Cores.req_have(s, rq)]), "")
 	match String(m.core_tab):
 		"loadout":
 			_build_loadout(m, s)
 		"look":
 			_build_look(m, s)
+
+
+## Requirements of the next milestone level (shown as chips above Level up).
+static func milestone_reqs(s: Dictionary) -> Array:
+	var ms: int = CoreLevelDB.next_milestone(Cores.level(s))
+	return CoreLevelDB.reqs_for(ms) if ms > 0 and ms <= Cores.max_level(s) else []
+
+
+static func chip_rect(m, k: int, n: int) -> Rect2:
+	var lr: Rect2 = level_rect(m)
+	var w: float = 216.0
+	var x0: float = lr.get_center().x - (float(n) * w + float(n - 1) * 8.0) * 0.5
+	return Rect2(x0 + float(k) * (w + 8.0), lr.position.y - 56.0, w, 44.0)
 
 
 static func level_tip(lv: int) -> String:
@@ -192,6 +216,10 @@ static func draw(m, cr: Rect2) -> void:
 		mods.append(Gear.item(s, int(so[k])) if k < so.size() else {})
 	GearVis.draw_core(m, Cores.look(s), mods, Gear.weapon(s), c, R_CORE, -PI * 0.5 + 0.25 * sin(m.t_anim * 0.6), m.t_anim)
 	Kit.th(m, "THE CORE  ·  Lv %d / %d" % [lv, Cores.max_level(s)], Vector2(c.x, c.y + R_CORE + 64.0), 24, Kit.GOLD, HORIZONTAL_ALIGNMENT_CENTER, 600.0)
+	var reqs: Array = milestone_reqs(s)
+	if not reqs.is_empty():
+		var cr0: Rect2 = chip_rect(m, 0, reqs.size())
+		Kit.th(m, "CORE Lv%d NEEDS" % CoreLevelDB.next_milestone(lv), Vector2(level_rect(m).get_center().x, cr0.position.y - 10.0), 15, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, 500.0)
 	match String(m.core_tab):
 		"loadout":
 			_draw_loadout(m, s, c, n)
@@ -227,7 +255,7 @@ static func _draw_loadout(m, s: Dictionary, c: Vector2, n: int) -> void:
 		var col: int = k / maxi(1, half)
 		var row: int = k % maxi(1, half)
 		var yy: float = by + 34.0 + float(row) * 22.0
-		if yy > level_rect(m).position.y - 10.0:
+		if yy > level_rect(m).position.y - 92.0:
 			continue
 		Kit.t(m, String(ln[k]), Vector2(bx + float(col) * bw * 0.5, yy), 15, Kit.ENEMY if String(ln[k]).begins_with("-") else Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, bw * 0.5 - 10.0)
 	# picker

@@ -161,6 +161,57 @@ static func art_of(id: String, lvl: int) -> String:
 	return OutpostDB.art_id(id, lvl)
 
 
+## Palette category of a building / decor id ("" if none).
+static func cat_of(id: String) -> String:
+	for k in CAT_IDS.keys():
+		if (CAT_IDS[k] as Array).has(id):
+			return String(k)
+	return "prod"
+
+
+## The uid of the best-level placed building of `id` ("" if none).
+static func uid_of(m, id: String) -> String:
+	var o: Dictionary = _o(m)
+	var best: String = ""
+	var bl: int = -1
+	for k in o["buildings"].keys():
+		var b: Dictionary = o["buildings"][k]
+		if String(b["id"]) == id and int(b["x"]) >= 0 and int(b["lvl"]) > bl:
+			bl = int(b["lvl"])
+			best = String(k)
+	return best
+
+
+## Centre the map camera on a building ("relay" or a uid).
+static func focus_on(m, uid: String) -> void:
+	var o: Dictionary = _o(m)
+	var cell: Vector2
+	var sz: Vector2i
+	if uid == "relay":
+		cell = Vector2(OutpostDB.RELAY)
+		sz = OutpostDB.size_of("relay", 0)
+	elif (o["buildings"] as Dictionary).has(uid):
+		var b: Dictionary = o["buildings"][uid]
+		cell = Vector2(int(b["x"]), int(b["y"]))
+		sz = OutpostDB.size_of(String(b["id"]), int(b["rot"]))
+	else:
+		return
+	var c: float = cell_px(m)
+	m.op_cam = Vector2(float(OutpostDB.W), float(OutpostDB.H)) * c * 0.5 - (cell + Vector2(sz) * 0.5) * c
+
+
+## Rect of a building / the Relay on screen (pulse after a jump).
+static func building_rect(m, uid: String) -> Rect2:
+	var o: Dictionary = _o(m)
+	if uid == "relay":
+		return cell_rect(m, OutpostDB.RELAY.x, OutpostDB.RELAY.y, 3, 3)
+	if not (o["buildings"] as Dictionary).has(uid):
+		return Rect2()
+	var b: Dictionary = o["buildings"][uid]
+	var sz: Vector2i = OutpostDB.size_of(String(b["id"]), int(b["rot"]))
+	return cell_rect(m, int(b["x"]), int(b["y"]), sz.x, sz.y)
+
+
 ## Draw an Outpost texture inside a footprint rect, aspect kept.
 static func _art(m, id: String, r: Rect2, mod: Color = Color.WHITE) -> void:
 	var tx: Texture2D = Art.tex(id)
@@ -664,6 +715,13 @@ static func _draw_map(m, s: Dictionary, o: Dictionary, mr: Rect2) -> void:
 		if m.op_sel == "d" + String(du):
 			Kit.outline(m, r3, Kit.GOLD)
 	_draw_ghost(m, s, o, mr)
+	# V2 P6: a requirement jump pulses its building for 2.5 s
+	var pt: float = float(m.t_anim) - float(m.op_pulse_t)
+	if String(m.op_pulse) != "" and pt < 2.5:
+		var pr2: Rect2 = building_rect(m, String(m.op_pulse))
+		if pr2.size.x > 0.0:
+			var k2: float = 0.5 + 0.5 * sin(pt * 9.0)
+			Kit.panel_glow(m, pr2.grow(4.0 + 6.0 * k2), Kit.GOLD, Color(0, 0, 0, 0), 1.0 + 1.5 * k2, 3)
 	# pad / keyboard cursor
 	if String(m.last_device) == "pad":
 		Kit.outline(m, cell_rect(m, m.op_focus.x, m.op_focus.y), Kit.GEM, 2.0)
@@ -847,6 +905,9 @@ static func _draw_palette(m, s: Dictionary, o: Dictionary) -> void:
 		var ok: bool = Outpost.can_afford(s, int(cc["coins"])) and n < lim
 		var armed: bool = m.op_arm == id
 		Kit.panel(m, r, Kit.GOLD if armed else (Kit.EDGE2 if ok else Kit.EDGE), Kit.CARD if ok else Kit.PANEL, 3 if armed else 1)
+		var ft: float = float(m.t_anim) - float(m.op_flash_t)
+		if String(m.op_flash) == id and ft < 2.5:
+			Kit.panel_glow(m, r.grow(3.0), Kit.GOLD, Color(Kit.GOLD, 0.10), 1.0 + 1.5 * (0.5 + 0.5 * sin(ft * 9.0)), 3)
 		var isz: float = r.size.y - 10.0
 		_art(m, art_of(id, 1), Rect2(r.position.x + 5, r.position.y + 5, isz, isz), Color.WHITE if ok else Color(1, 1, 1, 0.45))
 		var tx: float = r.position.x + isz + 12.0

@@ -11,6 +11,7 @@ const StCoreWeapon := preload("res://tests/st_core_weapon.gd")
 const StGearVis := preload("res://tests/st_gearvis.gd")
 const StLoot := preload("res://tests/st_loot.gd")
 const StOutpost := preload("res://tests/st_outpost.gd")
+const StCoreLevel := preload("res://tests/st_corelevel.gd")
 const FirePatterns := preload("res://FirePatterns.gd")
 const WeaponDB := preload("res://data/WeaponDB.gd")
 const TowerState := preload("res://TowerState.gd")
@@ -413,7 +414,8 @@ func _meta_stages() -> void:
 	nohall["outpost"]["buildings"] = {}
 	_check("AC-20 queues 1/2/3 at Hall L1/L4/L8, 0 without a Hall", qok == [1, 1, 2, 2, 3, 3] and Labs.slots(nohall) == 0 and Labs.start(nohall, "dmg", NOW).is_empty())
 	# V2 (deliberate): Part Analysis / Crate Theory are gone with parts and crates -> 10.
-	_check("AC-20 every LabDB project + Grid (no part / crate research)", LabDB.IDS.size() == 10 and LabDB.DEFS.has("grid") and not LabDB.DEFS.has("labspeed") and not LabDB.DEFS.has("part_analysis") and not LabDB.DEFS.has("crate_theory") and String(LabDB.DEFS["offcap"]["name"]) == "Storage Tech" and String(LabDB.DEFS["offrate"]["name"]) == "Logistics Tech")
+	# V2 P6 (deliberate): + Core Theory (gates Core levels 10 / 20 / 30 / 40 / 50)
+	_check("AC-20 every LabDB project + Grid + Core Theory (no part / crate research)", LabDB.IDS.size() == 11 and LabDB.DEFS.has("core_theory") and LabDB.DEFS.has("grid") and not LabDB.DEFS.has("labspeed") and not LabDB.DEFS.has("part_analysis") and not LabDB.DEFS.has("crate_theory") and String(LabDB.DEFS["offcap"]["name"]) == "Storage Tech" and String(LabDB.DEFS["offrate"]["name"]) == "Logistics Tech")
 	# V2 P3b/P8 (deliberate): 26 px cells, grid 7x7 -> 21x21 in 7 steep steps.
 	_check("V2 grid research 7..21 in 7 steps, costs 2k/10k/50k/200k/750k/2.5M/8M", LabDB.max_of("grid") == 7 and Labs.cost("grid", 0) == 2000 and Labs.cost("grid", 3) == 200000 and Labs.cost("grid", 6) == 8000000 and TowerState.grid_for_level(0) == 7 and TowerState.grid_for_level(1) == 9 and TowerState.grid_for_level(4) == 15 and TowerState.grid_for_level(7) == 21)
 	L["research"]["lvls"]["dmg"] = 30
@@ -2478,18 +2480,20 @@ func _core_stages() -> void:
 	_check("CORE one Core (V2): id core, Bastion sheet", CoreDB.ID == "core" and CoreDB.has("core") and not CoreDB.has("bastion") and float(CoreDB.get_def()["hp"]) == 120.0 and String(CoreDB.get_def()["attack"]) == "cannon")
 	var sv: Dictionary = BaseMeta.default_save()
 	_check("CORE default save: L1", Cores.level(sv) == 1 and Cores.active(sv) == "core")
-	_check("CORE level cost round(250*1.18^(L-1)), coins only (Core Cores are gone)", int(Cores.level_cost(1)["coins"]) == 250 and int(Cores.level_cost(2)["coins"]) == 295 and not Cores.level_cost(15).has("core_cores") and int(Cores.level_cost(10)["coins"]) == int(round(250.0 * pow(1.18, 9.0))))
+	# V2 P6 (deliberate): 300 x 1.2^(L-1) coins, plus milestone requirements (st_corelevel)
+	_check("CORE level cost round(300*1.2^(L-1)), coins only (Core Cores are gone)", int(Cores.level_cost(1)["coins"]) == 300 and int(Cores.level_cost(2)["coins"]) == 360 and not Cores.level_cost(15).has("core_cores") and int(Cores.level_cost(10)["coins"]) == int(round(300.0 * pow(1.2, 9.0))))
 	var snap: String = JSON.stringify(sv)
 	_check("CORE try_level refuses when broke (no mutation)", Cores.try_level(sv).is_empty() and JSON.stringify(sv) == snap)
 	sv["coins"] = 1000
 	var ev: Array = Cores.try_level(sv)
-	_check("CORE try_level spends coins, +1 level, event", ev.size() == 1 and Cores.level(sv) == 2 and int(sv["coins"]) == 750 and String(ev[0]["t"]) == "core_level")
+	_check("CORE try_level spends coins, +1 level, event", ev.size() == 1 and Cores.level(sv) == 2 and int(sv["coins"]) == 700 and String(ev[0]["t"]) == "core_level")
 	sv["coins"] = 1 << 40
 	for k in 20:
 		Cores.try_level(sv)
-	_check("CORE levels past 15 stay coin-only", Cores.level(sv) == 22)
+	# V2 P6 (deliberate): Core L5 needs an Arsenal (CoreLevelDB milestones)
+	_check("CORE coins alone stop at L4 (L5 needs an Arsenal)", Cores.level(sv) == 4 and Cores.why_level(sv).contains("Arsenal"))
 	var rt: Dictionary = BaseMeta.normalize(JSON.parse_string(JSON.stringify(sv)))
-	_check("CORE block survives JSON + normalize", Cores.level(rt) == 22)
+	_check("CORE block survives JSON + normalize", Cores.level(rt) == 4)
 	var bad: Dictionary = BaseMeta.normalize({"version": 5, "core": {"lvl": 999}})
 	_check("CORE normalize clamps the level", Cores.level(bad) == CoreDB.MAX_LVL)
 	sv["reforge"] = {"nodes": {"core_ceiling": 1}}
@@ -3173,6 +3177,7 @@ func _snapshot_stages() -> void:
 # ======================================================================
 func _engine_meta_stages() -> void:
 	StOutpost.run(self)
+	StCoreLevel.run(self)
 	_reforge_stages()
 
 
