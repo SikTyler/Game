@@ -1,6 +1,7 @@
 extends RefCounted
 ## Core meta rules (V2: one Core). Pure static functions over the save:
-##   save.core = {lvl: int}   (P4 adds look / loadout; P6 adds level requirements)
+##   save.core = {lvl: int, look: {shell, trim, pat, p, s, g}}  (loadout: save.gear;
+##   P6 adds level requirements)
 ## Level cost L -> L+1: round(base * growth^(L-1)) coins (pc_core_cost_base 250,
 ## pc_core_cost_growth 1.18). P6 gates milestone levels behind Outpost
 ## buildings and research (CoreLevelDB).
@@ -9,8 +10,16 @@ const CoreDB := preload("res://data/CoreDB.gd")
 const TuneRef := preload("res://Tune.gd")
 
 
+## Core look (CoreView "Look" tab, GearVis): shell silhouette, inner ring,
+## paint pattern and three colours (primary, secondary, glow; hex rgb).
+const SHELLS: int = 8
+const TRIMS: int = 5
+const LOOK_PATTERNS: int = 8
+const LOOK_DEFAULT: Dictionary = {"shell": 0, "trim": 0, "pat": 0, "p": "1b2440", "s": "39e6ff", "g": "ff3ea5"}
+
+
 static func default_block() -> Dictionary:
-	return {"lvl": 1}
+	return {"lvl": 1, "look": LOOK_DEFAULT.duplicate()}
 
 
 ## Coerce a raw (JSON) core block.
@@ -18,10 +27,49 @@ static func normalize_block(raw: Variant, max_lvl: int = CoreDB.MAX_LVL) -> Dict
 	var d: Dictionary = default_block()
 	if raw is Dictionary:
 		d["lvl"] = clampi(int((raw as Dictionary).get("lvl", 1)), 1, max_lvl)
-		for k in (raw as Dictionary).keys():
-			if String(k) != "lvl":
-				d[String(k)] = (raw as Dictionary)[k]
+		d["look"] = normalize_look((raw as Dictionary).get("look", {}))
 	return d
+
+
+static func normalize_look(raw: Variant) -> Dictionary:
+	var l: Dictionary = LOOK_DEFAULT.duplicate()
+	if not (raw is Dictionary):
+		return l
+	var r: Dictionary = raw
+	l["shell"] = clampi(int(r.get("shell", 0)), 0, SHELLS - 1)
+	l["trim"] = clampi(int(r.get("trim", 0)), 0, TRIMS - 1)
+	l["pat"] = clampi(int(r.get("pat", 0)), 0, LOOK_PATTERNS - 1)
+	for k in ["p", "s", "g"]:
+		var h: String = String(r.get(k, "")).strip_edges().trim_prefix("#").to_lower()
+		if h.length() == 6 and h.is_valid_hex_number(false):
+			l[k] = h
+	return l
+
+
+static func look(s: Dictionary) -> Dictionary:
+	var b: Dictionary = _block(s)
+	if not (b.get("look", null) is Dictionary):
+		b["look"] = LOOK_DEFAULT.duplicate()
+	return b["look"]
+
+
+## Change one look field (shell / trim / pat: int; p / s / g: hex rgb). Free.
+static func set_look(s: Dictionary, key: String, v: Variant) -> Array:
+	if not LOOK_DEFAULT.has(key):
+		return []
+	var l: Dictionary = look(s).duplicate()
+	if key in ["p", "s", "g"]:
+		var h: String = String(v).strip_edges().trim_prefix("#").to_lower()
+		if h.length() != 6 or not h.is_valid_hex_number(false):
+			return []
+		l[key] = h
+	else:
+		l[key] = int(v)
+	var n: Dictionary = normalize_look(l)
+	if n[key] == look(s)[key]:
+		return []
+	_block(s)["look"] = n
+	return [{"t": "core_look", "key": key, "v": n[key]}]
 
 
 static func _block(s: Dictionary) -> Dictionary:

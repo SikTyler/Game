@@ -6,6 +6,7 @@ extends SceneTree
 
 const StKit := preload("res://tests/st_kit.gd")
 const StDirectional := preload("res://tests/st_directional.gd")
+const StGear := preload("res://tests/st_gear.gd")
 const FirePatterns := preload("res://FirePatterns.gd")
 const WeaponDB := preload("res://data/WeaponDB.gd")
 const TowerState := preload("res://TowerState.gd")
@@ -294,6 +295,7 @@ func _initialize() -> void:
 	_horde_stages()
 	StKit.run(self)
 	StDirectional.run(self)
+	StGear.run(self)
 
 	if fails.is_empty():
 		print("SELFTEST OK")
