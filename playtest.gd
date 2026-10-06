@@ -20,7 +20,7 @@ extends SceneTree
 # "PLAYTEST OK" (exit 0) or "PLAYTEST FAIL: <gate>" lines (exit 1).
 # Debug: `-- only=<job> [dir=<snapshots>]` runs one job in-process (verbose,
 # no gates; phase-B jobs read / main writes snap3.bin / snap8.bin in dir);
-# `-- serial` runs every job in-process. Clears user:// saves at start / end.
+# `-- serial` runs every job in-process. Clears the dev save slot (user://dev/, see MetaSave.root()) at start / end.
 
 const TowerState := preload("res://TowerState.gd")
 const TrackDB := preload("res://data/TrackDB.gd")

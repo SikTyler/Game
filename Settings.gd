@@ -1,6 +1,7 @@
 extends RefCounted
 ## Global PC settings (PC_SPEC §6). Static, no autoload. Stored in a
-## ConfigFile at user://settings.cfg, never inside a save slot. Patterns
+## ConfigFile at user://settings.cfg (user://dev/ in harness and dev runs,
+## see MetaSave.root()), never inside a save slot. Patterns
 ## ported from Maaack/Godot-Game-Template app_settings.gd (MIT) and the
 ## godot-demo-projects window_management / multiple_resolutions demos (MIT).
 ##
@@ -8,8 +9,8 @@ extends RefCounted
 ## always returns a normalised copy, so callers never see missing keys.
 
 const Keybinds := preload("res://Keybinds.gd")
+const MetaSave := preload("res://MetaSave.gd")
 
-const PATH: String = "user://settings.cfg"
 const VERSION: int = 1
 
 const MODES: Array = ["windowed", "borderless", "fullscreen"]
@@ -100,7 +101,11 @@ static func normalize(src: Dictionary) -> Dictionary:
 
 
 # ------------------------------------------------------------- persistence
-static func write(s: Dictionary, path: String = PATH) -> Error:
+static func path() -> String:
+	return MetaSave.root() + "settings.cfg"
+
+
+static func write(s: Dictionary, file: String = "") -> Error:
 	var cf: ConfigFile = ConfigFile.new()
 	var n: Dictionary = normalize(s)
 	cf.set_value("meta", "version", VERSION)
@@ -111,12 +116,12 @@ static func write(s: Dictionary, path: String = PATH) -> Error:
 	var kb: Dictionary = n["keybinds"]
 	for act in kb.keys():
 		cf.set_value("keybinds", String(act), kb[act])
-	return cf.save(path)
+	return cf.save(file if not file.is_empty() else path())
 
 
-static func read(path: String = PATH) -> Dictionary:
+static func read(file: String = "") -> Dictionary:
 	var cf: ConfigFile = ConfigFile.new()
-	if cf.load(path) != OK:
+	if cf.load(file if not file.is_empty() else path()) != OK:
 		return defaults()
 	var raw: Dictionary = {}
 	for sec in cf.get_sections():

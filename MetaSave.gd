@@ -5,18 +5,41 @@ extends RefCounted
 ## user://save.json (save v1/v2) is imported into slot 1 when slot 1 is empty
 ## (BaseMeta.normalize migrates it to v3). Settings live in user://settings.cfg,
 ## never in a slot. Static-only so the headless tests preload it (no autoloads).
+## Dev isolation: headless harnesses (`--script`) and any run with
+## COREHOLD_DEV_SAVES=1 keep slots, the legacy file and settings under
+## user://dev/ (root()), so tests and dev tools never touch the player's saves.
 
 const SLOT_COUNT: int = 3
-const LEGACY_PATH: String = "user://save.json"
 const DELETE_CONFIRM: String = "DELETE"
-## Kept for callers of the old single-file API; read()/write() use the active slot.
-const SAVE_PATH: String = LEGACY_PATH
+const DEV_ENV: String = "COREHOLD_DEV_SAVES"
+const DEV_DIR: String = "user://dev/"
 
 static var active: int = 1
+static var _root: String = ""
+
+
+## "user://dev/" for harness / dev runs, else "user://". Decided once the
+## main loop exists (a harness's main loop is its SceneTree script).
+static func root() -> String:
+	if _root.is_empty():
+		var loop: MainLoop = Engine.get_main_loop()
+		var args: PackedStringArray = OS.get_cmdline_args()
+		var dev: bool = OS.get_environment(DEV_ENV) == "1" or args.has("--script") or args.has("-s") \
+			or (loop != null and loop.get_script() != null)
+		if not dev and loop == null:
+			return "user://"
+		_root = DEV_DIR if dev else "user://"
+		if dev:
+			DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(DEV_DIR))
+	return _root
 
 
 static func slot_path(n: int) -> String:
-	return "user://slot_%d.json" % n
+	return root() + "slot_%d.json" % n
+
+
+static func legacy_path() -> String:
+	return root() + "save.json"
 
 
 static func valid_slot(n: int) -> bool:
@@ -67,7 +90,7 @@ static func read_slot(n: int) -> Dictionary:
 	if b is Dictionary:
 		return b
 	if n == 1:
-		var l: Variant = _read_json(LEGACY_PATH)
+		var l: Variant = _read_json(legacy_path())
 		if l is Dictionary:
 			return l
 	return {}
@@ -97,7 +120,7 @@ static func delete_slot(n: int, confirm: String) -> bool:
 	_remove(slot_path(n) + ".bak")
 	_remove(slot_path(n) + ".tmp")
 	if n == 1:
-		_remove(LEGACY_PATH)
+		_remove(legacy_path())
 	return true
 
 
@@ -142,4 +165,4 @@ static func clear() -> void:
 	_remove(slot_path(active))
 	_remove(slot_path(active) + ".bak")
 	_remove(slot_path(active) + ".tmp")
-	_remove(LEGACY_PATH)
+	_remove(legacy_path())

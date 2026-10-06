@@ -17,6 +17,7 @@ const StTracks := preload("res://tests/st_tracks.gd")
 const StEvents := preload("res://tests/st_events.gd")
 const StContent := preload("res://tests/st_content.gd")
 const StResearch := preload("res://tests/st_research.gd")
+const StSaves := preload("res://tests/st_saves.gd")
 const FirePatterns := preload("res://FirePatterns.gd")
 const WeaponDB := preload("res://data/WeaponDB.gd")
 const TowerState := preload("res://TowerState.gd")
@@ -86,6 +87,14 @@ func _fresh(save: Dictionary = {}) -> RefCounted:
 
 
 func _initialize() -> void:
+	# Later stages clear and delete save slots: refuse to run unless saves are
+	# isolated under user://dev/ (MetaSave.root()), never the player's own.
+	if MetaSave.root() != MetaSave.DEV_DIR:
+		print("SELFTEST FAIL: saves not isolated (root %s); refusing to touch them" % MetaSave.root())
+		quit(1)
+		return
+	StSaves.run(self)
+
 	# --- Stage 1: setup ------------------------------------------------------
 	var S = _fresh()
 	# REDESIGN: the Core's HP comes from its CoreDB sheet (Bastion L1 = 120).
@@ -2220,7 +2229,7 @@ func _pc_save_stages() -> void:
 	_check("PC-E9 read()/write() use the active slot", int(MetaSave.read()["coins"]) == 222)
 	MetaSave.set_active(1)
 	MetaSave.delete_slot(1, MetaSave.DELETE_CONFIRM)
-	var lf := FileAccess.open(MetaSave.LEGACY_PATH, FileAccess.WRITE)
+	var lf := FileAccess.open(MetaSave.legacy_path(), FileAccess.WRITE)
 	lf.store_string(JSON.stringify(v2))
 	lf.close()
 	var imp: Dictionary = BaseMeta.normalize(MetaSave.read_slot(1))
@@ -2239,7 +2248,7 @@ func _pc_shell_stages() -> void:
 	var bad: Dictionary = {"video": {"mode": "sideways", "fps_cap": 77, "ui_scale": 9.0, "resolution": "huge"}, "audio": {"Master": 4.0, "SFX": -1.0}, "keybinds": {"nope": [], "pause": [{"type": "bogus"}]}}
 	var nb: Dictionary = Settings.normalize(bad)
 	_check("PC-E12 normalize clamps garbage", String(nb["video"]["mode"]) == "windowed" and int(nb["video"]["fps_cap"]) == 0 and is_equal_approx(float(nb["video"]["ui_scale"]), Settings.UI_SCALE_MAX) and nb["video"]["resolution"] == Vector2i(1920, 1080) and is_equal_approx(float(nb["audio"]["Master"]), 1.0) and is_equal_approx(float(nb["audio"]["SFX"]), 0.0) and not (nb["keybinds"] as Dictionary).has("nope") and ((nb["keybinds"] as Dictionary)["pause"] as Array).is_empty())
-	var path: String = "user://_selftest_settings.cfg"
+	var path: String = MetaSave.root() + "_selftest_settings.cfg"
 	var s1: Dictionary = Settings.defaults()
 	s1["video"]["mode"] = "borderless"
 	s1["video"]["resolution"] = Vector2i(1600, 900)
@@ -2253,7 +2262,7 @@ func _pc_shell_stages() -> void:
 	_check("PC-E12 settings write ok", Settings.write(s1, path) == OK)
 	var r1: Dictionary = Settings.read(path)
 	_check("PC-E12 settings round-trip through ConfigFile", JSON.stringify(r1) == JSON.stringify(Settings.normalize(s1)) and r1["video"]["resolution"] == Vector2i(1600, 900) and String(r1["video"]["mode"]) == "borderless")
-	_check("PC-E12 missing file -> defaults", JSON.stringify(Settings.read("user://_nope_settings.cfg")) == JSON.stringify(Settings.defaults()))
+	_check("PC-E12 missing file -> defaults", JSON.stringify(Settings.read(MetaSave.root() + "_nope_settings.cfg")) == JSON.stringify(Settings.defaults()))
 	Settings.apply(r1)
 	_check("PC-S1 fps cap applies to Engine.max_fps", Engine.max_fps == 144)
 	var mi: int = AudioServer.get_bus_index("Music")
