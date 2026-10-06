@@ -54,7 +54,7 @@ Inspect the actual environment before prescribing a stack or installing dependen
 Current code is authoritative. Re-verify these on the local machine.
 
 - `Corehold.csproj` uses `Godot.NET.Sdk/4.6.3`, and the README says .NET 8. Game files at the repo root include `Main.gd`, `TowerState.gd`, `HordeWorld.cs`, `MetaSave.gd`, `Tune.gd`, `selftest.gd`, `uitest.gd`, `smoke.gd`, `horde_fp.gd`, `horde_prof.gd`, `playtest.gd`, `_shots.gd`, `tests/st_*.gd`, and `tools/test_all.sh`.
-- **Save isolation bug (D5).** `project.godot` sets `custom_user_dir_name="Corehold-PC"`, so harnesses and real play share `%APPDATA%\Corehold-PC`. `MetaSave.clear()` deletes the active slot (`slot_1.json` plus `.bak`/`.tmp`) and the legacy `save.json`. It is called by `selftest.gd`, `uitest.gd`, `_shots.gd` and `playtest.gd`. Running the test gate on the machine where Tyler plays wipes his slot 1. Fix this in the game (harnesses use a dev save location) before the Workbench runs any of these scripts. Also check `Settings.gd`/`settings.cfg` and `SteamService.gd`, which uploads every `slot_*.json`.
+- **Save isolation bug (D5). Fixed on branch `claude/sleepy-hopper-p2hn8k`**: `MetaSave.root()` sends `--script` runs, and any run with `COREHOLD_DEV_SAVES=1`, to `user://dev/`. When the hub launches the game for development, it sets `COREHOLD_DEV_SAVES=1`. What the bug was: `project.godot` sets `custom_user_dir_name="Corehold-PC"`, so harnesses and real play share `%APPDATA%\Corehold-PC`. `MetaSave.clear()` deletes the active slot (`slot_1.json` plus `.bak`/`.tmp`) and the legacy `save.json`. It is called by `selftest.gd`, `uitest.gd`, `_shots.gd` and `playtest.gd`. selftest also deletes all three slots, and uitest rewrites `settings.cfg`. Running the test gate on the machine where Tyler plays wiped his saves. Fix this in the game (harnesses use a dev save location) before the Workbench runs any of these scripts. Also check `Settings.gd`/`settings.cfg` and `SteamService.gd`, which uploads every `slot_*.json`.
 - **Repo tooling is Linux-only.** `tools/setup_godot.sh` downloads the Linux mono build, and `tools/test_all.sh` is bash and uses `timeout`. The Windows doctor/setup and check runner need Windows-native equivalents, or Git Bash plus a documented `timeout` substitute. Don't assume WSL.
 - The game repo's `CLAUDE.md` holds the rules for game changes (determinism and the `HORDE_FP_GOLDEN` hash, where tests go, UI text contrast, the test ledger in `design/V2_PROGRESS.md`). Follow it whenever the Workbench edits the game. `design/V2_DESIGN.md` is the best seed for the Game Map (§9).
 
@@ -104,7 +104,7 @@ Collaborative is the default. Ask focused questions about unresolved behavior, a
 
 Implement questions as structured, durable task records with question ID, task/session ID, originating specialist, options, answer, and status. The dependent action must wait. A dismissed card or disconnected browser is not a default answer. Persist pending questions and answers across restarts.
 
-Use a verified Claude Code mechanism. The recommended route is the hub's resumable `ask_user` tool (§13, "Route to prove in Milestone A"). Parsing question marks from chat is insufficient. Do not select an unattended permission configuration that removes the question capability from Collaborative tasks.
+Use a verified Claude Code mechanism. Test `AskUserQuestion` through `--permission-prompt-tool` first; the fallback is the hub's resumable `ask_user` tool (§13, "Route to prove in Milestone A"). Parsing question marks from chat is insufficient. Do not select an unattended permission configuration that removes the question capability from Collaborative tasks.
 
 Verify specialist question routing: if delegated subagents cannot ask the user directly, route a structured clarification through the task owner, or implement that specialist as a separately addressable session. Demonstrate that the answer returns to the right task.
 
@@ -228,10 +228,10 @@ The hub is a **custom front-end over the `claude` CLI, signed in with Tyler's Cl
 
 **Route to prove in Milestone A** (recommended; change it only with Tyler's agreement):
 
-1. **The hub drives the `claude` CLI.** A hub-owned supervisor runs `claude -p` in stream-json mode for each task, using an explicit `--session-id` that is stored in the task record. It runs in the right working directory, so Tyler's CLAUDE.md files, skills, hooks and subagents apply as usual. claudecodeui and opcode wrap the CLI the same way, so evaluate them as shells on this basis (§15).
+1. **The hub drives the `claude` CLI.** A hub-owned supervisor runs `claude -p` in stream-json mode for each task, using an explicit `--session-id` that is stored in the task record. It runs in the right working directory, so Tyler's CLAUDE.md files, skills, hooks and subagents apply as usual. Keep one long-lived process per session, writing user messages to stdin, rather than a new process per turn. On Windows, resolve the `claude` binary the way claudecodeui does (`server/shared/claude-cli-path.ts`, which handles the `.cmd` shim); reimplement it rather than copying it, since that code is AGPL.
 2. **The hub's own MCP server gives Claude game abilities.** It is passed with `--mcp-config` and exposes tools such as `game_launch`, `game_capture`, `get_selection`, `run_checks`, and `ask_user`. Users and agents share these same operations (tool registry, below).
-3. **Questions use the hub's `ask_user` tool.** It writes a durable question record (§6), with the specialist ID taken from the calling context, and tells Claude to end the turn. When Tyler answers, the hub resumes that exact session with `--resume <id>` and the answer. This works in `-p` mode, survives restarts, and doesn't depend on an `AskUserQuestion` host hook. If subagents can't call MCP tools, routing through the task owner covers them (§6). If a native `AskUserQuestion` route is documented for the CLI, it can be used instead.
-4. **Images:** if stream-json image input is verified, use it. Otherwise save the capture into the task folder and reference its path so Claude reads it with the Read tool, which keeps the image and annotation consistent (§8).
+3. **Questions. Test the native route first:** `--permission-prompt-tool mcp__hub__approve`, served by the hub's MCP server, receives `AskUserQuestion` and permission requests. Answering would mean returning `{behavior: "allow", updatedInput: {…answers}}`. The SDK uses this same mechanism internally, but it is unverified for the CLI flag, so it gets tested first in A.4. **Fallback: the hub's own `ask_user` tool.** It writes a durable question record (§6), with the specialist ID taken from the calling context, and tells Claude to end the turn. When Tyler answers, the hub resumes that exact session with `--resume <id>` and the answer. This works in `-p` mode, survives restarts, and doesn't depend on an `AskUserQuestion` host hook. If subagents can't call MCP tools, routing through the task owner covers them (§6). If a native `AskUserQuestion` route is documented for the CLI, it can be used instead.
+4. **Images:** send captures as base64 `image` content blocks inside stream-json user messages. claudecodeui does this through the same CLI; verify it in A. Never pass images on the command line (Windows length limits). Otherwise save the capture into the task folder and reference its path so Claude reads it with the Read tool, which keeps the image and annotation consistent (§8).
 5. **Optional extra:** a Claude Code mod/pane plus the same MCP server, so game tools also work in Tyler's ordinary interactive Claude Code sessions.
 
 ### Backend
@@ -270,9 +270,13 @@ Use a small representative agent benchmark for significant changes to instructio
 
 Investigate only candidates relevant to the current milestone, using official documentation and actual source. Pin the versions/commits you select. Repositories worth evaluating:
 
-- https://github.com/siteboon/claudecodeui: extensible dashboard candidate; a custom web front-end over Claude Code.
-- https://github.com/winfunc/opcode: specialist/session UI alternative; a custom desktop front-end over Claude Code.
-- For both: confirm the current version still runs the `claude` CLI on a subscription login. A wrapper that has moved to the Agent SDK would need an API key and conflicts with D1.
+- https://github.com/siteboon/claudecodeui (now "CloudCLI UI"). **Evaluated 2026-10-06 (v1.37.3, active, AGPL-3.0): not a base.**
+  - Its core imports the Agent SDK (`claude-runtime.provider.js`), which conflicts with D1. It is also large (~119k lines) and multi-provider.
+  - Worth borrowing: question/permission cards with no timeout, base64 image blocks, Windows `claude` path resolution, and a tab-plugin model.
+- https://github.com/winfunc/opcode. **Evaluated 2026-10-06 (v0.2.0, dormant since 2025-10, AGPL-3.0): not a base.**
+  - It spawns the raw CLI, but every call uses `--dangerously-skip-permissions`, so it has no question or permission handling.
+  - Images travel as data URLs on the command line, there's PostHog telemetry, and it has no plugin system.
+- Recommendation from that evaluation: **a small custom shell** that borrows patterns from claudecodeui (§13, "Route to prove in Milestone A"). Confirm with Tyler once A proves the route.
 - https://github.com/anthropics/claude-agent-sdk-typescript: reference only. Its docs require API-key auth for third-party apps, which conflicts with D1 (§13). It's still useful for understanding the CLI's stream-json protocol.
 - https://github.com/anthropics/skills: workflow references; inspect individual licenses.
 - https://github.com/modelcontextprotocol/inspector: integration diagnostics.

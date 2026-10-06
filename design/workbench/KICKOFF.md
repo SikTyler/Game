@@ -17,7 +17,7 @@ Read these in order:
 Then do Milestone 0:
 - Inspect this machine and repo per spec §2: OS, git state, toolchain, and how Claude Code is logged in. Don't print any credentials.
 - Back up my saves folder (%APPDATA%\Corehold-PC) to a dated folder before anything else touches the game.
-- Check save isolation (D5). If the test/screenshot/bot scripts still share my real save folder, fix that in the game first, following the game repo's CLAUDE.md. Don't run selftest, uitest, _shots, playtest or the gate until it's fixed and verified.
+- Save isolation (D5) was fixed on branch claude/sleepy-hopper-p2hn8k (ledger row 0.2). After the backup, bring that branch's changes into my checkout without touching my uncommitted work (ask me how if there's any conflict). Then re-verify on this machine: run selftest with the local Godot (the bash gate is Linux-only until ledger 0.5) and confirm my real save files are byte-identical afterwards. Don't run selftest, uitest, _shots, playtest or the gate before the fix is in this checkout.
 - Ask me the first short round of open questions from the ledger, with your recommendations. Only ask the ones that matter now.
 - After I answer: create the Workbench repo where we agreed. Install WORKBENCH_CLAUDE.md as its CLAUDE.md, and the spec and ledger as docs/WORKBENCH_SPEC.md and docs/LEDGER.md. Replace design/workbench/ in the game repo with a short README pointing to the new location. Make local commits only; don't push.
 - Update the ledger and continue into Milestone A.

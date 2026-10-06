@@ -33,7 +33,7 @@ Status of every requirement in `WORKBENCH_SPEC.md`. Statuses: **verified** (demo
 | ID | Requirement | Spec | Status | Evidence / next |
 | --- | --- | --- | --- | --- |
 | 0.1 | Back up `%APPDATA%\Corehold-PC` before anything touches the game | §2, D5 | not started | — |
-| 0.2 | Save isolation: harnesses (`selftest`, `uitest`, `_shots`, `playtest`, `smoke`, `horde_*`) use a dev save location; a check proves a real slot survives `MetaSave.clear()`; settings and Steam upload checked too | §2, §8, D5 | not started | Bug confirmed 2026-10-06; see spec §2 "Known facts" |
+| 0.2 | Save isolation: harnesses (`selftest`, `uitest`, `_shots`, `playtest`, `smoke`, `horde_*`) use a dev save location; a check proves a real slot survives `MetaSave.clear()`; settings and Steam upload checked too | §2, §8, D5 | implemented (verified in cloud; re-verify on Tyler's PC) | 2026-10-06, cloud (Linux): reproduced first, then fixed. The unmodified selftest deleted three sentinel slots and the legacy `save.json`. After the fix, `tools/test_all.sh` gives ALL GATES OK, and all 8 sentinel files (slots, `.bak`s, `save.json`, `settings.cfg`) were byte-identical afterwards. The new `tests/st_saves.gd` scan check caught a planted hard-coded path. Steam: no game code uploads slots. Keep the Steamworks Auto-Cloud pattern non-recursive so `dev/` never syncs. Next: after 0.1, re-verify on Tyler's PC. |
 | 0.3 | Workbench repo created; `CLAUDE.md`, `docs/WORKBENCH_SPEC.md`, `docs/LEDGER.md` installed; game repo keeps only a pointer | §2, D3 | not started | — |
 | 0.4 | Doctor: OS, Claude Code installed and logged in on the subscription (no API key), Godot 4.6.3 .NET, .NET 8, Git; actionable errors | §2 | not started | — |
 | 0.5 | Windows-native check runner equivalent to `tools/test_all.sh` (or Git Bash plus a documented `timeout` substitute) | §2, §11 | not started | — |
@@ -47,10 +47,10 @@ Status of every requirement in `WORKBENCH_SPEC.md`. Statuses: **verified** (demo
 | A.1 | Launch and stop the native game with isolated dev saves under a hub-owned supervisor | §4, §8 | not started | — |
 | A.2 | Capture rendered output; a selection stays correctly located across resize/DPI | §4 | not started | — |
 | A.3 | Real request through the `claude` CLI on the subscription; streamed activity shown | §4, §13 | not started | — |
-| A.4 | Structured question with Other; the task waits; the answer resumes the correct session | §4, §6, §13 | not started | — |
+| A.4 | Structured question with Other; the task waits; the answer resumes the correct session | §4, §6, §13 | not started | Test `--permission-prompt-tool` answering `AskUserQuestion` first; fallback is the hub's `ask_user` tool plus `--resume` (spec §13) |
 | A.5 | Tiny reversible change → relevant check → preview → undo only that change | §4, §11 | not started | — |
 | A.6 | Capture, input, and audio paths and their limits documented; Godot C# web support status verified | §4 | not started | — |
-| A.7 | Shell evaluated (claudecodeui, opcode, Claude Code mods, custom) and one foundation chosen | §4, §15 | not started | — |
+| A.7 | Shell evaluated (claudecodeui, opcode, Claude Code mods, custom) and one foundation chosen | §4, §15 | partial | 2026-10-06 source review: claudecodeui is built on the Agent SDK (fails D1); opcode skips all permissions and is dormant. Both are AGPL. Recommendation: small custom shell borrowing claudecodeui's patterns (spec §15). Next: confirm with Tyler after A.3/A.4 prove the CLI route. |
 | A.8 | Demo 1 | §17 | not started | — |
 
 ### Milestone B — Daily usable hub
@@ -137,4 +137,6 @@ Status of every requirement in `WORKBENCH_SPEC.md`. Statuses: **verified** (demo
 
 ## Continuation note
 
-**2026-10-06 (planning, cloud session).** Spec, rules, and ledger written in the game repo under `design/workbench/` on branch `claude/sleepy-hopper-p2hn8k`. No Workbench code exists yet. Nothing has run on Tyler's machine. Next action: Tyler runs `design/workbench/KICKOFF.md` in Claude Code on his PC, opened in his local game checkout.
+**2026-10-06 (cloud session).** Branch `claude/sleepy-hopper-p2hn8k` of the game repo holds the spec, rules and ledger under `design/workbench/`, plus the dev save isolation fix (0.2): `MetaSave.root()` is `user://dev/` for `--script` runs or `COREHOLD_DEV_SAVES=1`. That's verified in the cloud with the full gate green and sentinel saves intact. A.7's shell research is done (recommendation: custom shell). No Workbench code exists yet, and nothing has run on Tyler's machine.
+
+Next action: Tyler runs `design/workbench/KICKOFF.md` in Claude Code on his PC, opened in his local game checkout. The first steps are 0.1 (back up saves), then pulling this branch and re-verifying 0.2 on Windows, then 0.4/0.6/0.7 and the first question round.
