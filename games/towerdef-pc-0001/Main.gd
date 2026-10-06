@@ -1142,6 +1142,11 @@ func _handle(events: Array) -> void:
 					sfx_play("click", 1.0 + 0.15 * float(int(ev["tier"])))
 					if int(ev["tier"]) >= 3:
 						juice.shake(0.4 * float(int(ev["tier"])))
+			"slot_spin":
+				var big: bool = int(ev["mult"]) >= 6
+				_pop(S.fp_pos(int(ev["slot"])) + Vector2(0, -34), ("x%d  +$%s" % [int(ev["mult"]), Kit.fmt(float(ev["cash"]))]), 1.3 if big else 0.9, GOLD if big else Kit.GREEN, 26 if big else 18)
+				if big:
+					sfx_play("coin", 1.3)
 			"supply_drop":
 				supply_show = ev
 				supply_t0 = t_anim

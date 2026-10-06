@@ -838,7 +838,10 @@ func _mass_horde_world() -> void:
 ## / XP / draft queue differ; re-recorded (was 0048784e).
 ## V2 P7d (deliberate): 12 more weapons join the draft pool, so the
 ## fingerprint run's card-0 picks differ; re-recorded (was 59f5e00c).
-const HORDE_FP_GOLDEN: String = "8912cd95bd3414af173f048a22fedb3f74f45ab807c16e03ca214418a02e3395"
+## V2 P7d2 (deliberate): 22 support buildings, 4 huts, 20 packs and 6
+## specials join the draft pool and gold perk offers draw from 6 families, so
+## the fingerprint run's picks differ again; re-recorded (was 8912cd95).
+const HORDE_FP_GOLDEN: String = "598342927ba0f4ca0b2378c543238bed0e1100b68cc241cb4d9efa6e0bbb88d1"
 ## MASS_HORDE §Design content (designed mass waves, the shipping ruleset).
 func _mfresh(seed_value: int = 1234):
 	var S = TowerState.new()
@@ -1943,8 +1946,8 @@ func _pc_building_stages() -> void:
 	for id in PickDB.BUILDINGS + PickDB.HUTS:
 		ids_ok = ids_ok and String(BuildingDB.get_def(String(id)).get("name", "")) != "" and String(PickDB.get_def(String(id)).get("desc", "")) != ""
 	# V2 (deliberate): no air (Drone Nest gone), no crates (Appraiser Insight gone).
-	# V2 P7d (deliberate): 12 more weapons (29 buildings); st_content checks the rest of the content.
-	_check("REDESIGN 29 buildings + 2 huts named in BuildingDB + PickDB", ids_ok and PickDB.BUILDINGS.size() == 29 and PickDB.HUTS.size() == 2 and PickDB.PACKS.size() == 10 and PickDB.SPECIALS.size() == 6 and PickDB.INSIGHT.size() == 6)
+	# V2 P7d (deliberate): 3x content - 51 buildings, 6 huts, 30 packs, 12 specials.
+	_check("REDESIGN 51 buildings + 6 huts named in BuildingDB + PickDB", ids_ok and PickDB.BUILDINGS.size() == 51 and PickDB.HUTS.size() == 6 and PickDB.PACKS.size() == 30 and PickDB.SPECIALS.size() == 12 and PickDB.INSIGHT.size() == 6)
 
 
 ## PC-E4 move / swap buildings.

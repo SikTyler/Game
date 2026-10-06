@@ -18,6 +18,13 @@ const FX: Dictionary = {
 	"sp_overdrive": {"rate": 2.0, "dur": 6.0},
 	"sp_magnet": {"cash": 2.0, "dur": 10.0},
 	"sp_timewarp": {"dur": 3.0},
+	# V2 P7d
+	"sp_nuke": {"radius": 3.0, "mult": 60.0, "delay": 1.5, "targeted": true},
+	"sp_shield": {"dur": 3.0},
+	"sp_frenzy": {"rate": 1.5, "dur": 8.0},
+	"sp_blackhole": {"radius": 2.5, "mult": 10.0, "slow": 0.8, "dur": 4.0, "targeted": true},
+	"sp_meteor": {"n": 5, "radius": 1.0, "mult": 8.0, "spread": 1.5},
+	"sp_jackpot": {},
 }
 
 

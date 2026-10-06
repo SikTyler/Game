@@ -24,6 +24,7 @@ extends RefCounted
 ## Tune pc_tier_mult overrides TIER_MULT.
 
 const TuneRef := preload("res://Tune.gd")
+const SupportDB := preload("res://data/SupportDB.gd")
 
 const TIER_MULT: float = 1.8
 const MAX_TIER: int = 3
@@ -373,6 +374,58 @@ const MODS: Dictionary = {
 	},
 }
 
+## V2 P7d templates for the data-driven buildings (SupportDB auras / core
+## fx and the new huts); the Spike Gate uses the Wall's mods.
+const TEMPLATES: Dictionary = {
+	"aura": {
+		"t2": [
+			{"name": "Amplified Field", "desc": "+50% to its aura", "fx": {"power": 0.50}},
+			{"name": "Wide Field", "desc": "+1 cell reach", "fx": {"reach": 1.0}},
+			{"name": "Resonant Field", "desc": "+30% to its aura, +1 reach at T3 merges", "fx": {"power": 0.30}},
+		],
+		"t3": [
+			{"name": "Overcharged Field", "desc": "+100% to its aura", "fx": {"power": 1.0}},
+			{"name": "Broadcast", "desc": "+2 cells reach, +25% to its aura", "fx": {"reach": 2.0, "power": 0.25}},
+		],
+	},
+	"core": {
+		"t2": [
+			{"name": "Amplified", "desc": "+50% to its effect", "fx": {"power": 0.50}},
+			{"name": "Efficient", "desc": "+30% to its effect, +0.5 cash/s", "fx": {"power": 0.30, "cash": 0.5}},
+			{"name": "Hardened", "desc": "+30% to its effect, +1 Core armor", "fx": {"power": 0.30, "armor": 1.0}},
+		],
+		"t3": [
+			{"name": "Overdrive", "desc": "+100% to its effect", "fx": {"power": 1.0}},
+			{"name": "Masterwork", "desc": "+60% to its effect, +2 Core regen", "fx": {"power": 0.60, "regen": 2.0}},
+		],
+	},
+	"hut": {
+		"t2": [
+			{"name": "Veterans", "desc": "Troops +40% damage and HP", "fx": {"power": 0.40}},
+			{"name": "Heavy Arms", "desc": "Troops +60% damage", "fx": {"troop_dmg": 0.60}},
+			{"name": "Body Armor", "desc": "Troops +80% HP", "fx": {"troop_hp": 0.80}},
+		],
+		"t3": [
+			{"name": "Elite Squad", "desc": "Troops +80% damage and HP", "fx": {"power": 0.80}},
+			{"name": "Juggernauts", "desc": "Troops +150% HP", "fx": {"troop_hp": 1.5}},
+		],
+	},
+}
+
+
+## The mod table of a building: its own, else a template.
+static func mods_of(id: String) -> Dictionary:
+	if MODS.has(id):
+		return MODS[id]
+	if id == "gate":
+		return MODS["barricade"]
+	if id.begins_with("hut_"):
+		return TEMPLATES["hut"]
+	if SupportDB.has(id):
+		return TEMPLATES["aura"] if SupportDB.get_def(id).has("aura") else TEMPLATES["core"]
+	return {}
+
+
 ## Every fx key a mod may carry (the content check in st_merge).
 const FX_KEYS: Array = ["dmg", "rate", "range", "crit", "pierce", "splash", "knock", "chains", "arcs", "rounds", "cone", "burn",
 	"missiles", "pellets", "bounces", "ramp", "elite",
@@ -386,7 +439,7 @@ static func tier_mult(tier: int) -> float:
 
 ## The mods offered when a building of `id` reaches `tier` ([] when none).
 static func offer(id: String, tier: int) -> Array:
-	var d: Dictionary = MODS.get(id, {})
+	var d: Dictionary = mods_of(id)
 	return (d.get("t%d" % tier, []) as Array)
 
 

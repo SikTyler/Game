@@ -27,6 +27,11 @@ const MELEE: float = 0.35       # cells: sapper charge contact
 const DEFS: Dictionary = {
 	"hut_infantry": {"kind": "rifleman", "count": 3, "hp": 40.0, "dmg": 5.0, "rate": 1.2, "range": 2.0, "spd": 1.2, "respawn": 8.0, "aoe": 0.0, "retreat": false, "taunt": true},
 	"hut_sapper": {"kind": "sapper", "count": 2, "hp": 25.0, "dmg": 30.0, "rate": 0.0, "range": 0.0, "spd": 1.6, "respawn": 12.0, "aoe": 1.0, "retreat": true, "taunt": false},
+	# V2 P7d: ranged-shooter kinds (rifleman behaviour) with their own numbers
+	"hut_sniper": {"kind": "sniper", "count": 1, "hp": 30.0, "dmg": 40.0, "rate": 0.4, "range": 6.0, "spd": 1.0, "respawn": 10.0, "aoe": 0.0, "retreat": true, "taunt": false},
+	"hut_guard": {"kind": "guard", "count": 2, "hp": 150.0, "dmg": 4.0, "rate": 1.0, "range": 1.2, "spd": 1.0, "respawn": 10.0, "aoe": 0.0, "retreat": false, "taunt": true},
+	"hut_medic": {"kind": "medic", "count": 1, "hp": 50.0, "dmg": 2.0, "rate": 1.0, "range": 2.0, "spd": 1.1, "respawn": 10.0, "aoe": 0.0, "retreat": true, "taunt": false},
+	"hut_engineer": {"kind": "engineer", "count": 2, "hp": 60.0, "dmg": 4.0, "rate": 1.0, "range": 2.0, "spd": 1.1, "respawn": 10.0, "aoe": 0.0, "retreat": true, "taunt": false},
 }
 const ARMORED: Array = ["elite", "boss", "hauler"]
 const PRIORITY: Array = ["elite", "boss"]

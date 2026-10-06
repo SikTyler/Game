@@ -314,6 +314,30 @@ func _initialize() -> void:
 	await _wait(6)
 	await _shot("%s/16g_new_arsenal.png" % outdir, false)
 	S.draft = []
+	# V2 P7d2: support / eco buildings + huts around the weapons, new specials
+	for nid in ["amp", "ocrelay", "uplink", "critlens", "market", "slots", "shieldpylon", "hut_sniper", "hut_engineer", "gate"]:
+		for fc in S.free_slots():
+			if S.can_place(int(fc), String(nid)):
+				S.slots[int(fc)] = {"id": String(nid), "tier": 1, "rot": 6, "mods": []}
+				S.recompute()
+				break
+	S.specials = [{"id": "sp_nuke", "copies": 1, "cd": 0.0, "charges": 1}, {"id": "sp_blackhole", "copies": 1, "cd": 0.0, "charges": 1},
+		{"id": "sp_meteor", "copies": 1, "cd": 0.0, "charges": 1}, {"id": "sp_jackpot", "copies": 1, "cd": 0.0, "charges": 1}]
+	main.sel = -1
+	for i in TowerState.N:
+		if S.id_at(i) == "amp":
+			main.sel = i
+	S.draft = []
+	for cid in ["forge", "pk_luck", "sp_frenzy"]:
+		var cc2: Dictionary = Dr.card_for(String(cid), S._draft_ctx(""))
+		if not cc2.is_empty():
+			S.draft.append(cc2)
+	_quiet()
+	main._rebuild_ui()
+	await _wait(6)
+	await _shot("%s/16h_support.png" % outdir, false)
+	S.draft = []
+	main.sel = -1
 	var orb: int = -1
 	for k in S.specials.size():
 		if String((S.specials[k] as Dictionary)["id"]) == "sp_orbital":

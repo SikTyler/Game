@@ -6,6 +6,9 @@ extends RefCounted
 ## the id's colour and a glyph drawn from primitives.
 ##   draw(ci, id, r, mod) -> bool (false = unknown id, nothing drawn)
 
+const PickDB := preload("res://data/PickDB.gd")
+const PerkDB := preload("res://data/PerkDB.gd")
+
 ## id -> [glyph, colour]
 const GLYPH: Dictionary = {
 	# weapons (P7d)
@@ -18,9 +21,10 @@ const GLYPH: Dictionary = {
 	"bank": ["bank", "ffd34d"], "capacitor": ["battery", "a3e635"], "market": ["coin", "ffd34d"], "xpsiphon": ["drop", "39e6ff"],
 	"magnet": ["magnet", "ff4d6d"], "salvager": ["gear", "d9b98a"], "totem": ["star", "c084fc"], "slots": ["slot", "ffd34d"],
 	"gate": ["spikes", "ff4d6d"], "watchtower": ["eye", "4ade80"], "medbay": ["cross", "4ade80"], "taxoffice": ["coin", "a3e635"],
-	"insurance": ["shield", "ffd34d"], "forge": ["chevrons", "ff9b3d"],
+	"insurance": ["shield", "ffd34d"], "forge": ["burst", "ff9b3d"],
 	# troop huts (P7d)
 	"hut_sniper": ["target", "4ade80"], "hut_guard": ["shield", "6e9bff"], "hut_medic": ["cross", "4ade80"], "hut_engineer": ["gear", "ffd34d"],
+	"troop_sniper": ["target", "4ade80"], "troop_guard": ["shield", "6e9bff"], "troop_medic": ["cross", "4ade80"], "troop_engineer": ["gear", "ffd34d"],
 	# specials (P7d)
 	"sp_nuke": ["burst", "ff4d6d"], "sp_shield": ["shield", "39e6ff"], "sp_frenzy": ["chevrons", "ff9b3d"], "sp_blackhole": ["rings", "a78bfa"],
 	"sp_meteor": ["missile", "ff9b3d"], "sp_jackpot": ["slot", "ffd34d"],
@@ -38,9 +42,36 @@ static func knows(id: String) -> bool:
 	return false
 
 
+## Glyph by an item's main effect (stat packs / gold perks with fx).
+const FX_GLYPH: Dictionary = {
+	"crit": ["lens", "ff5fb8"], "crit_dmg": ["lens", "ff3ea5"], "dmg": ["burst", "ff4d6d"], "range": ["eye", "39e6ff"],
+	"rate": ["chevrons", "ff9b3d"], "bld_rate": ["chevrons", "ff9b3d"], "armor": ["shield", "6e9bff"], "shield": ["shield", "39e6ff"],
+	"dr": ["shield", "8fb8ff"], "regen": ["cross", "4ade80"], "reflect": ["spikes", "ff4d6d"], "lifesteal": ["drop", "ff4d6d"],
+	"xp": ["drop", "39e6ff"], "kill_cash": ["coin", "ffd34d"], "interest": ["bank", "ffd34d"], "scrap_find": ["gear", "d9b98a"],
+	"coin_run": ["coin", "ffd34d"], "draft_luck": ["star", "c084fc"], "loot_luck": ["star", "f59e0b"], "slow_hit": ["snow", "9fe0ff"],
+	"execute": ["target", "ff4d6d"], "boss": ["missile", "ff9b3d"], "multishot": ["pellets", "ffd34d"], "knock": ["wave", "a78bfa"],
+	"chain": ["bolt", "8fb8ff"], "last_stand": ["shield", "ffd34d"], "cash": ["coin", "a3e635"],
+}
+
+
+static func _fx_spec(id: String) -> Array:
+	var fx: Dictionary = {}
+	if id.begins_with("pk_"):
+		fx = (PickDB.get_def(id) as Dictionary).get("fx", {})
+	elif id.begins_with("perk_"):
+		fx = (PerkDB.get_def("p_" + id.substr(5)) as Dictionary).get("fx", {})
+	for k in fx.keys():
+		if FX_GLYPH.has(String(k)) and float(fx[k]) > 0.0:
+			return FX_GLYPH[String(k)]
+	return []
+
+
 static func _spec(id: String) -> Array:
 	if GLYPH.has(id):
 		return GLYPH[id]
+	var fs: Array = _fx_spec(id)
+	if not fs.is_empty():
+		return fs
 	for p in PREFIX:
 		if id.begins_with(String((p as Array)[0])):
 			return [String((p as Array)[1]), String((p as Array)[2])]

@@ -33,7 +33,16 @@ static func offer(rng: RandomNumberGenerator, taken: Array) -> Array:
 		pool[i] = pool[j]
 		pool[j] = tmp
 	var picks: Array = []
-	for fam in PerkDB.FAMILIES:
+	# V2 P7d: six families - the offer draws 3 of them in a seeded order
+	var fams: Array = PerkDB.FAMILIES.duplicate()
+	for i2 in range(fams.size() - 1, 0, -1):
+		var j2: int = rng.randi_range(0, i2)
+		var tmp2: Variant = fams[i2]
+		fams[i2] = fams[j2]
+		fams[j2] = tmp2
+	for fam in fams:
+		if picks.size() >= 3:
+			break
 		for id in pool:
 			var d: Dictionary = PerkDB.DEFS[id]
 			if String(d["fam"]) == String(fam) and not picks.has(id):
@@ -45,6 +54,16 @@ static func offer(rng: RandomNumberGenerator, taken: Array) -> Array:
 		if not picks.has(id):
 			picks.append(id)
 	return picks
+
+
+## V2 P7d: summed "fx" of the taken fx perks (TowerState.rfx).
+static func fx_of(taken: Array) -> Dictionary:
+	var out: Dictionary = {}
+	for x in taken:
+		var fx: Dictionary = (PerkDB.DEFS.get(String(x), {}) as Dictionary).get("fx", {})
+		for k in fx.keys():
+			out[k] = float(out.get(k, 0.0)) + float(fx[k])
+	return out
 
 
 ## Multipliers implied by `taken`. Pure numbers so tests can assert exact values.

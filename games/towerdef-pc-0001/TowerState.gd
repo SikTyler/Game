@@ -41,6 +41,7 @@ const MergeDB := preload("res://data/MergeDB.gd")
 const TrackDB := preload("res://data/TrackDB.gd")
 const DirectiveDB := preload("res://data/DirectiveDB.gd")
 const EvoDB := preload("res://data/EvoDB.gd")
+const SupportDB := preload("res://data/SupportDB.gd")
 const FirePatterns := preload("res://FirePatterns.gd")
 const Gear := preload("res://Gear.gd")
 
@@ -270,7 +271,8 @@ var merges: int = 0                # merges this run (stats)
 var directives: Array = []         # Directives taken (boss rewards)
 var directive_offer: Array = []    # open Directive pick (3 ids)
 var directive_pending: int = 0
-var dfx: Dictionary = {}           # Directive fx (read through pf)
+var rfx: Dictionary = {}           # run fx: Directives + gold perks + stat packs (read through pf; _refresh_rfx)
+var sfx: Dictionary = {}           # V2 P7d: SupportDB "core" fx of the support buildings (compute_stats)
 var supply_rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var supply_last: Dictionary = {}   # the last Supply Drop (view)
 var supply_n: int = 0
@@ -525,7 +527,8 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	directives = []
 	directive_offer = []
 	directive_pending = 0
-	dfx = {}
+	rfx = {}
+	sfx = {}
 	supply_last = {}
 	supply_n = 0
 	combo = 0.0
@@ -533,7 +536,7 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	carry_cards = []
 	evo_done = {}
 	beam_ramps = {}
-	buffs = {"overdrive_t": 0.0, "magnet_t": 0.0, "repair_t": 0.0, "repair_rate": 0.0, "warp_t": 0.0}
+	buffs = {"overdrive_t": 0.0, "magnet_t": 0.0, "repair_t": 0.0, "repair_rate": 0.0, "warp_t": 0.0, "frenzy_t": 0.0}
 	orbitals = []
 	special_casts = 0
 	couriers = 0
@@ -561,12 +564,20 @@ func _reforge_node(id: String) -> int:
 
 ## One summed part fx value (0 when no equipped part carries the key).
 func pf(k: String) -> float:
-	return float(pfx.get(k, 0.0)) + float(tfx.get(k, 0.0)) + float(dfx.get(k, 0.0))
+	return float(pfx.get(k, 0.0)) + float(tfx.get(k, 0.0)) + float(rfx.get(k, 0.0)) + float(sfx.get(k, 0.0))
 
 
 ## Run-time extras only (enhancements + Directives): keys the setup reads once.
 func xf(k: String) -> float:
-	return float(tfx.get(k, 0.0)) + float(dfx.get(k, 0.0))
+	return float(tfx.get(k, 0.0)) + float(rfx.get(k, 0.0)) + float(sfx.get(k, 0.0))
+
+
+## Re-sum the run fx (Directives + gold perks with fx + stat packs with fx).
+func _refresh_rfx() -> void:
+	rfx = DirectiveDB.fx_of(directives)
+	for src in [Perks.fx_of(perks_taken), PickDB.pack_fx(packs)]:
+		for k in (src as Dictionary).keys():
+			rfx[k] = float(rfx.get(k, 0.0)) + float((src as Dictionary)[k])
 
 
 ## V2 P7b: the Core Enhancement part of pf alone.
@@ -969,6 +980,18 @@ func compute_stats() -> Dictionary:
 	for i in N:
 		if i != CORE_SLOT and id_at(i) != "":
 			nb += 1
+	# V2 P7d: SupportDB "core" fx first - every pf() below reads them
+	sfx = {}
+	for i0 in N:
+		var sid0: String = id_at(i0)
+		if sid0 == "" or not SupportDB.has(sid0):
+			continue
+		var core0: Dictionary = SupportDB.get_def(sid0).get("core", {})
+		if core0.is_empty():
+			continue
+		var pm0: float = tier_mult(i0) * (1.0 + float(mod_fx(i0).get("power", 0.0)))
+		for k0 in core0.keys():
+			sfx[k0] = float(sfx.get(k0, 0.0)) + float(core0[k0]) * pm0
 	var st: Dictionary = {
 		"max_hp": float(cd["hp"]) * CoreDB.lvl_mult("hp", L),
 		"regen": float(cd["regen"]) * CoreDB.lvl_mult("regen", L),
@@ -1042,6 +1065,11 @@ func compute_stats() -> Dictionary:
 						adj_rate[n] = float(adj_rate[n]) + 0.10 * m * (1.0 + float(fx.get("rate", 0.0)))
 						adj_range[n] = float(adj_range[n]) + 0.3 * m
 						links.append([i, n, "BEA"])
+			"hut_engineer":
+				for n in adjacent(i):
+					if n != CORE_SLOT:
+						adj_rate[n] = float(adj_rate[n]) + 0.10 * m
+						links.append([i, n, "ENG"])
 			"oilmill":
 				for n in adjacent(i):
 					if n != CORE_SLOT:
@@ -1049,6 +1077,22 @@ func compute_stats() -> Dictionary:
 							adj_rate[n] = float(adj_rate[n]) - 0.10
 						adj_dmg[n] = float(adj_dmg[n]) + float(fx.get("adj_dmg", 0.0))
 						links.append([i, n, "OIL"])
+	# V2 P7d: SupportDB auras (tier x power; mods add reach)
+	for i in N:
+		var aid: String = id_at(i)
+		if aid == "" or not SupportDB.has(aid) or not SupportDB.get_def(aid).has("aura"):
+			continue
+		var au: Dictionary = SupportDB.get_def(aid)["aura"]
+		var afx: Dictionary = bfx.get(i, {})
+		var am: float = tier_mult(i) * (1.0 + float(afx.get("power", 0.0)))
+		var ar2: int = int(au["r"]) + int(afx.get("reach", 0.0))
+		for n in (adjacent(i) if ar2 <= 1 else _near_anchors(i, ar2)):
+			var af: Dictionary = au["fx"]
+			adj_dmg[n] = float(adj_dmg[n]) + float(af.get("dmg", 0.0)) * am
+			adj_rate[n] = float(adj_rate[n]) + float(af.get("rate", 0.0)) * am
+			adj_range[n] = float(adj_range[n]) + float(af.get("range", 0.0)) * am
+			adj_crit[n] = float(adj_crit[n]) + float(af.get("crit", 0.0)) * am
+			links.append([i, n, "AUR"])
 	# Core attack range (cells).
 	var core_range_c: float = maxf(1.0, float(cd["range"]) + TRACK_RANGE * float(tracks["range"]) + range_add + float(adj_range[CORE_SLOT]) + pf("range"))
 	var core_range: float = core_range_c * px
@@ -1056,6 +1100,7 @@ func compute_stats() -> Dictionary:
 	var rr: float = TuneRef.num("pc_ring_range", 0.08)
 	var hp_add: float = 0.0
 	var cash_add: float = 0.0
+	var hut_regen: float = 0.0
 	for i in N:
 		var id: String = id_at(i)
 		if id == "":
@@ -1067,6 +1112,10 @@ func compute_stats() -> Dictionary:
 		var rate_m: float = rate_all * float(adj_rate[i]) * maxf(0.1, 1.0 + pf("bld_rate"))
 		var dm: float = dmg_all * float(adj_dmg[i]) * bld_dmg() * maxf(0.1, 1.0 + pf("bld_dmg"))
 		var rng_c: float = float(adj_range[i]) + range_add
+		if SupportDB.has(id):
+			# V2 P7d generic support: auras were applied above, core fx in sfx
+			cash_add += float(SupportDB.get_def(id).get("cash", 0.0)) * m2
+			continue
 		if WeaponDB.has(id):
 			var ws: Dictionary = _weapon_sheet(i, id, tier_mult(i), dm, rate_m, rng_c, ring_m, px)
 			_apply_merge_mods(ws, fx2, px)
@@ -1096,7 +1145,9 @@ func compute_stats() -> Dictionary:
 				st["interest_cap"] = float(st["interest_cap"]) + 100.0 * tier_mult(i) * (1.0 + float(fx2.get("cap", 0.0)))
 			"obelisk":
 				st["lifesteal"] = float(st["lifesteal"]) + 0.01 * m2
-			"hut_infantry", "hut_sapper":
+			"hut_infantry", "hut_sapper", "hut_sniper", "hut_guard", "hut_medic", "hut_engineer":
+				if id == "hut_medic":
+					hut_regen += 1.5 * m2
 				var dir: Vector2 = (fp_pos(i) - CENTER).normalized()
 				var post: Vector2 = CENTER + dir * (grid_half_px() + 0.6 * px)
 				var hut: Dictionary = {"slot": i, "id": id, "lvl": pattern_lvl(i), "home": fp_pos(i), "anchor": post,
@@ -1127,7 +1178,7 @@ func compute_stats() -> Dictionary:
 	# Core sheet with tracks, packs, legacy core levels, Insight.
 	var arm_n: int = tracks["armor"]
 	st["max_hp"] = (float(st["max_hp"]) + hp_add) * (1.0 + TRACK_ARMOR_HP * float(arm_n)) * pow(TRACK_ECO_HP, float(tracks["eco"])) * (1.0 + 0.20 * float(pack_n("pk_fort"))) * maxf(0.5, 1.0 - 0.05 * float(pack_n("pk_overclock"))) * max_hp_mult * (1.0 + float(ins.get("in_hp", 0.0))) * maxf(0.1, 1.0 + pf("core_hp"))
-	st["regen"] = (float(st["regen"]) + 1.0 * float(arm_n) + mod_regen) * maxf(0.0, 1.0 + pf("regen"))
+	st["regen"] = (float(st["regen"]) + 1.0 * float(arm_n) + mod_regen + hut_regen) * maxf(0.0, 1.0 + pf("regen"))
 	st["armor"] = float(st["armor"]) + 2.0 * float(arm_n) + float(pack_n("pk_fort")) + pf("armor") + mod_armor
 	var eco_lv: int = tracks["eco"]
 	var cash_w1: float = maxf(0.0, float(st["cash_ps"]) + TRACK_ECO_CASH * float(eco_lv) + 0.6 * float(pack_n("pk_ledger")) + cash_add + pf("cash_flat"))
@@ -1540,7 +1591,7 @@ func _step(sub: float, ev: Array) -> void:
 
 ## Buff timers, Aegis shield regen, special cooldowns, pending Orbitals.
 func _tick_buffs(dt: float, ev: Array) -> void:
-	for k in ["overdrive_t", "magnet_t", "repair_t", "warp_t"]:
+	for k in ["overdrive_t", "magnet_t", "repair_t", "warp_t", "frenzy_t"]:
 		buffs[k] = maxf(0.0, float(buffs[k]) - dt)
 	shield_idle += dt
 	var smax: float = float(stats.get("shield_max", 0.0))
@@ -1649,6 +1700,7 @@ func _advance_wave(ev: Array) -> void:
 	_wave_coins(wave, 1.0)
 	if wave % SUPPLY_EVERY == 0:
 		_supply_drop(ev)
+	_slot_spins(ev)
 	recompute()   # cash/s, building HP and troops scale with the wave
 	_drain_troop_events(ev)
 	ev.append({"t": "wave", "wave": wave})
@@ -2474,16 +2526,19 @@ func _wall_auras(dt: float, ev: Array) -> void:
 	var s0: float = TuneRef.num("pc_wall_slow", 0.30)
 	var bfx: Dictionary = stats.get("bfx", {})
 	for i in slots.size():
-		if id_at(i) != "barricade":
+		var wid: String = id_at(i)
+		if wid != "barricade" and wid != "gate":
 			continue
 		# V2 P7a: tiers widen the aura (+0.25 cell) and deepen it (+5%); mods add
+		# V2 P7d: the Spike Gate is a Wall with its own slow and built-in spikes
 		var fx: Dictionary = bfx.get(i, {})
+		var gw: Dictionary = SupportDB.get_def("gate").get("wall", {}) if wid == "gate" else {}
 		var tn: float = float(tier_at(i) - 1)
 		var r: float = (r0 + 0.25 * tn + float(fx.get("range", 0.0))) * cpx()
-		var sm: float = 1.0 - minf(0.8, s0 + 0.05 * tn + float(fx.get("slow", 0.0)))
+		var sm: float = 1.0 - minf(0.8, float(gw.get("slow", s0)) + 0.05 * tn + float(fx.get("slow", 0.0)))
 		var c: Vector2 = fp_pos(i)
 		var hit: PackedInt32Array = en.slow_radius(c, r, 0.2, sm)   # one C# call per Wall (P3d perf)
-		var spike: float = float(fx.get("dmg", 0.0)) * float(stats.get("dmg_all", 1.0)) * bld_dmg() * dt
+		var spike: float = (float(fx.get("dmg", 0.0)) + float(gw.get("dmg", 0.0)) * tier_mult(i)) * float(stats.get("dmg_all", 1.0)) * bld_dmg() * dt
 		if spike > 0.0:
 			_src = "barricade"
 			for fe in hit:
@@ -2513,6 +2568,8 @@ func _fire(dt: float, ev: Array) -> void:
 		var rate: float = float(wd["rate"])
 		if si == CORE_SLOT and float(buffs.get("overdrive_t", 0.0)) > 0.0:
 			rate *= 2.0
+		elif si != CORE_SLOT and float(buffs.get("frenzy_t", 0.0)) > 0.0:
+			rate *= float((Specials.FX["sp_frenzy"] as Dictionary)["rate"])   # V2 P7d Frenzy
 		var cd: float = float(cooldowns[si]) - dt
 		if cd > 0.0:
 			cooldowns[si] = cd
@@ -3332,7 +3389,7 @@ func choose_directive(k: int) -> Array:
 	var id: String = String(directive_offer[k])
 	directive_offer = []
 	directives.append(id)
-	dfx = DirectiveDB.fx_of(directives)
+	_refresh_rfx()
 	_refresh_enemy_mods()
 	recompute()
 	var d: Dictionary = DirectiveDB.get_def(id)
@@ -3404,6 +3461,20 @@ func _supply_pay(reels: Array, ev: Array) -> void:
 		pays["jackpot"] = jc
 	supply_last = {"reels": reels, "pays": pays, "jackpot": jackpot, "wave": wave}
 	ev.append({"t": "supply_drop", "reels": reels, "pays": pays, "jackpot": jackpot, "wave": wave})
+
+
+## V2 P7d Slot Machines: each spins at the start of every wave (Supply Drop
+## stream): x1 55% / x3 30% / x6 12% / x20 3% of its stake x cash index x tier.
+func _slot_spins(ev: Array) -> void:
+	for i in N:
+		if id_at(i) != "slots":
+			continue
+		var r: float = supply_rng.randf()
+		var mul: int = 1 if r < 0.55 else (3 if r < 0.85 else (6 if r < 0.97 else 20))
+		var c: float = float(SupportDB.get_def("slots")["spin"]) * float(mul) * cash_index() * tier_mult(i) * (1.0 + float(mod_fx(i).get("power", 0.0)))
+		cash += c
+		cash_earned += c
+		ev.append({"t": "slot_spin", "slot": i, "mult": mul, "cash": c})
 
 
 ## Lock / unlock draft card idx (max MAX_LOCKS): kept by rerolls, carried to
@@ -3658,6 +3729,7 @@ func choose_card(idx: int, arg: int = -1) -> Array:
 			return ev
 		"pack":
 			packs[id] = pack_n(id) + 1
+			_refresh_rfx()
 			recompute()
 			if id == "pk_fort":
 				hp = minf(float(stats["max_hp"]), hp)
@@ -3736,6 +3808,7 @@ func choose_perk(idx: int) -> Array:
 	var id: String = perk_offer[idx]
 	perk_offer.clear()
 	perks_taken.append(id)
+	_refresh_rfx()
 	recompute()
 	if id == "p_hp":
 		hp = float(stats["max_hp"])
@@ -4053,6 +4126,46 @@ func cast_special(k: int, cell: Variant = -1) -> Dictionary:
 			buffs["overdrive_t"] = float(fx["dur"])
 		"sp_magnet":
 			buffs["magnet_t"] = float(fx["dur"])
+		# ---- V2 P7d specials
+		"sp_nuke", "sp_blackhole":
+			var pos2: Vector2 = Vector2.INF
+			if cell is Vector2:
+				pos2 = cell
+			elif (cell is int or cell is float) and int(cell) >= 0 and int(cell) < N:
+				pos2 = slot_pos(int(cell))
+			else:
+				pos2 = _densest(float(fx["radius"]) * cpx())
+			if pos2 == Vector2.INF or live == 0:
+				return {"result": "no_target", "ev": []}
+			var cw2: Dictionary = (stats["weapons"] as Array).back()
+			var rr2: float = float(fx["radius"]) * cpx()
+			if id == "sp_nuke":
+				orbitals.append({"pos": pos2, "t": float(fx["delay"]), "dmg": float(fx["mult"]) * float(cw2["dmg"]) * spec_mult, "r": rr2, "knock": 6.0})
+			else:
+				_src = "special"
+				for ed in eh.candidates(pos2, rr2 + en.max_size * 0.5):
+					if ed < en.hp.size() and en.hp[ed] > 0.0 and en.pos[ed].distance_to(pos2) <= rr2 + en.size[ed] * 0.5:
+						en.apply_slow(ed, float(fx["dur"]), 1.0 - float(fx["slow"]))
+						_hit(ed, float(fx["mult"]) * float(cw2["dmg"]) * spec_mult, ev)
+				_src = ""
+			cast["pos"] = pos2
+			cast["r"] = rr2
+		"sp_shield":
+			immune_t = maxf(immune_t, float(fx["dur"]))
+		"sp_frenzy":
+			buffs["frenzy_t"] = float(fx["dur"])
+		"sp_meteor":
+			var mr: float = float(fx["radius"]) * cpx()
+			var mc: Vector2 = _densest(mr)
+			if mc == Vector2.INF or live == 0:
+				return {"result": "no_target", "ev": []}
+			var cw3: Dictionary = (stats["weapons"] as Array).back()
+			for mk in int(fx["n"]):
+				var off: Vector2 = Vector2.ZERO if mk == 0 else Vector2.from_angle(TAU * float(mk) / float(int(fx["n"]) - 1)) * float(fx["spread"]) * cpx()
+				orbitals.append({"pos": mc + off, "t": 0.5 + 0.2 * float(mk), "dmg": float(fx["mult"]) * float(cw3["dmg"]) * spec_mult, "r": mr})
+			cast["pos"] = mc
+		"sp_jackpot":
+			_supply_drop(ev)
 	if banked:
 		(specials[k] as Dictionary)["bank"] = int((specials[k] as Dictionary)["bank"]) - 1
 	else:
