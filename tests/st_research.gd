@@ -13,8 +13,7 @@ const LabDB := preload("res://data/LabDB.gd")
 const TrackDB := preload("res://data/TrackDB.gd")
 const Outpost := preload("res://Outpost.gd")
 const OutpostDB := preload("res://data/OutpostDB.gd")
-const Gear := preload("res://Gear.gd")
-const GearGen := preload("res://GearGen.gd")
+const Parts := preload("res://Parts.gd")
 const Drops := preload("res://Drops.gd")
 const Loot := preload("res://Loot.gd")
 const RarityDB := preload("res://data/RarityDB.gd")
@@ -22,7 +21,7 @@ const RunArt := preload("res://ui/RunArt.gd")
 
 const OT0: int = 1767225600
 ## Run fx keys TowerState reads through pf() (research fx must be among them).
-const PF_KEYS: Array = ["range", "crit", "rate", "dr", "shield", "boss", "interest"]
+const PF_KEYS: Array = ["range", "crit", "rate", "dr", "shield", "boss", "interest", "run_cash"]
 
 
 static func run(t) -> void:
@@ -278,14 +277,14 @@ static func _meta_effects(t) -> void:
 	var fg: Dictionary = _save()
 	var r := RandomNumberGenerator.new()
 	r.seed = 3
-	var it: Dictionary = GearGen.roll(r, "drop", {"kind": "weapon", "base": "autocannon", "rarity": "epic", "ilvl": 10}, {})
-	var up0: int = Gear.upgrade_cost(it, fg)
-	var rr0: int = Gear.reroll_cost(it, fg)
-	var sl0: int = Gear.salvage_value(it, fg)
+	var it: Dictionary = Parts.roll(r, "drop", {"base": "brl_autocannon", "slot": "barrel", "rarity": "epic"}, {})
+	var up0: int = Parts.upgrade_cost(it, fg)
+	var rr0: int = Parts.reroll_cost(it, fg)
+	var sl0: int = Parts.salvage_value(it, fg)
 	_lv(fg, "greater_cal", 2)
 	_lv(fg, "reroll_disc", 5)
 	_lv(fg, "reclaim", 5)
-	t._check("P8 forge: Greater Calibration 2 = upgrades -10%, Reroll Discount 5 = rerolls -40%, Reclamation 5 = salvage +50%", Gear.upgrade_cost(it, fg) == int(round(float(Gear.upgrade_cost(it)) * 0.9)) and up0 == Gear.upgrade_cost(it) and Gear.reroll_cost(it, fg) == int(round(float(rr0) * 0.6)) and Gear.salvage_value(it, fg) == int(round(float(sl0) * 1.5)), "%d %d %d / %d %d %d" % [up0, rr0, sl0, Gear.upgrade_cost(it, fg), Gear.reroll_cost(it, fg), Gear.salvage_value(it, fg)])
+	t._check("P8 forge (V3 parts): Greater Calibration 2 = upgrades -10%, Reroll Discount 5 = rerolls -40%, Reclamation 5 = smelt +50%", Parts.upgrade_cost(it, fg) == int(round(float(Parts.upgrade_cost(it)) * 0.9)) and up0 == Parts.upgrade_cost(it) and Parts.reroll_cost(it, fg) == int(round(float(rr0) * 0.6)) and Parts.salvage_value(it, fg) == int(round(float(sl0) * 1.5)), "%d %d %d / %d %d %d" % [up0, rr0, sl0, Parts.upgrade_cost(it, fg), Parts.reroll_cost(it, fg), Parts.salvage_value(it, fg)])
 	# Cache Luck lifts cache contents (same save stream, same caches)
 	var ranks: Array = []
 	for cl in [0, 5]:
@@ -335,46 +334,47 @@ static func _qol(t) -> void:
 	var ls: Dictionary = _save()
 	_lv(ls, "auto_salvage", 1)
 	Labs.cycle_auto_salvage(ls)
-	var n0: int = (Gear.block(ls)["items"] as Dictionary).size()
+	var n0: int = (Parts.block(ls)["items"] as Dictionary).size()
 	var lev: Array = Loot.realize(ls, {"caches": [{"id": "field", "ilvl": 10}, {"id": "field", "ilvl": 10}, {"id": "field", "ilvl": 10}], "items": [], "scrap": 0, "tier": 1, "luck": 0})
 	var kept_common: int = 0
 	for e in _ev(lev, "loot_item"):
 		if String(e["rar"]) == "common":
 			kept_common += 1
 	var auto_c: Array = _ev(lev, "loot_salvaged").filter(func(e: Variant) -> bool: return bool((e as Dictionary).get("auto", false)) and String((e as Dictionary)["rar"]) == "common")
-	t._check("P8b Auto-Salvage: Commons are salvaged for Scrap on arrival, better items are kept", kept_common == 0 and auto_c.size() > 0 and (Gear.block(ls)["items"] as Dictionary).size() == n0 + _ev(lev, "loot_item").size() and Labs.cycle_auto_salvage(ls) == 0, "%d %d" % [kept_common, auto_c.size()])
+	t._check("P8b Auto-Salvage: Commons are salvaged for Scrap on arrival, better parts are kept", kept_common == 0 and auto_c.size() > 0 and (Parts.block(ls)["items"] as Dictionary).size() == n0 + _ev(lev, "loot_item").size() and Labs.cycle_auto_salvage(ls) == 0, "%d %d" % [kept_common, auto_c.size()])
 	# Presets
 	var ps: Dictionary = _save()
 	_lv(ps, "presets", 2)
-	var g: Dictionary = Gear.block(ps)
-	var w0: int = int(g["equipped"]["weapon"])
+	var g: Dictionary = Parts.block(ps)
+	var w0: int = int(g["equipped"]["barrel"][0])
 	var r := RandomNumberGenerator.new()
 	r.seed = 21
-	var w1: int = Gear.add_item(ps, GearGen.roll(r, "drop", {"kind": "weapon", "base": "lance", "rarity": "rare", "ilvl": 10}, {}))
-	var m1: int = Gear.add_item(ps, GearGen.roll(r, "drop", {"kind": "module", "base": "echo", "rarity": "rare", "ilvl": 10}, {}))
-	var sv0: Array = Gear.save_preset(ps, 0)
-	Gear.equip(ps, w1)
-	Gear.equip(ps, m1, 0)
-	Gear.save_preset(ps, 1)
-	var ld0: Array = Gear.load_preset(ps, 0)
-	var back0: bool = int(g["equipped"]["weapon"]) == w0 and int((g["equipped"]["sockets"] as Array)[0]) == 0
-	Gear.load_preset(ps, 1)
-	var back1: bool = int(g["equipped"]["weapon"]) == w1 and int((g["equipped"]["sockets"] as Array)[0]) == m1
-	t._check("P8b presets: save / load swaps the whole loadout; slot 3 needs more research", sv0.size() == 1 and ld0.size() == 1 and back0 and back1 and Gear.save_preset(ps, 2).is_empty())
-	Gear.salvage(ps, m1)
-	Gear.load_preset(ps, 1)
-	t._check("P8b presets: a salvaged Module leaves its socket empty", int((g["equipped"]["sockets"] as Array)[0]) == 0)
+	var w1: int = Parts.add_item(ps, Parts.roll(r, "drop", {"base": "brl_lance", "slot": "barrel", "rarity": "rare"}, {}))
+	var m1: int = Parts.add_item(ps, Parts.roll(r, "drop", {"base": "amm_toxic", "slot": "ammo", "rarity": "rare"}, {}))
+	var sv0: Array = Parts.save_preset(ps, 0)
+	Parts.equip(ps, w1, 0)
+	Parts.equip(ps, m1)
+	Parts.save_preset(ps, 1)
+	var ld0: Array = Parts.load_preset(ps, 0)
+	var back0: bool = int(g["equipped"]["barrel"][0]) == w0 and (g["equipped"]["ammo"] as Array).is_empty()
+	Parts.load_preset(ps, 1)
+	var back1: bool = int(g["equipped"]["barrel"][0]) == w1 and int((g["equipped"]["ammo"] as Array)[0]) == m1
+	t._check("P8b presets: save / load swaps the whole loadout; slot 3 needs more research", sv0.size() == 1 and ld0.size() == 1 and back0 and back1 and Parts.save_preset(ps, 2).is_empty())
+	Parts.unequip(ps, "ammo", 0)
+	Parts.salvage(ps, m1)
+	Parts.load_preset(ps, 1)
+	t._check("P8b presets: a smelted part leaves its slot empty", (g["equipped"]["ammo"] as Array).is_empty())
 	# Bulk Upgrade
 	var bu: Dictionary = _save(1_000_000)
 	_lv(bu, "bulk_upgrade", 1)
-	var it: Dictionary = GearGen.roll(r, "drop", {"kind": "weapon", "base": "autocannon", "rarity": "common", "ilvl": 10}, {})
-	var u: int = Gear.add_item(bu, it)
-	var up5: Array = Gear.upgrade_n(bu, u, 5)
-	var upm: Array = Gear.upgrade_n(bu, u, 0)
-	t._check("P8b Bulk Upgrade: x5 = five levels, MAX = up to the rarity cap", _ev(up5, "gear_upgrade").size() == 5 and int(Gear.item(bu, u)["lvl"]) == Gear.max_lvl_of("common") and not upm.is_empty())
+	var it: Dictionary = Parts.roll(r, "drop", {"base": "brl_autocannon", "slot": "barrel", "rarity": "common"}, {})
+	var u: int = Parts.add_item(bu, it)
+	var up5: Array = Parts.upgrade_n(bu, u, 5)
+	var upm: Array = Parts.upgrade_n(bu, u, 0)
+	t._check("P8b Bulk Upgrade: x5 = five levels, MAX = up to the rarity cap", _ev(up5, "part_upgrade").size() == 5 and int(Parts.item(bu, u)["lvl"]) == Parts.max_lvl_of("common") and not upm.is_empty())
 	var nb: Dictionary = _save(1_000_000)
-	var u2: int = Gear.add_item(nb, GearGen.roll(r, "drop", {"kind": "weapon", "base": "autocannon", "rarity": "common", "ilvl": 10}, {}))
-	t._check("P8b Bulk Upgrade: without the research one click is one level", _ev(Gear.upgrade_n(nb, u2, 5), "gear_upgrade").size() == 1)
+	var u2: int = Parts.add_item(nb, Parts.roll(r, "drop", {"base": "brl_autocannon", "slot": "barrel", "rarity": "common"}, {}))
+	t._check("P8b Bulk Upgrade: without the research one click is one level", _ev(Parts.upgrade_n(nb, u2, 5), "part_upgrade").size() == 1)
 	# Auto-Buy in a run
 	var ab: Dictionary = _save()
 	_lv(ab, "auto_buy", 1)

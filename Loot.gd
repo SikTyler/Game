@@ -1,8 +1,8 @@
 extends RefCounted
-## Banking a run's loot (V2 P5). The run recorded tokens (Drops: items from
-## elites, caches from bosses / Couriers / wave clears); here they become
-## gear on the meta RNG (Gear's op stream: the same save + the same loot give
-## the same items), at the disclosed drop odds shifted by luck, with visible
+## Banking a run's loot (V2 P5, V3 parts). The run recorded tokens (Drops:
+## items from elites, caches from bosses / Couriers / wave clears); here they
+## become PARTS on the meta RNG (Parts' op stream: the same save + the same
+## loot give the same parts), at the disclosed drop odds shifted by luck, with visible
 ## pity counting every rolled item. A cache's best item is lifted to its
 ## guaranteed rarity if the roll fell short (that also resets the pity it
 ## satisfies). A full inventory salvages the overflow for Scrap.
@@ -12,8 +12,7 @@ extends RefCounted
 ##   {t: "loot_salvaged", rar, scrap}         (inventory full)
 ##   {t: "loot_banked", scrap}                (all Scrap: loose + caches + salvage)
 
-const Gear := preload("res://Gear.gd")
-const GearGen := preload("res://GearGen.gd")
+const Parts := preload("res://Parts.gd")
 const RarityDB := preload("res://data/RarityDB.gd")
 const LootDB := preload("res://data/LootDB.gd")
 const Labs := preload("res://Labs.gd")
@@ -27,11 +26,16 @@ static func luck_of(s: Dictionary, loot: Dictionary) -> float:
 	return float(int(loot.get("luck", 0))) + float(Labs.level(s, "appraisal")) + shrine
 
 
+## Perk-tier luck of a drop: deeper waves (item level) roll better perks.
+static func tier_luck(ilvl: int) -> float:
+	return float(clampi(ilvl, 1, 200)) / 15.0
+
+
 ## Turn the run's tokens into items in the save. `scrap_mult` scales the
 ## Scrap (Reforge Scrapper). Returns events.
 static func realize(s: Dictionary, loot: Dictionary, scrap_mult: float = 1.0) -> Array:
 	var ev: Array = []
-	var g: Dictionary = Gear.block(s)
+	var g: Dictionary = Parts.block(s)
 	var luck: float = luck_of(s, loot)
 	var tier: int = maxi(1, int(loot.get("tier", 1)))
 	var scrap: int = maxi(0, int(loot.get("scrap", 0)))
@@ -40,7 +44,7 @@ static func realize(s: Dictionary, loot: Dictionary, scrap_mult: float = 1.0) ->
 		var cd: Dictionary = c
 		var id: String = String(cd.get("id", "field"))
 		var d: Dictionary = LootDB.get_def(id)
-		var r: RandomNumberGenerator = Gear._rng(g)
+		var r: RandomNumberGenerator = Parts._rng(g)
 		var sc_rng: Array = d["scrap"]
 		var cs: int = 0
 		if int(sc_rng[1]) > 0:
@@ -48,8 +52,9 @@ static func realize(s: Dictionary, loot: Dictionary, scrap_mult: float = 1.0) ->
 		scrap += cs
 		var rolled: Array = []
 		var cluck: float = luck + 2.0 * float(Labs.level(s, "cache_luck"))   # V2 P8 Cache Luck
+		var tl: float = tier_luck(int(cd.get("ilvl", 1)))
 		for k in int(d["items"]):
-			rolled.append(GearGen.roll(r, "drop", {"ilvl": int(cd.get("ilvl", 1)), "luck": cluck, "bans": g["bans"]}, g["pity"]))
+			rolled.append(Parts.roll(r, "drop", {"luck": cluck, "tluck": tl}, g["pity"], g["bans"]))
 		var mn: String = String(d["min"])
 		if mn != "" and not rolled.is_empty():
 			var best: int = 0
@@ -57,8 +62,10 @@ static func realize(s: Dictionary, loot: Dictionary, scrap_mult: float = 1.0) ->
 				if RarityDB.rank(String((rolled[k] as Dictionary)["rar"])) > RarityDB.rank(String((rolled[best] as Dictionary)["rar"])):
 					best = k
 			if not RarityDB.at_least(String((rolled[best] as Dictionary)["rar"]), mn):
-				rolled[best] = GearGen.roll(r, "drop", {"kind": String((rolled[best] as Dictionary)["kind"]), "base": String((rolled[best] as Dictionary)["base"]), "rarity": mn, "ilvl": int(cd.get("ilvl", 1)), "bans": g["bans"]}, {})
-				GearGen.note_pity(g["pity"], mn, "drop")
+				rolled[best] = Parts.roll(r, "drop", {"slot": String((rolled[best] as Dictionary)["slot"]), "base": String((rolled[best] as Dictionary)["base"]), "rarity": mn, "tluck": tl}, {}, g["bans"])
+				for pg in ["e", "l", "m"]:
+					if RarityDB.at_least(mn, String((RarityDB.PITY[pg] as Dictionary)["min"])):
+						(g["pity"] as Dictionary)[pg] = 0
 		rolled.sort_custom(func(a: Variant, b: Variant) -> bool: return RarityDB.rank(String((a as Dictionary)["rar"])) < RarityDB.rank(String((b as Dictionary)["rar"])))
 		var uids: Array = []
 		var cev: Array = []
@@ -72,7 +79,7 @@ static func realize(s: Dictionary, loot: Dictionary, scrap_mult: float = 1.0) ->
 		ev.append_array(cev)
 	for x in (loot.get("items", []) if loot.get("items", []) is Array else []):
 		var xd: Dictionary = x
-		var it2: Dictionary = GearGen.roll(Gear._rng(g), "drop", {"ilvl": int(xd.get("ilvl", 1)), "luck": luck, "bans": g["bans"]}, g["pity"])
+		var it2: Dictionary = Parts.roll(Parts._rng(g), "drop", {"luck": luck, "tluck": tier_luck(int(xd.get("ilvl", 1)))}, g["pity"], g["bans"])
 		var e2: Dictionary = _keep(s, it2, "", String(xd.get("src", "elite")))
 		items_ev.append_array(e2["ev"])
 		scrap += int(e2["scrap"])
@@ -90,12 +97,12 @@ static func _keep(s: Dictionary, it: Dictionary, cache: String, src: String) -> 
 	it["new"] = true
 	# V2 P8b Auto-Salvage: low rarities turn into Scrap on arrival
 	if RarityDB.rank(String(it["rar"])) < Labs.auto_salvage_level(s):
-		var va: int = Gear.salvage_value(it, s)
+		var va: int = Parts.salvage_value(it, s)
 		return {"uid": 0, "scrap": va, "ev": [{"t": "loot_salvaged", "rar": String(it["rar"]), "scrap": va, "auto": true}]}
-	var uid: int = Gear.add_item(s, it)
+	var uid: int = Parts.add_item(s, it)
 	if uid > 0:
-		return {"uid": uid, "scrap": 0, "ev": [{"t": "loot_item", "uid": uid, "rar": String(it["rar"]), "kind": String(it["kind"]), "base": String(it["base"]), "src": src, "cache": cache}]}
-	var v: int = Gear.salvage_value(it, s)
+		return {"uid": uid, "scrap": 0, "ev": [{"t": "loot_item", "uid": uid, "rar": String(it["rar"]), "kind": String(it["slot"]), "slot": String(it["slot"]), "base": String(it["base"]), "src": src, "cache": cache}]}
+	var v: int = Parts.salvage_value(it, s)
 	return {"uid": 0, "scrap": v, "ev": [{"t": "loot_salvaged", "rar": String(it["rar"]), "scrap": v}]}
 
 

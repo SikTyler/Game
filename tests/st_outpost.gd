@@ -15,7 +15,7 @@ const OutpostDB := preload("res://data/OutpostDB.gd")
 const AdjDB := preload("res://data/AdjDB.gd")
 const BaseMeta := preload("res://BaseMeta.gd")
 const TowerState := preload("res://TowerState.gd")
-const Gear := preload("res://Gear.gd")
+const Parts := preload("res://Parts.gd")
 const Loot := preload("res://Loot.gd")
 
 const OT0: int = 1767225600
@@ -139,7 +139,7 @@ static func _production(t) -> void:
 	var uc: int = Outpost.cost("mill", 1)
 	var c1: int = int(nb["coins"])
 	var uev: Array = Outpost.upgrade(nb, tu, OT0 + 3720)
-	t._check("OP upgrade cost x1.6^(L-1), instant, L2 = +25%", _ev(uev, "upgrade_done").size() == 1 and int(nb["coins"]) == c1 - uc and Outpost.cost("mill", 3) == int(round(500.0 * 2.56)) and is_equal_approx(Outpost.nominal_rate(nb, tu), 1.25 * nr1))
+	t._check("OP upgrade cost x growth^(L-1) (Mill 1.45, others 1.6), instant; Mill L2 = x1.3 (V2 P10)", _ev(uev, "upgrade_done").size() == 1 and int(nb["coins"]) == c1 - uc and Outpost.cost("mill", 3) == int(round(500.0 * 1.45 * 1.45)) and Outpost.cost("refinery", 3) == int(round(1500.0 * 2.56)) and is_equal_approx(Outpost.nominal_rate(nb, tu), 1.3 * nr1))
 	t._check("OP max level = min(10, Relay L + 2)", Outpost.max_lvl(nb, "mill") == 3)
 	# Deep Mine on the start vein, linked by Conduits; lit Lamps (decor cap)
 	var gm: Dictionary = _save()
@@ -294,7 +294,7 @@ static func _core(t) -> void:
 	fw["outpost"]["relay_lvl"] = 8
 	var fu: String = _b(fw, "forgeworks", 7, 8)
 	fw["outpost"]["buildings"][fu]["lvl"] = 5
-	t._check("P6 core: Forge Works L5 = -10% Forge costs", int(Gear.forge_cost(fw)["coins"]) == int(round(1500.0 * 0.9)))
+	t._check("V3 core: Forge Works L5 = -10% Fabricator prices", Parts.fab_price(fw, {"rar": "rare"}) == int(round(float(Parts.FAB_PRICE["rare"]) * 0.9)))
 	var sh: Dictionary = _save()
 	sh["outpost"]["relay_lvl"] = 8
 	var su: String = _b(sh, "shrine", 7, 8)
@@ -326,9 +326,9 @@ static func _scavengers(t) -> void:
 	t._check("P6 scavenge: a Scavenger Post finds an item every 6 h", absf(float(sv["outpost"]["buildings"][su]["stored"]) - 1.0) < 0.01)
 	Outpost.tick(sv, OT0 + 72 * 3600)
 	t._check("P6 scavenge: ... storing up to 4", is_equal_approx(float(sv["outpost"]["buildings"][su]["stored"]), 4.0) and is_equal_approx(Outpost.cap(sv, su), 4.0))
-	var n0: int = Gear.count(sv)
+	var n0: int = Parts.count(sv)
 	var ev: Array = Outpost.collect(sv, su, OT0 + 72 * 3600)
-	t._check("P6 scavenge: collecting banks 4 items like run loot (NEW, at 60% of the best wave)", Gear.count(sv) == n0 + 4 and _ev(ev, "loot_item").size() == 4 and _ev(ev, "collect").size() == 1 and Outpost.scav_ilvl(sv) == 30)
+	t._check("P6 scavenge: collecting banks 4 parts like run loot (NEW, at 60% of the best wave)", Parts.count(sv) == n0 + 4 and _ev(ev, "loot_item").size() == 4 and _ev(ev, "collect").size() == 1 and Outpost.scav_ilvl(sv) == 30)
 	var dn: String = _b(sv, "scav_den", 12 - 3, 8)
 	sv["outpost"]["buildings"][dn]["stored"] = 1.0
 	sv["outpost"]["buildings"][dn]["last_tick"] = OT0 + 72 * 3600

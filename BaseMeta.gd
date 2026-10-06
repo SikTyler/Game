@@ -6,7 +6,7 @@ extends RefCounted
 ## Shape:
 ##   {version: 5, coins, scrap, shards, runs, best_wave, tier,
 ##    best_wave_by_tier: {"N": w}, tiers_rewarded: [N], best_coin_rate, speed,
-##    core: {lvl, look}  (Cores.gd), gear: {items, equipped, pity, ...} (Gear.gd),
+##    core: {lvl, look}  (Cores.gd), parts: {items, equipped, pity, fab, smelt ...} (Parts.gd),
 ##    research: {lvls, running} (Labs.gd), outpost (Outpost.gd),
 ##    reforge (Reforge.gd), insight: {id: n} (PickDB),
 ##    missions, streak, last_seen, stats, history, settings, endless,
@@ -23,7 +23,7 @@ const Cores := preload("res://Cores.gd")
 const PickDB := preload("res://data/PickDB.gd")
 const Outpost := preload("res://Outpost.gd")
 const Reforge := preload("res://Reforge.gd")
-const Gear := preload("res://Gear.gd")
+const Parts := preload("res://Parts.gd")
 const Loot := preload("res://Loot.gd")
 
 const VERSION: int = 5
@@ -35,7 +35,7 @@ static func default_save() -> Dictionary:
 		"runs": 0, "best_wave": 0, "tier": 1, "best_wave_by_tier": {"1": 0},
 		"tiers_rewarded": [], "best_coin_rate": 0.0, "speed": 1.0,
 		"core": Cores.default_block(),
-		"gear": Gear.default_block(),
+		"parts": Parts.default_block(),
 		"research": Labs.default_block(),
 		"missions": {"day": -1, "list": [], "bonus_claimed": false},
 		"streak": {"day_idx": 0, "last_day": -1, "loops": 0},
@@ -99,7 +99,17 @@ static func normalize(s_in: Dictionary) -> Dictionary:
 	d["outpost"] = Outpost.normalize_block(s.get("outpost", null))
 	d["reforge"] = Reforge.normalize_block(s.get("reforge", null))
 	d["core"] = Cores.normalize_block(s.get("core", null), Cores.max_level(d))
-	d["gear"] = Gear.normalize_block(s.get("gear", null), Cores.level(d))
+	# V3 parts: a V2 gear block (no parts yet) is refunded as Scrap, once
+	if s.get("gear", null) is Dictionary and not (s.get("parts", null) is Dictionary):
+		var mig: Dictionary = {"gear": s["gear"], "scrap": 0}
+		var refund: int = Parts.migrate_gear(mig)
+		d["scrap"] = int(d["scrap"]) + refund
+		d["parts_refund"] = refund
+		d["parts"] = Parts.default_block()
+	else:
+		d["parts"] = Parts.normalize_block(s.get("parts", null))
+		if s.has("parts_refund"):
+			d["parts_refund"] = maxi(0, int(s["parts_refund"]))
 	# research
 	var labs_in: Dictionary = s.get("research", {}) if s.get("research", {}) is Dictionary else {}
 	var lv_in: Dictionary = labs_in.get("lvls", {}) if labs_in.get("lvls", {}) is Dictionary else {}

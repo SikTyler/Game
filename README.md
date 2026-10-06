@@ -1,6 +1,6 @@
 # Corehold
 
-A mass-horde tower defense × roguelite × idle base-builder for PC, built in Godot. Defend the Core against waves of hundreds to tens of thousands of bodies, draft weapons and perks as you level, forge procedural gear, and grow your Outpost between runs.
+A mass-horde tower defense × roguelite × idle base-builder for PC, built in Godot. Defend the Core against waves of hundreds to tens of thousands of bodies, draft weapons and perks as you level, build your Weapon and Core from procedurally drawn parts (barrels, ammo, scopes, platings, generators …), and grow your Outpost between runs.
 
 ## Play it
 
@@ -25,8 +25,8 @@ In the editor: Project → Export → "Windows Desktop" or "Linux" (install the 
 | `project.godot`, `Main.tscn`, `Main.gd` | Project entry: the one scene and its controller (input, screens, juice). |
 | `TowerState.gd` | The run simulation (waves, weapons, drafts, economy) — the game's rules live here, the view never mutates them. |
 | `HordeWorld.cs`, `EnemyStore.gd`, `EnemyHash.gd` | The C# crowd sim (flow field, squeeze, contact) and its GDScript mirror / spatial hash. |
-| `BaseMeta.gd`, `Outpost.gd`, `Labs.gd`, `Gear*.gd`, `Loot.gd`, `Cores.gd`, `Reforge.gd`, … | Meta systems: save, Outpost, research, gear / Forge, loot, Core levels, prestige. |
-| `data/` | Content tables (weapons, buildings, perks, research, gear affixes, loot, enemies …). |
+| `BaseMeta.gd`, `Outpost.gd`, `Labs.gd`, `Parts.gd`, `PartVis.gd`, `Loot.gd`, `Cores.gd`, `Reforge.gd`, … | Meta systems: save, Outpost, research, Weapon / Core parts (design/V3_PARTS.md) and their art, loot, Core levels, prestige. |
+| `data/` | Content tables (weapons, buildings, perks, research, parts and perk affixes, loot, enemies …). |
 | `ui/`, `vfx/` | Code-drawn screens and widgets (`ui/Kit.gd` is the neon UI kit) and effects. |
 | `art/`, `audio/`, `fonts/` | SVG art, WAV effects / music (`audio/recipes.json` = how they were made), bundled fonts. |
 | `tests/`, `selftest.gd`, `uitest.gd`, `smoke.gd`, `horde_fp.gd`, `playtest.gd` | Test suites, determinism fingerprint, and the balance playtest bot. |

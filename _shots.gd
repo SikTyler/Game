@@ -54,65 +54,80 @@ func _initialize() -> void:
 	var s: Dictionary = main.save
 	main.set_tab("play")
 	await _shot("%s/02_home_outpost.png" % outdir)
-	# V2 P4 gear: a varied inventory (seeded drops), an Epic weapon and modules equipped
-	var GR = load("res://Gear.gd")
-	var GG = load("res://GearGen.gd")
+	# V3 parts: a varied inventory (seeded drops), a Legendary Receiver with two
+	# barrels and a Legendary Heart, every open slot filled
+	var PT = load("res://Parts.gd")
+	var RDB = load("res://data/RarityDB.gd")
 	var rr := RandomNumberGenerator.new()
 	rr.seed = 4242
-	var best: int = 0
-	for k in 26:
-		var it: Dictionary = GG.roll(rr, "drop", {"ilvl": 70, "luck": 6.0}, {})
+	for k in 40:
+		var it: Dictionary = PT.roll(rr, "drop", {"luck": 8.0}, {})
 		it["lvl"] = 1 + (k * 7) % 14
 		it["mw"] = int(it["lvl"]) / 5
-		var u: int = GR.add_item(s, it)
-		if String(it["kind"]) == "weapon" and (best == 0 or load("res://data/RarityDB.gd").rank(String(it["rar"])) > load("res://data/RarityDB.gd").rank(String(GR.item(s, best)["rar"]))):
-			best = u
-	GR.equip(s, best)
-	var socks: int = 0
-	for u in GR.uids(s, "module"):
-		if socks < GR.sockets_for(Cores.level(s)):
-			GR.equip(s, int(u))
-			socks += 1
-	Cores.set_look(s, "shell", 5)
-	Cores.set_look(s, "trim", 2)
+		PT.add_item(s, it)
+	PT.equip(s, PT.add_item(s, PT.roll(rr, "drop", {"slot": "receiver", "base": "rcv_heavy", "rarity": "legendary"}, {})))
+	PT.equip(s, PT.add_item(s, PT.roll(rr, "drop", {"slot": "heart", "base": "hrt_bastion", "rarity": "legendary"}, {})))
+	var PDB = load("res://data/PartDB.gd")
+	for side in ["weapon", "core"]:
+		var lo: Dictionary = PT.layout(s, side)
+		for sl in (PDB.WEAPON_SLOTS if side == "weapon" else PDB.CORE_SLOTS):
+			if PDB.is_chassis(String(sl)):
+				continue
+			var have: Array = PT.uids(s, String(sl))
+			for k in mini(int(lo.get(sl, 0)), have.size()):
+				PT.equip(s, int(have[k]), k)
+			for k in range(have.size(), int(lo.get(sl, 0))):
+				PT.equip(s, PT.add_item(s, PT.roll(rr, "drop", {"slot": String(sl), "luck": 6.0}, {})), k)
+	Cores.set_look(s, "pat", 2)
+	main.set_tab("weapon")
+	main.arm_slot["weapon"] = "barrel:1"
+	main.arm_sel = 0
+	main._rebuild_ui()
+	await _shot("%s/03_weapon.png" % outdir)
 	main.set_tab("core")
-	await _shot("%s/03_core.png" % outdir)
-	main.core_tab = "look"
+	main.arm_slot["core"] = "plating:0"
+	main.arm_sel = 0
+	main._rebuild_ui()
+	await _shot("%s/03a_core.png" % outdir)
+	main.arm_tab["core"] = "look"
 	main._rebuild_ui()
 	await _shot("%s/03b_core_look.png" % outdir)
-	# V2 P8b: Loadout Presets (two saved loadouts) + the Forge's QOL switches
-	for kq in ["presets", "bulk_upgrade", "auto_salvage"]:
+	main.arm_tab["core"] = "levels"
+	main._rebuild_ui()
+	await _shot("%s/03d_core_levels.png" % outdir)
+	main.arm_tab["core"] = "build"
+	# V2 P8b: Loadout Presets (two saved loadouts) + QOL switches
+	for kq in ["presets", "bulk_upgrade", "auto_salvage", "brand_contracts"]:
 		s["research"]["lvls"][kq] = 2 if kq == "presets" else 1
-	GR.save_preset(s, 0)
-	main.core_tab = "presets"
+	PT.save_preset(s, 0)
+	main.set_tab("weapon")
+	main.arm_tab["weapon"] = "presets"
 	main._rebuild_ui()
-	await _shot("%s/03c_core_presets.png" % outdir)
-	main.core_tab = "loadout"
-	main.core_sock = 1
+	await _shot("%s/03c_presets.png" % outdir)
+	s["scrap"] = 9000
+	main.arm_tab["weapon"] = "crates"
+	main.arm_crate_slot = "barrel"
 	main._rebuild_ui()
-	main.set_tab("forge")
-	main.forge_sel = best
-	main._rebuild_ui()
-	await _shot("%s/04_forge.png" % outdir)
+	await _shot("%s/04e_crates.png" % outdir)
+	main.arm_crate_slot = ""
+	main.arm_tab["weapon"] = "build"
+	main.arm_slot["weapon"] = "ammo:0"
+	main.arm_sel = 0
 	Labs.cycle_auto_salvage(s)
 	main._rebuild_ui()
-	await _shot("%s/04d_forge_qol.png" % outdir)
+	await _shot("%s/04d_parts_qol.png" % outdir)
 	Labs.cycle_auto_salvage(s)
-	for kq in ["presets", "bulk_upgrade", "auto_salvage"]:
+	for kq in ["presets", "bulk_upgrade", "auto_salvage", "brand_contracts"]:
 		s["research"]["lvls"][kq] = 0
-	s["scrap"] = 5000
-	GR.reroll(s, best, 0)
+	var rsel: int = int(PT.equipped(s, "receiver")[0]["uid"])
+	main.arm_slot["weapon"] = "receiver:0"
+	main.arm_sel = rsel
+	PT.reroll(s, rsel, 0)
 	main._rebuild_ui()
-	await _shot("%s/04b_forge_reroll.png" % outdir)
-	GR.reroll_choose(s, -1)
-	main.forge_kind = "module"
-	main.forge_filter = "module"
-	main.forge_sel = int(GR.uids(s, "module")[0])
-	main._rebuild_ui()
-	await _shot("%s/04c_forge_modules.png" % outdir)
-	main.forge_kind = "weapon"
-	main.forge_filter = "all"
-	main.core_sock = -1
+	await _shot("%s/04b_part_reroll.png" % outdir)
+	PT.reroll_choose(s, -1)
+	main.arm_slot["weapon"] = "barrel:0"
+	main.arm_sel = 0
 	# Outpost: developed (the bot's build plan over a few sessions), armed ghost, plot
 	s["coins"] = 400000
 	var t: int = T0
@@ -150,6 +165,35 @@ func _initialize() -> void:
 	main.mouse_pos = Vector2(-1, -1)
 	main._rebuild_ui()
 	await _shot("%s/05c_outpost_plot.png" % outdir)
+	main.op_sel = ""
+	# V3 workshops: the Fabricator shop and the Smelter queue
+	for wid in ["fabricator", "smelter"]:
+		if Outpost.level_of(s, wid) <= 0:
+			s["coins"] = int(s["coins"]) + 50000
+			var sp: Vector2i = Bot._op_spot(s, wid)
+			if sp.x >= 0:
+				Outpost.place(s, wid, sp.x, sp.y, 0, main.now_override)
+				Outpost.tick(s, main.now_override)
+	var PT2 = load("res://Parts.gd")
+	s["scrap"] = 6000
+	var fu: String = OV.uid_of(main, "fabricator")
+	if fu != "":
+		s["outpost"]["buildings"][fu]["lvl"] = 5
+	main.op_sel = fu
+	main._rebuild_ui()
+	await _shot("%s/05e_outpost_fabricator_sel.png" % outdir, false)
+	main.set_overlay("fabricator")
+	await _shot("%s/05f_fabricator.png" % outdir)
+	main.set_overlay("")
+	var smelt_n: int = 0
+	for u in PT2.uids(s):
+		if smelt_n >= 2:
+			break
+		if not PT2.is_equipped(s, int(u)) and PT2.smelt(s, int(u), main.now_override - 300 * smelt_n).size() > 0:
+			smelt_n += 1
+	main.set_overlay("smelter")
+	await _shot("%s/05g_smelter.png" % outdir)
+	main.set_overlay("")
 	main.op_sel = ""
 	# research / missions
 	Labs.start(s, "dmg", main.now_override - 120)

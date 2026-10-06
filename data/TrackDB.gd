@@ -19,7 +19,6 @@ const DEFS: Dictionary = {
 	"a_crit":   {"tree": "attack", "name": "Crit Chance", "base": 50.0, "growth": 1.42, "cap": 20, "step": {"crit": 0.015}, "desc": "+1.5% crit chance"},
 	"a_critd":  {"tree": "attack", "name": "Crit Damage", "base": 50.0, "growth": 1.42, "cap": 20, "step": {"crit_dmg": 0.10}, "desc": "+10% crit damage"},
 	"a_range":  {"tree": "attack", "name": "Range", "base": 60.0, "growth": 1.45, "cap": 15, "step": {"range": 0.10}, "desc": "+0.1 cell Weapon range"},
-	"a_multi":  {"tree": "attack", "name": "Multishot", "base": 300.0, "growth": 2.20, "cap": 3, "step": {"multishot": 1.0}, "desc": "+1 Weapon target per volley"},
 	"a_pierce": {"tree": "attack", "name": "Pierce", "base": 120.0, "growth": 1.80, "cap": 5, "step": {"pierce": 1.0}, "desc": "Weapon shots pierce +1 body", "unlock": ["enh_theory", 3]},
 	"a_splash": {"tree": "attack", "name": "Splash", "base": 60.0, "growth": 1.45, "cap": 10, "step": {"splash": 0.05}, "desc": "+0.05 cell blast radius on splash Weapons"},
 	"a_chain":  {"tree": "attack", "name": "Chain & Bounce", "base": 150.0, "growth": 1.90, "cap": 4, "step": {"chain": 1.0, "bounce": 1.0}, "desc": "+1 chain jump and +1 ricochet", "unlock": ["enh_theory", 2]},
@@ -30,9 +29,9 @@ const DEFS: Dictionary = {
 	"range":    {"tree": "attack", "name": "Long Barrel", "od": true, "base": 300.0, "growth": 2.5, "cap": 4, "step": {}, "desc": "+0.75 Core range", "minus": "-8% Core attack rate"},
 	# ---- Defense ---------------------------------------------------------
 	"d_hp":     {"tree": "defense", "name": "Max HP", "base": 40.0, "growth": 1.40, "cap": 25, "step": {"core_hp": 0.05}, "desc": "+5% Core max HP"},
-	"d_regen":  {"tree": "defense", "name": "Regen", "base": 40.0, "growth": 1.40, "cap": 20, "step": {"regen": 0.10}, "desc": "+10% Core regen"},
-	"d_armor":  {"tree": "defense", "name": "Armor", "base": 50.0, "growth": 1.45, "cap": 15, "step": {"armor": 1.0}, "desc": "+1 armor (flat off every hit)"},
-	"d_dr":     {"tree": "defense", "name": "Damage Reduction", "base": 60.0, "growth": 1.45, "cap": 20, "step": {"dr": 0.01}, "desc": "-1% damage taken (60% cap)"},
+	"d_regen":  {"tree": "defense", "name": "Regen", "base": 40.0, "growth": 1.40, "cap": 20, "step": {"regen": 0.06}, "desc": "+6% Core regen"},
+	"d_armor":  {"tree": "defense", "name": "Armor", "base": 50.0, "growth": 1.45, "cap": 10, "step": {"armor": 1.0}, "desc": "+1 armor (flat off every hit)"},
+	"d_dr":     {"tree": "defense", "name": "Damage Reduction", "base": 60.0, "growth": 1.45, "cap": 20, "step": {"dr": 0.01}, "desc": "-1% damage taken (40% cap)"},
 	"d_shield": {"tree": "defense", "name": "Shield", "base": 60.0, "growth": 1.45, "cap": 15, "step": {"shield": 20.0}, "desc": "+20 shield, +2 shield regen"},
 	"d_thorns": {"tree": "defense", "name": "Thorns", "base": 50.0, "growth": 1.42, "cap": 15, "step": {"reflect": 0.05}, "desc": "Reflect +5% of Core hits to the attacker", "unlock": ["enh_theory", 3]},
 	"d_steal":  {"tree": "defense", "name": "Lifesteal", "base": 70.0, "growth": 1.50, "cap": 10, "step": {"lifesteal": 0.002}, "desc": "+0.2% of damage dealt heals the Core", "unlock": ["enh_theory", 1]},
@@ -45,7 +44,7 @@ const DEFS: Dictionary = {
 	"e_flow":   {"tree": "economy", "name": "Cash Flow", "base": 40.0, "growth": 1.40, "cap": 20, "step": {"cash": 0.05}, "desc": "+5% cash per second"},
 	"e_int":    {"tree": "economy", "name": "Interest", "base": 60.0, "growth": 1.45, "cap": 10, "step": {"interest": 0.005}, "desc": "+0.5% wave interest"},
 	"e_icap":   {"tree": "economy", "name": "Interest Cap", "base": 50.0, "growth": 1.42, "cap": 15, "step": {"icap": 0.15}, "desc": "+15% interest cap", "unlock": ["enh_theory", 3]},
-	"e_xp":     {"tree": "economy", "name": "XP Gain", "base": 40.0, "growth": 1.40, "cap": 20, "step": {"xp": 0.10}, "desc": "+10% XP (faster drafts)"},
+	"e_xp":     {"tree": "economy", "name": "XP Gain", "base": 40.0, "growth": 1.40, "cap": 20, "step": {"xp": 0.05}, "desc": "+5% XP (faster drafts)"},
 	"e_loot":   {"tree": "economy", "name": "Loot Luck", "base": 120.0, "growth": 1.80, "cap": 5, "step": {"loot_luck": 1.0}, "desc": "+1 luck on the loot this run banks"},
 	"e_draft":  {"tree": "economy", "name": "Draft Luck", "base": 120.0, "growth": 1.80, "cap": 5, "step": {"draft_luck": 1.0}, "desc": "+1 draft luck (rarer cards)"},
 	"e_free":   {"tree": "economy", "name": "Lucky Purchase", "base": 80.0, "growth": 1.50, "cap": 10, "step": {"free_buy": 0.03}, "desc": "+3% chance an enhancement is free", "unlock": ["enh_theory", 1]},
@@ -55,7 +54,7 @@ const DEFS: Dictionary = {
 }
 
 ## Display order per tree (standard tracks first, Overdrives last).
-const IDS: Array = ["a_dmg", "a_rate", "a_crit", "a_critd", "a_range", "a_multi", "a_pierce", "a_splash", "a_chain", "a_boss", "a_exec", "dmg", "rate", "range",
+const IDS: Array = ["a_dmg", "a_rate", "a_crit", "a_critd", "a_range", "a_pierce", "a_splash", "a_chain", "a_boss", "a_exec", "dmg", "rate", "range",
 	"d_hp", "d_regen", "d_armor", "d_dr", "d_shield", "d_thorns", "d_steal", "d_knock", "d_slow", "d_last", "armor",
 	"e_kill", "e_flow", "e_int", "e_icap", "e_xp", "e_loot", "e_draft", "e_free", "e_scrap", "e_coin", "eco"]
 ## The five Overdrive ids (V1 tracks, kept for the trade-offs + Reforge head_start).

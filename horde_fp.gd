@@ -26,11 +26,12 @@ static func board(sealed: bool = false) -> Dictionary:
 		for c in TS.CORE_RING:
 			out[int(c)] = "barricade"
 	return out
-## V2 P4: every Weapon frame, equipped through the gear save (Common, L1,
-## no perks, quirk-free "standard" brand). The Lance and Pulse Nova run on the
-## Wall-sealed board (squeeze path).
-const FRAMES: Array = ["autocannon", "slag", "lance", "pulse", "scatter", "rail", "arc", "flame", "missiles", "saw"]
-const SEALED: Array = ["lance", "pulse"]
+## V3: every base barrel archetype, installed through the parts save (Common,
+## L1, no perks, Common Receiver); the last run is a Legendary Receiver with
+## two barrels (multi-directional fire). The Lance and Blast Emitter run on
+## the Wall-sealed board (squeeze path).
+const FRAMES: Array = ["brl_autocannon", "brl_lobber", "brl_lance", "brl_blast", "brl_scatter", "brl_sniper", "brl_arc", "brl_flame", "brl_missile", "brl_saw", "brl_minigun", "twin"]
+const SEALED: Array = ["brl_lance", "brl_blast"]
 
 
 func _initialize() -> void:
@@ -58,11 +59,15 @@ static func _dicts(S) -> Array:
 static func run_one(core: String) -> String:
 	var BM = load("res://BaseMeta.gd")
 	var TS = load("res://TowerState.gd")
-	var GR = load("res://Gear.gd")
+	var PT = load("res://Parts.gd")
 	var save: Dictionary = BM.default_save()
 	save["core"] = {"lvl": 3}
 	save = BM.normalize(save)
-	GR.equip(save, GR.add_item(save, GR.make("weapon", core)))
+	if core == "twin":
+		PT.equip(save, PT.add_item(save, PT.make("rcv_standard", "legendary")))
+		PT.equip(save, PT.add_item(save, PT.make("brl_sniper")))
+	else:
+		PT.equip(save, PT.add_item(save, PT.make(core)), 0)
 	var S = TS.new()
 	S.setup(4242, save, 1_700_000_000)
 	var bd: Dictionary = board(SEALED.has(core))

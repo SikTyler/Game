@@ -1,13 +1,13 @@
 extends RefCounted
 ## Core Weapon frames (V2 P4): the Weapon the player forges and mounts in the
 ## Core's centre slot. A frame fixes the attack (TowerState._core_fire /
-## FirePatterns), its L1 numbers and its silhouette (GearVis); rarity, level,
+## FirePatterns), its L1 numbers and its silhouette (PartVis barrel); rarity, level,
 ## brand and perks scale and modify it. The first four are the old Core
 ## attacks; the other six are new patterns.
 ##   attack   core attack code (cannon slag beam pulse scatter rail arc flame missiles saw)
 ##   dmg, rate, range: L1 Common sheet (range in cpx() cells)
 ##   p        attack parameters (splash in cells, slows, ramps, counts ...)
-##   look     GearVis silhouette: body, barrel, muzzle, and the perk parts it favours
+##   look     V2 silhouette data (V3 barrels draw from their PartDB look)
 ##   affinity perk ids this frame rolls more often (x2 weight)
 
 const IDS: Array = ["autocannon", "slag", "lance", "pulse", "scatter", "rail", "arc", "flame", "missiles", "saw"]
@@ -39,6 +39,10 @@ const DEFS: Dictionary = {
 	"missiles": {"name": "Swarm Missiles", "attack": "missiles", "dmg": 7.0, "rate": 0.6, "range": 5.0,
 		"p": {"missiles": 4, "splash": 0.3}, "desc": "Four seekers at the four nearest enemies; a small blast each",
 		"look": {"body": 4, "barrel": 8, "muzzle": 7}, "affinity": ["w_multishot", "w_splash", "w_range"]},
+	# V3 parts: the Minigun barrel (not in IDS: V2 gear never rolls it)
+	"minigun": {"name": "Minigun", "attack": "minigun", "dmg": 2.6, "rate": 6.0, "range": 3.5,
+		"p": {"spread": 3}, "desc": "Hoses the crowd: six light rounds a second, each at a random body among the nearest three",
+		"look": {"body": 0, "barrel": 2, "muzzle": 4}, "affinity": ["w_rate", "w_dmg", "w_crit"]},
 	"saw": {"name": "Saw Launcher", "attack": "saw", "dmg": 12.0, "rate": 0.9, "range": 4.0,
 		"p": {"bounces": 4, "bounce_frac": 0.85, "jump": 90.0}, "desc": "A saw that ricochets between 5 enemies (x0.85 each) and shreds armor",
 		"look": {"body": 4, "barrel": 9, "muzzle": 8}, "affinity": ["w_bounce", "w_shred", "w_dmg"]},

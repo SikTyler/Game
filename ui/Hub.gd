@@ -1,9 +1,9 @@
 extends RefCounted
 ## The hub between runs (V2): a nav row under the top bar — Outpost (home),
-## Core, Forge, Research, Reforge — and the deploy cluster (tier, modes,
+## Weapon, Core, Research, Reforge — and the deploy cluster (tier, modes,
 ## PLAY); Missions is a top-bar button. This file owns the nav and the Missions tab (Research: ResearchView); the
-## Outpost lives in OutpostView, the Core in CoreView, Reforge in
-## ReforgeView. View only: buttons call pure modules and hand the returned
+## Outpost lives in OutpostView, the Weapon and Core builders in ArmoryView
+## (V3 parts), Reforge in ReforgeView. View only: buttons call pure modules and hand the returned
 ## events to Main.meta_act().
 
 const TowerState := preload("res://TowerState.gd")
@@ -22,13 +22,12 @@ const TuneRef := preload("res://Tune.gd")
 const Kit := preload("res://ui/Kit.gd")
 const ReforgeView := preload("res://ui/ReforgeView.gd")
 const OutpostView := preload("res://ui/OutpostView.gd")
-const CoreView := preload("res://ui/CoreView.gd")
-const ForgeView := preload("res://ui/ForgeView.gd")
+const ArmoryView := preload("res://ui/ArmoryView.gd")
 const ResearchView := preload("res://ui/ResearchView.gd")
-const Gear := preload("res://Gear.gd")
+const Parts := preload("res://Parts.gd")
 
 ## Tab hotkeys: [action, tab].
-const TAB_KEYS: Array = [["tab_base", "play"], ["tab_outpost", "outpost"], ["tab_core", "core"], ["tab_forge", "forge"], ["tab_labs", "research"], ["tab_missions", "missions"], ["tab_reforge", "reforge"]]
+const TAB_KEYS: Array = [["tab_base", "play"], ["tab_outpost", "outpost"], ["tab_core", "core"], ["tab_forge", "weapon"], ["tab_labs", "research"], ["tab_missions", "missions"], ["tab_reforge", "reforge"]]
 const START_W: float = 250.0
 
 
@@ -43,9 +42,9 @@ static func badge(m, id: String) -> bool:
 		"reforge":
 			return Reforge.can_reforge(s)
 		"core":
-			return Cores.can_level(s)
-		"forge":
-			return Gear.new_count(s) > 0
+			return Cores.can_level(s) or Parts.new_count(s, "core") > 0
+		"weapon":
+			return Parts.new_count(s, "weapon") > 0
 	return false
 
 
@@ -54,12 +53,12 @@ static func is_home(tab: String) -> bool:
 	return tab == "play" or tab == "outpost"
 
 
-## Top menu (left): OUTPOST (home), CORE, FORGE, RESEARCH, REFORGE; the
+## Top menu (left): OUTPOST (home), WEAPON, CORE, RESEARCH, REFORGE; the
 ## deploy cluster (tier, Modes, PLAY) sits right. Missions moved to the top
 ## bar (Desktop).
 const NAV: Array = [
-	["core", "CORE", "core_open", "The Core: its Weapon, Module sockets, look and level"],
-	["forge", "FORGE", "icon_gear", "The Forge: forge, upgrade, merge, reroll and lock your Weapons and Modules"],
+	["weapon", "WEAPON", "icon_gear", "The Weapon: build it from parts - Receiver, Barrels, Ammo, Scope, Power, Muzzle, Magazine. Crates and presets."],
+	["core", "CORE", "core_open", "The Core: build it from parts - Heart, Plating, Generators, Capacitor, Reactor, Uplinks, Antenna, Shield - plus its look and level"],
 	["research", "RESEARCH", "icon_lab", "Research: permanent upgrades (instant)"],
 	["reforge", "REFORGE", "rf_root", "Core Reforge: reset for Shards and permanent nodes"],
 ]
@@ -140,9 +139,9 @@ static func build(m) -> void:
 		return
 	match String(m.tab):
 		"core":
-			CoreView.build(m)
-		"forge":
-			ForgeView.build(m)
+			ArmoryView.build(m, "core")
+		"weapon":
+			ArmoryView.build(m, "weapon")
 		"research":
 			ResearchView.build(m)
 		"missions":
@@ -176,9 +175,9 @@ static func draw(m) -> void:
 	if not home:
 		match String(m.tab):
 			"core":
-				CoreView.draw(m, cr)
-			"forge":
-				ForgeView.draw(m, cr)
+				ArmoryView.draw(m, "core")
+			"weapon":
+				ArmoryView.draw(m, "weapon")
 			"research":
 				ResearchView.draw(m, cr)
 			"missions":

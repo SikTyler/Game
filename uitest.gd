@@ -6,7 +6,8 @@ extends SceneTree
 ## away" modal, the hub (Outpost home / tier select / modes), the Core tab
 ## (level), the Outpost (palette click + drag place, ghost preview, rotate,
 ## move, upgrade, demolish, collect, plots, pan / zoom, blueprints),
-## Research, Missions, Reforge (two-step + tree),
+## Research, Missions, Reforge (two-step + tree), the V3 Weapon / Core parts
+## builders (crates, presets, Fabricator, Smelter),
 ## settings + remapping, records, and the run (draft cards, reroll, banish,
 ## drag-to-place, Core tracks, specials + aim, targeting, pause, retry,
 ## abandon -> results). Layout, tooltip, press-mode and focus checks on every
@@ -27,7 +28,7 @@ const Labs := preload("res://Labs.gd")
 const Missions := preload("res://Missions.gd")
 const Outpost := preload("res://Outpost.gd")
 const Cores := preload("res://Cores.gd")
-const Gear := preload("res://Gear.gd")
+const Parts := preload("res://Parts.gd")
 const Reforge := preload("res://Reforge.gd")
 const Specials := preload("res://Specials.gd")
 const OutpostDB := preload("res://data/OutpostDB.gd")
@@ -298,7 +299,7 @@ func _run() -> void:
 	_check("tier < back to tier 1", int(main.save["tier"]) == 1)
 
 	await _core_tab()
-	await _forge()
+	await _weapon_tab()
 	await _outpost()
 	await _research_missions()
 	await _home()
@@ -316,13 +317,14 @@ func _run() -> void:
 		quit(1)
 
 
-# ================================================================== CORE (V2)
-## V2 (deliberate): the Core Bay (4 Cores, parts, presets) is gone; the Core
-## tab shows the one Core's level + sheet (P4: Weapon / Modules / Look).
+# ================================================================== CORE (V2 / V3)
+## V2 (deliberate): the Core Bay (4 Cores, parts, presets) is gone. V3: the
+## Core tab is the Core's parts board (Build), Crates, Look and Levels; the
+## Level button sits under the Core art on every sub-tab.
 func _core_tab() -> void:
 	_key(KEY_K)
 	await _frames()
-	_check("CORE: K opens the Core tab", main.tab == "core" and _find("CORE LEVEL") != null)
+	_check("CORE: K opens the Core tab (parts board + Level button)", main.tab == "core" and _find("CORE LEVEL") != null and _find("arm:slot:heart:0") != null and _find("arm:slot:plating:0") != null)
 	_audit("core")
 	var c0: int = int(main.save["coins"])
 	var lv0: int = Cores.level(main.save)
@@ -336,64 +338,58 @@ func _core_tab() -> void:
 	await _frames()
 	_check("CORE: Level up is disabled when broke", _find("CORE LEVEL").disabled)
 	main.save["coins"] = 50000
-	# ---- P4 Loadout / Look / Levels
+	# ---- V3 parts on the Core
+	var pu: int = Parts.add_item(main.save, Parts.make("plt_composite", "rare"))
 	main._rebuild_ui()
 	await _frames()
-	_check("P4 CORE: Loadout tab shows the Weapon slot and 2 sockets (Core Lv %d)" % Cores.level(main.save), main.core_tab == "loadout" and _find("core:weapon") != null and _find("core:sock:0") != null and _find("core:sock:1") != null and _find("core:sock:%d" % Gear.sockets_for(Cores.level(main.save))) == null)
-	var mu: int = Gear.add_item(main.save, Gear.make("module", "shield_gen", "rare"))
-	_press("core:sock:1")
+	_press("arm:slot:plating:0")
 	await _frames()
-	_check("P4 CORE: clicking a socket lists Modules to pick", main.core_sock == 1 and _find("core:pick:%d" % mu) != null)
-	_press("core:pick:%d" % mu)
+	_check("V3 CORE: clicking Plating 1 lists the Platings", String(main.arm_slot["core"]) == "plating:0" and _find("arm:item:%d" % pu) != null)
+	_press("arm:item:%d" % pu)
 	await _frames()
-	_check("P4 CORE: picking a Module sockets it (run fx include it)", int((Gear.block(main.save)["equipped"]["sockets"] as Array)[1]) == mu and float(Gear.run_fx(main.save).get("shield", 0.0)) > 0.0)
-	_check("P4 CORE: a filled socket offers EMPTY THIS SOCKET", _find("core:unsock") != null)
-	_press("core:unsock")
+	_check("V3 CORE: clicking a part opens its card with INSTALL", int(main.arm_sel) == pu and _find("arm:install") != null and not _find("arm:install").disabled)
+	_press("arm:install")
 	await _frames()
-	_check("P4 CORE: ... which empties it", int((Gear.block(main.save)["equipped"]["sockets"] as Array)[1]) == 0)
-	var wu: int = Gear.add_item(main.save, Gear.make("weapon", "arc", "uncommon"))
-	_press("core:weapon")
+	var pl: Array = Parts.equipped(main.save, "plating")
+	_check("V3 CORE: INSTALL puts it in Plating 1 (its armor reaches the run fx)", pl.size() == 1 and int((pl[0] as Dictionary)["uid"]) == pu and float(Parts.run_fx(main.save).get("armor", 0.0)) > 0.0 and _find("arm:remove") != null)
+	_audit("core build")
+	_press("arm:remove")
 	await _frames()
-	_press("core:pick:%d" % wu)
+	_check("V3 CORE: REMOVE takes it out (it stays in the inventory)", Parts.equipped(main.save, "plating").is_empty() and Parts.has_item(Parts.block(main.save), pu))
+	var cu: int = Parts.add_item(main.save, Parts.make("cap_basic"))
+	_press("arm:slot:capacitor:0")
 	await _frames()
-	_check("P4 CORE: the Weapon slot takes a picked Weapon", int(Gear.block(main.save)["equipped"]["weapon"]) == wu)
-	_audit("core loadout")
-	# V2 P8b Loadout Presets
-	_check("P8b CORE: the Presets tab is locked without the research", _find("CORETAB Presets") != null and _find("CORETAB Presets").disabled)
-	main.save["research"]["lvls"]["presets"] = 1
-	main._rebuild_ui()
+	_press("arm:item:%d" % cu)
 	await _frames()
-	_press("CORETAB Presets")
+	_check("V3 CORE: a locked position names the Heart that opens it; INSTALL is refused", _find("arm:slot:capacitor:0").tooltip_text.contains("Uncommon Heart") and _find("arm:install").disabled)
+	var hu: int = Parts.add_item(main.save, Parts.make("hrt_standard", "uncommon"))
+	_press("arm:slot:heart:0")
 	await _frames()
-	_check("P8b CORE: Loadout Presets opens one preset slot", main.core_tab == "presets" and _find("preset:save:0") != null and _find("preset:save:1") == null and _find("preset:load:0").disabled)
-	_press("preset:save:0")
+	_press("arm:item:%d" % hu)
 	await _frames()
-	var pw: int = Gear.add_item(main.save, Gear.make("weapon", "flame", "common"))
-	Gear.equip(main.save, pw)
-	main._rebuild_ui()
+	_press("arm:install")
 	await _frames()
-	_press("preset:load:0")
+	_press("arm:slot:capacitor:0")
 	await _frames()
-	_check("P8b CORE: SAVE then LOAD brings the saved Weapon back", int(Gear.block(main.save)["equipped"]["weapon"]) == wu and not _find("preset:load:0").disabled)
-	_audit("core presets")
-	main.save["research"]["lvls"]["presets"] = 0
-	main.core_tab = "loadout"
-	main._rebuild_ui()
+	_press("arm:item:%d" % cu)
 	await _frames()
-	_press("CORETAB Look")
+	_press("arm:install")
 	await _frames()
-	_press("core:shell:3")
+	_check("V3 CORE: an Uncommon Heart opens the Capacitor; the Capacitor installs", Parts.equipped(main.save, "capacitor").size() == 1 and int(Parts.equipped(main.save, "heart")[0]["uid"]) == hu)
+	# Look / Levels
+	_press("ARMTAB Look")
+	await _frames()
+	_press("core:pat:3")
 	await _frames()
 	_press("core:col:p:ff3ea5")
 	await _frames()
-	_check("P4 CORE Look: shell and colour pickers change the Core's look", main.core_tab == "look" and int(Cores.look(main.save)["shell"]) == 3 and String(Cores.look(main.save)["p"]) == "ff3ea5" and _find("CORE LEVEL") != null)
+	_check("P4 CORE Look: pattern and colour pickers change the Core's look", String(main.arm_tab["core"]) == "look" and int(Cores.look(main.save)["pat"]) == 3 and String(Cores.look(main.save)["p"]) == "ff3ea5" and _find("CORE LEVEL") != null)
 	_audit("core look")
-	_press("CORETAB Levels")
+	_press("ARMTAB Levels")
 	await _frames()
-	_check("P4 CORE Levels: the level button stays", main.core_tab == "levels" and _find("CORE LEVEL") != null)
-	_press("CORETAB Loadout")
-	await _frames()
-	# ---- P6 milestone requirements: chips that jump to what is missing
+	_check("P4 CORE Levels: the level button stays", String(main.arm_tab["core"]) == "levels" and _find("CORE LEVEL") != null)
+	_audit("core levels")
+	# ---- P6 milestone requirements: chips (Levels) that jump to what is missing
 	var lv_keep: int = Cores.level(main.save)
 	var coins_keep: int = int(main.save["coins"])
 	main.save["core"]["lvl"] = 4
@@ -424,129 +420,194 @@ func _core_tab() -> void:
 	main.save["core"]["lvl"] = lv_keep
 	main.save["coins"] = coins_keep
 	main.op_cat = "prod"
+	main.arm_tab["core"] = "build"
 	_key(KEY_K)
 	await _frames()
 
 
-# ================================================================== FORGE (V2 P4)
-func _forge() -> void:
+## An open Outpost anchor for `id` (scans the start area).
+func _spot(id: String) -> Vector2i:
+	for y in range(2, 30):
+		for x in range(2, 46):
+			if Outpost.place_error(main.save, id, x, y, 0) == "":
+				return Vector2i(x, y)
+	return Vector2i(-1, -1)
+
+
+# ================================================================== WEAPON (V3 parts)
+## V3 (deliberate): the Forge (forge new / imprint / brands) is gone; the
+## Weapon tab builds the Weapon from parts. Crates, presets, the Smelter and
+## the Fabricator are covered here too.
+func _weapon_tab() -> void:
 	var s: Dictionary = main.save
 	s["coins"] = 3_000_000
 	s["scrap"] = 50_000
 	_key(KEY_J)
 	await _frames()
-	_check("P4 FORGE: J opens the Forge", main.tab == "forge" and _find("forge:new:rail") != null and _find("forge:item:%d" % int(Gear.block(s)["equipped"]["weapon"])) != null)
-	_audit("forge")
-	var n0: int = Gear.count(main.save)
-	var c0: int = int(main.save["coins"])
-	_press("forge:new:rail")
+	_check("V3 WEAPON: J opens the Weapon tab (parts board, the installed barrel listed)", main.tab == "weapon" and _find("arm:slot:barrel:0") != null and _find("arm:slot:receiver:0") != null and _find("arm:item:%d" % int(Parts.equipped(s, "barrel")[0]["uid"])) != null)
+	_audit("weapon")
+	var u: int = Parts.add_item(s, Parts.make("brl_minigun", "rare", 1, [{"id": "w_dmg", "t": 3, "q": 0.5, "lock": false}, {"id": "w_rate", "t": 2, "q": 0.5, "lock": false}]))
+	main._rebuild_ui()
 	await _frames()
-	var u: int = main.forge_sel
-	var it: Dictionary = Gear.item(main.save, u)
-	_check("P4 FORGE: forging a Rail Driver adds it and selects it (1500 coins + 40 Scrap)", Gear.count(main.save) == n0 + 1 and String(it.get("base", "")) == "rail" and int(main.save["coins"]) == c0 - 1500 and _find("forge:upgrade") != null)
-	_audit("forge card")
-	_press("forge:lock:0")
+	_press("arm:item:%d" % u)
 	await _frames()
-	_check("P4 FORGE: LOCK locks a perk; its REROLL is disabled", bool(((Gear.item(main.save, u)["perks"] as Array)[0] as Dictionary)["lock"]) and _find("forge:reroll:0").disabled)
-	_press("forge:lock:0")
+	_check("V3 WEAPON: a part's card shows its perks with LOCK and REROLL", int(main.arm_sel) == u and _find("arm:lock:0") != null and _find("arm:reroll:1") != null)
+	_audit("weapon card")
+	_press("arm:lock:0")
 	await _frames()
-	var sc0: int = int(main.save["scrap"])
-	_press("forge:reroll:0")
+	_check("V3 WEAPON: LOCK locks a perk; its REROLL is disabled", bool(((Parts.item(s, u)["perks"] as Array)[0] as Dictionary)["lock"]) and _find("arm:reroll:0").disabled)
+	_press("arm:lock:0")
 	await _frames()
-	var of: Dictionary = Gear.block(main.save)["offer"]
-	_check("P4 FORGE: REROLL pays Scrap and opens take / keep", not of.is_empty() and int(main.save["scrap"]) < sc0 and _find("forge:take:0") != null and _find("forge:take:1") != null and _find("forge:keep") != null)
-	_audit("forge reroll")
+	var sc0: int = int(s["scrap"])
+	_press("arm:reroll:0")
+	await _frames()
+	var of: Dictionary = Parts.block(s)["offer"]
+	_check("V3 WEAPON: REROLL pays Scrap and opens take / keep", not of.is_empty() and int(s["scrap"]) < sc0 and _find("arm:take:0") != null and _find("arm:take:1") != null and _find("arm:keep") != null)
+	_audit("weapon reroll")
 	var want: String = String((of["cands"][0] as Dictionary)["id"])
-	_press("forge:take:0")
+	_press("arm:take:0")
 	await _frames()
-	_check("P4 FORGE: TAKE swaps the perk in and closes the offer", String(((Gear.item(main.save, u)["perks"] as Array)[0] as Dictionary)["id"]) == want and (Gear.block(main.save)["offer"] as Dictionary).is_empty() and _find("forge:take:0") == null)
-	_press("forge:upgrade")
+	_check("V3 WEAPON: TAKE swaps the perk in and closes the offer", String(((Parts.item(s, u)["perks"] as Array)[0] as Dictionary)["id"]) == want and (Parts.block(s)["offer"] as Dictionary).is_empty() and _find("arm:take:0") == null)
+	_press("arm:upgrade")
 	await _frames()
-	_check("P4 FORGE: UPGRADE raises the level", int(Gear.item(main.save, u)["lvl"]) == 2)
-	# V2 P8b Bulk Upgrade + Auto-Salvage
-	_check("P8b FORGE: no bulk / auto-salvage buttons without the research", _find("forge:up5") == null and _find("forge:autosalvage") == null)
-	main.save["research"]["lvls"]["bulk_upgrade"] = 1
-	main.save["research"]["lvls"]["auto_salvage"] = 1
+	_check("V3 WEAPON: UPGRADE raises the level", int(Parts.item(s, u)["lvl"]) == 2)
+	_check("P8b WEAPON: no bulk / auto-smelt buttons without the research", _find("arm:up5") == null and _find("arm:autosmelt") == null)
+	s["research"]["lvls"]["bulk_upgrade"] = 1
+	s["research"]["lvls"]["auto_salvage"] = 1
 	main._rebuild_ui()
 	await _frames()
-	_press("forge:up5")
+	_press("arm:up5")
 	await _frames()
-	_check("P8b FORGE: UPGRADE x5 raises five levels", int(Gear.item(main.save, u)["lvl"]) == 7, str(Gear.item(main.save, u)["lvl"]))
-	_press("forge:autosalvage")
+	_check("P8b WEAPON: UPGRADE x5 raises five levels", int(Parts.item(s, u)["lvl"]) == 7, str(Parts.item(s, u)["lvl"]))
+	_press("arm:autosmelt")
 	await _frames()
-	_check("P8b FORGE: the Auto-Salvage switch cycles to Commons", Labs.auto_salvage_level(main.save) == 1 and _find("forge:autosalvage").text.contains("COMMONS"))
-	_audit("forge qol")
-	_press("forge:autosalvage")
+	_check("P8b WEAPON: the Auto-Smelt switch cycles to Commons", Labs.auto_salvage_level(s) == 1 and _find("arm:autosmelt").text.contains("COMMONS"))
+	_audit("weapon qol")
+	_press("arm:autosmelt")
 	await _frames()
-	_check("P8b FORGE: ... and back off (Lv 1 has two states)", Labs.auto_salvage_level(main.save) == 0)
-	main.save["research"]["lvls"]["bulk_upgrade"] = 0
-	main.save["research"]["lvls"]["auto_salvage"] = 0
+	_check("P8b WEAPON: ... and back off (Lv 1 has two states)", Labs.auto_salvage_level(s) == 0)
+	s["research"]["lvls"]["bulk_upgrade"] = 0
+	s["research"]["lvls"]["auto_salvage"] = 0
 	main._rebuild_ui()
 	await _frames()
-	_press("forge:equip")
+	_press("arm:install")
 	await _frames()
-	_check("P4 FORGE: EQUIP mounts it on the Core", int(Gear.block(main.save)["equipped"]["weapon"]) == u and _find("forge:equip").disabled)
-	# merge 3 commons
+	_check("V3 WEAPON: INSTALL swaps it into Barrel 1 (the Minigun now fires)", int(Parts.equipped(s, "barrel")[0]["uid"]) == u and _find("arm:remove") != null and _find("arm:remove").disabled and String(Parts.core_def(s)["attack"]) == "minigun")
+	# merge 3 Common Ammo
 	var m3: Array = []
 	for k in 3:
-		m3.append(Gear.add_item(main.save, Gear.make("weapon", "saw", "common")))
+		m3.append(Parts.add_item(s, Parts.make("amm_toxic", "common")))
+	_press("arm:slot:ammo:0")
+	await _frames()
+	_press("arm:item:%d" % int(m3[0]))
+	await _frames()
+	_check("V3 WEAPON: Ammo 1 lists the Ammo; clicking a tile selects it", int(main.arm_sel) == int(m3[0]))
+	_press("arm:merge")
+	await _frames()
+	_check("V3 WEAPON: MERGE opens the merge panel", (main.arm_merge as Array).size() == 3 and _find("arm:merge:go") != null and _find("arm:merge:cancel") != null)
+	_audit("weapon merge")
+	var used: Array = (main.arm_merge as Array).duplicate()
+	_press("arm:merge:go")
+	await _frames()
+	_check("V3 WEAPON: merging makes an Uncommon (the other two consumed)", String(Parts.item(s, int(m3[0]))["rar"]) == "uncommon" and used.size() == 3 and not Parts.has_item(Parts.block(s), int(used[1])) and not Parts.has_item(Parts.block(s), int(used[2])) and (main.arm_merge as Array).is_empty())
+	# smelt: needs a Smelter; a Rare asks twice
+	var rm: int = Parts.add_item(s, Parts.make("amm_cryo", "rare"))
 	main._rebuild_ui()
 	await _frames()
-	_press("forge:item:%d" % int(m3[0]))
+	_press("arm:item:%d" % rm)
 	await _frames()
-	_check("P4 FORGE: clicking a tile selects it", main.forge_sel == int(m3[0]))
-	_press("forge:merge")
-	await _frames()
-	_check("P4 FORGE: MERGE opens the merge panel with the perk-slot choices", (main.forge_merge as Array).size() == 3 and _find("forge:merge:pick:0") != null and _find("forge:merge:cancel") != null)
-	_audit("forge merge")
-	var used: Array = (main.forge_merge as Array).duplicate()
-	_press("forge:merge:pick:0")
-	await _frames()
-	_check("P4 FORGE: picking merges into Uncommon (the other two consumed)", String(Gear.item(main.save, int(m3[0]))["rar"]) == "uncommon" and used.size() == 3 and not Gear.has_item(Gear.block(main.save), int(used[1])) and not Gear.has_item(Gear.block(main.save), int(used[2])) and main.forge_merge.is_empty())
-	# imprint: copy the Rail's perk 0 onto the Saw
-	var donor_perk: String = String(((Gear.item(main.save, u)["perks"] as Array)[0] as Dictionary)["id"])
-	var dn: int = Gear.add_item(main.save, Gear.make("weapon", "rail", "common", 1, [{"id": "w_boss", "t": 3, "q": 0.5, "lock": false}]))
+	_check("V3 WEAPON: SMELT needs a Smelter in the Outpost", _find("arm:smelt").disabled and _find("arm:smelt").tooltip_text.contains("Smelter"))
+	s["outpost"]["relay_lvl"] = maxi(1, int(s["outpost"]["relay_lvl"]))
+	var sp: Vector2i = _spot("smelter")
+	var se: Array = Outpost.place(s, "smelter", sp.x, sp.y, 0, main.now())
+	Outpost.tick(s, main.now())
 	main._rebuild_ui()
 	await _frames()
-	_press("forge:imprint")
+	_press("arm:smelt")
 	await _frames()
-	_press("forge:item:%d" % dn)
+	_check("V3 WEAPON: SMELT on a Rare asks to confirm first", not se.is_empty() and Parts.has_item(Parts.block(s), rm) and _find("arm:smelt").text.begins_with("CONFIRM"))
+	_press("arm:smelt")
 	await _frames()
-	_check("P4 FORGE: IMPRINT then a donor tile lists perk -> slot choices", main.forge_imprint == int(m3[0]) and main.forge_donor == dn and _findp("forge:imp:0:") != null)
-	_audit("forge imprint")
-	_press("forge:imp:0:0")
+	_check("V3 WEAPON: ... the second press sends it to the Smelter queue", not Parts.has_item(Parts.block(s), rm) and (Parts.block(s)["smelt"] as Array).size() == 1)
+	# crates -> the reveal
+	_press("ARMTAB Crates")
 	await _frames()
-	_check("P4 FORGE: imprinting copies the perk and destroys the donor", String(((Gear.item(main.save, int(m3[0]))["perks"] as Array)[0] as Dictionary)["id"]) == "w_boss" and not Gear.has_item(Gear.block(main.save), dn) and donor_perk != "")
-	# salvage: Rare asks twice
-	var rm: int = Gear.add_item(main.save, Gear.make("module", "echo", "rare"))
+	var n0: int = Parts.count(s)
+	_check("V3 CRATES: three crates; no part-type picker without Part Contracts", _find("crate:open:standard") != null and _find("crate:open:elite") != null and _find("crate:slot:barrel") == null)
+	_audit("weapon crates")
+	_press("crate:open:advanced")
+	await _frames()
+	_check("V3 CRATES: opening one pays Scrap and opens the reveal over its parts", Parts.count(s) == n0 + 3 and main.overlay == "loot" and (main.reveal_uids as Array).size() == 3)
+	_press("loot:all")
+	await _frames()
+	_press("loot:done")
+	await _frames()
+	s["research"]["lvls"]["brand_contracts"] = 1
 	main._rebuild_ui()
 	await _frames()
-	_press("forge:item:%d" % rm)
+	_press("crate:slot:scope")
 	await _frames()
-	var sc1: int = int(main.save["scrap"])
-	_press("forge:salvage")
+	_press("crate:open:standard")
 	await _frames()
-	_check("P4 FORGE: SALVAGE on a Rare asks to confirm first", Gear.has_item(Gear.block(main.save), rm) and _find("forge:salvage").text.begins_with("CONFIRM"))
-	_press("forge:salvage")
+	_check("V3 CRATES: Part Contracts picks the part type (a Scope)", main.overlay == "loot" and String(Parts.item(s, int((main.reveal_uids as Array)[0]))["slot"]) == "scope")
+	_press("loot:done")
 	await _frames()
-	_check("P4 FORGE: ... and the second press salvages for Scrap", not Gear.has_item(Gear.block(main.save), rm) and int(main.save["scrap"]) == sc1 + 25)
-	_press("forge:filter:module")
+	s["research"]["lvls"]["brand_contracts"] = 0
+	main.arm_crate_slot = ""
+	# presets
+	_check("P8b WEAPON: the Presets tab is locked without the research", _find("ARMTAB Presets") != null and _find("ARMTAB Presets").disabled)
+	s["research"]["lvls"]["presets"] = 1
+	main._rebuild_ui()
 	await _frames()
-	var only_mod: bool = true
-	for b in _all_buttons():
-		var key: String = _label(b as Button)
-		if key.begins_with("forge:item:"):
-			only_mod = only_mod and String(Gear.item(main.save, int(key.substr(11))).get("kind", "")) == "module"
-	_check("P4 FORGE: the Modules filter shows only modules", main.forge_filter == "module" and only_mod)
-	_press("forge:kind:module")
+	_press("ARMTAB Presets")
 	await _frames()
-	_check("P4 FORGE: the Forge panel switches to the 23 Modules", _find("forge:new:overclock") != null and _find("forge:new:rail") == null)
-	_audit("forge modules")
-	_press("forge:filter:all")
+	_check("P8b WEAPON: Loadout Presets opens one preset slot", String(main.arm_tab["weapon"]) == "presets" and _find("preset:save:0") != null and _find("preset:save:1") == null and _find("preset:load:0").disabled)
+	_press("preset:save:0")
 	await _frames()
-	_check("P4 FORGE: the nav shows a badge for new gear", Hub.badge(main, "forge") == (Gear.new_count(main.save) > 0))
-	main.save["coins"] = 50000
-	main.save["scrap"] = 2000
+	Parts.equip(s, Parts.add_item(s, Parts.make("brl_flame")), 0)
+	main._rebuild_ui()
+	await _frames()
+	_press("preset:load:0")
+	await _frames()
+	_check("P8b WEAPON: SAVE then LOAD brings the saved barrel back", int(Parts.equipped(s, "barrel")[0]["uid"]) == u and not _find("preset:load:0").disabled)
+	_audit("weapon presets")
+	s["research"]["lvls"]["presets"] = 0
+	main.arm_tab["weapon"] = "build"
+	main._rebuild_ui()
+	await _frames()
+	_check("V3 WEAPON: the nav shows a badge for new Weapon parts", Hub.badge(main, "weapon") == (Parts.new_count(s, "weapon") > 0))
+	# the Outpost workshops: Fabricator shop + Smelter queue modals
+	s["outpost"]["relay_lvl"] = maxi(2, int(s["outpost"]["relay_lvl"]))
+	var fp: Vector2i = _spot("fabricator")
+	var fe: Array = Outpost.place(s, "fabricator", fp.x, fp.y, 0, main.now())
+	Outpost.tick(s, main.now())
+	_key(KEY_O)
+	await _frames()
+	main.op_sel = String(fe[0]["uid"]) if not fe.is_empty() else ""
+	main._rebuild_ui()
+	await _frames()
+	_press("OP OPEN FABRICATOR")
+	await _frames()
+	_check("V3 FABRICATOR: the building opens its shop (3 offers at Lv 1)", main.overlay == "fabricator" and _find("fab:buy:2") != null and _find("fab:buy:3") == null and _find("fab:reroll") != null)
+	_audit("fabricator")
+	var n1: int = Parts.count(s)
+	_press("fab:buy:0")
+	await _frames()
+	_check("V3 FABRICATOR: BUY adds the part and marks the offer sold", Parts.count(s) == n1 + 1 and _find("fab:buy:0").disabled)
+	_press("ws:close")
+	await _frames()
+	main.op_sel = String(se[0]["uid"]) if not se.is_empty() else ""
+	main._rebuild_ui()
+	await _frames()
+	_press("OP OPEN SMELTER")
+	await _frames()
+	_check("V3 SMELTER: the building opens its queue (one part melting, CLAIM waits)", main.overlay == "smelter" and _find("smelt:claim") != null and _find("smelt:claim").disabled)
+	_audit("smelter")
+	_press("ws:close")
+	await _frames()
+	main.op_sel = ""
+	s["coins"] = 50000
+	s["scrap"] = 2000
 
 
 # ================================================================= OUTPOST
@@ -779,11 +840,11 @@ func _home() -> void:
 	main.set_tab("play")
 	await _frames()
 	_check("V2 home: Outpost map + top menu Core / Research / Missions / Reforge", _findp("OPBUILD ") != null and _find("DSTART") != null and _find("DTAB Core") != null and _find("DTAB Research") != null and _find("DTAB Missions") != null and _find("DTAB Reforge") != null and _find("DTAB Core Bay") == null and _find("DTAB Crates") == null and _find("DTAB Cards") == null)
-	var fg: Button = _find("DTAB Forge")
-	_check("P2 nav: OUTPOST / CORE / FORGE / RESEARCH / REFORGE (P4: the Forge is open)", fg != null and not fg.disabled and fg.tooltip_text.contains("Forge") and _find("DTAB Outpost").text == "OUTPOST")
+	var fg: Button = _find("DTAB Weapon")
+	_check("V3 nav: OUTPOST / WEAPON / CORE / RESEARCH / REFORGE (no Forge)", fg != null and not fg.disabled and fg.tooltip_text.contains("parts") and _find("DTAB Forge") == null and _find("DTAB Outpost").text == "OUTPOST" and fg.position.x < _find("DTAB Core").position.x)
 	var mb: Button = _find("DTAB Missions")
 	_check("P2 nav: Missions is a top-bar button", mb != null and mb.position.y < float(main.TOP_H) and mb.position.x > Hub.start_rect(main).position.x - 700.0)
-	for nv in [["DTAB Core", "core"], ["DTAB Research", "research"], ["DTAB Missions", "missions"], ["DTAB Reforge", "reforge"]]:
+	for nv in [["DTAB Weapon", "weapon"], ["DTAB Core", "core"], ["DTAB Research", "research"], ["DTAB Missions", "missions"], ["DTAB Reforge", "reforge"]]:
 		_press(String(nv[0]))
 		await _frames()
 		_check("V2 top menu %s opens its screen" % String(nv[0]), main.tab == String(nv[1]), main.tab)
@@ -1045,7 +1106,7 @@ func _run_screen() -> void:
 	await _frames(3)
 	# V2 (deliberate): one Core, no traits — the tooltip names the Core and the
 	# equipped Weapon (P4: whatever the Forge / Core tabs equipped above).
-	_check("RUN: hovering the Core shows its level + equipped Weapon", main.tipbox.visible and main.tip_label.text.contains("Core") and main.tip_label.text.contains(String(Gear.weapon(main.save)["name"])), main.tip_label.text)
+	_check("RUN: hovering the Core shows its level + equipped Weapon", main.tipbox.visible and main.tip_label.text.contains("Core") and main.tip_label.text.contains(String(S.core_def["attack_name"])), main.tip_label.text)
 	# V2 P7a: every run opens with a draft (later drafts come from XP levels)
 	_check("P7a RUN: the run opens with a draft on the table", S.draft.size() >= 3 and S.wave == 1)
 	# draft: cards, reroll, banish, Q pick, place
@@ -1206,7 +1267,7 @@ func _run_screen() -> void:
 	var tm0: String = String(S.target_modes[cell])
 	await _frames(2)
 	_check("FB1: clicking a building shows its range circle", int(main.get_meta("range_shown", -1)) == cell and float(BattleUI.range_of(main, cell).get("r", 0.0)) > 0.0)
-	_check("FB1: non-weapon buildings show an aura range", String(BattleUI.preview_range(main, "mine")["kind"]) == "aura")
+	_check("V2 P10: an aura building shows its reach; a global-effect one (Mine) shows none", String(BattleUI.preview_range(main, "amp").get("kind", "")) == "aura" and BattleUI.preview_range(main, "mine").is_empty())
 	_press("Target:")
 	await _frames()
 	_check("RUN: Target button cycles the weapon's mode", String(S.target_modes[cell]) != tm0)
@@ -1277,7 +1338,7 @@ func _run_screen() -> void:
 	# V2 P5: tokens the run dropped (a Boss Vault + an elite item) bank as items
 	(S2.loot["caches"] as Array).append({"id": "boss", "ilvl": 20})
 	(S2.loot["items"] as Array).append({"src": "elite", "ilvl": 12})
-	var n_items0: int = Gear.count(main.save)
+	var n_items0: int = Parts.count(main.save)
 	var runs_b: int = int(main.save["runs"])
 	_press("HUD Pause")
 	await _frames()
@@ -1301,7 +1362,7 @@ func _run_screen() -> void:
 	main._rebuild_ui()
 	await _frames()
 	_check("sfx: game_over clip", main.sfx.played("game_over"))
-	_check("P5 RESULTS: the run's tokens banked as 5 items; OPEN LOOT offers the reveal", Gear.count(main.save) == n_items0 + 5 and _find("loot:open") != null and _find("loot:open").text.contains("5"))
+	_check("P5 RESULTS: the run's tokens banked as 5 items; OPEN LOOT offers the reveal", Parts.count(main.save) == n_items0 + 5 and _find("loot:open") != null and _find("loot:open").text.contains("5"))
 	_press("loot:open")
 	await _frames()
 	var ru: Array = main.reveal_uids
@@ -1315,10 +1376,10 @@ func _run_screen() -> void:
 	_check("P5 REVEAL: REVEAL ALL flips everything", _find("loot:equip:%d" % int(ru[4])) != null and _find("loot:all") == null and _find("loot:done") != null)
 	_audit("loot reveal")
 	var pick: int = int(ru[4])
-	var pit: Dictionary = Gear.item(main.save, pick)
+	var why_pick: String = Parts.why_equip(main.save, pick)
 	_press("loot:equip:%d" % pick)
 	await _frames()
-	_check("P5 REVEAL: EQUIP from a revealed card", Gear.is_equipped(main.save, pick) or String(pit.get("kind", "")) == "module" and not Gear.why_equip(main.save, pick).is_empty())
+	_check("P5 REVEAL: INSTALL from a revealed card (unless its slot is still locked)", Parts.is_equipped(main.save, pick) or not why_pick.is_empty())
 	_press("loot:done")
 	await _frames()
 	_check("P5 REVEAL: DONE closes the reveal (back on the results)", main.overlay == "" and main.screen == "results")

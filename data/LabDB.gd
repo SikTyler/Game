@@ -12,7 +12,7 @@ extends RefCounted
 ## cut by Lab Discount (Labs.price). Ids of the V1 projects are kept for saves:
 ## offcap = Storage Tech, offrate = Logistics Tech.
 
-const CATS: Array = [["core", "Core"], ["enemy", "Enemy"], ["economy", "Economy"], ["loot", "Loot"], ["forge", "Forge"], ["run", "Run"], ["qol", "QOL"]]
+const CATS: Array = [["core", "Core"], ["enemy", "Enemy"], ["economy", "Economy"], ["loot", "Loot"], ["forge", "Parts"], ["run", "Run"], ["qol", "QOL"]]
 ## Research Hall levels that open each row of projects.
 const HALL_ROWS: Array = [1, 3, 5, 8]
 
@@ -38,6 +38,8 @@ const DEFS: Dictionary = {
 	"coin":        {"name": "Coin Bonus", "cat": "economy", "max": 20, "base": 60.0, "growth": 1.35, "hall": 1, "effect": "+5% coins", "icon": ["coin", "ffd34d"]},
 	"startcash":   {"name": "Starting Cash", "cat": "economy", "max": 15, "base": 40.0, "growth": 1.40, "hall": 1, "effect": "+$15 cash at run start", "icon": ["coin", "a3e635"]},
 	"interest":    {"name": "Compound Interest", "cat": "economy", "max": 10, "base": 1500.0, "growth": 1.6, "hall": 1, "req": [["coin", 2]], "fx": {"interest": 0.002}, "effect": "+0.2% wave interest", "icon": ["bank", "ffd34d"]},
+	# V2 P10 eco ramp: the long run-cash line (owner: "a lengthy ramp-up requiring heavy investment in research and outpost building")
+	"field_econ":  {"name": "Field Economics", "cat": "economy", "max": 15, "base": 1800.0, "growth": 1.62, "hall": 3, "req": [["coin", 2]], "fx": {"run_cash": 0.10}, "effect": "+10% all run cash (more enhancements, longer runs)", "icon": ["coin", "4ade80"]},
 	"bounty":      {"name": "Clear Bounty", "cat": "economy", "max": 10, "base": 1000.0, "growth": 1.55, "hall": 1, "req": [["coin", 1]], "effect": "+10% coins from cleared waves", "icon": ["star", "ffd34d"]},
 	"offcap":      {"name": "Storage Tech", "cat": "economy", "max": 8, "base": 150.0, "growth": 1.60, "hall": 1, "effect": "+4% Outpost storage", "icon": ["box", "e8c48f"]},
 	"offrate":     {"name": "Logistics Tech", "cat": "economy", "max": 5, "base": 120.0, "growth": 1.50, "hall": 1, "effect": "+5% Outpost production", "icon": ["gear", "a3e635"]},
@@ -49,18 +51,18 @@ const DEFS: Dictionary = {
 	"lic_adv":     {"name": "Advanced Licensing", "cat": "economy", "max": 2, "costs": [150000, 1500000], "hall": 5, "req": [["lic_mill", 1]], "effect": "Outpost buildings that need Relay 3+ unlock one Relay level earlier", "icon": ["star", "39e6ff"]},
 	# ---- Loot ------------------------------------------------------------
 	"loot_theory": {"name": "Loot Theory", "cat": "loot", "max": 10, "base": 4000.0, "growth": 1.7, "hall": 3, "effect": "+10% elite item drop chance", "icon": ["box", "f59e0b"]},
-	"appraisal":   {"name": "Appraisal", "cat": "loot", "max": 10, "base": 6000.0, "growth": 1.8, "hall": 3, "req": [["loot_theory", 1]], "effect": "+1 rarity luck on drops and Forge rolls", "icon": ["star", "f59e0b"]},
+	"appraisal":   {"name": "Appraisal", "cat": "loot", "max": 10, "base": 6000.0, "growth": 1.8, "hall": 3, "req": [["loot_theory", 1]], "effect": "+1 rarity luck on drops, crates and Fabricator stock", "icon": ["star", "f59e0b"]},
 	"cache_luck":  {"name": "Cache Luck", "cat": "loot", "max": 5, "base": 20000.0, "growth": 2.0, "hall": 5, "req": [["appraisal", 2]], "effect": "+2 rarity luck inside caches", "icon": ["slot", "a855f7"]},
 	"scav_rate":   {"name": "Scavenging", "cat": "loot", "max": 10, "base": 5000.0, "growth": 1.7, "hall": 3, "req": [["loot_theory", 1]], "effect": "+6% Scavenger speed", "icon": ["magnet", "4ade80"]},
-	"reclaim":     {"name": "Reclamation", "cat": "loot", "max": 5, "base": 3000.0, "growth": 1.8, "hall": 1, "effect": "+10% Scrap from salvaging gear", "icon": ["gear", "d9b98a"]},
+	"reclaim":     {"name": "Reclamation", "cat": "loot", "max": 5, "base": 3000.0, "growth": 1.8, "hall": 1, "effect": "+10% Scrap from smelting parts", "icon": ["gear", "d9b98a"]},
 	# ---- Forge -----------------------------------------------------------
-	"stabilizer":  {"name": "Stabilizer", "cat": "forge", "max": 2, "costs": [5000, 80000], "hall": 3, "effect": "+1 perk lock slot per item (1 -> 3)", "icon": ["shield", "ffd34d"]},
-	"blacklist":   {"name": "Blacklist", "cat": "forge", "max": 3, "costs": [10000, 120000, 1200000], "hall": 3, "req": [["stabilizer", 1]], "effect": "+1 banned perk per gear kind", "icon": ["target", "ff3ea5"]},
+	"stabilizer":  {"name": "Stabilizer", "cat": "forge", "max": 2, "costs": [5000, 80000], "hall": 3, "effect": "+1 perk lock slot per part (1 -> 3)", "icon": ["shield", "ffd34d"]},
+	"blacklist":   {"name": "Blacklist", "cat": "forge", "max": 3, "costs": [10000, 120000, 1200000], "hall": 3, "req": [["stabilizer", 1]], "effect": "+1 banned perk per assembly (Weapon / Core)", "icon": ["target", "ff3ea5"]},
 	"reroll_disc": {"name": "Reroll Discount", "cat": "forge", "max": 5, "base": 4000.0, "growth": 1.8, "hall": 3, "effect": "-8% perk reroll Scrap", "icon": ["slot", "d9b98a"]},
-	"greater_cal": {"name": "Greater Calibration", "cat": "forge", "max": 5, "base": 5000.0, "growth": 1.9, "hall": 3, "effect": "-5% gear upgrade coins", "icon": ["chevrons", "39e6ff"]},
+	"greater_cal": {"name": "Greater Calibration", "cat": "forge", "max": 5, "base": 5000.0, "growth": 1.9, "hall": 3, "effect": "-5% part upgrade coins", "icon": ["chevrons", "39e6ff"]},
 	"enchanters_eye": {"name": "Enchanter's Eye", "cat": "forge", "max": 1, "costs": [250000], "hall": 5, "req": [["reroll_disc", 2]], "effect": "Perk rerolls offer 3 candidates", "icon": ["eye", "a855f7"]},
 	"masterwork_odds": {"name": "Masterwork Odds", "cat": "forge", "max": 3, "costs": [30000, 300000, 2000000], "hall": 5, "req": [["greater_cal", 2]], "effect": "+5% masterwork jackpot chance (15% -> 30%)", "icon": ["star", "ffd34d"]},
-	"brand_contracts": {"name": "Brand Contracts", "cat": "forge", "max": 1, "costs": [150000], "hall": 5, "req": [["blacklist", 1]], "effect": "Pick the brand of a Forge roll", "icon": ["coin", "ff3ea5"]},
+	"brand_contracts": {"name": "Part Contracts", "cat": "forge", "max": 1, "costs": [150000], "hall": 5, "req": [["blacklist", 1]], "effect": "Pick the part type of a Scrap crate (x1.5 price)", "icon": ["coin", "ff3ea5"]},
 	"mythic_fusion": {"name": "Mythic Fusion", "cat": "forge", "max": 1, "costs": [5000000], "hall": 8, "req": [["stabilizer", 2]], "effect": "Merge three Legendaries into a Mythic", "icon": ["rings", "ff3e6c"]},
 	# ---- Run -------------------------------------------------------------
 	"grid":        {"name": "Grid Expansion", "cat": "run", "max": 7, "costs": [2000, 10000, 50000, 200000, 750000, 2500000, 8000000], "hall": 1, "effect": "Bigger run grid: 7x7 -> 9x9 -> 11x11 ... -> 21x21", "icon": ["box", "39e6ff"]},
@@ -73,8 +75,8 @@ const DEFS: Dictionary = {
 	"draft_choices": {"name": "Draft Choices", "cat": "run", "max": 2, "costs": [150000, 2000000], "hall": 5, "req": [["reroll", 1]], "effect": "+1 card in every draft (3 -> 5)", "icon": ["pellets", "c084fc"]},
 	# ---- QOL -------------------------------------------------------------
 	"fast_reveal": {"name": "Fast Reveal", "cat": "qol", "max": 1, "costs": [2500], "hall": 1, "effect": "Loot reveals play twice as fast", "icon": ["chevrons", "ffd34d"]},
-	"presets":     {"name": "Loadout Presets", "cat": "qol", "max": 3, "costs": [15000, 150000, 1500000], "hall": 3, "effect": "+1 saved loadout (Weapon + Modules), on the Core's Presets tab", "icon": ["box", "39e6ff"]},
-	"auto_salvage": {"name": "Auto-Salvage", "cat": "qol", "max": 2, "costs": [20000, 200000], "hall": 3, "effect": "Salvage banked Commons (Lv 2: and Uncommons) on arrival, when switched on in the Forge", "icon": ["gear", "d9b98a"]},
+	"presets":     {"name": "Loadout Presets", "cat": "qol", "max": 3, "costs": [15000, 150000, 1500000], "hall": 3, "effect": "+1 saved loadout (Weapon + Core parts), on the Armory's Presets row", "icon": ["box", "39e6ff"]},
+	"auto_salvage": {"name": "Auto-Salvage", "cat": "qol", "max": 2, "costs": [20000, 200000], "hall": 3, "effect": "Smelt banked Commons (Lv 2: and Uncommons) on arrival, when switched on in the Armory", "icon": ["gear", "d9b98a"]},
 	"auto_collect": {"name": "Auto-Collect", "cat": "qol", "max": 1, "costs": [30000], "hall": 3, "effect": "The Outpost collects its coins and Scrap by itself (Scavengers stay manual)", "icon": ["magnet", "4ade80"]},
 	"bulk_upgrade": {"name": "Bulk Upgrade", "cat": "qol", "max": 1, "costs": [40000], "hall": 3, "effect": "Upgrade gear x5 or to its max in one click", "icon": ["chevrons", "4ade80"]},
 	"auto_buy":    {"name": "Auto-Buy", "cat": "qol", "max": 1, "costs": [80000], "hall": 3, "req": [["enh_theory", 1]], "effect": "Runs spend spare cash on Core Enhancements by the rule you pick (AUTO in the run panel)", "icon": ["coin", "a3e635"]},
@@ -85,7 +87,7 @@ const DEFS: Dictionary = {
 const IDS: Array = [
 	"dmg", "hp", "core_theory", "targeting", "optics", "reactor", "aegis", "shielding", "manual",
 	"en_hp", "en_atk", "en_speed", "boss_breaker", "elite_hp", "sapper_damp",
-	"coin", "startcash", "interest", "bounty", "offcap", "offrate", "lab_discount", "lic_mill", "lic_mine", "lic_scav", "lic_core", "lic_adv",
+	"coin", "startcash", "interest", "field_econ", "bounty", "offcap", "offrate", "lab_discount", "lic_mill", "lic_mine", "lic_scav", "lic_core", "lic_adv",
 	"loot_theory", "appraisal", "cache_luck", "scav_rate", "reclaim",
 	"stabilizer", "blacklist", "reroll_disc", "greater_cal", "enchanters_eye", "masterwork_odds", "brand_contracts", "mythic_fusion",
 	"grid", "speed", "xp", "reroll", "banish_r", "draft_lock", "enh_theory", "draft_choices",

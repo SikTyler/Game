@@ -48,10 +48,10 @@ const WeaponDB := preload("res://data/WeaponDB.gd")
 const Fonts := preload("res://ui/Fonts.gd")
 const NeonTheme := preload("res://ui/NeonTheme.gd")
 const Roll := preload("res://vfx/Roll.gd")
-const Gear := preload("res://Gear.gd")
+const Parts := preload("res://Parts.gd")
+const PartDB := preload("res://data/PartDB.gd")
 const RarityDB := preload("res://data/RarityDB.gd")
 const FrameDB := preload("res://data/FrameDB.gd")
-const ModuleDB := preload("res://data/ModuleDB.gd")
 const AffixDB := preload("res://data/AffixDB.gd")
 const LootReveal := preload("res://ui/LootReveal.gd")
 
@@ -111,6 +111,10 @@ var fade: float = 0.0
 var tracers: FxPool = FxPool.new(96)  # {a, b, t, color, w}
 var rings: FxPool = FxPool.new(64)    # {pos, r, t, color}
 var pops: FxPool = FxPool.new(24)     # {pos, text, t, color, size}
+## V2 P10 (owner: "see your looting in action"): a loot icon pops over the
+## body that dropped it - {pos, icon, color, text, t}.
+var loot_pops: FxPool = FxPool.new(32)
+const LOOT_POP_S: float = 1.1
 var dmgnums: FxPool = FxPool.new(48)  # {pos, amt, eid, t, size}
 var bolts: FxPool = FxPool.new(24)    # {a, t}
 var juice: Juice = Juice.new()
@@ -179,19 +183,15 @@ var op_bp_text: String = ""
 var op_focus: Vector2i = Vector2i(4, 4)   # keyboard / pad map cursor
 # Reforge
 var rf_confirm: int = 0              # two-step confirm
-# V2 P4 Forge / Core screens (ForgeView, CoreView)
-var forge_sel: int = 0               # selected item uid
-var forge_filter: String = "all"     # all | weapon | module
-var forge_page: int = 0
-var forge_kind: String = "weapon"    # Forge-new panel: weapon | module
-var forge_merge: Array = []          # [base, a, b] while the merge panel is open
-var forge_imprint: int = 0           # target uid while imprinting
-var forge_donor: int = 0
-var forge_confirm: int = 0           # salvage two-step confirm (Rare+)
-var forge_t: float = -10.0           # t_anim of the last forge / merge (reveal beam)
-var core_tab: String = "loadout"     # loadout | look | levels
-var core_sock: int = -1              # -1 the Weapon slot, 0.. a Module socket
-var core_page: int = 0
+# V3 parts screens (ArmoryView: the WEAPON and CORE tabs)
+var arm_tab: Dictionary = {"weapon": "build", "core": "build"}   # build | crates | presets | look | levels
+var arm_slot: Dictionary = {"weapon": "barrel:0", "core": "plating:0"}   # selected position "<slot>:<i>"
+var arm_sel: int = 0                 # selected part uid
+var arm_page: int = 0
+var arm_merge: Array = []            # [base, a, b] while the merge panel is open
+var arm_confirm: int = 0             # smelt two-step confirm (Rare+)
+var arm_t: float = -10.0             # t_anim of the last merge (reveal beam)
+var arm_crate_slot: String = ""      # Part Contracts: the crate's part type
 # V2 P4 manual aim (run): hold LMB on open field, or deflect the right stick
 var aim_down: bool = false
 var aim_t: float = 0.0
@@ -545,11 +545,12 @@ func abandon_run() -> void:
 func set_tab(id: String) -> void:
 	if screen != "base":
 		return
-	if tab == "forge" and id != "forge":
-		# V2 P9 audit: leaving the Forge marks what it showed as seen, so the
-		# "new" dots / Forge badge mean new since the last visit
-		for u in Gear.uids(save):
-			Gear.mark_seen(save, int(u))
+	if (tab == "weapon" or tab == "core") and id != tab:
+		# V2 P9 audit: leaving a builder marks its side's parts as seen, so the
+		# "new" dots / tab badge mean new since the last visit
+		for u in Parts.uids(save):
+			if PartDB.side_of(String(Parts.item(save, int(u))["slot"])) == tab:
+				Parts.mark_seen(save, int(u))
 	tab = id
 	op_arm = ""
 	op_moving = false
@@ -729,6 +730,33 @@ func _pop(pos: Vector2, text: String, t: float, col: Color, size: int) -> void:
 	d["size"] = size
 
 
+## Loot icon over the body that dropped it (Scrap, an item, a cache, coins).
+func _loot_pop(ev: Dictionary) -> void:
+	var kind: String = String(ev.get("kind", ""))
+	var icon: String = "cur_scrap"
+	var col: Color = Color.WHITE
+	var text: String = ""
+	match kind:
+		"scrap":
+			text = "+%d" % int(ev.get("n", 1))
+		"item":
+			icon = "icon_gear"
+			col = Kit.rarity_text(drop_rar(ev))
+		"cache":
+			icon = "chest"
+			col = Kit.rarity_text(drop_rar(ev))
+		"coins":
+			icon = "cur_coin"
+			text = "+%d" % int(ev.get("n", ev.get("coins", 1)))
+		_:
+			return
+	var n: Dictionary = loot_pops.take(LOOT_POP_S)
+	n["pos"] = ev.get("pos", TowerState.CENTER)
+	n["icon"] = icon
+	n["color"] = col
+	n["text"] = text
+
+
 ## Floating damage number: hits on one enemy within DMG_MERGE merge.
 func _dmg_num(eid: int, pos: Vector2, amt: float) -> void:
 	var mode: String = String((Settings.normalize(settings)["video"] as Dictionary).get("dmg_numbers", "all"))
@@ -773,6 +801,7 @@ func _clear_fx() -> void:
 	tracers.clear()
 	rings.clear()
 	pops.clear()
+	loot_pops.clear()
 	bolts.clear()
 	dmgnums.clear()
 	if bursts != null:
@@ -848,22 +877,30 @@ func ev_text(e: Dictionary) -> String:
 			return "Core Reforged! +%d shards" % int(e["shards"])
 		"shard_node":
 			return "%s -> Lv%d" % [String((ReforgeDB.NODES[String(e["id"])] as Dictionary)["name"]), int(e["lvl"])]
-		"gear_forge":
-			return "Forged a %s %s!" % [String(RarityDB.get_def(String(e["rar"]))["name"]), _gear_name(e)]
-		"gear_upgrade":
+		"part_upgrade":
 			if e.has("mw"):
 				return ("JACKPOT MASTERWORK! Lv%d" if bool(e.get("jackpot", false)) else "MASTERWORK! Lv%d") % int(e["lvl"])
 			return "Upgraded to Lv%d" % int(e["lvl"])
-		"gear_merge":
+		"part_merge":
 			return "Merged into %s!" % String(RarityDB.get_def(String(e["to"]))["name"])
-		"gear_salvage":
-			return "Salvaged: +%d Scrap" % int(e["scrap"])
-		"gear_imprint":
-			return "Perk imprinted"
-		"gear_reroll_take":
+		"part_salvage":
+			return "Smelted: +%d Scrap" % int(e["scrap"])
+		"smelt_start":
+			return "Smelting - Scrap in %s" % Kit.dur(maxi(0, int(e["done"]) - now()))
+		"smelt_done":
+			return "Smelter: +%d Scrap" % int(e["scrap"])
+		"part_reroll_take":
 			return "New perk: %s" % String(AffixDB.get_def(String((e["perk"] as Dictionary)["id"])).get("name", ""))
-		"gear_equip":
-			return "Equipped %s" % String(Gear.item(save, int(e["uid"])).get("name", ""))
+		"part_equip":
+			return "Installed %s" % String(Parts.item(save, int(e["uid"])).get("name", ""))
+		"part_unequip":
+			return "Removed %s" % String(Parts.item(save, int(e["uid"])).get("name", ""))
+		"crate_open":
+			return "%s opened" % String((Parts.CRATES.get(String(e["crate"]), {}) as Dictionary).get("name", "Crate"))
+		"fab_buy":
+			return "Fabricated a %s part" % String(RarityDB.get_def(String(e["rar"]))["name"])
+		"fab_reroll":
+			return "Fabricator restocked"
 		"core_look":
 			return ""
 	return ""
@@ -929,12 +966,6 @@ func open_loot() -> void:
 	LootReveal.open(self, uids)
 
 
-func _gear_name(e: Dictionary) -> String:
-	var kind: String = String(e.get("kind", "weapon"))
-	var base: String = String(e.get("base", ""))
-	return String((FrameDB.get_def(base) if kind == "weapon" else ModuleDB.get_def(base)).get("name", base))
-
-
 ## Audio for meta (hub) events: event -> clip only.
 func _meta_sfx(ev: Array) -> void:
 	for x in ev:
@@ -947,13 +978,13 @@ func _meta_sfx(ev: Array) -> void:
 				sfx_play("upgrade")
 			"op_placed", "decor_placed", "op_moved", "plot_open":
 				sfx_play("place")
-			"tier_unlocked", "set_complete", "core_unlocked", "reforge", "gear_merge":
+			"tier_unlocked", "set_complete", "core_unlocked", "reforge", "part_merge":
 				sfx_play("levelup")
-			"gear_upgrade":
+			"part_upgrade":
 				sfx_play("levelup" if (x as Dictionary).has("mw") else "upgrade")
-			"gear_reroll", "gear_lock", "gear_equip", "gear_imprint", "gear_reroll_take":
+			"part_reroll", "part_lock", "part_equip", "part_reroll_take", "fab_buy", "fab_reroll":
 				sfx_play("upgrade")
-			"gear_salvage":
+			"part_salvage", "smelt_done", "smelt_start":
 				sfx_play("coin")
 			"offline", "mission_claimed", "streak_claimed", "mission_bonus", "collect":
 				sfx_play("coin")
@@ -1016,6 +1047,9 @@ func _handle(events: Array) -> void:
 			sfx_play(clip)
 		if et == "drop":
 			Intel.on_event(self, ev)   # FB2 Loot Drops feed
+			_loot_pop(ev)
+		elif et == "loot_drop":
+			_loot_pop({"kind": "coins", "n": maxi(1, int(round(float(ev.get("coins", 1.0))))), "pos": ev.get("pos", TowerState.CENTER)})
 			if String(ev.get("kind", "")) in ["item", "cache"]:
 				loot_beams.append({"pos": ev.get("pos", TowerState.CENTER), "rar": drop_rar(ev), "t": 0.0})
 				sfx_play("card_open", 1.4)
@@ -1525,6 +1559,7 @@ func _process(delta: float) -> void:
 			var t: int = now()
 			var ev: Array = Labs.claim(save, t)
 			ev.append_array(Missions.roll(save, t))
+			ev.append_array(Parts.smelt_claim(save, t))   # V3: finished melts pay out on their own
 			auto_collect_t += 1.0
 			if auto_collect_t >= AUTO_COLLECT_S:
 				auto_collect_t = 0.0
@@ -1541,6 +1576,7 @@ func _process(delta: float) -> void:
 	tracers.update(delta)
 	rings.update(delta)
 	pops.update(delta)
+	loot_pops.update(delta)
 	bolts.update(delta)
 	dmgnums.update(delta)
 	for k in slot_pop.keys():

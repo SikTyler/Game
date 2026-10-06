@@ -21,7 +21,11 @@ extends RefCounted
 ## Quantity limits by Relay level: LIMITS (anything unlisted: 1).
 
 ## Coin Mill L1 coins/h (measured so the Outpost replaces the old Offline pay).
-const MILL_RATE: float = 600.0
+const MILL_RATE: float = 150.0   # V2 P10 eco ramp (owner: 2 Mills out-earned early runs): was 600
+## V2 P10: coin producers (Mill, Deep Mine) grow x COIN_LVL a level (was +25%
+## linear), so levelling - not spamming cheap Mills - is the road to a big
+## hourly income: a Mill makes 150 / h at Lv1, ~1,600 / h at Lv10.
+const COIN_LVL: float = 1.30
 ## Coin Mill output x (1 + MILL_TIER x (highest tier - 1)).
 const MILL_TIER: float = 0.8
 const W: int = 48
@@ -49,8 +53,8 @@ const DEFS: Dictionary = {
 	"relay": {"name": "Core Relay", "cat": "support", "size": [3, 3], "power": 0, "coins": 3000, "res": "", "rate": 0.0, "storage_h": 0.0, "max_lvl": 10,
 		"desc": "Powers and links the Outpost; its level caps every building's"},
 	# ---- production
-	"mill": {"name": "Coin Mill", "cat": "production", "size": [2, 2], "power": 2, "coins": 500, "res": "coins", "rate": MILL_RATE, "storage_h": 8.0,
-		"desc": "Coins per hour (x0.8 per tier above 1); +10% next to each Mill, +15% next to a Warehouse"},
+	"mill": {"name": "Coin Mill", "cat": "production", "size": [2, 2], "power": 2, "coins": 500, "growth": 1.45, "max_lvl": 15, "res": "coins", "rate": MILL_RATE, "storage_h": 8.0,
+		"desc": "Coins per hour: x1.3 per level, +80% per tier above 1; +10% next to each Mill, +15% next to a Warehouse"},
 	"refinery": {"name": "Scrap Refinery", "cat": "production", "size": [2, 2], "power": 3, "coins": 1500, "res": "scrap", "rate": 6.0, "storage_h": 6.0,
 		"desc": "Scrap per hour; noisy Mills next door cost it 10%"},
 	"gemmine": {"name": "Deep Mine", "cat": "production", "size": [2, 2], "power": 4, "coins": 10000, "res": "coins", "rate": MILL_RATE * 3.0, "storage_h": 8.0,
@@ -58,14 +62,14 @@ const DEFS: Dictionary = {
 	# ---- permanent Core stats (built + linked; adjacency scales them)
 	"arsenal": {"name": "Arsenal", "cat": "core", "size": [2, 2], "power": 2, "coins": 2500, "core": {"dmg": 0.07}, "relay": 1, "desc": "+7% all damage per level"},
 	"reactor": {"name": "Reactor", "cat": "core", "size": [2, 2], "power": 1, "coins": 3000, "core": {"rate": 0.05}, "relay": 1, "desc": "+5% Weapon attack rate per level; heats Mills next to it"},
-	"bulwark_w": {"name": "Bulwark Works", "cat": "core", "size": [2, 2], "power": 2, "coins": 2500, "core": {"core_hp": 0.08}, "relay": 1, "desc": "+8% Core max HP per level"},
+	"bulwark_w": {"name": "Bulwark Works", "cat": "core", "size": [2, 2], "power": 2, "coins": 2500, "core": {"core_hp": 0.05}, "relay": 1, "desc": "+5% Core max HP per level"},
 	"aegis_a": {"name": "Aegis Array", "cat": "core", "size": [2, 2], "power": 2, "coins": 4000, "core": {"dr": 0.012}, "relay": 2, "desc": "-1.2% damage taken per level"},
 	"optics": {"name": "Optics Lab", "cat": "core", "size": [2, 2], "power": 2, "coins": 4000, "core": {"crit": 0.01}, "relay": 2, "desc": "+1% crit chance per level"},
 	"rangefinder": {"name": "Rangefinder", "cat": "core", "size": [2, 2], "power": 1, "coins": 3500, "core": {"range": 0.04}, "relay": 2, "desc": "+0.04 cell Weapon range per level"},
-	"treasury": {"name": "Treasury", "cat": "core", "size": [2, 2], "power": 1, "coins": 3000, "core": {"cash": 0.04}, "relay": 1, "desc": "+4% run cash per second per level"},
-	"training": {"name": "Training Grounds", "cat": "core", "size": [2, 2], "power": 1, "coins": 3000, "core": {"xp": 0.06}, "relay": 3, "desc": "+6% run XP per level"},
+	"treasury": {"name": "Treasury", "cat": "core", "size": [2, 2], "power": 1, "coins": 3000, "core": {"run_cash": 0.06}, "relay": 1, "desc": "+6% all run cash per level"},
+	"training": {"name": "Training Grounds", "cat": "core", "size": [2, 2], "power": 1, "coins": 3000, "core": {"xp": 0.03}, "relay": 3, "desc": "+3% run XP per level"},
 	"shrine": {"name": "Fortune Shrine", "cat": "core", "size": [2, 2], "power": 1, "coins": 6000, "core": {"loot_luck": 1.0}, "relay": 3, "desc": "+1 loot luck per level (rarer drops when a run banks)"},
-	"forgeworks": {"name": "Forge Works", "cat": "core", "size": [2, 2], "power": 2, "coins": 5000, "core": {"forge_disc": 0.02}, "relay": 4, "desc": "-2% Forge costs per level"},
+	"forgeworks": {"name": "Forge Works", "cat": "core", "size": [2, 2], "power": 2, "coins": 5000, "core": {"forge_disc": 0.02}, "relay": 4, "desc": "-2% Fabricator prices per level"},
 	# ---- scavenging: gear while you are away (tokens bank like run loot)
 	"scav_post": {"name": "Scavenger Post", "cat": "scavenge", "size": [2, 2], "power": 2, "coins": 4000, "res": "item", "rate": 1.0 / 6.0, "store": 4, "relay": 2,
 		"desc": "Finds an item every 6 h (stores 4)"},
@@ -81,11 +85,16 @@ const DEFS: Dictionary = {
 	"scrapyard": {"name": "Salvage Yard", "cat": "support", "size": [2, 1], "power": 1, "coins": 4000, "res": "", "rate": 0.0, "storage_h": 0.0, "desc": "Salvage yard (Scrap logistics)"},
 	"beaconpost": {"name": "Outpost Beacon", "cat": "support", "size": [1, 1], "power": 1, "coins": 2500, "res": "", "rate": 0.0, "storage_h": 0.0, "desc": "+5% to every building within 2 cells"},
 	"pylon": {"name": "Pylon", "cat": "support", "size": [1, 1], "power": 1, "coins": 1500, "res": "", "rate": 0.0, "relay": 2, "desc": "+5% to buildings 2 cells away, -5% to anything touching it"},
+	# ---- V3 parts workshops
+	"fabricator": {"name": "Fabricator", "cat": "scavenge", "size": [2, 2], "power": 3, "coins": 6000, "res": "", "rate": 0.0, "storage_h": 0.0, "relay": 2,
+		"desc": "Builds parts to order: a rotating shop paid in Scrap. Each level: more offers, faster refreshes, lower prices, rarer stock"},
+	"smelter": {"name": "Smelter", "cat": "scavenge", "size": [2, 2], "power": 2, "coins": 2500, "res": "", "rate": 0.0, "storage_h": 0.0, "relay": 1,
+		"desc": "Melts unwanted parts into Scrap over time. Each level: more furnace slots, faster melts, richer yield"},
 	# ---- links
 	"conduit": {"name": "Conduit", "cat": "links", "size": [1, 1], "power": 0, "coins": 10, "res": "", "rate": 0.0, "storage_h": 0.0, "max_lvl": 1, "desc": "Links buildings to the Relay"},
 }
 const IDS: Array = ["mill", "refinery", "gemmine", "arsenal", "reactor", "bulwark_w", "aegis_a", "optics", "rangefinder", "treasury", "training", "shrine", "forgeworks",
-	"scav_post", "scav_den", "scav_deep", "research", "barracks", "archive", "warehouse", "scrapyard", "beaconpost", "pylon", "conduit"]
+	"scav_post", "scav_den", "scav_deep", "fabricator", "smelter", "research", "barracks", "archive", "warehouse", "scrapyard", "beaconpost", "pylon", "conduit"]
 ## Buildings that accrue stored output (coins / Scrap / tokens).
 const GENERATORS: Array = ["mill", "refinery", "gemmine", "scav_post", "scav_den", "scav_deep"]
 const SCAVENGERS: Array = ["scav_post", "scav_den", "scav_deep"]
@@ -100,7 +109,7 @@ const LIMITS: Array = [[1, {"mill": 2, "refinery": 1, "gemmine": 1, "scav_post":
 
 ## Decor: 1x1 or 2x1, coins, tags drive adjacency (AdjDB).
 const DECOR: Dictionary = {
-	"dc_smelter": {"name": "Smelter", "size": [2, 1], "coins": 800, "tag": "industrial"},
+	"dc_smelter": {"name": "Slag Kiln", "size": [2, 1], "coins": 800, "tag": "industrial"},
 	"dc_crates": {"name": "Crate Stack", "size": [1, 1], "coins": 150, "tag": "industrial"},
 	"dc_bookshelf": {"name": "Bookshelf", "size": [1, 1], "coins": 300, "tag": "scholar"},
 	"dc_orrery": {"name": "Orrery", "size": [1, 1], "coins": 2000, "tag": "scholar"},

@@ -28,8 +28,9 @@ const Battle := preload("res://ui/Battle.gd")
 const Hub := preload("res://ui/Hub.gd")
 const OutpostView := preload("res://ui/OutpostView.gd")
 const LootReveal := preload("res://ui/LootReveal.gd")
+const WorkshopView := preload("res://ui/WorkshopView.gd")
 
-const OVERLAYS: Array = ["pause", "settings", "credits", "stats", "history", "achievements", "modes", "goal", "loot"]
+const OVERLAYS: Array = ["pause", "settings", "credits", "stats", "history", "achievements", "modes", "goal", "loot", "fabricator", "smelter"]
 const SET_TABS: Array = ["video", "audio", "controls", "gameplay"]
 const KEYS_PER_PAGE: int = 11
 
@@ -90,6 +91,8 @@ static func build(m) -> void:
 				_build_goal(m)
 			"loot":
 				LootReveal.build(m)
+			"fabricator", "smelter":
+				WorkshopView.build(m)
 		_focus_first(m)
 		return
 	if m.screen == "base" and not m.offline_offer.is_empty():
@@ -672,7 +675,7 @@ static func draw_topbar(m) -> void:
 	var rl: Dictionary = m.rolls
 	var cur: Array = [
 		["cur_coin", "coins", Kit.GOLD, "Coins — Core levels, the Outpost, research and forging (live during a run)", 134.0, true],
-		["cur_scrap", "scrap", Kit.SCRAP, "Scrap — the Forge's material: reroll, lock and upgrade gear (drops, salvage, Scrap Refinery)", 116.0, true],
+		["cur_scrap", "scrap", Kit.SCRAP, "Scrap — the parts material: crates, the Fabricator and perk rerolls (from runs, the Smelter and the Scrap Refinery)", 116.0, true],
 		["cur_shard", "shards", Kit.SHARD, "Reforge Shards — spend on the permanent Reforge tree", 96.0, false],
 	]
 	var compact: bool = m.vw < 1500.0
@@ -768,6 +771,8 @@ static func draw_overlay(m) -> void:
 	match String(m.overlay):
 		"loot":
 			LootReveal.draw(m)
+		"fabricator", "smelter":
+			WorkshopView.draw(m)
 		"pause":
 			var rp: Rect2 = modal_rect(m, 520, 470)
 			Kit.panel(m, rp, Kit.GEM, Kit.PANEL2)

@@ -64,7 +64,7 @@ const LABELS: Dictionary = {
 	"upgrade": "Upgrade (Outpost / Core)", "sell": "Demolish / salvage", "confirm": "Place / confirm", "cancel": "Cancel / back", "info": "Cell info",
 	"toggle_left": "Toggle left panel", "toggle_right": "Toggle right panel",
 	"tab_base": "Home (Outpost)", "tab_labs": "Research", "tab_missions": "Missions / Outpost move", "tab_stats": "Stats / history",
-	"tab_core": "Core", "tab_forge": "Forge", "tab_outpost": "Outpost", "tab_reforge": "Reforge",
+	"tab_core": "Core", "tab_forge": "Weapon", "tab_outpost": "Outpost", "tab_reforge": "Reforge",
 	"retry": "Play again (new run)",
 	"fullscreen": "Toggle fullscreen", "screenshot": "Screenshot", "zoom_in": "Zoom in", "zoom_out": "Zoom out",
 	"cursor_up": "Cursor up", "cursor_down": "Cursor down", "cursor_left": "Cursor left", "cursor_right": "Cursor right",
