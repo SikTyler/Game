@@ -15,6 +15,9 @@ const Kit := preload("res://ui/Kit.gd")
 const DraftPanel := preload("res://ui/DraftPanel.gd")
 const Hotbar := preload("res://ui/Hotbar.gd")
 const Intel := preload("res://ui/Intel.gd")
+const WeaponDB := preload("res://data/WeaponDB.gd")
+const COMPASS: Array = ["E", "SE", "S", "SW", "W", "NW", "N", "NE"]
+const FirePatterns := preload("res://FirePatterns.gd")
 
 const ENEMY2: Color = Kit.MAGENTA
 const SHIELD: Color = Color("7fd8ff")
@@ -191,17 +194,16 @@ static func cell_text(m, i: int) -> String:
 		return "Empty cell (ring %d)\nDraft a building and drop it here" % ring
 	var d: Dictionary = PickDB.get_def(id)
 	var up: String = "\nClick to apply the %s upgrade here" % pick_name(S.pending_upgrade) if S.pending_upgrade == id and S.upgrade_targets(id).has(i) else ""
-	return "%s  Lv%d / %d  (%s)\n%s%s" % [String(d["name"]), S.lvl_at(i), PickDB.max_of(id), String(d["rarity"]).capitalize(), String(d["desc"]), up]
+	var aim: String = ""
+	if WeaponDB.directional(id):
+		aim = "\n%s, facing %s  ·  [%s] or wheel turns it" % ["Arc %d deg" % int(WeaponDB.DEFS[id]["arc"]) if WeaponDB.aim_of(id) == "arc" else ("Fixed lane" if float(WeaponDB.DEFS[id]["arc"]) == 0.0 else "Fixed cone %d deg" % int(WeaponDB.DEFS[id]["arc"])), COMPASS[S.rot_at(i)], Kit.hint(m, "rotate")]
+	return "%s  Lv%d / %d  (%s)\n%s%s%s" % [String(d["name"]), S.lvl_at(i), PickDB.max_of(id), String(d["rarity"]).capitalize(), String(d["desc"]), aim, up]
 
 
 # ================================================================== ranges
-## Base weapon reach in cells (TowerState weapon table) for a building that is
-## not on the grid yet (placement preview).
-const BASE_RANGE: Dictionary = {"gun": 3.0, "mortar": 4.5, "tesla": 3.0, "flak": 3.5, "railgun": 7.0, "frost": 2.5}
-
-
-## World-space reach of the building on cell i: weapons use their live range,
-## every other building its aura (the 8 neighbouring cells). {} = none.
+## World-space reach of the building on cell i: weapons use their live range
+## and aim (V2 P3c: radial circle, arc wedge, fixed cone or lane along their
+## facing), every other building its aura (the cells around it). {} = none.
 static func range_of(m, i: int) -> Dictionary:
 	var S = m.S
 	if S == null or i < 0:
@@ -209,35 +211,84 @@ static func range_of(m, i: int) -> Dictionary:
 	for wv in (S.stats.get("weapons", []) as Array):
 		var wd: Dictionary = wv
 		if int(wd.get("slot", -2)) == i:
-			return {"r": float(wd.get("range", 0.0)), "kind": "weapon"}
+			return _aim_shape(m, wd)
 	if i != TowerState.CORE_SLOT and S.id_at(i) != "":
 		return {"r": TowerState.CELL * (0.5 * float(S.size_at(i)) + 1.0), "kind": "aura"}
 	return {}
 
 
-## Reach of `id` if it were placed now (live range of a placed twin, else base).
-static func preview_range(m, id: String) -> Dictionary:
+## The drawn shape of a weapon sheet: {r, kind: weapon, aim, facing, arc_cos, width}.
+static func _aim_shape(m, wd: Dictionary) -> Dictionary:
+	var r: float = float(wd.get("range", 0.0))
+	if String(wd.get("pattern", "")) == "cone_dot":
+		r = FirePatterns.cone_len(m.S, wd)
+	return {"r": r, "kind": "weapon", "aim": String(wd.get("aim", "radial")), "facing": wd.get("facing", Vector2.UP),
+		"arc_cos": float(wd.get("arc_cos", -1.0)), "width": float(wd.get("pierce", 0.0)) + 6.0}
+
+
+## Reach of `id` if it were placed now at anchor `at_i` (live sheet of a placed
+## twin turned to the pending facing, else its WeaponDB base).
+static func preview_range(m, id: String, at_i: int = -1) -> Dictionary:
 	var S = m.S
-	if BASE_RANGE.has(id):
+	if WeaponDB.has(id):
+		var face: Vector2 = WeaponDB.facing(S.pending_rot_at(at_i) if at_i >= 0 else 6)
 		for wv in (S.stats.get("weapons", []) as Array):
-			var wd: Dictionary = wv
+			var wd: Dictionary = (wv as Dictionary).duplicate()
 			if String(wd.get("kind", "")) == id:
-				return {"r": float(wd.get("range", 0.0)), "kind": "weapon"}
-		return {"r": float(BASE_RANGE[id]) * TowerState.cpx(), "kind": "weapon"}
+				wd["facing"] = face
+				return _aim_shape(m, wd)
+		var d: Dictionary = WeaponDB.get_def(id)
+		var base: Dictionary = {"range": float(d["range"]) * TowerState.cpx(), "pattern": String(d["pattern"]), "aim": String(d["aim"]),
+			"facing": face, "arc_cos": cos(deg_to_rad(float(d["arc"]) * 0.5)), "pierce": float((d["p"] as Dictionary).get("pierce", 0.0)), "lvl": 1}
+		return _aim_shape(m, base)
 	return {"r": TowerState.CELL * 1.5, "kind": "aura"}
 
 
-static func draw_reach(m, c: Vector2, rg: Dictionary, col: Color) -> void:
+static func draw_reach(m, c: Vector2, rg: Dictionary, col: Color, scale: float = 1.0) -> void:
 	if rg.is_empty():
 		return
-	var r: float = float(rg["r"])
+	var r: float = float(rg["r"]) * scale
 	if String(rg["kind"]) == "aura":
 		var rect := Rect2(c - Vector2(r, r), Vector2(r, r) * 2.0)
 		m.draw_rect(rect, Color(col, 0.08))
 		m.draw_rect(rect, Color(col, 0.6), false, 2.0)
 		return
-	m.draw_circle(c, r, Color(col, 0.07))
-	m.draw_arc(c, r, 0, TAU, 96, Color(col, 0.6), 2.0)
+	var aim: String = String(rg.get("aim", "radial"))
+	var face: Vector2 = rg.get("facing", Vector2.UP)
+	if aim == "radial":
+		m.draw_circle(c, r, Color(col, 0.07))
+		m.draw_arc(c, r, 0, TAU, 96, Color(col, 0.6), 2.0)
+		return
+	var ac: float = float(rg.get("arc_cos", -1.0))
+	if aim == "fixed" and ac >= 0.9999:
+		# a lane: a strip along the facing
+		var w: float = float(rg.get("width", 8.0)) * scale
+		var nrm := Vector2(-face.y, face.x) * w
+		var tip: Vector2 = c + face * r
+		var pts := PackedVector2Array([c + nrm, tip + nrm, tip - nrm, c - nrm])
+		m.draw_colored_polygon(pts, Color(col, 0.10))
+		m.draw_polyline(PackedVector2Array([c + nrm, tip + nrm, tip - nrm, c - nrm, c + nrm]), Color(col, 0.7), 2.0)
+		m.draw_line(c, tip, Color(col, 0.35), 1.0)
+		return
+	# an arc traverse or a fixed cone: a wedge around the facing
+	var half: float = acos(clampf(ac, -1.0, 1.0))
+	var a0: float = face.angle()
+	var fan := PackedVector2Array([c])
+	var seg: int = maxi(6, int(half * 20.0))
+	for k in seg + 1:
+		fan.append(c + Vector2.from_angle(a0 - half + 2.0 * half * float(k) / float(seg)) * r)
+	m.draw_colored_polygon(fan, Color(col, 0.09 if aim == "arc" else 0.13))
+	var edge := PackedVector2Array(fan)
+	edge.append(c)
+	m.draw_polyline(edge, Color(col, 0.7), 2.0)
+
+
+## Small facing pointer on a directional building (world space).
+static func draw_facing(m, c: Vector2, face: Vector2, half: float, col: Color) -> void:
+	var tip: Vector2 = c + face * (half + 5.0)
+	var nrm := Vector2(-face.y, face.x) * 4.0
+	var base: Vector2 = c + face * (half - 1.0)
+	m.draw_colored_polygon(PackedVector2Array([tip, base + nrm, base - nrm]), col)
 
 
 ## Owner feedback #1: clicking (selecting) any building shows its range.
@@ -349,6 +400,8 @@ static func _draw_grid(m) -> void:
 		m.draw_rect(br, Color(rc, 0.55), false, 1.0)
 		if not Kit.icon(m, id, br.grow(1)):
 			m.draw_rect(br.grow(-4), rc)
+		if WeaponDB.directional(id):
+			draw_facing(m, br.get_center(), WeaponDB.facing(S.rot_at(i)), bh, Color(Kit.CYAN, 0.9))
 		var lv: int = S.lvl_at(i)
 		var pw: float = minf(4.0, (br.size.x - 4.0) / 5.0 - 1.0)
 		for k in lv:
@@ -654,16 +707,12 @@ static func _draw_ghost(m) -> void:
 			m.draw_rect(cr, Color(Kit.GREEN, 0.25) if ok else Color(Kit.ENEMY, 0.25))
 			m.draw_rect(cr, Kit.GREEN if ok else Kit.ENEMY, false, 3.0)
 			if is_new and (S.pending_place != "" or m.drag_card >= 0):
-				var rg: Dictionary = preview_range(m, id)
-				var sr: float = float(rg["r"]) * m.world_scale()
+				var rg: Dictionary = preview_range(m, id, i)
 				var rc: Color = Kit.GREEN if ok else Kit.ENEMY
-				if String(rg["kind"]) == "aura":
-					var ar := Rect2(at - Vector2(sr, sr), Vector2(sr, sr) * 2.0)
-					m.draw_rect(ar, Color(rc, 0.08))
-					m.draw_rect(ar, Color(rc, 0.7), false, 2.0)
-				else:
-					m.draw_circle(at, sr, Color(rc, 0.08))
-					m.draw_arc(at, sr, 0, TAU, 96, Color(rc, 0.7), 2.0)
+				draw_reach(m, at, rg, rc, m.world_scale())
+				if WeaponDB.directional(id):
+					m.set_meta("ghost_rot", S.pending_rot_at(i))
+					draw_facing(m, at, WeaponDB.facing(S.pending_rot_at(i)), fs * 0.5, rc)
 	var gs: float = maxf(40.0, cs * 0.9 * float(TowerState.size_of(id)))
 	Kit.icon(m, id, Rect2(at - Vector2(gs, gs) * 0.5, Vector2(gs, gs)), Color(0.6, 1.0, 0.6, 0.85) if ok else Color(1.0, 0.55, 0.55, 0.8))
 	if reason != "" and not ok:

@@ -61,6 +61,17 @@ func cone(apex: Vector2, dir: Vector2, half_angle: float, rng: float) -> PackedI
 	return _w().call("InCone", apex.x, apex.y, dir.x, dir.y, cos(half_angle), rng)
 
 
+## V2 P3c: nearest living body inside a cone from `apex` along unit `dir`
+## (half angle in rad, range); -1 if none.
+func nearest_in_cone(apex: Vector2, dir: Vector2, half_angle: float, rng: float) -> int:
+	return int(_w().call("NearestInCone", apex.x, apex.y, dir.x, dir.y, cos(half_angle), rng))
+
+
+## V2 P3c: living bodies in the lane a -> b (half width w).
+func count_in_line(a: Vector2, b: Vector2, width: float) -> int:
+	return int(_w().call("CountInLine", a.x, a.y, b.x, b.y, width))
+
+
 ## Living body with the smallest d^2 <= r^2 (ties: the higher slot, `<=`),
 ## skipping slots in `exclude`. -1 if none.
 func nearest(from: Vector2, rng_lim: float, exclude: Dictionary) -> int:

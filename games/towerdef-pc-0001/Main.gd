@@ -40,6 +40,7 @@ const Battle := preload("res://ui/Battle.gd")
 const Intel := preload("res://ui/Intel.gd")
 const Hub := preload("res://ui/Hub.gd")
 const OutpostView := preload("res://ui/OutpostView.gd")
+const WeaponDB := preload("res://data/WeaponDB.gd")
 const Fonts := preload("res://ui/Fonts.gd")
 const NeonTheme := preload("res://ui/NeonTheme.gd")
 const Roll := preload("res://vfx/Roll.gd")
@@ -604,6 +605,18 @@ func _cast_result(r: Dictionary) -> void:
 	_rebuild_ui()
 
 
+## V2 P3c: turn the pick being placed (from the facing its ghost shows) or
+## the selected directional weapon by d x 45 deg. Free.
+func rotate_weapon(d: int = 1) -> void:
+	if S == null:
+		return
+	if S.pending_place != "":
+		_handle(S.rotate_pending(d, place_anchor(s2w(mouse_pos), S.pending_place)))
+	elif sel >= 0:
+		_handle(S.rotate(sel, d))
+	_rebuild_ui()
+
+
 func place_at(i: int) -> void:
 	if S != null and S.pending_place != "" and i >= 0:
 		_handle(S.place(i))
@@ -964,6 +977,11 @@ func _handle(events: Array) -> void:
 				rebuild = true
 			"levelup", "perk_offer", "draft_offer", "draft_reroll", "draft_banish", "speed", "mutation_offer", "mutation_taken", "track", "target_mode", "place_cancelled", "upgrade_cancelled":
 				rebuild = true
+			"rotated":
+				sfx_play("click", 1.15)
+				if int(ev["slot"]) >= 0:
+					slot_pop[int(ev["slot"])] = 0.15
+				rebuild = true
 			"placed", "upgraded", "building_level":
 				slot_pop[int(ev["slot"])] = 0.3
 				rebuild = true
@@ -1044,10 +1062,17 @@ func _input(event: InputEvent) -> void:
 			_rebuild_ui()
 			get_viewport().set_input_as_handled()
 		MOUSE_BUTTON_WHEEL_UP:
-			set_zoom(zoom + (-0.1 if bool(_ctl("invert_zoom")) else 0.1))
+			# V2 P3c: while placing a directional weapon the wheel turns it
+			if S != null and S.pending_place != "" and WeaponDB.directional(S.pending_place):
+				rotate_weapon(-1)
+			else:
+				set_zoom(zoom + (-0.1 if bool(_ctl("invert_zoom")) else 0.1))
 			get_viewport().set_input_as_handled()
 		MOUSE_BUTTON_WHEEL_DOWN:
-			set_zoom(zoom + (0.1 if bool(_ctl("invert_zoom")) else -0.1))
+			if S != null and S.pending_place != "" and WeaponDB.directional(S.pending_place):
+				rotate_weapon(1)
+			else:
+				set_zoom(zoom + (0.1 if bool(_ctl("invert_zoom")) else -0.1))
 			get_viewport().set_input_as_handled()
 
 

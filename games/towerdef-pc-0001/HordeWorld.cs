@@ -1110,6 +1110,31 @@ public partial class HordeWorld : RefCounted
 		return outl.ToArray();
 	}
 
+	// V2 P3c: nearest living body whose centre lies in a cone (apex x,y; unit
+	// dir; cos of the half angle; range) - arc-limited targeting. Ties: the
+	// higher slot (`<=`, as Nearest). -1 if none.
+	public int NearestInCone(double x, double y, double dirx, double diry, double cosHalf, double range)
+	{
+		int best = -1;
+		double bd = range * range;
+		foreach (int s in Circle(x, y, range, false))
+		{
+			double dx = px[s] - x, dy = py[s] - y;
+			double d2 = dx * dx + dy * dy;
+			double l = Math.Sqrt(d2);
+			if (l > 1e-9 && (dx * dirx + dy * diry) < cosHalf * l) continue;
+			if (d2 <= bd) { bd = d2; best = s; }
+		}
+		return best;
+	}
+
+	// V2 P3c: how many living bodies a lane (segment + half width) holds - a
+	// fixed lane weapon only fires when this is > 0.
+	public int CountInLine(double x0, double y0, double x1, double y1, double width)
+	{
+		return InLine(x0, y0, x1, y1, width).Length;
+	}
+
 	// Nearest living body with d^2 <= r^2 (ties: the higher slot, `<=`), skipping `exclude`. -1 if none.
 	public int Nearest(double x, double y, double r, int[] exclude)
 	{

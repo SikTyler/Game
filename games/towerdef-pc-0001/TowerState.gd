@@ -35,6 +35,8 @@ const Drops := preload("res://Drops.gd")
 const PowerModel := preload("res://PowerModel.gd")
 const EnemyStore := preload("res://EnemyStore.gd")
 const EnemyHash := preload("res://EnemyHash.gd")
+const WeaponDB := preload("res://data/WeaponDB.gd")
+const FirePatterns := preload("res://FirePatterns.gd")
 
 const CENTER: Vector2 = Vector2(360, 470)
 const CELL: float = 26.0
@@ -183,6 +185,7 @@ var last_wave_spawned: Dictionary = {}  # {wave, n} of the wave that just ended
 var wave_started: bool = false    # wave 1 starts after the opening telegraph lead
 var grid_n: int = 7               # run grid side (Research unlock)
 var occ: PackedInt32Array = PackedInt32Array()   # cell -> anchor covering it (CORE_SLOT on the Core, -1 free)
+var pending_rot: int = -1          # V2 P3c: facing chosen for the pick being placed (-1 = away from the Core)
 var wave_cash0: float = 0.0       # cash_earned at wave start
 var ironclad: float = 0.0         # Ironclad modifier: non-crit hits deal this much less
 
@@ -917,19 +920,10 @@ func compute_stats() -> Dictionary:
 		var rate_m: float = rate_all * float(adj_rate[i]) * maxf(0.1, 1.0 + pf("bld_rate"))
 		var dm: float = dmg_all * float(adj_dmg[i]) * bld_dmg() * maxf(0.1, 1.0 + pf("bld_dmg"))
 		var rng_c: float = float(adj_range[i]) + range_add
+		if WeaponDB.has(id):
+			weapons.append(_weapon_sheet(i, id, m2, dm, rate_m, rng_c, ring_m, px))
+			continue
 		match id:
-			"gun":
-				weapons.append({"slot": i, "lvl": lvl_at(i), "kind": "gun", "dmg": 6.0 * m2 * dm, "rate": 2.0 * rate_m, "range": (3.0 + rng_c) * px * ring_m})
-			"mortar":
-				weapons.append({"slot": i, "lvl": lvl_at(i), "kind": "mortar", "dmg": 18.0 * m2 * dm, "rate": 0.4 * rate_m, "range": (4.5 + rng_c) * px * ring_m, "splash": 1.0 * px, "min_range": 1.5 * px})
-			"tesla":
-				weapons.append({"slot": i, "lvl": lvl_at(i), "kind": "tesla", "dmg": 9.0 * m2 * dm * (1.0 + pf("chain_dmg")), "rate": 0.8 * rate_m, "range": (3.0 + rng_c) * px * ring_m, "chains": 3 + int(pf("chain")), "chain_frac": 0.7})
-			"flak":
-				weapons.append({"slot": i, "lvl": lvl_at(i), "kind": "flak", "dmg": 8.0 * m2 * dm, "rate": 1.5 * rate_m * TuneRef.num("mass_flame_rate", 0.5), "range": (3.5 + rng_c) * px * ring_m})
-			"railgun":
-				weapons.append({"slot": i, "lvl": lvl_at(i), "kind": "railgun", "dmg": 60.0 * m2 * dm, "rate": 0.25 * rate_m, "range": (7.0 + rng_c) * px * ring_m, "pierce": 14.0})
-			"frost":
-				weapons.append({"slot": i, "lvl": lvl_at(i), "kind": "frost", "dmg": 1.5 * m2 * dm, "rate": 2.0, "range": (2.5 + rng_c) * px, "slow": 0.30, "slow_t": 0.6})
 			"bulwark":
 				hp_add += 40.0 * m2
 				links.append([i, CORE_SLOT, "BUL"])
@@ -1022,6 +1016,36 @@ func compute_stats() -> Dictionary:
 	st["overcharge"] = dmg_track
 	st["bounty_mult"] = float(st["kill_cash"])
 	return st
+
+
+## V2 P3c: one weapon building's live sheet from WeaponDB - base numbers x
+## level (m2) x damage / rate / range modifiers x its direction commitment
+## (dir_mult), plus its aim (radial / arc / fixed), facing and pattern params.
+func _weapon_sheet(i: int, id: String, m2: float, dm: float, rate_m: float, rng_c: float, ring_m: float, px: float) -> Dictionary:
+	var d: Dictionary = WeaponDB.get_def(id)
+	var p: Dictionary = d.get("p", {})
+	var w: Dictionary = {"slot": i, "lvl": lvl_at(i), "kind": id, "pattern": String(d["pattern"]), "aim": String(d["aim"]),
+		"arc_cos": cos(deg_to_rad(float(d["arc"]) * 0.5)), "facing": WeaponDB.facing(rot_at(i)),
+		"dmg": float(d["dmg"]) * m2 * dm * float(d["dir_mult"]), "rate": float(d["rate"]) * rate_m, "range": (float(d["range"]) + rng_c) * px * ring_m}
+	match id:
+		"mortar":
+			w["splash"] = float(p["splash"]) * px
+			w["min_range"] = float(p["min_range"]) * px
+		"tesla":
+			w["dmg"] = float(w["dmg"]) * (1.0 + pf("chain_dmg"))
+			w["chains"] = int(p["chains"]) + int(pf("chain"))
+			w["chain_frac"] = float(p["chain_frac"])
+		"flak":
+			w["rate"] = float(w["rate"]) * TuneRef.num("mass_flame_rate", 0.5)
+		"railgun":
+			w["pierce"] = float(p["pierce"])
+		"frost":
+			# an aura: fixed pulse rate, no ring reach bonus
+			w["rate"] = float(d["rate"])
+			w["range"] = (float(d["range"]) + rng_c) * px
+			w["slow"] = float(p["slow"])
+			w["slow_t"] = float(p["slow_t"])
+	return w
 
 
 func recompute() -> void:
@@ -2224,184 +2248,69 @@ func _fire(dt: float, ev: Array) -> void:
 		_kb_k = float(KNOCK_W.get(kind, 0.0))
 		_kb_from = from
 		_src = kind
-		if kind == "frost":
-			# Aura: every pulse slows and chills every enemy in range.
-			# MASS_HORDE §D4: -50% in the field; slowed bodies block the ones
-			# behind (the C# front-blocking rule), so the flow backs up behind
-			# the field (viscosity); chilled bodies shatter / turn Brittle.
-			var any: bool = false
-			var frange: float = float(wd["range"])
-			var fslow: float = maxf(float(wd["slow"]), TuneRef.num("mass_frost_slow", 0.5))
-			for fe in eh.candidates(from, frange):
-				if en.hp[fe] > 0.0 and from.distance_to(en.pos[fe]) <= frange:
-					any = true
-					en.apply_slow(fe, float(wd["slow_t"]), 1.0 - fslow)
-					en.flags[fe] = en.flags[fe] | EnemyStore.F_FROST
-					_hit(fe, float(wd["dmg"]) * TuneRef.num("mass_frost_dmg", 0.1), ev)   # a force multiplier, not a blender (§D4: 5-20 kills/s direct)
-			if any:
-				ev.append({"t": "shot", "kind": "frost", "from": from, "to": from, "radius": float(wd["range"])})
+		var pattern: String = String(wd.get("pattern", "pierce_round"))
+		if pattern == "aura_slow":
+			if FirePatterns.aura_slow(self, wd, from, ev):
 				cooldowns[si] = cd + 1.0 / rate
 			else:
 				cooldowns[si] = 0.0
 			continue
-		var tgt: int = pick_target(from, float(wd["range"]), String(target_modes[si]) if si < target_modes.size() else "nearest")
-		if kind == "mortar" and tgt >= 0 and from.distance_to(en.pos[tgt]) < float(wd.get("min_range", 0.0)):
-			# A crowd at the wall must not silence the mortar: lob at the
-			# nearest body beyond the minimum range instead.
-			tgt = -1
-			var mr2: float = float(wd["min_range"]) * float(wd["min_range"])
-			for cand in eh.nearest_n(from, 96, float(wd["range"])):
-				if from.distance_squared_to(en.pos[cand]) >= mr2:
-					tgt = cand
-					break
-		if tgt < 0:
-			cooldowns[si] = 0.0
-			continue
+		var tgt: int = -1
+		if String(wd.get("aim", "radial")) == "fixed":
+			# V2 P3c: a fixed weapon fires along its facing, only when a body
+			# stands in its cone / lane.
+			if not FirePatterns.shape_occupied(self, wd, from):
+				cooldowns[si] = 0.0
+				continue
+		else:
+			tgt = pick_target_for(wd, from, String(target_modes[si]) if si < target_modes.size() else "nearest")
+			if pattern == "lob_aoe" and tgt >= 0 and from.distance_to(en.pos[tgt]) < float(wd.get("min_range", 0.0)):
+				# A crowd at the wall must not silence the mortar: lob at the
+				# nearest body beyond the minimum range instead.
+				tgt = -1
+				var mr2: float = float(wd["min_range"]) * float(wd["min_range"])
+				for cand in eh.nearest_n(from, 96, float(wd["range"])):
+					if from.distance_squared_to(en.pos[cand]) >= mr2:
+						tgt = cand
+						break
+			if tgt < 0:
+				cooldowns[si] = 0.0
+				continue
 		cooldowns[si] = cd + 1.0 / rate
 		var dmg: float = float(wd["dmg"])
-		var te: int = tgt
 		var crit: bool = _roll_crit(wd)
 		if crit:
 			dmg *= TuneRef.num("pc_crit_mult", 2.0)
-		_fire_mass(kind, wd, from, te, dmg, crit, ev)
+		FirePatterns.fire(self, pattern, wd, from, wd.get("facing", Vector2.UP), tgt, dmg, crit, ev)
 
 
-## MASS_HORDE §D4 weapon verbs (mass runs). Damage stays in each weapon's
-## classic range (upgrades / Labs / parts apply unchanged); the SHAPE changes
-## so every weapon turns its DPS into kills per second against a dense crowd.
-func _fire_mass(kind: String, wd: Dictionary, from: Vector2, te: int, dmg: float, crit: bool, ev: Array) -> void:
-	var tpos: Vector2 = en.pos[te]
-	var lvl: int = int(wd.get("lvl", 1))
-	match kind:
-		"railgun":
-			# Infinite pierce along the line, no falloff; x4 on the first elite /
-			# boss it meets (the elite/boss killer). Bodies in line order.
-			var dir: Vector2 = (tpos - from).normalized()
-			var reach: float = float(wd["range"])
-			var tip: Vector2 = from + dir * reach
-			var on: Array = []
-			for ed in eh.line(from, tip, float(wd["pierce"]) + en.max_size * 0.5 + 1.0):
-				if en.hp[ed] <= 0.0:
-					continue
-				var rel: Vector2 = en.pos[ed] - from
-				var along: float = rel.dot(dir)
-				if along < 0.0 or along > reach or absf(rel.cross(dir)) > float(wd["pierce"]) + en.size[ed] * 0.5:
-					continue
-				on.append([along, ed])
-			on.sort_custom(func(x: Array, y: Array) -> bool: return float(x[0]) < float(y[0]) or (float(x[0]) == float(y[0]) and int(x[1]) < int(y[1])))
-			var boss_hit: bool = false
-			_blockable = true
-			for x in on:
-				var ed2: int = int((x as Array)[1])
-				var m: float = 1.0
-				if not boss_hit and (BOSSY.has(en.kind[ed2]) or en.is_marked(ed2)):
-					boss_hit = true
-					m = TuneRef.num("mass_rail_boss", 4.0)
-				_hit(ed2, dmg * m, ev, crit)
-			_blockable = false
-			ev.append({"t": "shot", "kind": kind, "from": from, "to": tip})
-		"flak":
-			# Flamer: a gout every ~1.3 s into a 40 deg cone (1.4 cells, +10%/lv):
-			# a light lick plus a 2 s burn that spreads to touching bodies.
-			var dir2: Vector2 = (tpos - from).normalized()
-			var cl: float = minf(float(wd["range"]), TuneRef.num("mass_flame_len", 1.4) * cpx() * (1.0 + 0.1 * float(lvl - 1)))
-			var bdps: float = dmg * TuneRef.num("mass_flame_burn", 0.3)
-			for ed in eh.cone(from, dir2, deg_to_rad(20.0), cl):
-				if en.hp[ed] <= 0.0:
-					continue
-				_hit(ed, dmg * TuneRef.num("mass_flame_hit", 0.15), ev, crit)
-				_ignite(ed, TuneRef.num("mass_burn_s", 2.0), bdps)
-			ev.append({"t": "shot", "kind": kind, "from": from, "to": from + dir2 * cl, "cone": 40.0})
-		"mortar":
-			# AoE r 0.75 cell (~60 px, +20%/lv); the outer ring is a knockback blast that
-			# parts the sea (impulse / mass); 500+ pushed = Parting the Sea.
-			var rad: float = TuneRef.num("mass_mortar_r", 0.75) * cpx() * (1.0 + 0.2 * float(lvl - 1))
-			for ed in eh.candidates(tpos, rad):
-				if en.hp[ed] > 0.0 and en.pos[ed].distance_to(tpos) <= rad:
-					_hit(ed, dmg, ev, crit)
-			var pushed: int = en.radial_knock(tpos, rad * 1.5, TuneRef.num("horde_knock", 60.0) * TuneRef.num("mass_mortar_knock", 2.0))
-			if pushed >= 500:
-				ev.append({"t": "part_sea", "n": pushed, "pos": tpos})
-			ev.append({"t": "shot", "kind": kind, "from": from, "to": tpos, "radius": rad})
-		"tesla":
-			# Chain 6 (+3/lv, + chain parts, cap 20), 70 px jumps, x0.9 per jump;
-			# stuns elites / bosses for 0.2 s.
-			# Each discharge forks into 3 arcs (the nearest 3 bodies), each one
-			# chaining on to bodies no arc has hit yet.
-			var n: int = mini(TuneRef.int_of("mass_chain_cap", 20), TuneRef.int_of("mass_chain", 6) + 3 * (lvl - 1) + int(pf("chain")))
-			var jr: float = TuneRef.num("mass_chain_r", 70.0)
-			var hit: Dictionary = {}
-			var starts: Array = [te]
-			for st in eh.nearest_n(from, TuneRef.int_of("mass_tesla_arcs", 3) + 1, float(wd["range"])):
-				if starts.size() >= TuneRef.int_of("mass_tesla_arcs", 3):
-					break
-				if st != te:
-					starts.append(st)
-			for s0 in starts:
-				var ce: int = s0
-				var d2: float = dmg
-				var prev: Vector2 = from
-				var jumps: int = 0
-				while ce >= 0 and jumps < n:
-					jumps += 1
-					hit[ce] = true
-					var cpos: Vector2 = en.pos[ce]
-					if en.hp[ce] > 0.0:
-						_hit(ce, d2, ev, crit)
-						en.set_shock(ce, 1.5)
-						en.shock_src[ce] = int(wd["slot"])
-						if BOSSY.has(en.kind[ce]):
-							en.apply_slow(ce, 0.2, 0.0)
-					ev.append({"t": "shot", "kind": kind, "from": prev, "to": cpos})
-					prev = cpos
-					d2 *= TuneRef.num("mass_chain_frac", 0.9)
-					ce = _nearest(cpos, jr, hit)
-		_:
-			# Gun: rounds pierce 3 bodies (+2/lv, cap 12), x0.85 per body;
-			# a Shieldbearer's front stops the round.
-			var pn: int = mini(12, 3 + 2 * (lvl - 1))
-			var reach3: float = float(wd["range"])
-			# Two rounds per shot against a crowd: the target and the next nearest.
-			var aims: Array = [te]
-			for t2 in eh.nearest_n(from, 2, reach3):
-				if aims.size() < TuneRef.int_of("mass_gun_rounds", 2) and t2 != te:
-					aims.append(t2)
-			for ai in aims:
-				_gun_round(from, en.pos[int(ai)], int(ai), pn, reach3, dmg, crit, ev)
-
-
-## One Gun round (§D4): pierces up to `pn` bodies along the line, x0.85 each;
-## a Shieldbearer's front stops it.
-func _gun_round(from: Vector2, tpos: Vector2, te: int, pn: int, reach3: float, dmg: float, crit: bool, ev: Array) -> void:
-	var dir3: Vector2 = (tpos - from).normalized()
-	var on3: Array = []
-	for ed in eh.line(from, from + dir3 * reach3, en.max_size * 0.5 + 2.0):
-		if en.hp[ed] <= 0.0:
+## V2 P3c target choice: a radial weapon takes any body in range (by its
+## targeting mode); an arc weapon only bodies within +-arc/2 of its facing.
+func pick_target_for(wd: Dictionary, from: Vector2, mode_s: String) -> int:
+	var rng_lim: float = float(wd["range"])
+	if String(wd.get("aim", "radial")) != "arc":
+		return pick_target(from, rng_lim, mode_s)
+	var face: Vector2 = wd["facing"]
+	var ac: float = float(wd["arc_cos"])
+	if mode_s == "nearest":
+		return eh.nearest_in_cone(from, face, acos(clampf(ac, -1.0, 1.0)), rng_lim)
+	var best: int = -1
+	var best_key: float = INF
+	var best_d: float = INF
+	for k in eh.cone(from, face, acos(clampf(ac, -1.0, 1.0)), rng_lim):
+		var hpv: float = en.hp[k]
+		if hpv <= 0.0:
 			continue
-		var rel3: Vector2 = en.pos[ed] - from
-		var al: float = rel3.dot(dir3)
-		if al < 0.0 or al > reach3 or absf(rel3.cross(dir3)) > en.size[ed] * 0.5 + 2.0:
+		var p: Vector2 = en.pos[k]
+		var d2: float = from.distance_squared_to(p)
+		if d2 > rng_lim * rng_lim or not FirePatterns.in_arc(from, p, face, ac):
 			continue
-		on3.append([al, ed])
-	on3.sort_custom(func(x: Array, y: Array) -> bool: return float(x[0]) < float(y[0]) or (float(x[0]) == float(y[0]) and int(x[1]) < int(y[1])))
-	var d3: float = dmg
-	var hitn: int = 0
-	var last: Vector2 = tpos
-	_blockable = true
-	for x in on3:
-		if hitn >= pn:
-			break
-		var ed3: int = int((x as Array)[1])
-		_hit(ed3, d3, ev, crit)
-		last = en.pos[ed3]
-		hitn += 1
-		if _blocked:
-			break
-		d3 *= TuneRef.num("mass_pierce_fall", 0.85)
-	_blockable = false
-	if hitn == 0 and en.hp[te] > 0.0:
-		_hit(te, dmg, ev, crit)
-	ev.append({"t": "shot", "kind": "gun", "from": from, "to": last})
+		var key: float = CENTER.distance_squared_to(p) if mode_s == "first" else (-hpv if mode_s == "strongest" else hpv)
+		if key < best_key or (key == best_key and d2 < best_d):
+			best_key = key
+			best_d = d2
+			best = k
+	return best
 
 
 ## Warlord aura (§D1): every 0.25 s each living Warlord hastes the fodder
@@ -3069,14 +2978,57 @@ func place(i: int) -> Array:
 	var ev: Array = []
 	if pending_place == "" or not can_place(i, pending_place):
 		return ev
-	slots[i] = {"id": pending_place, "perm": 0, "run": 1}
+	var r: int = pending_rot if pending_rot >= 0 else default_rot(i, pending_place)
+	slots[i] = {"id": pending_place, "perm": 0, "run": 1, "rot": r}
 	cooldowns[i] = 0.0
 	pending_place = ""
+	pending_rot = -1
 	recompute()
 	ev.append({"t": "placed", "slot": i, "id": id_at(i)})
 	_drain_troop_events(ev)
 	_check_queue(ev)
 	return ev
+
+
+# ------------------------------------------------------------------ facing (V2 P3c)
+## Default facing of `id` anchored at cell i: away from the Core.
+func default_rot(i: int, id: String) -> int:
+	return WeaponDB.rot_toward(fp_center(i, size_of(id)) - CENTER)
+
+
+## Facing step (0-7) of the building anchored at i (its default when unset).
+func rot_at(i: int) -> int:
+	var sd: Dictionary = slots[i] if i >= 0 and i < slots.size() else {}
+	if sd.is_empty():
+		return 6
+	return int(sd["rot"]) if sd.has("rot") else default_rot(i, String(sd["id"]))
+
+
+## Rotate the directional weapon anchored at i by `d` steps of 45 deg (free).
+func rotate(i: int, d: int = 1) -> Array:
+	if i < 0 or i >= N or id_at(i) == "" or not WeaponDB.directional(id_at(i)):
+		return []
+	var r: int = posmod(rot_at(i) + d, 8)
+	(slots[i] as Dictionary)["rot"] = r
+	recompute()
+	return [{"t": "rotated", "slot": i, "rot": r}]
+
+
+## Rotate the pick being placed. `hint` is the anchor under the cursor, so the
+## first turn starts from the facing the ghost shows (its default there).
+func rotate_pending(d: int = 1, hint: int = -1) -> Array:
+	if pending_place == "" or not WeaponDB.directional(pending_place):
+		return []
+	var base: int = pending_rot
+	if base < 0:
+		base = default_rot(hint, pending_place) if hint >= 0 else 6
+	pending_rot = posmod(base + d, 8)
+	return [{"t": "rotated", "slot": -1, "rot": pending_rot}]
+
+
+## Facing the ghost of the pending pick shows at anchor i.
+func pending_rot_at(i: int) -> int:
+	return pending_rot if pending_rot >= 0 else default_rot(i, pending_place)
 
 
 ## Cells holding `id` below the level cap (targets of a pending upgrade).

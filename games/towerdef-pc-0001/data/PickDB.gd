@@ -19,11 +19,11 @@ const SPECIAL_COPIES: int = 3
 
 const DEFS: Dictionary = {
 	# ---- buildings (17; the 15 "adapted" ids keep their art) ----------------
-	"gun":       {"fam": "building", "name": "Gatling", "rarity": "common", "tags": ["dps"], "max": 5, "desc": "6 dmg, 2.0/s, range 3"},
+	"gun":       {"fam": "building", "name": "Gatling", "rarity": "common", "tags": ["dps"], "max": 5, "desc": "Arc turret (120 deg): 6 dmg x1.2, 2.0/s, range 3; rounds pierce"},
 	"mortar":    {"fam": "building", "name": "Mortar", "rarity": "common", "tags": ["aoe", "dps"], "max": 5, "size": 2, "desc": "2x2. 18 dmg, 0.4/s, range 4.5, 1-cell splash (min range 1.5)"},
 	"tesla":     {"fam": "building", "name": "Tesla Coil", "rarity": "rare", "tags": ["aoe", "control"], "max": 5, "desc": "9 dmg, 0.8/s, chains 3 at 70%"},
-	"flak":      {"fam": "building", "name": "Flamer", "rarity": "common", "tags": ["dps", "aoe"], "max": 5, "desc": "40 deg cone of fire; burn spreads through the pile"},
-	"railgun":   {"fam": "building", "name": "Railgun", "rarity": "epic", "tags": ["dps"], "max": 5, "size": 2, "desc": "2x2. 60 dmg, 0.25/s, pierces a line (range 7); ring 3+"},
+	"flak":      {"fam": "building", "name": "Flamer", "rarity": "common", "tags": ["dps", "aoe"], "max": 5, "desc": "Fixed 50 deg cone along its facing (x1.4): fire licks, burn spreads through the pile"},
+	"railgun":   {"fam": "building", "name": "Railgun", "rarity": "epic", "tags": ["dps"], "max": 5, "size": 2, "desc": "2x2 fixed lane along its facing (x1.6): 60 dmg, 0.25/s, pierces the whole line (range 7); ring 3+"},
 	"armory":    {"fam": "building", "name": "Armory", "rarity": "rare", "tags": ["dps"], "max": 5, "desc": "Adjacent buildings +15% dmg"},
 	"beacon":    {"fam": "building", "name": "Beacon", "rarity": "rare", "tags": ["dps"], "max": 5, "desc": "Within 4 cells: +10% rate, +0.3 range"},
 	"bulwark":   {"fam": "building", "name": "Bulwark", "rarity": "common", "tags": ["sustain"], "max": 5, "desc": "Core +40 HP"},

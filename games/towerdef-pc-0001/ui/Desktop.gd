@@ -457,6 +457,9 @@ static func _run_action(m, event: InputEvent) -> bool:
 		if _pressed(m, event, "track_%d" % (k + 1)):
 			m.buy_track(String(TowerState.TRACK_IDS[k]))
 			return true
+	if _pressed(m, event, "rotate"):
+		m.rotate_weapon(1)
+		return true
 	if _pressed(m, event, "reroll"):
 		m.reroll()
 		return true

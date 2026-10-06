@@ -120,6 +120,12 @@ func _mouse(pos: Vector2, button: MouseButton, pressed: bool) -> void:
 	root.push_input(ev, true)
 
 
+## One wheel notch at pos (up = true / down = false).
+func _wheel(pos: Vector2, up: bool) -> void:
+	_mouse(pos, MOUSE_BUTTON_WHEEL_UP if up else MOUSE_BUTTON_WHEEL_DOWN, true)
+	_mouse(pos, MOUSE_BUTTON_WHEEL_UP if up else MOUSE_BUTTON_WHEEL_DOWN, false)
+
+
 func _motion(pos: Vector2, rel: Vector2 = Vector2.ZERO) -> void:
 	var ev := InputEventMouseMotion.new()
 	ev.position = pos
@@ -765,12 +771,27 @@ func _run_screen() -> void:
 	await _frames(2)
 	_check("FB1: placing shows the building as the cursor on a valid (green) cell", String(main.get_meta("ghost_id", "")) == "gun" and String(main.get_meta("ghost_reason", "x")) == "")
 	_check("FB1: the placement preview has a range radius", float(BattleUI.preview_range(main, "gun")["r"]) > TowerState.CELL)
+	# V2 P3c: the ghost shows the turret's facing (away from the Core); Z turns it
+	var gr0: int = int(main.get_meta("ghost_rot", -1))
+	_key(KEY_Z)
+	await _frames(2)
+	_check("P3c: Z turns the weapon being placed (+45 deg from the facing its ghost shows)", gr0 >= 0 and int(main.get_meta("ghost_rot", -1)) == posmod(gr0 + 1, 8) and S.pending_rot == posmod(gr0 + 1, 8), "%d -> %d" % [gr0, int(main.get_meta("ghost_rot", -1))])
+	_wheel(_cell_scr(cell), false)
+	await _frames(2)
+	_check("P3c: the mouse wheel turns it while placing (not the zoom)", S.pending_rot == posmod(gr0 + 2, 8))
+	_wheel(_cell_scr(cell), true)
+	await _frames(2)
 	_motion(_cell_scr(TowerState.CORE_SLOT))
 	await _frames(2)
 	_check("FB1: an invalid cell turns the preview red with a reason", String(main.get_meta("ghost_reason", "")) != "")
 	_click(_cell_scr(cell))
 	await _frames()
 	_check("RUN: click a glowing cell places it", S.id_at(cell) == "gun" and S.pending_place == "")
+	_check("P3c: the placed turret keeps the chosen facing", S.rot_at(cell) == posmod(gr0 + 1, 8))
+	main.sel = cell
+	_key(KEY_Z)
+	await _frames()
+	_check("P3c: Z turns the selected turret (free)", S.rot_at(cell) == posmod(gr0 + 2, 8))
 	_check("sfx: place clip", main.sfx.played("place"))
 	# drag a NEW building card onto a cell
 	S.grant_draft()

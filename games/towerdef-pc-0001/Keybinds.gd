@@ -49,6 +49,7 @@ const DEFAULTS: Dictionary = {
 	"cursor_left":   ["k:%d" % KEY_LEFT, "ja:%d:-1" % JOY_AXIS_LEFT_X],
 	"cursor_right":  ["k:%d" % KEY_RIGHT, "ja:%d:1" % JOY_AXIS_LEFT_X],
 	"modifier_bulk": ["k:%d" % KEY_SHIFT],
+	"rotate":        ["k:%d" % KEY_Z, "jb:%d" % JOY_BUTTON_RIGHT_STICK],
 }
 
 ## Display order + labels for the Controls tab of the settings menu.
@@ -68,6 +69,7 @@ const LABELS: Dictionary = {
 	"fullscreen": "Toggle fullscreen", "screenshot": "Screenshot", "zoom_in": "Zoom in", "zoom_out": "Zoom out",
 	"cursor_up": "Cursor up", "cursor_down": "Cursor down", "cursor_left": "Cursor left", "cursor_right": "Cursor right",
 	"modifier_bulk": "Bulk modifier",
+	"rotate": "Rotate weapon (placing / selected)",
 }
 
 

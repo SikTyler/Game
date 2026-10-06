@@ -172,6 +172,18 @@ func _initialize() -> void:
 	await _shot("%s/15_place.png" % outdir)
 	if S.pending_place != "":
 		main._handle(S.cancel_place())
+	# V2 P3c: placing a directional weapon shows its facing wedge / lane
+	for pid in ["gun", "flak"]:
+		S.pending_place = String(pid)
+		S.pending_rot = -1
+		for i in TowerState.N:
+			if S.can_place(i, S.pending_place) and TowerState.ring_of(i) >= 2:
+				main.mouse_pos = main.w2s(TowerState.fp_center(i, TowerState.size_of(S.pending_place)))
+				break
+		main._rebuild_ui()
+		await _wait(3)
+		await _shot("%s/15b_place_%s.png" % [outdir, String(pid)])
+		main._handle(S.cancel_place())
 	for k in 9000:
 		S.tick(0.1)
 		S.hp = float(S.stats["max_hp"])

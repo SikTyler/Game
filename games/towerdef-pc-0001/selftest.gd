@@ -5,6 +5,9 @@ extends SceneTree
 ## Run: godot --headless --path games/towerdef-pc-0001/ --script res://selftest.gd
 
 const StKit := preload("res://tests/st_kit.gd")
+const StDirectional := preload("res://tests/st_directional.gd")
+const FirePatterns := preload("res://FirePatterns.gd")
+const WeaponDB := preload("res://data/WeaponDB.gd")
 const TowerState := preload("res://TowerState.gd")
 const MissionDB := preload("res://data/MissionDB.gd")
 const BaseMeta := preload("res://BaseMeta.gd")
@@ -87,7 +90,7 @@ func _initialize() -> void:
 	S.slots[_r(7)] = {"id": "gun", "perm": 0, "run": 1}
 	S.recompute()
 	var gun_dmg: float = float((S.stats["weapons"] as Array)[0]["dmg"])
-	_check("gatling L1 6 dmg x building scale (Steadfast-free)", is_equal_approx(gun_dmg, 6.0 * TowerState.bld_dmg()))
+	_check("gatling L1 6 dmg x building scale (Steadfast-free)", is_equal_approx(gun_dmg, 6.0 * TowerState.bld_dmg() * _dm("gun")))
 	S.slots[_at(-2, -1)] = {"id": "armory", "perm": 0, "run": 1}   # touches the gun and the Core
 	S.recompute()
 	var buffed: float = float((S.stats["weapons"] as Array)[0]["dmg"])
@@ -290,6 +293,7 @@ func _initialize() -> void:
 	_redesign_run_stages()
 	_horde_stages()
 	StKit.run(self)
+	StDirectional.run(self)
 
 	if fails.is_empty():
 		print("SELFTEST OK")
@@ -801,7 +805,11 @@ func _mass_horde_world() -> void:
 ## V2 P3d (deliberate): the classic ruleset is gone - the fingerprint runs
 ## designed mass waves (wave 14 plan, a fragile 150-body flood), beam / pulse on
 ## a Wall-sealed board (the squeeze path); re-recorded (was e5a407bd).
-const HORDE_FP_GOLDEN: String = "ebffce97b4c320ac7be5b7a64cc76b2a0d8aedd084e5c54cf270db8a9b81e214"
+## V2 P3c (deliberate): directional weapons - the Gatling turns within a 120
+## deg arc, the Flamer / Railgun fire a fixed cone / lane along their facing
+## (away from the Core by default), x1.2 / x1.4 / x1.6 direction damage, verbs
+## moved to FirePatterns; re-recorded (was ebffce97).
+const HORDE_FP_GOLDEN: String = "189df79c8c7d02dab92cab5b7596ce8eb8621617486b67617ec735c772165dc9"
 ## MASS_HORDE §Design content (designed mass waves, the shipping ruleset).
 func _mfresh(seed_value: int = 1234):
 	var S = TowerState.new()
@@ -926,7 +934,7 @@ func _mass_content_stages() -> void:
 	for i in 6:
 		SG.add_enemy({"kind": "mite", "pos": gfrom + Vector2(0, -60 - 14 * i), "hp": 999.0, "max_hp": 999.0, "size": 10.0})
 	SG.eh.rebuild()
-	SG._fire_mass("gun", {"slot": 0, "lvl": 1, "range": 300.0}, gfrom, SG.en.order[0], 10.0, false, [])
+	FirePatterns.pierce_round(SG, {"slot": 0, "lvl": 1, "range": 300.0, "kind": "gun"}, gfrom, SG.en.order[0], 10.0, false, [])
 	var gh: int = 0
 	for sl in SG.en.order:
 		if SG.en.hp[sl] < 999.0:
@@ -938,7 +946,7 @@ func _mass_content_stages() -> void:
 	for i in 25:
 		ST.add_enemy({"kind": "mite", "pos": TowerState.CENTER + Vector2(-600 + 50 * i, -200), "hp": 999.0, "max_hp": 999.0, "size": 10.0})
 	ST.eh.rebuild()
-	ST._fire_mass("tesla", {"slot": 0, "lvl": 1, "range": 300.0}, TowerState.CENTER, ST.en.order[0], 10.0, false, [])
+	FirePatterns.chain(ST, {"slot": 0, "lvl": 1, "range": 300.0, "kind": "tesla"}, TowerState.CENTER, ST.en.order[0], 10.0, false, [])
 	var th: int = 0
 	for sl in ST.en.order:
 		if ST.en.hp[sl] < 999.0:
@@ -950,7 +958,8 @@ func _mass_content_stages() -> void:
 	SF.add_enemy({"kind": "mite", "pos": TowerState.CENTER + Vector2(0, -108), "hp": 999.0, "max_hp": 999.0, "size": 10.0})
 	SF.add_enemy({"kind": "mite", "pos": TowerState.CENTER + Vector2(0, 100), "hp": 999.0, "max_hp": 999.0, "size": 10.0})
 	SF.eh.rebuild()
-	SF._fire_mass("flak", {"slot": 0, "lvl": 1, "range": 300.0}, TowerState.CENTER, SF.en.order[0], 10.0, false, [])
+	# V2 P3c: the Flamer is a fixed 50 deg cone along its facing (here north)
+	FirePatterns.cone_dot(SF, {"slot": 0, "lvl": 1, "range": 300.0, "kind": "flak", "arc_cos": cos(deg_to_rad(25.0))}, TowerState.CENTER, Vector2.UP, 10.0, false, [])
 	var cone_ok: bool = SF.en.hp[SF.en.order[0]] < 999.0 and SF.en.hp[SF.en.order[1]] < 999.0 and SF.en.hp[SF.en.order[2]] == 999.0 and SF.burning.size() == 2
 	SF.add_enemy({"kind": "mite", "pos": TowerState.CENTER + Vector2(9, -100), "hp": 999.0, "max_hp": 999.0, "size": 10.0})
 	SF.eh.rebuild()
@@ -1049,6 +1058,12 @@ func _horde_stages() -> void:
 	var sv: Dictionary = BaseMeta.normalize({})
 	Missions.on_run_events(sv, [{"t": "kills", "n": 7, "by_kind": {"drone": 7}}])
 	_check("HORDE aggregated kills count per body in Stats", int((sv["stats"] as Dictionary)["kills"]) == 7)
+
+
+## V2 P3c: a weapon's direction commitment (WeaponDB dir_mult: radial 1.0,
+## arc / fixed more) multiplies its sheet damage.
+func _dm(id: String) -> float:
+	return float(WeaponDB.DEFS[id]["dir_mult"])
 
 
 func _weapon(S, kind: String) -> Dictionary:
@@ -1229,10 +1244,10 @@ func _engine_b_stages() -> void:
 	S.slots[_r(7)] = {"id": "gun", "perm": 0, "run": 1}
 	S.recompute()
 	var gr: float = float(_weapon(S, "gun")["rate"])
-	_check("gatling L1: 6 dmg, 2.0/s", is_equal_approx(float(_weapon(S, "gun")["dmg"]), 6.0 * TowerState.bld_dmg()) and is_equal_approx(gr, 2.0))
+	_check("gatling L1: 6 dmg, 2.0/s", is_equal_approx(float(_weapon(S, "gun")["dmg"]), 6.0 * TowerState.bld_dmg() * _dm("gun")) and is_equal_approx(gr, 2.0))
 	S.slots[_r(7)] = {"id": "gun", "perm": 0, "run": 5}
 	S.recompute()
-	_check("level-ups +35% main stat (L5 = 1.35^4)", is_equal_approx(float(_weapon(S, "gun")["dmg"]), 6.0 * TowerState.bld_dmg() * pow(1.35, 4.0)) and S.lvl_at(_r(7)) == 5)
+	_check("level-ups +35% main stat (L5 = 1.35^4)", is_equal_approx(float(_weapon(S, "gun")["dmg"]), 6.0 * TowerState.bld_dmg() * _dm("gun") * pow(1.35, 4.0)) and S.lvl_at(_r(7)) == 5)
 	S.slots[_r(7)] = {"id": "gun", "perm": 0, "run": 9}
 	_check("building level capped at 5", S.lvl_at(_r(7)) == 5 and TowerState.lvl_cap() == 5)
 	S.slots[_r(7)] = {"id": "gun", "perm": 0, "run": 1}
@@ -1775,7 +1790,7 @@ func _pc_building_stages() -> void:
 	S.slots[r2] = {"id": "railgun", "perm": 0, "run": 1}
 	S.recompute()
 	var rd0: float = float(_weapon(S, "railgun")["dmg"])
-	_check("PC-E3 railgun base dmg 60, 0.25/s, range 7", is_equal_approx(rd0, 60.0 * TowerState.bld_dmg()) and is_equal_approx(float(_weapon(S, "railgun")["rate"]), 0.25))
+	_check("PC-E3 railgun base dmg 60, 0.25/s, range 7", is_equal_approx(rd0, 60.0 * TowerState.bld_dmg() * _dm("railgun")) and is_equal_approx(float(_weapon(S, "railgun")["rate"]), 0.25))
 	# Railgun pierces along its line.
 	S = _open_run()
 	S.slots[r2] = {"id": "railgun", "perm": 0, "run": 1}
@@ -1795,7 +1810,7 @@ func _pc_building_stages() -> void:
 	S.slots[r1] = {"id": "flak", "perm": 0, "run": 2}
 	S.recompute()
 	var fl: Dictionary = _weapon(S, "flak")
-	_check("PC-E3 flak L2 dmg 8 x 1.35", is_equal_approx(float(fl["dmg"]), 8.0 * 1.35 * TowerState.bld_dmg()) and not fl.has("prey"))
+	_check("PC-E3 flak L2 dmg 8 x 1.35", is_equal_approx(float(fl["dmg"]), 8.0 * 1.35 * TowerState.bld_dmg() * _dm("flak")) and not fl.has("prey"))
 	S.stats["weapons"] = [fl]
 	var fpos: Vector2 = TowerState.slot_pos(r1) + Vector2(0, -120)
 	var heavy: Dictionary = _enemy("hauler", fpos + Vector2(0, 20))
@@ -3138,7 +3153,7 @@ func _snapshot_stages() -> void:
 	S.specials = [{"id": "sp_orbital", "copies": 1, "cd": 0.0, "charges": 1}]
 	S.recompute()
 	var snap2: Dictionary = S.power_snapshot()
-	_check("SNAP lists building DPS, troops, orbital DPS", (snap2["buildings"] as Array).size() == 1 and is_equal_approx(float(snap2["buildings"][0]["dps"]), 12.0 * TowerState.bld_dmg() * float(TowerState.MASS_CROWD["gun"])) and (snap2["troops"] as Array).size() == 3 and float(snap2["specials"][0]["dps"]) > 0.0)
+	_check("SNAP lists building DPS, troops, orbital DPS", (snap2["buildings"] as Array).size() == 1 and is_equal_approx(float(snap2["buildings"][0]["dps"]), 12.0 * TowerState.bld_dmg() * _dm("gun") * float(TowerState.MASS_CROWD["gun"])) and (snap2["troops"] as Array).size() == 3 and float(snap2["specials"][0]["dps"]) > 0.0)
 	_check("SNAP power ratio rises with the board", PowerModel.power_ratio(snap2, 1, 1) > r0 and r0 > 2.0)
 
 
