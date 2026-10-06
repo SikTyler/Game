@@ -299,11 +299,25 @@ func _initialize() -> void:
 	main.dbg_overlay = false
 	main.settings["video"]["gore"] = "low"
 	live_S = null
+	# V2 P5: the run banks a Reliquary, a Boss Vault and two elite items
+	(S.loot["caches"] as Array).append({"id": "reliquary", "ilvl": 90})
+	(S.loot["caches"] as Array).append({"id": "boss", "ilvl": 60})
+	(S.loot["items"] as Array).append({"src": "elite", "ilvl": 40})
 	S.wind_used = true
 	S.hp = -1.0
 	S.stats["regen"] = 0.0
 	await _wait(30)
 	await _shot("%s/18_results.png" % outdir)
+	main.open_loot()
+	main.reveal_t0 = main.t_anim - 2.05   # mid-show: two up, the third face down
+	await _wait(2)
+	await _shot("%s/18b_loot_reveal.png" % outdir, false)
+	main.reveal_skip = true
+	main.reveal_fired = 10
+	main._rebuild_ui()
+	await _wait(4)
+	await _shot("%s/18c_loot_all.png" % outdir, false)
+	main.set_overlay("")
 	main.go_base()
 	main.set_tab("outpost")
 	get_root().size = Vector2i(1280, 720)

@@ -9,6 +9,7 @@ const StDirectional := preload("res://tests/st_directional.gd")
 const StGear := preload("res://tests/st_gear.gd")
 const StCoreWeapon := preload("res://tests/st_core_weapon.gd")
 const StGearVis := preload("res://tests/st_gearvis.gd")
+const StLoot := preload("res://tests/st_loot.gd")
 const FirePatterns := preload("res://FirePatterns.gd")
 const WeaponDB := preload("res://data/WeaponDB.gd")
 const TowerState := preload("res://TowerState.gd")
@@ -300,6 +301,7 @@ func _initialize() -> void:
 	StGear.run(self)
 	StCoreWeapon.run(self)
 	StGearVis.run(self)
+	StLoot.run(self)
 
 	if fails.is_empty():
 		print("SELFTEST OK")
@@ -3083,7 +3085,8 @@ func _insight_drop_stages() -> void:
 	_check("DROP elite ~25%% x in_drop (%d / 20000 at x1.15)" % el_dm, el_dm > 5300 and el_dm < 6200)
 	var loot: Dictionary = Drops.empty_loot()
 	Drops.add(loot, [{"kind": "scrap", "n": 5}, {"kind": "scrap", "n": 2}, {"kind": "junk", "n": 9}])
-	_check("DROP loot fold: scrap only", int(loot["scrap"]) == 7 and loot.size() == 1)
+	# V2 P5 (deliberate): run loot also carries item / cache tokens (st_loot)
+	_check("DROP loot fold: Scrap sums, unknown kinds are ignored", int(loot["scrap"]) == 7 and (loot["items"] as Array).is_empty() and (loot["caches"] as Array).is_empty())
 	# Engine: boss kill emits drop events; drops replay with the seed and
 	# never perturb the wave RNG.
 	var A = _fresh()

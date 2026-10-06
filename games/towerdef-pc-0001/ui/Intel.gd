@@ -9,6 +9,7 @@ const TowerState := preload("res://TowerState.gd")
 const EnemyDB := preload("res://data/EnemyDB.gd")
 const EnemyStore := preload("res://EnemyStore.gd")
 const Kit := preload("res://ui/Kit.gd")
+const LootDB := preload("res://data/LootDB.gd")
 
 ## MASS_HORDE §D1 roster names (ids kept so art / Codex carry over).
 const NAMES: Dictionary = {
@@ -139,6 +140,11 @@ static func on_event(m, ev: Dictionary) -> void:
 			match String(ev["kind"]):
 				"scrap":
 					loot_add(m, "scrap", "Scrap", "cur_scrap", float(ev["n"]), Kit.SCRAP)
+				"item":
+					loot_add(m, "item", "Items (elites)", "icon_gear", 1.0, Kit.TEXT)
+				"cache":
+					var cid: String = String(ev.get("cache", "field"))
+					loot_add(m, "cache_" + cid, String(LootDB.get_def(cid)["name"]), "chest", 1.0, Kit.rarity_col({"scrap": "common", "field": "uncommon", "elite": "rare", "boss": "epic", "reliquary": "legendary"}.get(cid, "common")))
 		"boss_bounty":
 			loot_add(m, "bounty", "Boss bounty coins", "cur_coin", float(ev["coins"]), Kit.GOLD)
 

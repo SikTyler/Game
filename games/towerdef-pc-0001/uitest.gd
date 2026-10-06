@@ -1037,6 +1037,10 @@ func _run_screen() -> void:
 	_check("RUN: Ctrl+R never replays a seed mid-run", main.S == S)
 	var S2 = main.S
 	S2.coins_run = 33.0
+	# V2 P5: tokens the run dropped (a Boss Vault + an elite item) bank as items
+	(S2.loot["caches"] as Array).append({"id": "boss", "ilvl": 20})
+	(S2.loot["items"] as Array).append({"src": "elite", "ilvl": 12})
+	var n_items0: int = Gear.count(main.save)
 	var runs_b: int = int(main.save["runs"])
 	_press("HUD Pause")
 	await _frames()
@@ -1046,6 +1050,27 @@ func _run_screen() -> void:
 	_check("RUN: results offer Back to base + Play again (no seed retry)", _find("DBACK") != null and _find("PLAY AGAIN") != null and _find("RETRY SEED") == null)
 	_audit("results")
 	_check("sfx: game_over clip", main.sfx.played("game_over"))
+	_check("P5 RESULTS: the run's tokens banked as 5 items; OPEN LOOT offers the reveal", Gear.count(main.save) == n_items0 + 5 and _find("loot:open") != null and _find("loot:open").text.contains("5"))
+	_press("loot:open")
+	await _frames()
+	var ru: Array = main.reveal_uids
+	_check("P5 REVEAL: the reveal opens face down (no EQUIP yet)", main.overlay == "loot" and ru.size() == 5 and _findp("loot:equip:") == null and _find("loot:all") != null)
+	var t0r: int = Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0r < 1500 and _find("loot:equip:%d" % int(ru[0])) == null:
+		await process_frame
+	_check("P5 REVEAL: cards flip on their own (the first card's EQUIP appears)", _find("loot:equip:%d" % int(ru[0])) != null and _find("loot:equip:%d" % int(ru[4])) == null)
+	_press("loot:all")
+	await _frames()
+	_check("P5 REVEAL: REVEAL ALL flips everything", _find("loot:equip:%d" % int(ru[4])) != null and _find("loot:all") == null and _find("loot:done") != null)
+	_audit("loot reveal")
+	var pick: int = int(ru[4])
+	var pit: Dictionary = Gear.item(main.save, pick)
+	_press("loot:equip:%d" % pick)
+	await _frames()
+	_check("P5 REVEAL: EQUIP from a revealed card", Gear.is_equipped(main.save, pick) or String(pit.get("kind", "")) == "module" and not Gear.why_equip(main.save, pick).is_empty())
+	_press("loot:done")
+	await _frames()
+	_check("P5 REVEAL: DONE closes the reveal (back on the results)", main.overlay == "" and main.screen == "results")
 	_press("DBACK")
 	await _frames()
 	_check("RUN: Back to base returns to the hub", main.screen == "base" and main.tab == "play")

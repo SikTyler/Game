@@ -21,6 +21,8 @@ const FirePatterns := preload("res://FirePatterns.gd")
 const Gear := preload("res://Gear.gd")
 const GearVis := preload("res://GearVis.gd")
 const Cores := preload("res://Cores.gd")
+const LootDB := preload("res://data/LootDB.gd")
+const RarityDB := preload("res://data/RarityDB.gd")
 
 const ENEMY2: Color = Kit.MAGENTA
 const SHIELD: Color = Color("7fd8ff")
@@ -84,6 +86,18 @@ static func build_results(m) -> void:
 	var bw: float = (r.size.x - 72.0) * 0.5
 	Kit.btn(m, "Back to base", Rect2(r.position.x + 24, r.end.y - 76, bw, 56), m.go_base, "Return to the hub to spend your loot", true, Kit.RUST, "DBACK", "", 22)
 	Kit.btn(m, "Play again", Rect2(r.position.x + 48 + bw, r.end.y - 76, bw, 56), func() -> void: m.start_run(), "Start a new run (every run is randomly seeded)", true, Kit.GREEN, "PLAY AGAIN", "", 20)
+	var n: int = loot_count(m)
+	if n > 0:
+		var lb: Button = Kit.btn(m, "OPEN LOOT  ·  %d items" % n, Rect2(r.get_center().x + 20.0, r.end.y - 152.0, r.size.x * 0.5 - 44.0, 60.0), m.open_loot, "Reveal this run's items one by one (already in your inventory)", true, Kit.GOLD, "loot:open", "chest", 20)
+		lb.add_theme_font_override("font", Kit.Fonts.bold())
+
+
+static func loot_count(m) -> int:
+	var n: int = 0
+	for e in m.run_loot:
+		if String((e as Dictionary).get("t", "")) == "loot_item":
+			n += 1
+	return n
 
 
 static func results_rect(m) -> Rect2:
@@ -465,6 +479,11 @@ static func _draw_reticle(m, S) -> void:
 
 static func _draw_world(m) -> void:
 	var S = m.S
+	# V2 P5 loot beams: a drop token stands in its colour for 2.6 s
+	for b in m.loot_beams:
+		var bd: Dictionary = b
+		var f: float = clampf(float(bd["t"]) / 0.35, 0.0, 1.0) * clampf((2.6 - float(bd["t"])) / 0.6, 0.0, 1.0)
+		Kit.rarity_beam(m, bd["pos"], String(bd["rar"]), 220.0 * f, m.t_anim, 30.0)
 	# Lance beam
 	if int(S.beam_eid) >= 0:
 		var bp: Variant = m.enemy_pos(int(S.beam_eid))
@@ -876,9 +895,32 @@ static func _draw_results(m) -> void:
 	Kit.head(m, "LOOT", Vector2(lx, y), w)
 	var ly: float = y + 24.0
 	var any: bool = false
+	# caches grouped: "Boss Vault x2 · 8 items"
+	var groups: Dictionary = {}
+	var order: Array = []
+	for e in m.run_loot:
+		if String((e as Dictionary)["t"]) == "cache_open":
+			var cid: String = String(e["cache"])
+			if not groups.has(cid):
+				groups[cid] = [0, 0]
+				order.append(cid)
+			groups[cid][0] = int(groups[cid][0]) + 1
+			groups[cid][1] = int(groups[cid][1]) + (e["uids"] as Array).size()
+	order.sort_custom(func(a: Variant, b: Variant) -> bool: return LootDB.IDS.find(String(a)) > LootDB.IDS.find(String(b)))
+	for cid in order:
+		if ly > r.end.y - 196.0:
+			break
+		var g: Array = groups[cid]
+		var d: Dictionary = LootDB.get_def(String(cid))
+		Kit.icon(m, "chest", Rect2(lx, ly, 36, 36))
+		Kit.t(m, "%s  x%d%s" % [String(d["name"]), int(g[0]), ("  ·  %d items" % int(g[1])) if int(g[1]) > 0 else ""], Vector2(lx + 44, ly + 25), 17, Kit.rarity_col(String(d["min"])) if String(d["min"]) != "" else Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w - 44)
+		ly += 42.0
+		any = true
 	for e in m.run_loot:
 		var ev: Dictionary = e
 		var et: String = String(ev["t"])
+		if et == "cache_open":
+			continue
 		if et == "loot_banked":
 			var bits: Array = []
 			if int(ev.get("scrap", 0)) > 0:
@@ -888,7 +930,7 @@ static func _draw_results(m) -> void:
 				ly += 30.0
 				any = true
 			continue
-		if ly > r.end.y - 130.0:
+		if ly > r.end.y - 196.0:
 			break
 		var icon_id: String = String(ev.get("id", ""))
 		var label: String = ""
@@ -897,6 +939,16 @@ static func _draw_results(m) -> void:
 			"insight_banked":
 				label = "%s banked" % pick_name(icon_id)
 				col = Kit.RARITY["insight"]
+			"loot_item":
+				if String(ev.get("cache", "")) != "":
+					continue
+				icon_id = "icon_gear"
+				label = "%s item (elite drop)" % String(RarityDB.get_def(String(ev["rar"]))["name"])
+				col = Kit.rarity_col(String(ev["rar"]))
+			"loot_salvaged":
+				icon_id = "cur_scrap"
+				label = "Inventory full: a %s salvaged" % String(RarityDB.get_def(String(ev["rar"]))["name"])
+				col = Kit.DIM
 		if label == "":
 			continue
 		Kit.icon(m, icon_id, Rect2(lx, ly, 36, 36))
@@ -904,5 +956,6 @@ static func _draw_results(m) -> void:
 		ly += 42.0
 		any = true
 	if not any:
-		Kit.t(m, "No loot this run — bosses, marked elites and Couriers drop it.", Vector2(lx, ly + 22), 15, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w)
-	Kit.t(m, "Spend coins on the Core, the Outpost and Research", Vector2(cx, r.end.y - 96), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
+		Kit.t(m, "No loot this run — elites, bosses, Couriers and every 5th wave drop it.", Vector2(lx, ly + 22), 15, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w)
+	if loot_count(m) == 0:
+		Kit.t(m, "Spend coins on the Core, the Outpost and Research", Vector2(cx, r.end.y - 96), 16, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)

@@ -349,6 +349,11 @@ static func rarity_beam(m, base: Vector2, rarity: String, h: float, t: float, w:
 	Beam.draw(m, base, rarity_col_t(rarity, t), h, w, t, 0.35 + 0.11 * float(rk))
 
 
+## A loot beam in any colour (LootReveal's white -> rarity climb).
+static func beam_col(m, base: Vector2, col: Color, h: float, w: float, t: float, alpha: float) -> void:
+	Beam.draw(m, base, col, h, w, t, alpha)
+
+
 ## Requirement chip (P6): a button that jumps to what is missing. Green when
 ## met, red when not. Key: "req:<kind>:<id>".
 static func req_chip(m, rect: Rect2, kind: String, id: String, label: String, met: bool, cb: Callable, tip: String = "", icon_id: String = "") -> Button:

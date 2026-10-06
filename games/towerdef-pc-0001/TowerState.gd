@@ -32,6 +32,7 @@ const Cores := preload("res://Cores.gd")
 const Specials := preload("res://Specials.gd")
 const Troops := preload("res://Troops.gd")
 const Drops := preload("res://Drops.gd")
+const LootDB := preload("res://data/LootDB.gd")
 const PowerModel := preload("res://PowerModel.gd")
 const EnemyStore := preload("res://EnemyStore.gd")
 const EnemyHash := preload("res://EnemyHash.gd")
@@ -151,6 +152,8 @@ static func in_grid_n(i: int, g: int) -> bool:
 
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var drop_rng: RandomNumberGenerator = RandomNumberGenerator.new()   # loot only: never perturbs waves
+var loot_rng: RandomNumberGenerator = RandomNumberGenerator.new()   # V2 P5 item / cache tokens: never perturbs the run
+var wave_items: Dictionary = {}   # wave -> item tokens dropped (LootDB.wave_cap)
 var draft_rng: RandomNumberGenerator = RandomNumberGenerator.new()  # drafts / perks / mutations
 var combat_rng: RandomNumberGenerator = RandomNumberGenerator.new() # crits / wave skip
 var horde_rng: RandomNumberGenerator = RandomNumberGenerator.new()  # FB1 per-body horde loot (own stream)
@@ -358,6 +361,7 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	drop_rng.seed = seed_value ^ 0x5EED_D20B
 	draft_rng.seed = seed_value ^ 0x0D2A_F7C3
 	combat_rng.seed = seed_value ^ 0x00C0_BA75
+	loot_rng.seed = seed_value ^ 0x1007_CA5E
 	horde_rng.seed = seed_value ^ 0x40AD_1007
 	run_seed = seed_value
 	save = save_data
@@ -479,6 +483,7 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	troop_counter = {"next": 1}
 	insight_found = []
 	loot = Drops.empty_loot()
+	wave_items = {}
 	banished = []
 	banish_left = 1 + mini(2, _reforge_node("banish_plus")) + int(mods.get("banish", 0))
 	free_reroll = true
@@ -1495,6 +1500,8 @@ func _on_death(ev: Array) -> void:
 	hp = 0.0
 	over = true
 	_sweep_horde_loot(true)
+	loot["luck"] = luck      # V2 P5: bank-time rarity luck (the run never rolls it)
+	loot["tier"] = tier
 	var cashout: int = int(floor(TuneRef.num("cashout_frac", 0.12) * cash_earned / maxf(1.0, cash_index()) * tier_coin_mult * mod_coin * mode_coin))
 	var coins: int = int(coins_run) + cashout
 	var bd: Dictionary = {
@@ -1717,6 +1724,12 @@ func _mass_try_clear(w: int, ev: Array) -> void:
 	coins_wave += coins
 	_mass_sweep_loot(a)
 	ev.append({"t": "wave_clear", "wave": w, "cash": cg, "coins": coins, "kept": kept, "kills": int(a["dead"]) - int(a["leak"]), "leaked": int(a["leak"])})
+	# V2 P5: cleared waves drop caches (loot stream only)
+	for x in Drops.add(loot, Drops.wave_clear(loot_rng, w, tier)):
+		var dx: Dictionary = (x as Dictionary).duplicate()
+		dx["t"] = "drop"
+		dx["pos"] = CENTER
+		ev.append(dx)
 	wave_acct.erase(w)
 
 
@@ -3033,8 +3046,12 @@ func _roll_drops(ed: int, ev: Array, ks: float = -1.0) -> void:
 		couriers_caught += 1
 	elif kind == "elite" or en.is_marked(ed):
 		src = "elite"
-	var ctx: Dictionary = {"tier": tier, "drop_mult": 1.0 + float(ins.get("in_drop", 0.0)), "share": ks if ks >= 0.0 else en.share[ed]}
-	var drops: Array = Drops.roll(drop_rng, src, ctx)
+	var ctx: Dictionary = {"tier": tier, "wave": wave, "drop_mult": 1.0 + float(ins.get("in_drop", 0.0)), "share": ks if ks >= 0.0 else en.share[ed],
+		"items_left": LootDB.wave_cap(tier) - int(wave_items.get(wave, 0))}
+	var drops: Array = Drops.roll(drop_rng, src, ctx, loot_rng)
+	for d1 in drops:
+		if String((d1 as Dictionary)["kind"]) == "item":
+			wave_items[wave] = int(wave_items.get(wave, 0)) + 1
 	if pf("scrap_find") > 0.0:
 		for d0 in drops:
 			if String((d0 as Dictionary)["kind"]) == "scrap":

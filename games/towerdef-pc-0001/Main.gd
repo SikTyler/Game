@@ -49,6 +49,7 @@ const RarityDB := preload("res://data/RarityDB.gd")
 const FrameDB := preload("res://data/FrameDB.gd")
 const ModuleDB := preload("res://data/ModuleDB.gd")
 const AffixDB := preload("res://data/AffixDB.gd")
+const LootReveal := preload("res://ui/LootReveal.gd")
 
 const GOLD: Color = Kit.GOLD
 const GEM: Color = Kit.GEM
@@ -185,6 +186,13 @@ var aim_t: float = 0.0
 var pad_aim: bool = false
 var turret_ang: float = -PI * 0.5     # drawn turret angle (eases toward the engine's aim)
 const AIM_HOLD_S: float = 0.15
+# V2 P5 loot: the reveal overlay (LootReveal) and in-world drop beams
+var reveal_uids: Array = []
+var reveal_t0: float = 0.0
+var reveal_fired: int = 0
+var reveal_skip: bool = false
+var reveal_page: int = 0
+var loot_beams: Array = []          # [{pos, col, t}] item / cache drops in the run
 var credits_scroll: float = 0.0
 
 
@@ -402,6 +410,7 @@ func start_run(seed_override: int = 0) -> void:
 	_clear_fx()
 	run_missions = 0
 	run_loot = []
+	loot_beams = []
 	Intel.reset(self)
 	last_breakdown = {}
 	var sd: int = seed_override if seed_override != 0 else TuneRef.seed_of(int(Time.get_ticks_usec() % 1000000))
@@ -801,6 +810,23 @@ func ev_text(e: Dictionary) -> String:
 	return ""
 
 
+## Beam colour of an in-run drop token (rarity is rolled at bank time): a
+## cache shows its guaranteed rarity, a loose item white.
+func drop_rar(ev: Dictionary) -> String:
+	if String(ev.get("kind", "")) == "cache":
+		return {"scrap": "common", "field": "uncommon", "elite": "rare", "boss": "epic", "reliquary": "legendary"}.get(String(ev.get("cache", "")), "common")
+	return "common"
+
+
+## Open the casino reveal over this run's banked items (results screen).
+func open_loot() -> void:
+	var uids: Array = []
+	for e in run_loot:
+		if String((e as Dictionary).get("t", "")) == "loot_item":
+			uids.append(int((e as Dictionary)["uid"]))
+	LootReveal.open(self, uids)
+
+
 func _gear_name(e: Dictionary) -> String:
 	var kind: String = String(e.get("kind", "weapon"))
 	var base: String = String(e.get("base", ""))
@@ -888,6 +914,9 @@ func _handle(events: Array) -> void:
 			sfx_play(clip)
 		if et == "drop":
 			Intel.on_event(self, ev)   # FB2 Loot Drops feed
+			if String(ev.get("kind", "")) in ["item", "cache"]:
+				loot_beams.append({"pos": ev.get("pos", TowerState.CENTER), "rar": drop_rar(ev), "t": 0.0})
+				sfx_play("card_open", 1.4)
 		match et:
 			"shot":
 				var kind: String = ev["kind"]
@@ -1045,7 +1074,7 @@ func _handle(events: Array) -> void:
 				_queue_toasts([ev])
 			"game_over":
 				last_breakdown = ev
-			"insight_banked", "loot_banked":
+			"insight_banked", "loot_banked", "loot_item", "cache_open", "loot_salvaged":
 				run_loot.append(ev)
 			"dead":
 				last_result = ev
@@ -1295,6 +1324,11 @@ func _process(delta: float) -> void:
 		fade = maxf(0.0, fade - delta)
 		fader.modulate = Color(1, 1, 1, 0.9 * fade / FADE_TIME)
 	_aim_input(delta)
+	if overlay == "loot":
+		LootReveal.tick(self)
+	for b in loot_beams:
+		(b as Dictionary)["t"] = float((b as Dictionary)["t"]) + delta
+	loot_beams = loot_beams.filter(func(b: Variant) -> bool: return float((b as Dictionary)["t"]) < 2.6)
 	if screen == "run" and S != null and overlay == "" and not _draft_hold():
 		var t0: int = Time.get_ticks_usec()
 		var tev: Array = S.tick(juice.engine_delta(delta))

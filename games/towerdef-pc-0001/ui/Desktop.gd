@@ -26,8 +26,9 @@ const Kit := preload("res://ui/Kit.gd")
 const Battle := preload("res://ui/Battle.gd")
 const Hub := preload("res://ui/Hub.gd")
 const OutpostView := preload("res://ui/OutpostView.gd")
+const LootReveal := preload("res://ui/LootReveal.gd")
 
-const OVERLAYS: Array = ["pause", "settings", "credits", "stats", "history", "achievements", "modes", "goal"]
+const OVERLAYS: Array = ["pause", "settings", "credits", "stats", "history", "achievements", "modes", "goal", "loot"]
 const SET_TABS: Array = ["video", "audio", "controls", "gameplay"]
 const KEYS_PER_PAGE: int = 11
 
@@ -86,6 +87,8 @@ static func build(m) -> void:
 				_build_modes(m)
 			"goal":
 				_build_goal(m)
+			"loot":
+				LootReveal.build(m)
 		_focus_first(m)
 		return
 	if m.screen == "base" and not m.offline_offer.is_empty():
@@ -739,6 +742,8 @@ static func draw_overlay(m) -> void:
 		return
 	m.draw_rect(Rect2(0, 0, m.vw, m.vh), Color(0, 0, 0, 0.72))
 	match String(m.overlay):
+		"loot":
+			LootReveal.draw(m)
 		"pause":
 			var rp: Rect2 = modal_rect(m, 520, 470)
 			Kit.panel(m, rp, Kit.GEM, Kit.PANEL2)

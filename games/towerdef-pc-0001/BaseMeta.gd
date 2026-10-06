@@ -24,6 +24,7 @@ const PickDB := preload("res://data/PickDB.gd")
 const Outpost := preload("res://Outpost.gd")
 const Reforge := preload("res://Reforge.gd")
 const Gear := preload("res://Gear.gd")
+const Loot := preload("res://Loot.gd")
 
 const VERSION: int = 5
 
@@ -203,12 +204,8 @@ static func bank(s: Dictionary, coins: int, wave: int, tier: int = 1, run_minute
 
 ## Bank a run's loot: Scrap into the wallet (P5: items and caches too).
 static func bank_loot(s: Dictionary, loot: Dictionary, _rng: RandomNumberGenerator = null) -> Array:
-	var ev: Array = []
-	var sc: int = int(round(float(maxi(0, int(loot.get("scrap", 0)))) * scrap_mult(s)))
-	s["scrap"] = int(s.get("scrap", 0)) + sc
-	if sc > 0:
-		ev.append({"t": "loot_banked", "scrap": sc})
-	return ev
+	# V2 P5: tokens -> items on the meta RNG (Loot.realize) + all Scrap
+	return Loot.realize(s, loot, scrap_mult(s))
 
 
 ## Scrap multiplier on banked loot (Reforge Scrapper +10%/L).
