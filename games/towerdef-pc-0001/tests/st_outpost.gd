@@ -5,7 +5,9 @@ extends RefCounted
 ## to the 48x32 map of small cells (Relay 3x3 at (4,8), Research Hall 3x3 on
 ## top of it, start area 12x12), plus the V2 rules: Relay unlocks, Core
 ## buildings -> permanent Core stats in runs, signed adjacency (heat, Pylons,
-## rivals, floor / cap), scavengers banking gear, limits.
+## rivals, floor / cap), scavengers banking gear, limits; P6c: adjacency
+## sources for the connector lines, receivers only, per-building Core share,
+## procedural art coverage.
 ## `t` is the selftest runner.
 
 const Outpost := preload("res://Outpost.gd")
@@ -28,6 +30,7 @@ static func run(t) -> void:
 	_edit(t)
 	_core(t)
 	_scavengers(t)
+	_links(t)
 
 
 static func _save(coins: int = 10_000_000) -> Dictionary:
@@ -332,3 +335,47 @@ static func _scavengers(t) -> void:
 	var ev2: Array = Outpost.collect(sv, dn, OT0 + 72 * 3600)
 	t._check("P6 scavenge: a Scavenger Den's find is a Field Cache (2 items)", _ev(ev2, "cache_open").size() == 1 and _ev(ev2, "loot_item").size() == 2)
 	t._check("P6 scavenge: scavengers don't count as coin / Scrap production", not Outpost.production(sv).has("item") and Outpost.pending(sv, OT0 + 80 * 3600).has("coins"))
+
+
+# ------------------------------------------------------------------ P6c links
+
+static func _links(t) -> void:
+	var OV = load("res://ui/OutpostView.gd")
+	var OA = load("res://ui/OutpostArt.gd")
+	var h: Dictionary = _save()
+	h["outpost"]["relay_lvl"] = 8
+	var hm: String = _b(h, "mill", 7, 8)
+	var hr: String = _b(h, "reactor", 9, 8)
+	var ha: String = _b(h, "arsenal", 9, 10)
+	var la: Dictionary = _lb(h, ha)
+	t._check("P6c links: layout_bonus names each part's sources (Reactor -> Arsenal, Reactor -> Mill)", la["srcs"].get("reactor", []) == [hr] and _lb(h, hm)["srcs"].get("heat", []) == [hr], str(la))
+	t._check("P6c links: a once-only part credits its source in full", is_equal_approx(float(OV._ins(la).get(hr, 0.0)), 0.20) and is_equal_approx(float(OV._ins(_lb(h, hm)).get(hr, 0.0)), -0.15))
+	t._check("P6c links: core_part is one building's share of core_bonus", is_equal_approx(float(Outpost.core_part(h["outpost"], ha).get("dmg", 0.0)), float(Outpost.core_bonus(h)["dmg"])) and is_equal_approx(float(Outpost.core_part(h["outpost"], ha)["dmg"]), 0.024))
+	var j: Dictionary = _save()
+	j["outpost"]["relay_lvl"] = 8
+	var ma: String = _b(j, "mill", 7, 9)
+	var mb: String = _b(j, "mill", 7, 11)
+	var mc: String = _b(j, "mill", 9, 9)
+	var ins: Dictionary = OV._ins(_lb(j, ma))
+	t._check("P6c links: a stacking part splits over its sources (two Mills, +10% each)", ins.size() == 2 and is_equal_approx(float(ins.get(mb, 0.0)), 0.10) and is_equal_approx(float(ins.get(mc, 0.0)), 0.10), str(ins))
+	var w: Dictionary = _save()
+	w["outpost"]["relay_lvl"] = 8
+	var wu: String = _b(w, "warehouse", 7, 8)
+	var wm: String = _b(w, "mill", 7, 10)
+	_b(w, "beaconpost", 9, 9)
+	t._check("P6c links: Beacons / Pylons reach only buildings a layout bonus scales (a Mill, not a Warehouse)", not AdjDB.receives("warehouse") and AdjDB.receives("arsenal") and (_lb(w, wu)["parts"] as Dictionary).is_empty() and is_equal_approx(float(_lb(w, wm)["parts"].get("beacon", 0.0)), 0.05))
+	var d: Dictionary = _save()
+	d["outpost"]["relay_lvl"] = 8
+	_b(d, "barracks", 7, 8)
+	_b(d, "training", 9, 8)
+	t._check("P6c links: Training Grounds drill a touching Barracks (+10% troops in runs)", is_equal_approx(float(BaseMeta.run_mods(d)["barracks_bonus"]), 0.10))
+	var miss: Array = []
+	for id in OutpostDB.IDS:
+		if id == "conduit":
+			continue
+		if not OA.has_art(id) or not OA.CAT_COL.has(String(OutpostDB.get_def(id)["cat"])):
+			miss.append(id)
+	for id in AdjDB.RECEIVERS:
+		if not OutpostDB.IDS.has(id):
+			miss.append("recv:" + String(id))
+	t._check("P6c art: every building has a neon glyph + category rim (and every receiver exists)", miss.is_empty() and OA.has_art("relay"), str(miss))

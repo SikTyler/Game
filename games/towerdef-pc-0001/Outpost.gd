@@ -378,8 +378,9 @@ static func layout_bonus(o: Dictionary, uid: String, con: Dictionary = {}) -> Di
 	var b: Dictionary = o["buildings"][uid]
 	var id: String = String(b["id"])
 	var parts: Dictionary = {}
+	var srcs: Dictionary = {}
 	if int(b["x"]) < 0:
-		return {"total": 0.0, "parts": parts}
+		return {"total": 0.0, "parts": parts, "srcs": srcs}
 	var cn: Dictionary = con if not con.is_empty() else connected(o)
 	var touching: Array = neighbours(o, uid)
 	var mine: Array = _cells_of(o, uid)
@@ -388,6 +389,7 @@ static func layout_bonus(o: Dictionary, uid: String, con: Dictionary = {}) -> Di
 		if not AdjDB.targets(rd, id) or (String(rd["dst"]) == "*" and String(rd["src"]) == id):
 			continue
 		var n: int = 0
+		var who: Array = []
 		for k in o["buildings"].keys():
 			var bb: Dictionary = o["buildings"][k]
 			if String(k) == uid or String(bb["id"]) != String(rd["src"]) or not bool(bb["built"]) or int(bb["x"]) < 0 or not bool(cn.get(String(k), false)):
@@ -400,6 +402,7 @@ static func layout_bonus(o: Dictionary, uid: String, con: Dictionary = {}) -> Di
 				near = dd <= int(rd["r"]) and dd >= int(rd.get("rmin", 1))
 			if near:
 				n += 1
+				who.append(String(k))
 		if n <= 0:
 			continue
 		var v: float = float(rd["eff"]) * (1.0 if bool(rd.get("once", false)) else float(n))
@@ -409,6 +412,7 @@ static func layout_bonus(o: Dictionary, uid: String, con: Dictionary = {}) -> Di
 		if bool(rd.get("once", false)) and parts.has(key):
 			continue   # the same effect from two rule rows counts once
 		parts[key] = float(parts.get(key, 0.0)) + v
+		srcs[key] = (srcs.get(key, []) as Array) + who
 	var decor: float = 0.0
 	var lamps: int = 0
 	var scholar: int = 0
@@ -438,7 +442,7 @@ static func layout_bonus(o: Dictionary, uid: String, con: Dictionary = {}) -> Di
 	var tot: float = 0.0
 	for k in parts.keys():
 		tot += float(parts[k])
-	return {"total": clampf(tot, AdjDB.NERF_FLOOR, TuneRef.num("pc_layout_cap", AdjDB.BUFF_CAP)), "parts": parts}
+	return {"total": clampf(tot, AdjDB.NERF_FLOOR, TuneRef.num("pc_layout_cap", AdjDB.BUFF_CAP)), "parts": parts, "srcs": srcs}
 
 
 ## Warehouse storage bonus on a building: +25% (+5%/L) within radius 2.
@@ -1028,12 +1032,13 @@ static func research_queues(s: Dictionary) -> int:
 	return 3 if L >= 8 else (2 if L >= 4 else 1)
 
 
-## Lab speed from scholar decor next to the Research Hall (max +15%).
+## Lab speed from the Research Hall's layout (scholar decor, Beacons,
+## Pylons; max +15%).
 static func hall_speed(s: Dictionary) -> float:
 	var o: Dictionary = _o(s)
 	for k in o["buildings"].keys():
 		if String((o["buildings"][k] as Dictionary)["id"]) == "research" and int((o["buildings"][k] as Dictionary)["x"]) >= 0:
-			return 1.0 + minf(0.15, float((layout_bonus(o, String(k))["parts"] as Dictionary).get("decor", 0.0)))
+			return 1.0 + minf(0.15, float(layout_bonus(o, String(k))["total"]))
 	return 1.0
 
 
@@ -1051,9 +1056,25 @@ static func core_bonus(s: Dictionary) -> Dictionary:
 		var d: Dictionary = OutpostDB.get_def(String(b["id"]))
 		if not d.has("core") or not bool(b["built"]) or int(b["x"]) < 0 or not bool(con.get(String(k), false)):
 			continue
-		var m: float = float(int(b["lvl"])) * (1.0 + float(layout_bonus(o, String(k), con)["total"])) * eff
-		for key in (d["core"] as Dictionary).keys():
-			out[key] = float(out.get(key, 0.0)) + float(d["core"][key]) * m
+		var part: Dictionary = core_part(o, String(k), con, eff)
+		for key in part.keys():
+			out[key] = float(out.get(key, 0.0)) + float(part[key])
+	return out
+
+
+## One Core building's share of core_bonus at its current level ({} when it
+## is not a Core building; ignores built / linked - callers check).
+static func core_part(o: Dictionary, uid: String, con: Dictionary = {}, eff: float = -1.0) -> Dictionary:
+	var b: Dictionary = o["buildings"][uid]
+	var d: Dictionary = OutpostDB.get_def(String(b["id"]))
+	if not d.has("core") or int(b["x"]) < 0:
+		return {}
+	var cn: Dictionary = con if not con.is_empty() else connected(o)
+	var e: float = eff if eff >= 0.0 else efficiency(o, cn)
+	var m: float = float(int(b["lvl"])) * (1.0 + float(layout_bonus(o, uid, cn)["total"])) * e
+	var out: Dictionary = {}
+	for key in (d["core"] as Dictionary).keys():
+		out[key] = float(d["core"][key]) * m
 	return out
 
 
@@ -1069,7 +1090,7 @@ static func run_mods(s: Dictionary) -> Dictionary:
 	var bar_bonus: float = 0.0
 	for k in o["buildings"].keys():
 		if String((o["buildings"][k] as Dictionary)["id"]) == "barracks" and bool((o["buildings"][k] as Dictionary)["built"]):
-			bar_bonus = float((layout_bonus(o, String(k))["parts"] as Dictionary).get("decor", 0.0))
+			bar_bonus = float(layout_bonus(o, String(k))["total"])
 	var cb: Dictionary = core_bonus(s)
 	var fx: Dictionary = {}
 	for k in RUN_KEYS:

@@ -1,12 +1,16 @@
 extends RefCounted
-## Outpost builder (REDESIGN_SPEC §5): the persistent base outside runs.
-## Pannable / zoomable 24x16 map (right- or middle-drag pans, wheel zooms),
-## build palette on the right (by category: cost, power, count / limit),
-## selected-building panel (production, storage bar, connection, adjacency,
-## Collect / Upgrade / Move / Rotate / Demolish), builder queue + Collect all
-## along the bottom, and the blueprint menu (save / load / export / import).
+## Outpost builder (V2 P6): the persistent base outside runs.
+## Pannable / zoomable 48x32 map (right- or middle-drag pans, wheel zooms)
+## framed on the frontier (open land + the plots you can buy next), build
+## palette on the right (by category: cost, power, count / limit),
+## selected-building panel (production or Core stat, storage bar, link,
+## layout parts, next-upgrade delta, Collect / Upgrade / Move / Rotate /
+## Demolish), Collect all and the blueprint menu (save / load / export /
+## import). Buildings are drawn procedurally (OutpostArt).
 ## Hover preview: ghost footprint, green / red validity with the reason, a
-## connectivity line to the Relay and the adjacency delta (e.g. "+15%").
+## link line to the Relay and adjacency connector lines with +/- chips (who
+## feeds the ghost, which neighbours it changes; same lines for a selected
+## building).
 ## Hotkeys: R rotate, M move, Del demolish, U upgrade, 1-9 palette.
 ## View only: every action calls Outpost and replays its events.
 
@@ -15,6 +19,8 @@ const OutpostDB := preload("res://data/OutpostDB.gd")
 const Settings := preload("res://Settings.gd")
 const Art := preload("res://ArtDB.gd")
 const Kit := preload("res://ui/Kit.gd")
+const OutpostArt := preload("res://ui/OutpostArt.gd")
+const AdjDB := preload("res://data/AdjDB.gd")
 
 const PAL_W: float = 400.0
 const HEAD_H: float = 48.0
@@ -59,6 +65,21 @@ const DESC: Dictionary = {
 	"scav_deep": "Finds an Elite Cache (Rare+) every 24 h (stores 2).",
 	"pylon": "+5% to buildings exactly 2 cells away, -5% to anything touching it.",
 }
+## Core building stats: key -> [label, format, scale].
+const CORE_FMT: Dictionary = {
+	"dmg": ["Damage", "+%.1f%%", 100.0], "rate": ["Attack rate", "+%.1f%%", 100.0], "core_hp": ["Core HP", "+%.1f%%", 100.0],
+	"dr": ["Damage taken", "-%.1f%%", 100.0], "crit": ["Crit chance", "+%.1f%%", 100.0], "range": ["Range", "+%.2f", 1.0],
+	"cash": ["Run cash", "+%.1f%%", 100.0], "xp": ["Run XP", "+%.1f%%", 100.0], "loot_luck": ["Loot luck", "+%.1f", 1.0],
+	"forge_disc": ["Forge costs", "-%.1f%%", 100.0],
+}
+## Short names of layout parts (AdjDB keys + decor).
+const PART_NAME: Dictionary = {
+	"mills": "Mills", "warehouse": "Warehouse", "noise": "Mill noise", "heat": "Reactor heat", "reactor": "Reactor",
+	"plating": "Bulwark", "lenses": "Optics", "drills": "Training", "ledger": "Treasury", "smelt": "Refinery",
+	"omens": "Shrine", "rivals": "Rivals", "beacon": "Beacon", "pylon": "Pylon", "pylon_hum": "Pylon hum", "decor": "Decor",
+}
+## Scavenger finds (res -> name).
+const SCAV_NAME: Dictionary = {"item": "item", "field": "Field Cache", "elite": "Elite Cache"}
 const ERR: Dictionary = {"outside": "Outside the map", "locked": "Locked land — buy the plot", "blocked": "Rock", "occupied": "Occupied", "needs_vein": "Deep Mine needs a Crystal Vein", "limit": "Limit reached — upgrade the Relay", "relay": "Needs a higher Relay level", "unknown": "?"}
 
 
@@ -77,16 +98,67 @@ static func pal_rect(m) -> Rect2:
 	return Rect2(cr.end.x - PAL_W - 12, cr.position.y + 12, PAL_W, cr.size.y - 24)
 
 
+## V2 P6c: the camera frames the frontier - open land plus the plots you
+## can buy next, +1 cell - so cells stay big while the Outpost is small
+## (cell units; cached on the plot list).
+static func frame(m) -> Rect2:
+	var o: Dictionary = _o(m)
+	var key: String = str(o["plots"])
+	var cache: Dictionary = m.get_meta("op_frame", {})
+	if String(cache.get("key", "-")) == key:
+		return cache["r"]
+	var r: Rect2i = OutpostDB.START
+	r = r.merge(Rect2i(OutpostDB.RELAY, Vector2i(3, 3)))
+	for k in OutpostDB.PLOTS.size():
+		if (o["plots"] as Array).has(k) or Outpost.plot_adjacent(o, k):
+			r = r.merge(OutpostDB.PLOTS[k])
+	r = r.grow(1).intersection(Rect2i(0, 0, OutpostDB.W, OutpostDB.H))
+	var out := Rect2(r)
+	m.set_meta("op_frame", {"key": key, "r": out})
+	return out
+
+
+## Open-land mask (W x H bytes, 1 = open), cached on the plot list.
+static func open_mask(m) -> PackedByteArray:
+	var o: Dictionary = _o(m)
+	var key: String = str(o["plots"])
+	var cache: Dictionary = m.get_meta("op_mask", {})
+	if String(cache.get("key", "-")) == key:
+		return cache["v"]
+	var out := PackedByteArray()
+	out.resize(OutpostDB.W * OutpostDB.H)
+	for y in OutpostDB.H:
+		for x in OutpostDB.W:
+			out[y * OutpostDB.W + x] = 1 if Outpost.is_open(o, Vector2i(x, y)) else 0
+	m.set_meta("op_mask", {"key": key, "v": out})
+	return out
+
+
+## A slate boulder on a rock cell (seeded by the cell).
+static func _rock(m, r: Rect2, x: int, y: int) -> void:
+	var c: Vector2 = r.get_center()
+	var rad: float = r.size.x * 0.42
+	var pts := PackedVector2Array()
+	var h: int = hash([x, y])
+	for k in 7:
+		var an: float = TAU * float(k) / 7.0 + float(h % 7) * 0.3
+		pts.append(c + Vector2(cos(an), sin(an) * 0.85) * rad * (0.8 + 0.2 * float((h >> k) & 1)))
+	m.draw_colored_polygon(pts, Color("27304a"))
+	var top := PackedVector2Array([pts[4], pts[5], pts[6], pts[0]])
+	m.draw_polyline(top, Color("4a5678"), 1.5, true)
+
+
 static func cell_px(m) -> float:
 	var mr: Rect2 = map_rect(m)
-	return minf(mr.size.x / float(OutpostDB.W + PLAZA_W), mr.size.y / float(OutpostDB.H)) * 0.97 * m.op_zoom
+	var f: Rect2 = frame(m)
+	return minf(mr.size.x / f.size.x, mr.size.y / f.size.y) * 0.97 * m.op_zoom
 
 
-## Cell (0, 0) on screen; the plaza (PLAZA_W columns) sits to its left.
+## Cell (0, 0) on screen: the frontier's centre sits at the map's centre,
+## then the pan offset.
 static func origin(m) -> Vector2:
 	var mr: Rect2 = map_rect(m)
-	var c: float = cell_px(m)
-	return mr.get_center() - Vector2(float(OutpostDB.W + PLAZA_W), float(OutpostDB.H)) * c * 0.5 + Vector2(float(PLAZA_W) * c, 0.0) + m.op_cam
+	return mr.get_center() - frame(m).get_center() * cell_px(m) + m.op_cam
 
 
 static func landmark_rect(m, tab: String) -> Rect2:
@@ -197,7 +269,7 @@ static func focus_on(m, uid: String) -> void:
 	else:
 		return
 	var c: float = cell_px(m)
-	m.op_cam = Vector2(float(OutpostDB.W), float(OutpostDB.H)) * c * 0.5 - (cell + Vector2(sz) * 0.5) * c
+	m.op_cam = (frame(m).get_center() - (cell + Vector2(sz) * 0.5)) * c
 
 
 ## Rect of a building / the Relay on screen (pulse after a jump).
@@ -210,6 +282,15 @@ static func building_rect(m, uid: String) -> Rect2:
 	var b: Dictionary = o["buildings"][uid]
 	var sz: Vector2i = OutpostDB.size_of(String(b["id"]), int(b["rot"]))
 	return cell_rect(m, int(b["x"]), int(b["y"]), sz.x, sz.y)
+
+
+## Draw a building (procedural neon, OutpostArt) or a decor / Conduit
+## texture inside a footprint rect.
+static func _bld(m, id: String, lvl: int, r: Rect2, linked: bool = true, alpha: float = 1.0) -> void:
+	if OutpostArt.has_art(id):
+		OutpostArt.draw(m, id, lvl, r, float(m.t_anim), {"linked": linked, "alpha": alpha, "max": int(OutpostDB.get_def(id).get("max_lvl", 10))})
+	else:
+		_art(m, art_of(id, lvl), r, Color(1, 1, 1, alpha))
 
 
 ## Draw an Outpost texture inside a footprint rect, aspect kept.
@@ -592,9 +673,18 @@ static func building_text(m, uid: String) -> String:
 	var id: String = String(b["id"])
 	var con: Dictionary = Outpost.connected(o)
 	var lines: Array = ["%s  Lv%d%s" % [name_of(id), int(b["lvl"]), "" if bool(b["built"]) else "  (building)"], String(DESC.get(id, ""))]
-	if OutpostDB.GENERATORS.has(id):
+	if OutpostDB.SCAVENGERS.has(id):
+		lines.append("%s  ·  stored %d / %d" % [scav_text(id, Outpost.rate(s, uid, con)), int(float(b["stored"])), int(Outpost.cap(s, uid, con))])
+	elif OutpostDB.GENERATORS.has(id):
 		var res: String = String(OutpostDB.get_def(id)["res"])
 		lines.append("%s %s/h  ·  stored %d / %d" % [_rate_txt(Outpost.rate(s, uid, con)), res, int(float(b["stored"])), int(Outpost.cap(s, uid, con))])
+	if OutpostDB.CORE_IDS.has(id) and bool(con.get(uid, false)) and bool(b["built"]):
+		var part: Dictionary = Outpost.core_part(o, uid, con)
+		var ct: Array = []
+		for k in part.keys():
+			ct.append(core_text(String(k), float(part[k])))
+		lines.append("Core: " + ", ".join(PackedStringArray(ct)))
+	if AdjDB.receives(id):
 		var lb: Dictionary = Outpost.layout_bonus(o, uid, con)
 		if float(lb["total"]) != 0.0:
 			lines.append("Layout bonus %+d%%" % int(round(float(lb["total"]) * 100.0)))
@@ -605,6 +695,19 @@ static func building_text(m, uid: String) -> String:
 
 static func _rate_txt(r: float) -> String:
 	return Kit.fmt(r) if r >= 10.0 else "%.2f" % r
+
+
+## "+4.0% damage" style readout of one Core stat.
+static func core_text(key: String, v: float, with_label: bool = true) -> String:
+	var f: Array = CORE_FMT.get(key, [key, "+%.2f", 1.0])
+	var num: String = String(f[1]) % (v * float(f[2]))
+	return ("%s %s" % [num, String(f[0]).to_lower()]) if with_label else num
+
+
+## Scavenger pace: "1 item / 5.5 h" (or "paused" when it is not producing).
+static func scav_text(id: String, rate: float) -> String:
+	var nm: String = String(SCAV_NAME.get(String(OutpostDB.get_def(id).get("res", "")), "find"))
+	return ("1 %s / %.1f h" % [nm, 1.0 / rate]) if rate > 0.0 else "paused"
 
 
 # ===================================================================== draw
@@ -630,39 +733,59 @@ static func _draw_map(m, s: Dictionary, o: Dictionary, mr: Rect2) -> void:
 	var con: Dictionary = Outpost.connected(o)
 	var occ: Dictionary = Outpost.occupancy(o)
 	var t: int = m.now()
-	# terrain
+	# terrain (V2 P6c neon blueprint): open land navy with a cyan grid and a
+	# glowing frontier edge; locked land near-black; rocks as slate boulders
+	var mask: PackedByteArray = open_mask(m)
+	var grid := Color(Kit.CYAN, 0.07)
+	var edge := Color(Kit.CYAN, 0.55)
+	var ew: float = maxf(1.5, c * 0.05)
 	for y in OutpostDB.H:
 		for x in OutpostDB.W:
 			var cv := Vector2i(x, y)
 			var r: Rect2 = cell_rect(m, x, y)
 			if not mr.intersects(r):
 				continue
-			var open: bool = Outpost.is_open(o, cv)
-			if OutpostDB.BLOCKED.has(cv) and open:
-				Kit.icon(m, "tile_rock", r)
-			elif open:
-				Kit.icon(m, "tile_ash", r)
-				if OutpostDB.VEINS.has(cv):
+			var open: bool = mask[y * OutpostDB.W + x] == 1
+			if open:
+				m.draw_rect(r, Color("0f182d") if (x + y) % 2 == 0 else Color("111b33"))
+				m.draw_rect(r, grid, false, 1.0)
+				if OutpostDB.BLOCKED.has(cv):
+					_rock(m, r, x, y)
+				elif OutpostDB.VEINS.has(cv):
 					Kit.icon(m, "op_vein", r)
+				# frontier edge where open land meets locked land / the map edge
+				if y == 0 or mask[(y - 1) * OutpostDB.W + x] == 0:
+					m.draw_line(r.position, Vector2(r.end.x, r.position.y), edge, ew)
+				if y == OutpostDB.H - 1 or mask[(y + 1) * OutpostDB.W + x] == 0:
+					m.draw_line(Vector2(r.position.x, r.end.y), r.end, edge, ew)
+				if x == 0 or mask[y * OutpostDB.W + x - 1] == 0:
+					m.draw_line(r.position, Vector2(r.position.x, r.end.y), edge, ew)
+				if x == OutpostDB.W - 1 or mask[y * OutpostDB.W + x + 1] == 0:
+					m.draw_line(Vector2(r.end.x, r.position.y), r.end, edge, ew)
 			else:
-				Kit.icon(m, "tile_ash", r, Color(0.42, 0.42, 0.46))   # FB1: resources hidden until bought
-			m.draw_rect(r, Color(1, 1, 1, 0.05), false, 1.0)
-	# locked plots
+				m.draw_rect(r, Color("070b15"))   # FB1: resources hidden until bought
+				m.draw_rect(r, Color(1, 1, 1, 0.025), false, 1.0)
+	# locked plots: buyable ones (touching open land) show a gold frame + price
+	var price: String = Kit.fmt(float(Outpost.plot_cost(s)["coins"]))
 	for k in OutpostDB.PLOTS.size():
 		if (o["plots"] as Array).has(k):
 			continue
 		var pr: Rect2i = OutpostDB.PLOTS[k]
 		var rr: Rect2 = cell_rect(m, pr.position.x, pr.position.y, pr.size.x, pr.size.y)
+		if not mr.intersects(rr):
+			continue
 		var sel: bool = m.op_sel == "plot:%d" % k
-		m.draw_rect(rr, Color(0.02, 0.03, 0.05, 0.30))
-		m.draw_rect(rr.grow(-2), Kit.GOLD if sel else Color(1, 1, 1, 0.22), false, 3.0 if sel else 1.5)
+		var buy: bool = Outpost.plot_adjacent(o, k)
+		m.draw_rect(rr.grow(-3), Kit.GOLD if sel else (Color(Kit.GOLD, 0.35) if buy else Color(1, 1, 1, 0.08)), false, 3.0 if sel else 1.5)
 		var isz: float = minf(c * 1.2, minf(rr.size.x, rr.size.y) - 8.0)
-		Kit.icon(m, "op_plot_locked", Rect2(rr.get_center() - Vector2(isz, isz) * 0.5, Vector2(isz, isz)), Color(1, 1, 1, 0.75 if Outpost.plot_adjacent(o, k) else 0.3))
+		var ic: Vector2 = rr.get_center() - Vector2(0.0, 10.0 if buy else 0.0)
+		Kit.icon(m, "op_plot_locked", Rect2(ic - Vector2(isz, isz) * 0.5, Vector2(isz, isz)), Color(1, 1, 1, 0.8 if buy else 0.25))
+		if buy and rr.size.y > isz + 30.0:
+			Kit.th(m, price, Vector2(ic.x, ic.y + isz * 0.5 + 20.0), 15, Kit.GOLD, HORIZONTAL_ALIGNMENT_CENTER, rr.size.x)
 	# Relay
 	var rl: int = int(o["relay_lvl"])
 	var rrr: Rect2 = cell_rect(m, OutpostDB.RELAY.x, OutpostDB.RELAY.y, 3, 3)
-	m.draw_rect(rrr.grow(-2), Color(Kit.RUST, 0.12))
-	_art(m, OutpostDB.art_id("relay", rl), rrr)
+	_bld(m, "relay", rl, rrr.grow(-2))
 	if m.op_sel == "relay":
 		Kit.outline(m, rrr, Kit.GOLD)
 	# buildings
@@ -680,9 +803,7 @@ static func _draw_map(m, s: Dictionary, o: Dictionary, mr: Rect2) -> void:
 			if m.op_sel == String(uid):
 				Kit.outline(m, r2, Kit.GOLD)
 			continue
-		m.draw_rect(r2.grow(-2), Color("111a2e") if linked else Color("2a1022"))
-		m.draw_rect(r2.grow(-2), Color(Kit.EDGE, 0.8) if linked else Color(Kit.ENEMY, 0.6), false, 2.0)
-		_art(m, art_of(id, int(b["lvl"])), r2.grow(-3), Color(1, 1, 1, 0.35 if moving else (1.0 if bool(b["built"]) else 0.5)))
+		_bld(m, id, int(b["lvl"]), r2.grow(-2), linked, 0.35 if moving else (1.0 if bool(b["built"]) else 0.5))
 		if not bool(b["built"]):
 			var job: Dictionary = _job_of(o, String(uid))
 			Kit.icon(m, "op_timer", Rect2(r2.get_center() - Vector2(c * 0.3, c * 0.3), Vector2(c * 0.6, c * 0.6)))
@@ -714,6 +835,11 @@ static func _draw_map(m, s: Dictionary, o: Dictionary, mr: Rect2) -> void:
 		_art(m, String(d["id"]), r3.grow(-2), Color(1, 1, 1, 0.35 if mv else 1.0))
 		if m.op_sel == "d" + String(du):
 			Kit.outline(m, r3, Kit.GOLD)
+	# V2 P6c: a selected building shows its adjacency links
+	var sel: String = String(m.op_sel)
+	if m.op_arm == "" and not m.op_moving and (o["buildings"] as Dictionary).has(sel):
+		var lk: Dictionary = links(m, sel)
+		_draw_links(m, building_rect(m, sel), lk["ins"], lk["outs"])
 	_draw_ghost(m, s, o, mr)
 	# V2 P6: a requirement jump pulses its building for 2.5 s
 	var pt: float = float(m.t_anim) - float(m.op_pulse_t)
@@ -798,7 +924,7 @@ static func _draw_ghost(m, s: Dictionary, o: Dictionary, mr: Rect2) -> void:
 	var info: Dictionary = preview(m, id, cell, m.op_rot, skip)
 	var ok: bool = String(info["err"]) == ""
 	m.draw_rect(r, Color(Kit.GREEN, 0.22) if ok else Color(Kit.ENEMY, 0.25))
-	_art(m, art_of(id, 1), r.grow(-3), Color(1, 1, 1, 0.6))
+	_bld(m, id, 1, r.grow(-3), ok and (is_decor(id) or bool(info["linked"])), 0.7)
 	m.draw_rect(r, Kit.GREEN if ok else Kit.ENEMY, false, 3.0)
 	if ok and not is_decor(id):
 		var relay_c: Vector2 = cell_rect(m, OutpostDB.RELAY.x, OutpostDB.RELAY.y, 3, 3).get_center()
@@ -812,14 +938,16 @@ static func _draw_ghost(m, s: Dictionary, o: Dictionary, mr: Rect2) -> void:
 			for k in steps:
 				if k % 2 == 0:
 					m.draw_line(a.lerp(relay_c, float(k) / float(steps)), a.lerp(relay_c, float(k + 1) / float(steps)), col, 2.0)
+	if ok:
+		_draw_links(m, r, info["ins"], info["outs"])
 	var label: String = String(ERR.get(String(info["err"]), String(info["err"])))
 	if ok:
 		label = name_of(id)
 		if not is_decor(id) and id != "conduit":
 			label += "  ·  linked" if bool(info["linked"]) else "  ·  not linked (add Conduits)"
-		if OutpostDB.GENERATORS.has(id):
+		if AdjDB.receives(id):
 			label += "  ·  layout %+d%%" % int(round(float(info["bonus"]) * 100.0))
-		elif absf(float(info["delta"])) > 0.0001:
+		if absf(float(info["delta"])) > 0.0001:
 			label += "  ·  neighbours %+d%%" % int(round(float(info["delta"]) * 100.0))
 	var lw: float = 20.0 + m.font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
 	Kit.panel(m, Rect2(r.position.x, r.position.y - 34, lw, 30), Kit.GREEN if ok else Kit.ENEMY, Color(0.05, 0.06, 0.08, 0.92))
@@ -828,19 +956,28 @@ static func _draw_ghost(m, s: Dictionary, o: Dictionary, mr: Rect2) -> void:
 
 
 ## Pure preview on a copy of the Outpost block: validity, Relay link, the
-## ghost's own layout bonus and the summed delta it gives its neighbours.
+## ghost's own layout bonus and parts, who feeds it (ins: {uid: share}) and
+## how each neighbour's bonus moves (outs: {uid: delta}, summed in delta).
 static func preview(m, id: String, c: Vector2i, rot: int, skip: String = "") -> Dictionary:
-	var key: String = "%s|%d|%d|%d|%s|%d" % [id, c.x, c.y, rot, skip, int(_o(m)["next_uid"]) + (_o(m)["buildings"] as Dictionary).size() * 1000 + (_o(m)["decor"] as Dictionary).size() * 100000]
+	var key: String = "%s|%d|%d|%d|%s|%d" % [id, c.x, c.y, rot, skip, _fp(_o(m))]
 	var cache: Dictionary = m.get_meta("op_prev_cache", {})
 	if String(cache.get("key", "")) == key:
 		return cache["info"]
 	var err: String = Outpost.place_error(m.save, id, c.x, c.y, rot, skip)
-	var info: Dictionary = {"err": err, "linked": false, "bonus": 0.0, "delta": 0.0}
-	if err == "" and not is_decor(id):
+	var info: Dictionary = {"err": err, "linked": false, "bonus": 0.0, "delta": 0.0, "parts": {}, "ins": {}, "outs": {}}
+	if err == "":
 		var o: Dictionary = _o(m).duplicate(true)
 		var before: Dictionary = _bonuses(o)
 		var uid: String = skip
-		if skip != "":
+		if is_decor(id):
+			uid = ""
+			if skip == "":
+				(o["decor"] as Dictionary)["ghost"] = {"id": id, "x": c.x, "y": c.y, "rot": rot % 2}
+			else:
+				var dd: Dictionary = o["decor"][skip.substr(1)]
+				dd["x"] = c.x
+				dd["y"] = c.y
+		elif skip != "":
 			var b: Dictionary = o["buildings"][skip]
 			b["x"] = c.x
 			b["y"] = c.y
@@ -848,40 +985,141 @@ static func preview(m, id: String, c: Vector2i, rot: int, skip: String = "") -> 
 		else:
 			uid = Outpost._add_building(o, id, c.x, c.y, rot % 2, true)
 		var con: Dictionary = Outpost.connected(o)
-		info["linked"] = bool(con.get(uid, false))
-		info["bonus"] = float(Outpost.layout_bonus(o, uid, con)["total"])
+		if uid != "":
+			info["linked"] = bool(con.get(uid, false))
+			var lb: Dictionary = Outpost.layout_bonus(o, uid, con)
+			if AdjDB.receives(id):
+				info["bonus"] = float(lb["total"])
+				info["parts"] = lb["parts"]
+			info["ins"] = _ins(lb)
 		var after: Dictionary = _bonuses(o)
+		var outs: Dictionary = {}
 		var dl: float = 0.0
 		for k in after.keys():
-			if String(k) != uid and before.has(k):
-				dl += float(after[k]) - float(before[k])
+			if String(k) == uid or (skip != "" and String(k) == skip):
+				continue
+			var dv: float = float(after[k]) - float(before.get(k, 0.0))
+			if absf(dv) > 0.0001:
+				outs[String(k)] = dv
+				dl += dv
+		info["outs"] = outs
 		info["delta"] = dl
-	elif err == "" and is_decor(id):
-		var o2: Dictionary = _o(m).duplicate(true)
-		var before2: Dictionary = _bonuses(o2)
-		if skip == "":
-			(o2["decor"] as Dictionary)["ghost"] = {"id": id, "x": c.x, "y": c.y, "rot": rot % 2}
-		else:
-			var dd: Dictionary = o2["decor"][skip.substr(1)]
-			dd["x"] = c.x
-			dd["y"] = c.y
-		var after2: Dictionary = _bonuses(o2)
-		var dl2: float = 0.0
-		for k in after2.keys():
-			dl2 += float(after2[k]) - float(before2.get(k, 0.0))
-		info["delta"] = dl2
 	m.set_meta("op_prev_cache", {"key": key, "info": info})
 	return info
 
 
+## Layout fingerprint for the preview / link caches: positions, build state,
+## decor, Relay level, plots.
+static func _fp(o: Dictionary) -> int:
+	var parts: Array = [int(o["relay_lvl"]), (o["plots"] as Array).size()]
+	for uid in o["buildings"].keys():
+		var b: Dictionary = o["buildings"][uid]
+		parts.append([String(uid), int(b["x"]), int(b["y"]), int(b["rot"]), bool(b["built"])])
+	for du in o["decor"].keys():
+		var d: Dictionary = o["decor"][du]
+		parts.append([String(du), int(d["x"]), int(d["y"])])
+	return hash(parts)
+
+
+## Layout bonus of every receiving building (AdjDB.RECEIVERS).
 static func _bonuses(o: Dictionary) -> Dictionary:
 	var con: Dictionary = Outpost.connected(o)
 	var out: Dictionary = {}
 	for uid in o["buildings"].keys():
-		var id: String = String((o["buildings"][uid] as Dictionary)["id"])
-		if OutpostDB.GENERATORS.has(id) or id in ["research", "barracks"]:
+		var b: Dictionary = o["buildings"][uid]
+		if AdjDB.receives(String(b["id"])) and int(b["x"]) >= 0:
 			out[String(uid)] = float(Outpost.layout_bonus(o, String(uid), con)["total"])
 	return out
+
+
+## {source uid: share} of a layout_bonus result: a "once" part credits its
+## first source, a stacking part splits evenly over its sources.
+static func _ins(lb: Dictionary) -> Dictionary:
+	var out: Dictionary = {}
+	for key in (lb["srcs"] as Dictionary).keys():
+		var who: Array = lb["srcs"][key]
+		if who.is_empty():
+			continue
+		var v: float = float((lb["parts"] as Dictionary).get(key, 0.0))
+		if AdjDB.is_once(String(key)):
+			out[String(who[0])] = float(out.get(String(who[0]), 0.0)) + v
+		else:
+			for w in who:
+				out[String(w)] = float(out.get(String(w), 0.0)) + v / float(who.size())
+	return out
+
+
+## Adjacency links of a placed building: {ins: {src: share}, outs: {dst:
+## share}} (cached on the layout fingerprint).
+static func links(m, uid: String) -> Dictionary:
+	var o: Dictionary = _o(m)
+	var key: String = "%s|%d" % [uid, _fp(o)]
+	var cache: Dictionary = m.get_meta("op_link_cache", {})
+	if String(cache.get("key", "")) == key:
+		return cache["v"]
+	var res: Dictionary = {"ins": {}, "outs": {}}
+	if (o["buildings"] as Dictionary).has(uid):
+		var con: Dictionary = Outpost.connected(o)
+		var me: String = String((o["buildings"][uid] as Dictionary)["id"])
+		if AdjDB.receives(me):
+			res["ins"] = _ins(Outpost.layout_bonus(o, uid, con))
+		for k in o["buildings"].keys():
+			var b: Dictionary = o["buildings"][k]
+			if String(k) == uid or not AdjDB.receives(String(b["id"])) or int(b["x"]) < 0:
+				continue
+			var share: float = float(_ins(Outpost.layout_bonus(o, String(k), con)).get(uid, 0.0))
+			if absf(share) > 0.0001:
+				res["outs"][String(k)] = share
+	m.set_meta("op_link_cache", {"key": key, "v": res})
+	return res
+
+
+## Connector lines (Islanders-style): solid from `from` to each neighbour it
+## changes (chip on the neighbour), dashed from each source feeding it (chip
+## near `from`). Green = buff, red = nerf; arrowheads point at the receiver.
+static func _draw_links(m, from: Rect2, ins: Dictionary, outs: Dictionary) -> void:
+	var c0: Vector2 = from.get_center()
+	for uid in outs.keys():
+		var v: float = float(outs[uid])
+		var r: Rect2 = building_rect(m, String(uid))
+		if r.size.x <= 0.0 or absf(v) < 0.005:
+			continue
+		var col: Color = Kit.GREEN if v > 0.0 else Kit.ENEMY
+		_link_line(m, c0, r.get_center(), col, false)
+		_chip(m, r.get_center(), "%+d%%" % int(round(v * 100.0)), col)
+	for uid in ins.keys():
+		var v2: float = float(ins[uid])
+		var r2: Rect2 = building_rect(m, String(uid))
+		if r2.size.x <= 0.0 or absf(v2) < 0.005:
+			continue
+		var col2: Color = Kit.GREEN if v2 > 0.0 else Kit.ENEMY
+		_link_line(m, r2.get_center(), c0, col2, true)
+		_chip(m, c0.lerp(r2.get_center(), 0.42), "%+d%%" % int(round(v2 * 100.0)), col2)
+
+
+static func _link_line(m, a: Vector2, b: Vector2, col: Color, dashed: bool) -> void:
+	var ln: float = a.distance_to(b)
+	if ln < 4.0:
+		return
+	var d: Vector2 = (b - a) / ln
+	var tip: Vector2 = b - d * minf(ln * 0.3, 18.0)
+	m.draw_line(a, tip, Color(col, 0.25), 6.0)
+	if dashed:
+		var n: int = maxi(1, int(a.distance_to(tip) / 10.0))
+		for k in n:
+			if k % 2 == 0:
+				m.draw_line(a.lerp(tip, float(k) / float(n)), a.lerp(tip, float(k + 1) / float(n)), col, 2.5)
+	else:
+		m.draw_line(a, tip, col, 2.5)
+	var nn := Vector2(-d.y, d.x)
+	m.draw_colored_polygon(PackedVector2Array([tip + d * 9.0, tip - nn * 6.0, tip + nn * 6.0]), col)
+
+
+static func _chip(m, c: Vector2, txt: String, col: Color) -> void:
+	var w: float = 14.0 + m.font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x
+	var r := Rect2(c - Vector2(w * 0.5, 12.0), Vector2(w, 24.0))
+	Kit.panel(m, r, col, Color(0.03, 0.05, 0.09, 0.94), 2)
+	Kit.th(m, txt, Vector2(c.x, c.y + 6.0), 15, col, HORIZONTAL_ALIGNMENT_CENTER, w)
 
 
 static func _draw_palette(m, s: Dictionary, o: Dictionary) -> void:
@@ -909,7 +1147,7 @@ static func _draw_palette(m, s: Dictionary, o: Dictionary) -> void:
 		if String(m.op_flash) == id and ft < 2.5:
 			Kit.panel_glow(m, r.grow(3.0), Kit.GOLD, Color(Kit.GOLD, 0.10), 1.0 + 1.5 * (0.5 + 0.5 * sin(ft * 9.0)), 3)
 		var isz: float = r.size.y - 10.0
-		_art(m, art_of(id, 1), Rect2(r.position.x + 5, r.position.y + 5, isz, isz), Color.WHITE if ok else Color(1, 1, 1, 0.45))
+		_bld(m, id, 1, Rect2(r.position.x + 5, r.position.y + 5, isz, isz), true, 1.0 if ok else 0.45)
 		var tx: float = r.position.x + isz + 12.0
 		var tw: float = r.end.x - tx - 6.0
 		Kit.t(m, name_of(id), Vector2(tx, r.position.y + r.size.y * 0.42), 15 if r.size.x < 250.0 else 17, Kit.TEXT if ok else Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, tw)
@@ -948,7 +1186,7 @@ static func _draw_selected(m, s: Dictionary, o: Dictionary, sr: Rect2) -> void:
 		Kit.t(m, "%s coins%s" % [Kit.fmt(float(pc["coins_alt"])), ""], Vector2(x, sr.position.y + 170), 17, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, w)
 		return
 	if who == "relay":
-		Kit.icon(m, OutpostDB.art_id("relay", int(o["relay_lvl"])), Rect2(x, sr.position.y + 10, 72, 72))
+		_bld(m, "relay", int(o["relay_lvl"]), Rect2(x, sr.position.y + 10, 72, 72))
 		Kit.t(m, "Core Relay  Lv%d" % int(o["relay_lvl"]), Vector2(x + 84, sr.position.y + 40), 19, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w - 84)
 		Kit.wrap(m, String(DESC["relay"]), Vector2(x + 84, sr.position.y + 54), 14, Kit.DIM, w - 84, 3)
 		Kit.t(m, "Power %d / %d" % [int(Outpost.demand(o)), int(Outpost.supply(o))], Vector2(x, sr.position.y + 118), 15, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w)
@@ -965,24 +1203,60 @@ static func _draw_selected(m, s: Dictionary, o: Dictionary, sr: Rect2) -> void:
 		return
 	var b: Dictionary = o["buildings"][who]
 	var id: String = String(b["id"])
-	_art(m, art_of(id, int(b["lvl"])), Rect2(x, sr.position.y + 10, 72, 72))
+	_bld(m, id, int(b["lvl"]), Rect2(x, sr.position.y + 10, 72, 72))
 	Kit.t(m, "%s  Lv%d / %d" % [name_of(id), int(b["lvl"]), Outpost.max_lvl(s, id)], Vector2(x + 84, sr.position.y + 34), 18, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w - 84)
 	Kit.wrap(m, String(DESC.get(id, "")), Vector2(x + 84, sr.position.y + 50), 14, Kit.DIM, w - 84, 3)
 	var con: Dictionary = Outpost.connected(o)
 	var y: float = sr.position.y + 110.0
-	Kit.t(m, ("Linked to the Relay" if bool(con.get(who, false)) else "NOT LINKED — add Conduits") if id != "conduit" else "Conduit", Vector2(x, y), 15, Kit.GREEN if bool(con.get(who, false)) else Kit.ENEMY, HORIZONTAL_ALIGNMENT_LEFT, w)
+	var lnk: bool = bool(con.get(who, false))
+	Kit.t(m, ("Linked to the Relay" if lnk else "NOT LINKED — add Conduits") if id != "conduit" else "Conduit", Vector2(x, y), 15, Kit.GREEN if lnk else Kit.ENEMY, HORIZONTAL_ALIGNMENT_LEFT, w)
+	var ly: float = y + 30.0
 	if OutpostDB.GENERATORS.has(id):
-		var res: String = String(OutpostDB.get_def(id)["res"])
-		Kit.t(m, "%s %s/h" % [_rate_txt(Outpost.rate(s, who, con)), res], Vector2(x + w, y), 15, Kit.GOLD, HORIZONTAL_ALIGNMENT_RIGHT, w * 0.5)
+		var rt: float = Outpost.rate(s, who, con)
+		var rtxt: String = scav_text(id, rt) if OutpostDB.SCAVENGERS.has(id) else "%s %s/h" % [_rate_txt(rt), String(OutpostDB.get_def(id)["res"])]
+		Kit.t(m, rtxt, Vector2(x + w, y), 15, Kit.GOLD, HORIZONTAL_ALIGNMENT_RIGHT, w * 0.6)
 		var cp: float = maxf(0.001, Outpost.cap(s, who, con))
-		Kit.bar(m, Rect2(x, y + 10, w, 12), float(b["stored"]) / cp, Kit.GOLD)
+		Kit.bar(m, Rect2(x, y + 10, w, 12), float(b["stored"]) / cp, Kit.MAGENTA if OutpostDB.SCAVENGERS.has(id) else Kit.GOLD)
 		Kit.t(m, "stored %d / %d" % [int(float(b["stored"])), int(cp)], Vector2(x + w * 0.5, y + 40), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_CENTER, w)
-		var lb: Dictionary = Outpost.layout_bonus(o, who, con)
-		var parts: Array = []
-		for k in (lb["parts"] as Dictionary).keys():
-			parts.append("%s %+d%%" % [String(k), int(round(float(lb["parts"][k]) * 100.0))])
-		Kit.t(m, "Layout %+d%%  %s" % [int(round(float(lb["total"]) * 100.0)), ("(" + ", ".join(parts) + ")") if not parts.is_empty() else ""], Vector2(x, y + 62), 14, Kit.GREEN if float(lb["total"]) > 0.0 else Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w)
-	_draw_delta(m, s, who, x, sr.position.y + 192.0, w)
+		ly = y + 62.0
+	elif OutpostDB.CORE_IDS.has(id):
+		# V2 P6c: what this building gives the Core right now
+		var part: Dictionary = Outpost.core_part(o, who, con) if (lnk and bool(b["built"])) else {}
+		var keys: Array = (OutpostDB.get_def(id)["core"] as Dictionary).keys()
+		var ct: Array = []
+		for k in keys:
+			ct.append(core_text(String(k), float(part.get(k, 0.0))))
+		Kit.th(m, "CORE  " + "  ·  ".join(PackedStringArray(ct)), Vector2(x, y + 30), 17, Kit.CYAN if lnk else Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w)
+		ly = y + 62.0
+	if AdjDB.receives(id):
+		_draw_parts(m, Outpost.layout_bonus(o, who, con), x, ly, w)
+	_draw_delta(m, s, who, x, sr.position.y + 206.0, w)
+
+
+## "Layout +25%" + one chip per part (green buff / red nerf; tooltips say
+## which rule).
+static func _draw_parts(m, lb: Dictionary, x: float, y: float, w: float) -> void:
+	var tot: float = float(lb["total"])
+	var head: String = "Layout %+d%%" % int(round(tot * 100.0))
+	Kit.t(m, head, Vector2(x, y), 14, Kit.GREEN if tot > 0.0 else (Kit.ENEMY if tot < 0.0 else Kit.DIM), HORIZONTAL_ALIGNMENT_LEFT, w)
+	var cx: float = x + 22.0 + m.font.get_string_size(head, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
+	var parts: Dictionary = lb["parts"]
+	if parts.is_empty():
+		Kit.t(m, "no neighbours", Vector2(cx, y), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, x + w - cx)
+		return
+	for k in parts.keys():
+		var v: float = float(parts[k])
+		var txt: String = "%s %+d%%" % [String(PART_NAME.get(String(k), String(k))), int(round(v * 100.0))]
+		var cw: float = 14.0 + m.font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
+		if cx + cw > x + w:
+			Kit.t(m, "…", Vector2(cx, y), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, 20.0)
+			break
+		var col: Color = Kit.GREEN if v > 0.0 else Kit.ENEMY
+		var cr := Rect2(cx, y - 15.0, cw, 21.0)
+		Kit.panel(m, cr, Color(col, 0.7), Color(col, 0.10), 1)
+		Kit.t(m, txt, Vector2(cx + 7.0, y), 14, col, HORIZONTAL_ALIGNMENT_LEFT, cw)
+		m.stat_tips.append([cr, AdjDB.text_of(String(k))])
+		cx += cw + 6.0
 
 
 # ============================================================ upgrade delta
@@ -1013,12 +1287,23 @@ static func upgrade_delta(s: Dictionary, uid: String) -> Array:
 	var lv: int = int(b0["lvl"])
 	(o2["buildings"][uid] as Dictionary)["lvl"] = lv + 1
 	out.append(["Level", "%d" % lv, "%d" % (lv + 1)])
-	if OutpostDB.GENERATORS.has(id2):
+	var c1: Dictionary = Outpost.connected(o)
+	var c2: Dictionary = Outpost.connected(o2)
+	if OutpostDB.SCAVENGERS.has(id2):
+		var r1: float = Outpost.nominal_rate(s, uid, c1)
+		var r2: float = Outpost.nominal_rate(s2, uid, c2)
+		out.append(["Finds every", "%.1f h" % (1.0 / maxf(0.0001, r1)), "%.1f h" % (1.0 / maxf(0.0001, r2))])
+		out.append(["Storage", "%d" % int(Outpost.cap(s, uid, c1)), "%d" % int(Outpost.cap(s2, uid, c2))])
+	elif OutpostDB.GENERATORS.has(id2):
 		var res: String = String(OutpostDB.get_def(id2)["res"])
-		var c1: Dictionary = Outpost.connected(o)
-		var c2: Dictionary = Outpost.connected(o2)
 		out.append(["%s / hour" % res.capitalize(), _rate_txt(Outpost.rate(s, uid, c1)), _rate_txt(Outpost.rate(s2, uid, c2))])
 		out.append(["Storage", "%d" % int(Outpost.cap(s, uid, c1)), "%d" % int(Outpost.cap(s2, uid, c2))])
+	if OutpostDB.CORE_IDS.has(id2):
+		# nominal (as if linked & powered): the upgrade's own step
+		var p1: Dictionary = Outpost.core_part(o, uid, c1, 1.0)
+		var p2: Dictionary = Outpost.core_part(o2, uid, c2, 1.0)
+		for k in p1.keys():
+			out.append([String((CORE_FMT.get(String(k), [String(k)]) as Array)[0]), core_text(String(k), float(p1[k]), false), core_text(String(k), float(p2.get(k, 0.0)), false)])
 	match id2:
 		"research":
 			out.append(["Research queues", "%d" % Outpost.research_queues(s), "%d" % Outpost.research_queues(s2)])
@@ -1052,7 +1337,7 @@ static func _draw_delta(m, s: Dictionary, uid: String, x: float, y: float, w: fl
 	Kit.t(m, "NEXT UPGRADE", Vector2(x, y), 14, Kit.GREEN, HORIZONTAL_ALIGNMENT_LEFT, w)
 	m.draw_line(Vector2(x, y + 6), Vector2(x + w, y + 6), Color(Kit.GREEN, 0.3), 1.0)
 	var ry: float = y + 24.0
-	for r in rows.slice(0, 4):
+	for r in rows.slice(0, 4 if uid == "relay" else 3):
 		var a: Array = r
 		Kit.t(m, String(a[0]), Vector2(x, ry), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w * 0.5)
 		Kit.t(m, String(a[1]), Vector2(x + w * 0.62, ry), 14, Kit.TEXT, HORIZONTAL_ALIGNMENT_RIGHT, w * 0.2)

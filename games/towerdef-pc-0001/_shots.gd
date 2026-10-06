@@ -113,10 +113,25 @@ func _initialize() -> void:
 	main.set_tab("outpost")
 	await _shot("%s/05_outpost_dev.png" % outdir)
 	var OV = load("res://ui/OutpostView.gd")
-	main.op_arm = "mill"
-	main.mouse_pos = OV.cell_rect(main, 8, 8).get_center()
+	# the ghost goes where it shows the most adjacency links (P6c lines)
+	main.op_arm = "reactor"
+	var gbest := Vector2i(8, 8)
+	var bn: int = -1
+	for gy in range(0, 20):
+		for gx in range(0, 20):
+			var inf: Dictionary = OV.preview(main, "reactor", Vector2i(gx, gy), 0)
+			var nl: int = (inf["ins"] as Dictionary).size() + (inf["outs"] as Dictionary).size()
+			if String(inf["err"]) == "" and nl > bn:
+				bn = nl
+				gbest = Vector2i(gx, gy)
+	main.mouse_pos = OV.cell_rect(main, gbest.x, gbest.y).get_center()
 	main._rebuild_ui()
 	await _shot("%s/05b_outpost_ghost.png" % outdir, false)
+	main.op_arm = ""
+	main.op_sel = OV.uid_of(main, "arsenal")
+	main.mouse_pos = Vector2(-1, -1)
+	main._rebuild_ui()
+	await _shot("%s/05d_outpost_select.png" % outdir, false)
 	main.op_arm = ""
 	main.op_sel = "plot:1"
 	main.mouse_pos = Vector2(-1, -1)

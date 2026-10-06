@@ -36,12 +36,18 @@ const RULES: Array = [
 ]
 ## Targets a "scavenger" rule matches.
 const SCAVENGERS: Array = ["scav_post", "scav_den", "scav_deep"]
+## Buildings whose output a layout bonus scales ("*" rules reach only these):
+## generators + scavengers (rate), Core buildings (stat), the Barracks (troops)
+## and the Research Hall (lab speed).
+const RECEIVERS: Array = ["mill", "refinery", "gemmine", "scav_post", "scav_den", "scav_deep",
+	"arsenal", "reactor", "bulwark_w", "aegis_a", "optics", "rangefinder", "treasury", "training", "shrine", "forgeworks",
+	"barracks", "research"]
 
 
 ## Does rule `rule` target a building of id `dst`?
 static func targets(rule: Dictionary, dst: String) -> bool:
 	var t: String = String(rule["dst"])
-	if dst == "conduit":
+	if not RECEIVERS.has(dst):
 		return false
 	if t == "*":
 		return true
@@ -59,3 +65,26 @@ static func rules_for(id: String) -> Array:
 		if String(rd["src"]) == id or (String(rd["dst"]) != "*" and targets(rd, id)):
 			out.append(rd)
 	return out
+
+
+## Does a layout bonus change anything for a building of id `id`?
+static func receives(id: String) -> bool:
+	return RECEIVERS.has(id)
+
+
+## Rule rows sharing `key` count once (not per source)?
+static func is_once(key: String) -> bool:
+	for r in RULES:
+		if String((r as Dictionary)["key"]) == key:
+			return bool((r as Dictionary).get("once", false))
+	return true
+
+
+## Readout text of a part key ("decor" = decor tags).
+static func text_of(key: String) -> String:
+	if key == "decor":
+		return "Decor next to it"
+	for r in RULES:
+		if String((r as Dictionary)["key"]) == key:
+			return String((r as Dictionary)["text"])
+	return key

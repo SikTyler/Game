@@ -539,6 +539,22 @@ func _outpost() -> void:
 	_check("OP: click on the map places it (coins spent, built at once)", Outpost.count_of(o2, "mill") == mills0 + 1 and int(main.save["coins"]) == c0 - Outpost.cost("mill", 1) and Outpost.busy(main.save) == 0)
 	var new_uid: String = main.op_sel
 	_check("OP: the new building is selected", new_uid != "" and (o2["buildings"] as Dictionary).has(new_uid))
+	# V2 P6c: the camera frames the frontier, not the whole 48x32 map
+	var mr6: Rect2 = OutpostView.map_rect(main)
+	var full_c: float = minf(mr6.size.x / float(OutpostDB.W), mr6.size.y / float(OutpostDB.H)) * 0.97
+	_check("P6c OP: the map frames open land + buyable plots (cells >= 1.3x the whole-map fit)", OutpostView.cell_px(main) >= full_c * 1.3 and OutpostView.frame(main).size.x < float(OutpostDB.W), "%.1f vs %.1f" % [OutpostView.cell_px(main), full_c])
+	# V2 P6c: a Reactor ghost under the new Mill links to it with the heat nerf
+	_press("OPCAT core")
+	await _frames()
+	_press("OPBUILD reactor")
+	await _frames()
+	_motion(_op_scr(7, 12))
+	await _frames(2)
+	gh = main.get_meta("op_ghost", {})
+	_check("P6c OP: the ghost's connector lines name the Mill it nerfs (Reactor heat -15%)", String(gh.get("err", "?")) == "" and is_equal_approx(float((gh.get("outs", {}) as Dictionary).get(new_uid, 0.0)), -0.15) and is_equal_approx(float(gh.get("delta", 0.0)), -0.15), str(gh))
+	_key(KEY_ESCAPE)
+	await _frames()
+	main.op_sel = new_uid
 	# FEEDBACK-1: no build timers, so no gem Skip button either.
 	_check("OP: the build is finished at once (no Skip)", bool((o2["buildings"][new_uid] as Dictionary)["built"]) and _find("OP SKIP 0") == null and not main.save.has("gems"))
 	# drag a Conduit from the palette onto the map
