@@ -315,9 +315,13 @@ static func bar_glow(m, r: Rect2, frac: float, col: Color, ticks: int = 0, back:
 		m.draw_polygon(PackedVector2Array([fr.position, Vector2(fr.end.x, fr.position.y), fr.end, Vector2(fr.position.x, fr.end.y)]), PackedColorArray([dk, col, col, dk]))
 		m.draw_rect(Rect2(fr.position + Vector2(0, 1), Vector2(w, maxf(1.0, r.size.y * 0.3))), Color(1, 1, 1, 0.22))
 		m.draw_line(Vector2(fr.end.x, r.position.y - 2), Vector2(fr.end.x, r.end.y + 2), col.lightened(0.6), 2.0)
+	# ticks are notches on the top and bottom edges, so a centred label
+	# (the Core's "HP 221 / 221") is never struck through
+	var nl: float = maxf(3.0, r.size.y * 0.22)
 	for k in range(1, ticks):
 		var x: float = r.position.x + r.size.x * float(k) / float(ticks)
-		m.draw_line(Vector2(x, r.position.y + 2), Vector2(x, r.end.y - 2), Color(0, 0, 0, 0.45), 1.0)
+		m.draw_line(Vector2(x, r.position.y + 1), Vector2(x, r.position.y + 1 + nl), Color(0, 0, 0, 0.5), 1.0)
+		m.draw_line(Vector2(x, r.end.y - 1 - nl), Vector2(x, r.end.y - 1), Color(0, 0, 0, 0.5), 1.0)
 
 
 ## Draws an ArtDB texture; false (nothing drawn) when it is missing.
