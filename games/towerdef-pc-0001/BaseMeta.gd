@@ -160,6 +160,7 @@ static func run_mods(s: Dictionary) -> Dictionary:
 		"rf_dmg": float(rm["rf_dmg"]), "rf_hp": float(rm["rf_hp"]), "rf_coin": float(rm["rf_coin"]),
 		"barracks_tier": int(om.get("barracks_tier", 0)), "barracks_bonus": float(om.get("barracks_bonus", 0.0)),
 		"insight_cap": int(om.get("insight_cap", 0)), "banish": int(om.get("banish", 0)),
+		"outpost_fx": (om.get("outpost_fx", {}) as Dictionary).duplicate(),
 		"tier": t, "hp_mult": Tiers.hp_mult(t), "coin_mult": Tiers.coin_mult(t),
 		"boss_every": Tiers.boss_every(t),
 		"lab_dmg": float(lm["dmg"]), "lab_hp": float(lm["hp"]),

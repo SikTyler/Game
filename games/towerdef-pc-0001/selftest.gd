@@ -10,6 +10,7 @@ const StGear := preload("res://tests/st_gear.gd")
 const StCoreWeapon := preload("res://tests/st_core_weapon.gd")
 const StGearVis := preload("res://tests/st_gearvis.gd")
 const StLoot := preload("res://tests/st_loot.gd")
+const StOutpost := preload("res://tests/st_outpost.gd")
 const FirePatterns := preload("res://FirePatterns.gd")
 const WeaponDB := preload("res://data/WeaponDB.gd")
 const TowerState := preload("res://TowerState.gd")
@@ -425,7 +426,7 @@ func _meta_stages() -> void:
 	# each building's storage; Storage/Logistics Tech replace offcap/offrate.
 	var O: Dictionary = BaseMeta.default_save()
 	O["coins"] = 1000
-	var om: String = _op_build(O, "mill", 4, 4, 0, NOW)
+	var om: String = _op_build(O, "mill", 7, 8, 0, NOW)
 	_check("AC-17 last_seen 0 pays 0", int(Outpost.away_report(O, NOW + 3600)["coins"]) == 0)
 	O["last_seen"] = NOW
 	_check("AC-17 under 5 min pays 0", int(Outpost.away_report(O, NOW + 299)["coins"]) == 0)
@@ -3171,7 +3172,7 @@ func _snapshot_stages() -> void:
 # save v4. TDD'd here; each sub-stage is one system.
 # ======================================================================
 func _engine_meta_stages() -> void:
-	_outpost_stages()
+	StOutpost.run(self)
 	_reforge_stages()
 
 
@@ -3198,212 +3199,7 @@ func _op_build(sv: Dictionary, id: String, x: int, y: int, rot: int = 0, now: in
 	return uid
 
 
-## AC-17..19 + storage, timers, plots, decor, blueprints, research hooks.
-func _outpost_stages() -> void:
-	var sv: Dictionary = _op_save()
-	var o: Dictionary = sv["outpost"]
-	_check("OP new save: Relay L1 + a connected Research Hall", int(o["relay_lvl"]) == 1 and Outpost.level_of(sv, "research") == 1 and Outpost.research_queues(sv) == 1 and bool(Outpost.connected(o).values()[0]))
-	# Placement validation (AC-17).
-	_check("AC-17 refuse: occupied (Relay), locked plot, outside, blocked", Outpost.place_error(sv, "mill", 2, 4, 0) == "occupied" and Outpost.place_error(sv, "mill", 7, 3, 0) == "locked" and Outpost.place_error(sv, "mill", 13, 9, 0) != "" and Outpost.place_error(sv, "conduit", -1, 3, 0) == "outside")
-	_check("AC-17 Gem Mine only on a Crystal Vein", Outpost.place_error(sv, "gemmine", 4, 2, 0) == "needs_vein" and Outpost.place_error(sv, "gemmine", 0, 6, 0) == "")
-	var m1: String = _op_build(sv, "mill", 4, 4)
-	_check("OP place Mill: pays 500, builds on a timer", m1 != "" and int(sv["coins"]) == 1000000 - 500 and bool(o["buildings"][m1]["built"]))
-	_check("AC-17 quantity limit (Relay 1: 2 Mills)", _op_build(sv, "mill", 4, 6) != "" and Outpost.place_error(sv, "mill", 4, 2, 0) == "limit")
-	# Connectivity (AC-17): an island Mill produces 0 until a Conduit links it.
-	var cs: Dictionary = _op_save()
-	var isl: String = _op_build(cs, "mill", 0, 6)
-	var con: Dictionary = Outpost.connected(cs["outpost"])
-	_check("AC-17 unconnected generator produces 0", not bool(con[isl]) and is_equal_approx(Outpost.rate(cs, isl), 0.0) and Outpost.nominal_rate(cs, isl) > 0.0)
-	_op_build(cs, "conduit", 2, 6)
-	_check("AC-17 a Conduit next to the Relay links it (flood fill)", bool(Outpost.connected(cs["outpost"])[isl]) and is_equal_approx(Outpost.rate(cs, isl), OutpostDB.MILL_RATE))
-	# Power budget scales efficiency (AC-17).
-	var ps: Dictionary = _op_save()
-	ps["outpost"]["plots"] = [0, 1]
-	_op_build(ps, "mill", 4, 4)
-	_op_build(ps, "mill", 4, 6)
-	_op_build(ps, "refinery", 6, 4)
-	_op_build(ps, "barracks", 4, 2)
-	_op_build(ps, "archive", 6, 2)
-	_op_build(ps, "warehouse", 6, 6)
-	var dm: float = Outpost.demand(ps["outpost"])
-	_check("AC-17 over-budget power scales generator efficiency", dm > Outpost.supply(ps["outpost"]) and is_equal_approx(Outpost.efficiency(ps["outpost"]), Outpost.supply(ps["outpost"]) / dm))
-	# Accrual (AC-18): rate x elapsed, clamped at cap; collect empties.
-	var a: Dictionary = _op_save()
-	var mu: String = _op_build(a, "mill", 4, 4)
-	Outpost.tick(a, OT0 + 3600)
-	_check("AC-18 accrual = rate x elapsed (60/h)", absf(float(a["outpost"]["buildings"][mu]["stored"]) - OutpostDB.MILL_RATE) < 0.01)
-	Outpost.tick(a, OT0 + 3600 * 30)
-	_check("AC-18 accrual clamps at the 8 h storage cap", is_equal_approx(float(a["outpost"]["buildings"][mu]["stored"]), 8.0 * OutpostDB.MILL_RATE) and is_equal_approx(Outpost.cap(a, mu), 8.0 * OutpostDB.MILL_RATE))
-	var c0: int = int(a["coins"])
-	var cev: Array = Outpost.collect(a, mu, OT0 + 3600 * 30)
-	_check("AC-18 collect pays whole coins and empties storage", _evts(cev, "collect").size() == 1 and int(a["coins"]) == c0 + int(8.0 * OutpostDB.MILL_RATE) and float(a["outpost"]["buildings"][mu]["stored"]) < 1.0 and int(a["stats"]["outpost_collects"]) == 1)
-	var pv: Dictionary = Outpost.pending(a, OT0 + 3600 * 32)
-	_check("OP pending previews without mutating", absf(float(pv["coins"]) - 2.0 * OutpostDB.MILL_RATE) < 0.01 and float(a["outpost"]["buildings"][mu]["stored"]) < 1.0)
-	# First tick of a never-ticked building only stamps the clock (no back pay).
-	var nb: Dictionary = _op_save()
-	var nu: String = _op_build(nb, "mill", 4, 4)
-	nb["outpost"]["buildings"][nu]["last_tick"] = 0
-	Outpost.tick(nb, OT0 + 86400)
-	_check("OP last_tick 0 = start the clock (no double pay after migration)", is_equal_approx(float(nb["outpost"]["buildings"][nu]["stored"]), 0.0) and int(nb["outpost"]["buildings"][nu]["last_tick"]) == OT0 + 86400)
-	# FEEDBACK-1 (deliberate): builds and upgrades are INSTANT (no timers, no
-	# builders limit, no gem skips).
-	var t: Dictionary = _op_save()
-	var pe: Array = Outpost.place(t, "mill", 4, 4, 0, OT0)
-	var tu: String = String(_evts(pe, "op_placed")[0]["uid"])
-	_check("FB1 a build completes on placement", _evts(pe, "build_done").size() == 1 and bool(t["outpost"]["buildings"][tu]["built"]) and Outpost.busy(t) == 0)
-	_check("FB1 no builder limit (2nd build at once)", not Outpost.place(t, "mill", 4, 6, 0, OT0).is_empty() and not Outpost.place(t, "conduit", 2, 6, 0, OT0).is_empty())
-	var dev: Array = Outpost.tick(t, OT0 + 3600)
-	_check("FB1 an instant build produces from placement", float(t["outpost"]["buildings"][tu]["stored"]) > 0.0 and absf(float(t["outpost"]["buildings"][tu]["stored"]) - Outpost.rate(t, tu)) < 0.01)
-	var nr1: float = Outpost.nominal_rate(t, tu)
-	var uc: int = Outpost.cost("mill", 1)
-	var c1: int = int(t["coins"])
-	var uev: Array = Outpost.upgrade(t, tu, OT0 + 3720)
-	_check("OP upgrade cost x1.6^(L-1), instant", _evts(uev, "upgrade_done").size() == 1 and int(t["coins"]) == c1 - uc and Outpost.cost("mill", 3) == int(round(500.0 * 2.56)) and Outpost.build_time(t, "mill", 2) == 0)
-	_check("OP upgrade done: L2 = +25% production", int(t["outpost"]["buildings"][tu]["lvl"]) == 2 and is_equal_approx(Outpost.nominal_rate(t, tu), 1.25 * nr1))
-	_check("OP max level = min(10, Relay L + 2)", Outpost.max_lvl(t, "mill") == 3)
-	var sk: Dictionary = _op_save()
-	sk["outpost"]["queue"] = [{"uid": "relay", "kind": "upgrade", "ends_at": OT0 + 99999}]
-	var skn: Dictionary = BaseMeta.normalize(sk)
-	Outpost.tick(skn, OT0)
-	_check("FB1 a job queued in an old save completes on the next tick", int(skn["outpost"]["relay_lvl"]) == 2 and (skn["outpost"]["queue"] as Array).is_empty() and not Outpost.new().has_method("skip"))
-	var _dv: int = dev.size()
-	# Adjacency + cap (AC-19).
-	var j: Dictionary = _op_save()
-	j["outpost"]["plots"] = [0, 1]
-	j["outpost"]["relay_lvl"] = 8
-	var ma: String = _op_build(j, "mill", 4, 4)
-	var mb: String = _op_build(j, "mill", 4, 6)
-	var lb: Dictionary = Outpost.layout_bonus(j["outpost"], ma)
-	_check("AC-19 +10% per adjacent Mill", is_equal_approx(float(lb["total"]), 0.10) and is_equal_approx(float(lb["parts"]["mills"]), 0.10))
-	_op_build(j, "mill", 6, 4)
-	_op_build(j, "mill", 6, 2)
-	_op_build(j, "warehouse", 4, 2)
-	_op_build(j, "beaconpost", 3, 6)
-	var lb2: Dictionary = Outpost.layout_bonus(j["outpost"], ma)
-	_check("AC-19 Mill adj max +30%, +15% Warehouse, +5% Beacon", is_equal_approx(float(lb2["parts"]["mills"]), 0.20) and is_equal_approx(float(lb2["parts"]["warehouse"]), 0.15) and is_equal_approx(float(lb2["parts"]["beacon"]), 0.05))
-	_check("AC-19 Warehouse +10% storage within radius 2", is_equal_approx(Outpost.warehouse_bonus(j["outpost"], ma), 0.10))
-	var r: Dictionary = _op_save()
-	r["outpost"]["plots"] = [0, 1]
-	r["outpost"]["relay_lvl"] = 8
-	var rf: String = _op_build(r, "refinery", 4, 4)
-	_op_build(r, "mill", 4, 6)
-	_check("AC-19 Refinery -10% next to a Mill (noise)", is_equal_approx(float(Outpost.layout_bonus(r["outpost"], rf)["total"]), -0.10))
-	Outpost.place_decor(r, "dc_smelter", 4, 3, 0)
-	_check("AC-19 Refinery +20% next to a Smelter", is_equal_approx(float(Outpost.layout_bonus(r["outpost"], rf)["total"]), 0.10))
-	var cap: Dictionary = _op_save()
-	cap["outpost"]["plots"] = [0, 1, 2, 4]
-	cap["outpost"]["relay_lvl"] = 8
-	var mc: String = _op_build(cap, "mill", 6, 2)
-	_op_build(cap, "mill", 8, 2)
-	_op_build(cap, "mill", 6, 4)
-	_op_build(cap, "mill", 6, 0)
-	_op_build(cap, "warehouse", 4, 2)
-	_op_build(cap, "beaconpost", 8, 4)
-	_op_build(cap, "conduit", 4, 4)
-	_op_build(cap, "conduit", 5, 4)
-	var tb: float = 0.0
-	for k in (Outpost.layout_bonus(cap["outpost"], mc)["parts"] as Dictionary).values():
-		tb += float(k)
-	# The best Mill layout (3 Mills + Warehouse + Beacon) sums to +50%; the
-	# +60% cap bounds every stack (decor stacks are capped at +20% before it).
-	_check("AC-19 layout total = min(+60%, adjacency + Warehouse + Beacon)", is_equal_approx(tb, 0.50) and is_equal_approx(float(Outpost.layout_bonus(cap["outpost"], mc)["total"]), minf(0.60, tb)), "%.2f" % tb)
-	var gl: Dictionary = _op_save()
-	var gmu: String = _op_build(gl, "gemmine", 0, 6)
-	for lp in [Vector2i(2, 6), Vector2i(2, 7), Vector2i(0, 5), Vector2i(1, 5)]:
-		Outpost.place_decor(gl, "dc_lamp", lp.x, lp.y, 0)
-	_check("AC-19 decor stack capped at +20% (4 lit Lamps on a Gem Mine)", is_equal_approx(float(Outpost.layout_bonus(gl["outpost"], gmu)["total"]), 0.20))
-	# FEEDBACK-1 (deliberate): the Gem Mine is now the Deep Mine — a coin
-	# generator (3x a Mill's base rate, 8 h storage); no gems, no daily cap.
-	var gm: Dictionary = _op_save()
-	var gu: String = _op_build(gm, "gemmine", 0, 6)
-	_op_build(gm, "conduit", 2, 6)
-	_check("OP Deep Mine: 3x Mill rate in coins", String(OutpostDB.get_def("gemmine")["res"]) == "coins" and is_equal_approx(Outpost.nominal_rate(gm, gu), 3.0 * OutpostDB.MILL_RATE * Outpost.global_mult(gm)))
-	Outpost.tick(gm, OT0 + 86400 * 30)
-	_check("OP Deep Mine storage cap = 8 h of output", is_equal_approx(float(gm["outpost"]["buildings"][gu]["stored"]), Outpost.cap(gm, gu)) and is_equal_approx(Outpost.cap(gm, gu), 8.0 * Outpost.nominal_rate(gm, gu) * (1.0 + Outpost.warehouse_bonus(gm["outpost"], gu))))
-	var gg: int = int(gm["coins"])
-	var gst: float = float(gm["outpost"]["buildings"][gu]["stored"])
-	Outpost.collect(gm, gu, OT0 + 86400 * 30)
-	_check("OP Deep Mine collect pays coins", int(gm["coins"]) == gg + int(floor(gst)) and not gm.has("gems"))
-	# Plots: cost, adjacency (coins only — FEEDBACK-1).
-	var p: Dictionary = _op_save(10000000)
-	_check("OP plot 0 costs 5,000; a non-adjacent plot is refused", int(Outpost.plot_cost(p)["coins"]) == 5000 and Outpost.unlock_plot(p, 5).is_empty())
-	Outpost.unlock_plot(p, 0)
-	_check("OP plot k = 5,000 x 2.2^k; plot 5 adjacent after plot 0", int(Outpost.plot_cost(p)["coins"]) == 11000 and not Outpost.unlock_plot(p, 5).is_empty())
-	Outpost.unlock_plot(p, 1)
-	Outpost.unlock_plot(p, 2)
-	var pc4: Dictionary = Outpost.plot_cost(p)
-	var cp4: int = int(p["coins"])
-	Outpost.unlock_plot(p, 3, "coins")
-	_check("FB1 5th plot: plain coin price 5,000 x 2.2^4, no gem option", not pc4.has("gems") and int(pc4["coins"]) == int(round(5000.0 * pow(2.2, 4.0))) and int(p["coins"]) == cp4 - int(pc4["coins"]))
-	# Decor + Charm.
-	var d: Dictionary = _op_save()
-	d["outpost"]["plots"] = [0, 1, 2, 3, 4, 5, 6, 7]
-	var n: int = 0
-	for y in range(0, 10):
-		for x in range(6, 14):
-			if n < 20 and not Outpost.place_decor(d, "dc_tree", x, y, 0).is_empty():
-				n += 1
-	_check("OP Charm +1% per 10 decor (max +10%)", n == 20 and is_equal_approx(Outpost.charm(d["outpost"]), 0.02))
-	var dk: String = String(d["outpost"]["decor"].keys()[0])
-	var c2: int = int(d["coins"])
-	Outpost.remove_decor(d, dk)
-	_check("OP remove decor refunds 50%", int(d["coins"]) == c2 + 25)
-	# Move / rotate / demolish.
-	var mv: Dictionary = _op_save()
-	var ku: String = _op_build(mv, "mill", 4, 4)
-	_check("OP move is free + validated", not Outpost.move(mv, ku, 4, 6, 0, OT0).is_empty() and int(mv["outpost"]["buildings"][ku]["y"]) == 6 and Outpost.move(mv, ku, 2, 4, 0, OT0).is_empty())
-	var ws: String = _op_build(mv, "scrapyard", 0, 6)
-	_check("OP rotate (R) swaps the footprint", not Outpost.move(mv, ws, 0, 6, 1, OT0).is_empty() and Outpost.footprint("scrapyard", 0, 6, 1).size() == 2 and (Outpost.footprint("scrapyard", 0, 6, 1)[1] as Vector2i) == Vector2i(0, 7))
-	var c3: int = int(mv["coins"])
-	Outpost.demolish(mv, ku, OT0)
-	_check("OP demolish after build refunds 50%", int(mv["coins"]) == c3 + 250)
-	# FEEDBACK-1: builds are instant, so nothing is ever "queued" — a fresh
-	# building demolishes at the normal 50% refund and no builder is held.
-	var qd: Dictionary = _op_save()
-	var qe: Array = Outpost.place(qd, "barracks", 4, 2, 0, OT0)
-	var c4: int = int(qd["coins"])
-	Outpost.demolish(qd, String(_evts(qe, "op_placed")[0]["uid"]), OT0)
-	_check("FB1 demolish right after placing refunds 50%, no builder held", int(qd["coins"]) == c4 + 1500 and Outpost.busy(qd) == 0)
-	# Blueprints: save / export / import / one-click rebuild.
-	var bp: Dictionary = _op_save()
-	var bu: String = _op_build(bp, "mill", 4, 4)
-	Outpost.save_blueprint(bp, "Mint Ring")
-	var code: String = Outpost.export_layout(bp["outpost"])
-	Outpost.move(bp, bu, 4, 6, 0, OT0)
-	var lr: Dictionary = Outpost.load_blueprint(bp, Outpost.import_layout(code), OT0)
-	_check("OP blueprint export/import + rebuild moves owned buildings back", int(bp["outpost"]["buildings"][bu]["y"]) == 4 and (lr["missing"] as Array).is_empty() and (bp["outpost"]["blueprints"] as Array).size() == 1)
-	var miss: Dictionary = Outpost.load_blueprint(bp, [{"id": "archive", "x": 4, "y": 2, "rot": 0}], OT0)
-	_check("OP blueprint reports buildings you do not own", (miss["missing"] as Array) == ["archive"])
-	for k in 6:
-		Outpost.save_blueprint(bp, "L%d" % k)
-	_check("OP 5 blueprint slots max", (bp["outpost"]["blueprints"] as Array).size() == 5)
-	# Run hooks: Barracks tier, Archive Insight cap / banish.
-	var rh: Dictionary = _op_save()
-	var bk: String = _op_build(rh, "barracks", 4, 2)
-	var ar: String = _op_build(rh, "archive", 4, 4)
-	rh["outpost"]["buildings"][bk]["lvl"] = 4
-	rh["outpost"]["buildings"][ar]["lvl"] = 9
-	var rm: Dictionary = BaseMeta.run_mods(rh)
-	_check("OP run hooks: Barracks tier = level, Archive L9 cap +2 / +1 banish", int(rm["barracks_tier"]) == 4 and int(rm["insight_cap"]) == 2 and int(rm["banish"]) == 1)
-	var Sx = TowerState.new()
-	Sx.setup(5, rh)
-	_check("OP Archive feeds the run (banish 2)", Sx.banish_left == 2)
-	# Normalize: overlapping / out-of-land buildings are lifted, JSON round-trip.
-	var nz: Dictionary = _op_save()
-	_op_build(nz, "mill", 4, 4)
-	nz["outpost"]["buildings"]["99"] = {"id": "mill", "x": 4, "y": 4, "rot": 0, "lvl": 1}
-	nz["outpost"]["buildings"]["98"] = {"id": "bogus", "x": 0, "y": 0}
-	var nn: Dictionary = BaseMeta.normalize(JSON.parse_string(JSON.stringify(nz)))
-	_check("OP normalize: unknown dropped, overlap lifted to unplaced", not (nn["outpost"]["buildings"] as Dictionary).has("98") and int(nn["outpost"]["buildings"]["99"]["x"]) == -1 and int(nn["outpost"]["next_uid"]) >= 100)
-	_check("OP art bands L1-3 / L4-7 / L8-10", OutpostDB.art_id("mill", 3) == "op_mill_1" and OutpostDB.art_id("mill", 4) == "op_mill_2" and OutpostDB.art_id("beaconpost", 9) == "op_beacon_3")
-	var arts: bool = true
-	for id in OutpostDB.IDS + ["relay"]:
-		for L in [1, 5, 9]:
-			arts = arts and FileAccess.file_exists("res://art/" + OutpostDB.art_id(String(id), int(L)) + ".svg")
-	for id in OutpostDB.DECOR.keys():
-		arts = arts and FileAccess.file_exists("res://art/" + String(id) + ".svg")
-	_check("OP every building band + decor has an SVG", arts)
-
+## V2 P6: the Outpost stages moved to tests/st_outpost.gd (48x32 map).
 
 
 ## Set the pre-placed Research Hall's level (queue tests).
@@ -3430,11 +3226,11 @@ func _reforge_stages() -> void:
 	var sh1: int = int(floor(ReforgeDB.SHARD_K * sqrt(60.0))) + 5
 	_check("AC-21 shards = floor(k sqrt(6e5 / 1e4)) + 5 first (k = ReforgeDB.SHARD_K; loop table at k 1: 12)", Reforge.shards_now(sv) == sh1 and int(Reforge.preview(sv)["shards"]) == sh1 and bool(Reforge.preview(sv)["worth"]))
 	# Build a little state to reset.
-	var mu: String = _op_build(sv, "mill", 4, 4)
+	var mu: String = _op_build(sv, "mill", 7, 8)
 	sv["outpost"]["buildings"][mu]["lvl"] = 3
 	sv["outpost"]["relay_lvl"] = 3
 	sv["outpost"]["plots"] = [0]
-	Outpost.place_decor(sv, "dc_tree", 7, 2, 0)
+	Outpost.place_decor(sv, "dc_tree", 14, 5, 0)
 	Outpost.save_blueprint(sv, "Mine")
 	sv["research"]["lvls"]["dmg"] = 5
 	sv["insight"]["in_dmg"] = 4
@@ -3443,7 +3239,7 @@ func _reforge_stages() -> void:
 	var ev: Array = Reforge.reforge(sv, OT0 + 100)
 	var ok_reset: bool = int(sv["coins"]) == 0 and Cores.level(sv) == 1 and int(sv["outpost"]["buildings"][mu]["lvl"]) == 1 and int(sv["outpost"]["relay_lvl"]) == 1 and int(sv["research"]["lvls"]["dmg"]) == 0 and int(sv["tier"]) == 1 and Tiers.highest(sv) == 1
 	_check("AC-21 resets: coins, Core level, Outpost levels + Relay, research, tier", c_before > 0 and _evts(ev, "reforge").size() == 1 and ok_reset)
-	var ok_keep: bool = (sv["outpost"]["plots"] as Array) == [0] and (sv["outpost"]["decor"] as Dictionary).size() == 1 and (sv["outpost"]["blueprints"] as Array).size() == 1 and int(sv["outpost"]["buildings"][mu]["x"]) == 4 and not sv.has("gems") and int(sv["scrap"]) == 3 and int(sv["insight"]["in_dmg"]) == 4 and int(sv["best_wave"]) == 39
+	var ok_keep: bool = (sv["outpost"]["plots"] as Array) == [0] and (sv["outpost"]["decor"] as Dictionary).size() == 1 and (sv["outpost"]["blueprints"] as Array).size() == 1 and int(sv["outpost"]["buildings"][mu]["x"]) == 7 and not sv.has("gems") and int(sv["scrap"]) == 3 and int(sv["insight"]["in_dmg"]) == 4 and int(sv["best_wave"]) == 39
 	_check("AC-21 keeps: layout/plots/decor/blueprints, Scrap, Insight, best wave", ok_keep)
 	_check("AC-21 shards banked, count + cum", int(sv["shards"]) == sh1 and Reforge.count(sv) == 1 and int(sv["reforge"]["cum_shards"]) == sh1 and int(sv["reforge"]["coins_since"]) == 0 and int(sv["stats"]["reforges"]) == 1)
 	_check("AC-21 gate re-arms after a Reforge (tier progress reset)", not Reforge.can_reforge(sv))
@@ -3476,7 +3272,7 @@ func _reforge_stages() -> void:
 	_check("RF bp_mint: Mint Ring blueprint + 20% build credit", String((sv["outpost"]["blueprints"] as Array).back()["name"]) == "Mint Ring" and int(sv["outpost"]["credit"]) == (500 * 2 + 2000) / 5)
 	# retain keeps floor(lvl x 10%) of Outpost levels.
 	var rt: Dictionary = _op_save()
-	var ru: String = _op_build(rt, "mill", 4, 4)
+	var ru: String = _op_build(rt, "mill", 7, 8)
 	rt["outpost"]["buildings"][ru]["lvl"] = 10
 	rt["reforge"]["nodes"] = {"root_forge": 1, "retain": 3}
 	rt["best_wave_by_tier"] = {"1": 45}
@@ -3484,7 +3280,7 @@ func _reforge_stages() -> void:
 	_check("RF retain 3: keeps 30% of Outpost levels (L10 -> L3)", int(rt["outpost"]["buildings"][ru]["lvl"]) == 3)
 	# Outpost coins feed coins_since.
 	var oc: Dictionary = _op_save()
-	var ou: String = _op_build(oc, "mill", 4, 4)
+	var ou: String = _op_build(oc, "mill", 7, 8)
 	Outpost.collect(oc, ou, OT0 + 3600)
 	_check("RF Outpost coins count toward coins_since", int(oc["reforge"]["coins_since"]) == int(OutpostDB.MILL_RATE))
 

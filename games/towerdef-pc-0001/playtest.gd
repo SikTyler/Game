@@ -949,12 +949,18 @@ static func spend_meta(save: Dictionary, policy: String, rng: RandomNumberGenera
 ## 0): [kind, id, x, y, rot]. Each session the bot takes the first affordable
 ## action (one job per builder) within pc_bot_op_frac of its coins.
 const OP_PLAN: Array = [
-	["place", "mill", 4, 4, 0], ["place", "mill", 4, 6, 0], ["place", "warehouse", 3, 2, 0],
-	["up", "mill"], ["up", "relay"], ["up", "research"], ["place", "conduit", 2, 6, 0],
-	["place", "refinery", 0, 4, 0], ["place", "gemmine", 0, 6, 0],
-	["plot", 0], ["place", "mill", 6, 4, 0], ["place", "archive", 6, 2, 0], ["place", "barracks", 8, 4, 0],
-	["place", "mill", 8, 2, 0], ["up", "warehouse"], ["up", "refinery"], ["up", "gemmine"],
-	["up", "archive"], ["up", "barracks"],
+	# V2 P6 (48x32 small cells; Relay 3x3 at (4,8), Research Hall above it)
+	["place", "mill", 7, 8, 0], ["place", "mill", 7, 10, 0], ["place", "warehouse", 9, 8, 0],
+	["up", "mill"], ["up", "relay"], ["up", "research"],
+	["place", "arsenal", 9, 10, 0], ["place", "treasury", 7, 12, 0], ["place", "reactor", 9, 12, 0],
+	["place", "conduit", 3, 9, 0], ["place", "refinery", 1, 9, 0], ["place", "conduit", 1, 11, 0], ["place", "conduit", 1, 12, 0], ["place", "gemmine", 1, 13, 0],
+	["place", "bulwark_w", 7, 5, 0], ["place", "scav_post", 9, 5, 0],
+	["plot", 0], ["place", "conduit", 11, 8, 0], ["place", "mill", 12, 8, 0], ["place", "archive", 12, 6, 0], ["place", "barracks", 12, 10, 0],
+	["place", "optics", 14, 8, 0], ["place", "rangefinder", 14, 10, 0], ["place", "aegis_a", 14, 6, 0],
+	["place", "training", 16, 10, 0], ["place", "shrine", 16, 6, 0], ["place", "forgeworks", 16, 8, 0],
+	["up", "arsenal"], ["up", "reactor"], ["up", "warehouse"], ["up", "refinery"], ["up", "gemmine"], ["up", "treasury"],
+	["up", "bulwark_w"], ["up", "optics"], ["up", "rangefinder"], ["up", "aegis_a"], ["up", "scav_post"],
+	["up", "archive"], ["up", "barracks"], ["up", "training"], ["up", "shrine"], ["up", "forgeworks"],
 ]
 
 

@@ -42,7 +42,7 @@ func _initialize() -> void:
 	save["tier"] = 2
 	save["runs"] = 14
 	save["core"]["lvl"] = 13
-	Outpost.place(save, "mill", 4, 4, 0, T0 - 3 * 3600 - 200)
+	Outpost.place(save, "mill", 7, 8, 0, T0 - 3 * 3600 - 200)
 	Outpost.tick(save, T0 - 3 * 3600)
 	save["last_seen"] = T0 - 3 * 3600
 	save["research"]["lvls"]["speed"] = 2

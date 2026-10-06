@@ -19,6 +19,7 @@ const ModuleDB := preload("res://data/ModuleDB.gd")
 const NameDB := preload("res://data/NameDB.gd")
 const Labs := preload("res://Labs.gd")
 const Cores := preload("res://Cores.gd")
+const Outpost := preload("res://Outpost.gd")
 const CoreDB := preload("res://data/CoreDB.gd")
 
 ## Module sockets by Core level: 2 at L1, then +1 at each threshold (8 at L55).
@@ -417,9 +418,11 @@ static func forge_cost(s: Dictionary) -> Dictionary:
 	return {"coins": int(round(FORGE_COINS * pow(FORGE_GROWTH, float(f)) * (1.0 - disc))), "scrap": FORGE_SCRAP}
 
 
-## Forge cost discount (P6: the Forge Works building fills this in).
-static func forge_discount(_s: Dictionary) -> float:
-	return 0.0
+## Forge cost discount: the Forge Works building (-2% per level, max -50%).
+static func forge_discount(s: Dictionary) -> float:
+	if not (s.get("outpost", null) is Dictionary):
+		return 0.0
+	return clampf(float(Outpost.core_bonus(s).get("forge_disc", 0.0)), 0.0, 0.5)
 
 
 ## Rarity luck of Forge rolls (Appraisal research, P8).

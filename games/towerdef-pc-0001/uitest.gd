@@ -268,7 +268,7 @@ func _run() -> void:
 	# V2 (deliberate): the Factory is gone; the away pay is the Outpost's
 	# stored production again (pre-Factory behaviour).
 	var boot_save: Dictionary = main.save.duplicate(true)
-	Outpost.place(boot_save, "mill", 4, 4, 0, T0 - 7200 - 120)
+	Outpost.place(boot_save, "mill", 7, 8, 0, T0 - 7200 - 120)
 	Outpost.tick(boot_save, T0 - 7200)
 	boot_save["last_seen"] = T0 - 7200
 	var expect_off: int = int(Outpost.away_report(BaseMeta.normalize(boot_save), T0)["coins"])
@@ -491,15 +491,15 @@ func _outpost() -> void:
 	_press("OPBUILD mill")
 	await _frames()
 	_check("OP: palette click arms the building", main.op_arm == "mill")
-	_motion(_op_scr(4, 6))
+	_motion(_op_scr(7, 10))
 	await _frames(2)
 	var gh: Dictionary = main.get_meta("op_ghost", {})
 	_check("OP: hover preview validates the footprint and the Relay link", gh.has("err") and String(gh["err"]) == "" and bool(gh.get("linked", false)), str(gh))
-	_motion(_op_scr(0, 2))
+	_motion(_op_scr(5, 6))
 	await _frames(2)
 	gh = main.get_meta("op_ghost", {})
 	_check("OP: hover over the Research Hall shows the refusal", String(gh.get("err", "")) == "occupied", str(gh))
-	_click(_op_scr(4, 6))
+	_click(_op_scr(7, 10))
 	await _frames()
 	var o2: Dictionary = main.save["outpost"]
 	# FEEDBACK-1 (deliberate): builds are instant — no builder is held.
@@ -513,13 +513,13 @@ func _outpost() -> void:
 	await _frames()
 	var b: Button = _find("OPBUILD conduit")
 	if b != null:
-		await _drag(b.get_global_rect().get_center(), _op_scr(1, 4))
-	_check("OP: dragging a Conduit from the palette places it", Outpost.occupancy(main.save["outpost"]).has(Vector2i(1, 4)))
+		await _drag(b.get_global_rect().get_center(), _op_scr(3, 9))
+	_check("OP: dragging a Conduit from the palette places it", Outpost.occupancy(main.save["outpost"]).has(Vector2i(3, 9)))
 	_key(KEY_ESCAPE)
 	await _frames()
 	_check("OP: Esc disarms", main.op_arm == "")
 	# select + upgrade (U) + move (M) + rotate (R) + demolish (Del)
-	_click(_op_scr(4, 6))
+	_click(_op_scr(7, 10))
 	await _frames()
 	_check("OP: clicking a building selects it", main.op_sel == new_uid)
 	_key(KEY_U)
@@ -529,9 +529,9 @@ func _outpost() -> void:
 	_key(KEY_M)
 	await _frames()
 	_check("OP: M picks the building up", main.op_moving)
-	_click(_op_scr(0, 6))
+	_click(_op_scr(0, 12))
 	await _frames()
-	_check("OP: click drops it at the new spot", int((o2["buildings"][new_uid] as Dictionary)["x"]) == 0 and int((o2["buildings"][new_uid] as Dictionary)["y"]) == 6 and not main.op_moving)
+	_check("OP: click drops it at the new spot", int((o2["buildings"][new_uid] as Dictionary)["x"]) == 0 and int((o2["buildings"][new_uid] as Dictionary)["y"]) == 12 and not main.op_moving)
 	_press("OPCAT support")
 	await _frames()
 	_press("OPBUILD scrapyard")
@@ -548,7 +548,7 @@ func _outpost() -> void:
 	_check("OP: Delete demolishes the selection", not (o2["buildings"] as Dictionary).has(new_uid))
 	# collect: click a full generator; Collect all at Relay 3
 	var mill_uid: String = ""
-	Outpost.place(main.save, "mill", 4, 4, 0, T0 - 4000)
+	Outpost.place(main.save, "mill", 7, 8, 0, T0 - 4000)
 	Outpost.tick(main.save, T0)
 	for u in o2["buildings"].keys():
 		if String((o2["buildings"][u] as Dictionary)["id"]) == "mill" and bool((o2["buildings"][u] as Dictionary)["built"]):
@@ -559,7 +559,7 @@ func _outpost() -> void:
 	await _frames()
 	var cb: int = int(main.save["coins"])
 	var mb: Dictionary = o2["buildings"].get(mill_uid, {})
-	_click(_op_scr(int(mb.get("x", 4)), int(mb.get("y", 4))))
+	_click(_op_scr(int(mb.get("x", 7)), int(mb.get("y", 8))))
 	await _frames()
 	_check("OP: clicking a stocked generator collects it", int(main.save["coins"]) >= cb + 120)
 	_check("OP: Collect all is locked below Relay Lv3", _find("OP COLLECT ALL").disabled)
@@ -586,10 +586,10 @@ func _outpost() -> void:
 	_check("OP: buying a plot opens the land", (o2["plots"] as Array).has(pk))
 	# pan + zoom
 	var cam0: Vector2 = main.op_cam
-	await _drag(_op_scr(6, 1), _op_scr(6, 1) + Vector2(120, 60), MOUSE_BUTTON_RIGHT)
+	await _drag(_op_scr(14, 2), _op_scr(14, 2) + Vector2(120, 60), MOUSE_BUTTON_RIGHT)
 	_check("OP: right-drag pans the map", main.op_cam.distance_to(cam0) > 50.0, str(main.op_cam))
 	var z0: float = main.op_zoom
-	_mouse(_op_scr(5, 5), MOUSE_BUTTON_WHEEL_UP, true)
+	_mouse(_op_scr(10, 10), MOUSE_BUTTON_WHEEL_UP, true)
 	await _frames()
 	_check("OP: wheel zooms the map", main.op_zoom > z0)
 	main.op_cam = Vector2.ZERO

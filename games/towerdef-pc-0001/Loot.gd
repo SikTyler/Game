@@ -17,12 +17,14 @@ const GearGen := preload("res://GearGen.gd")
 const RarityDB := preload("res://data/RarityDB.gd")
 const LootDB := preload("res://data/LootDB.gd")
 const Labs := preload("res://Labs.gd")
+const Outpost := preload("res://Outpost.gd")
 
 
 ## Rarity luck of a bank: the run's luck (Insight, gear Fortune Chips,
-## drafts) + Appraisal research (P8).
+## drafts) + Appraisal research (P8) + Fortune Shrines (Outpost).
 static func luck_of(s: Dictionary, loot: Dictionary) -> float:
-	return float(int(loot.get("luck", 0))) + float(Labs.level(s, "appraisal"))
+	var shrine: float = float(Outpost.core_bonus(s).get("loot_luck", 0.0)) if s.get("outpost", null) is Dictionary else 0.0
+	return float(int(loot.get("luck", 0))) + float(Labs.level(s, "appraisal")) + shrine
 
 
 ## Turn the run's tokens into items in the save. `scrap_mult` scales the

@@ -389,6 +389,9 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	core_def = Gear.core_def(save)
 	core_lvl = Cores.level(save)
 	pfx = Gear.run_fx(save)
+	var ofx: Dictionary = mods.get("outpost_fx", {})   # V2 P6 Core buildings
+	for k in ofx.keys():
+		pfx[k] = float(pfx.get(k, 0.0)) + float(ofx[k])
 	coin_mult *= maxf(0.1, 1.0 + pf("coin_run"))
 	aim_on = false
 	aim_pos = CENTER

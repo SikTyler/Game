@@ -19,14 +19,16 @@ const Kit := preload("res://ui/Kit.gd")
 const PAL_W: float = 400.0
 const HEAD_H: float = 48.0
 ## [id, label, icon] — FB1: obvious build categories with icons.
-const CATS: Array = [["prod", "Production", "op_mill_1"], ["support", "Support", "op_research_1"], ["infra", "Links", "op_conduit"], ["decor", "Decor", "dc_tree"]]
+const CATS: Array = [["prod", "Production", "op_mill_1"], ["core", "Core", "core_open"], ["scav", "Scavenge", "chest"], ["support", "Support", "op_research_1"], ["infra", "Links", "op_conduit"], ["decor", "Decor", "dc_tree"]]
 ## V2: the Command Plaza is gone (Core / Forge / Research are top-bar tabs).
 const PLAZA_W: int = 0
 const LANDMARKS: Array = []
 const LM_SIZE: int = 3
 const CAT_IDS: Dictionary = {
 	"prod": ["mill", "refinery", "gemmine"],
-	"support": ["research", "barracks", "archive", "warehouse", "scrapyard", "beaconpost"],
+	"core": ["arsenal", "reactor", "bulwark_w", "aegis_a", "optics", "rangefinder", "treasury", "training", "shrine", "forgeworks"],
+	"scav": ["scav_post", "scav_den", "scav_deep"],
+	"support": ["research", "barracks", "archive", "warehouse", "scrapyard", "beaconpost", "pylon"],
 	"infra": ["conduit"],
 	"decor": ["dc_lamp", "dc_brazier", "dc_tree", "dc_shrub", "dc_pond", "dc_crates", "dc_smelter", "dc_bookshelf", "dc_orrery", "dc_yard", "dc_dummy", "dc_banner", "dc_trophy"],
 }
@@ -41,9 +43,23 @@ const DESC: Dictionary = {
 	"warehouse": "+10% storage (+2% per level) to buildings within 2 cells.",
 	"scrapyard": "Salvaging parts returns more Scrap.",
 	"conduit": "Carries power: buildings work only when linked to the Relay.",
-	"beaconpost": "+5% production to buildings within 2 cells.",
+	"beaconpost": "+5% to every building within 2 cells.",
+	"arsenal": "Core building: +2% all damage per level in every run. A touching Reactor: +20%.",
+	"reactor": "Core building: +1.5% Weapon attack rate per level. Powers a touching Arsenal (+20%); heats a touching Mill (-15%).",
+	"bulwark_w": "Core building: +3% Core max HP per level. Plates a touching Aegis Array (+15%).",
+	"aegis_a": "Core building: -0.6% damage taken per level.",
+	"optics": "Core building: +0.5% crit chance per level. Lenses a touching Rangefinder (+15%).",
+	"rangefinder": "Core building: +0.04 cell Weapon range per level.",
+	"treasury": "Core building: +2% run cash per second per level. +5% to Mills within 2 cells.",
+	"training": "Core building: +3% run XP per level. Drills a touching Barracks (+10%).",
+	"shrine": "Core building: +1 loot luck per level when a run banks. Guides scavengers within 2 cells (+10%).",
+	"forgeworks": "Core building: -2% Forge costs per level. A touching Refinery: +10%.",
+	"scav_post": "Finds an item every 6 h while you are away (stores 4, +1 per 3 levels). Scavengers within 2 cells compete (-15%).",
+	"scav_den": "Finds a Field Cache every 12 h (stores 2).",
+	"scav_deep": "Finds an Elite Cache (Rare+) every 24 h (stores 2).",
+	"pylon": "+5% to buildings exactly 2 cells away, -5% to anything touching it.",
 }
-const ERR: Dictionary = {"outside": "Outside the map", "locked": "Locked land — buy the plot", "blocked": "Rock", "occupied": "Occupied", "needs_vein": "Deep Mine needs a Crystal Vein", "limit": "Limit reached — upgrade the Relay", "unknown": "?"}
+const ERR: Dictionary = {"outside": "Outside the map", "locked": "Locked land — buy the plot", "blocked": "Rock", "occupied": "Occupied", "needs_vein": "Deep Mine needs a Crystal Vein", "limit": "Limit reached — upgrade the Relay", "relay": "Needs a higher Relay level", "unknown": "?"}
 
 
 static func map_rect(m) -> Rect2:
@@ -374,10 +390,10 @@ static func build(m) -> void:
 	var x: float = pr.position.x + 12.0
 	var w: float = pr.size.x - 24.0
 	# category tabs
-	var cw: float = (w - 6.0) / 2.0
+	var cw: float = (w - 12.0) / 3.0
 	for k in CATS.size():
 		var cat: String = String((CATS[k] as Array)[0])
-		Kit.btn(m, String((CATS[k] as Array)[1]), Rect2(x + float(k % 2) * (cw + 6.0), pr.position.y + 98 + float(k / 2) * 50.0, cw, 46), func() -> void: m.op_cat = cat; m._rebuild_ui(), "Build category: %s" % String((CATS[k] as Array)[1]), true, Kit.RUST if m.op_cat == cat else Kit.NEUTRAL, "OPCAT " + cat, String((CATS[k] as Array)[2]), 14)
+		Kit.btn(m, String((CATS[k] as Array)[1]), Rect2(x + float(k % 3) * (cw + 6.0), pr.position.y + 98 + float(k / 3) * 50.0, cw, 46), func() -> void: m.op_cat = cat; m._rebuild_ui(), "Build category: %s" % String((CATS[k] as Array)[1]), true, Kit.RUST if m.op_cat == cat else Kit.NEUTRAL, "OPCAT " + cat, String((CATS[k] as Array)[2]), 14)
 	# palette entries
 	var ids: Array = CAT_IDS[m.op_cat]
 	for k in ids.size():
@@ -593,7 +609,7 @@ static func _draw_map(m, s: Dictionary, o: Dictionary, mr: Rect2) -> void:
 		Kit.icon(m, "op_plot_locked", Rect2(rr.get_center() - Vector2(isz, isz) * 0.5, Vector2(isz, isz)), Color(1, 1, 1, 0.75 if Outpost.plot_adjacent(o, k) else 0.3))
 	# Relay
 	var rl: int = int(o["relay_lvl"])
-	var rrr: Rect2 = cell_rect(m, OutpostDB.RELAY.x, OutpostDB.RELAY.y, 2, 2)
+	var rrr: Rect2 = cell_rect(m, OutpostDB.RELAY.x, OutpostDB.RELAY.y, 3, 3)
 	m.draw_rect(rrr.grow(-2), Color(Kit.RUST, 0.12))
 	_art(m, OutpostDB.art_id("relay", rl), rrr)
 	if m.op_sel == "relay":
@@ -727,7 +743,7 @@ static func _draw_ghost(m, s: Dictionary, o: Dictionary, mr: Rect2) -> void:
 	_art(m, art_of(id, 1), r.grow(-3), Color(1, 1, 1, 0.6))
 	m.draw_rect(r, Kit.GREEN if ok else Kit.ENEMY, false, 3.0)
 	if ok and not is_decor(id):
-		var relay_c: Vector2 = cell_rect(m, OutpostDB.RELAY.x, OutpostDB.RELAY.y, 2, 2).get_center()
+		var relay_c: Vector2 = cell_rect(m, OutpostDB.RELAY.x, OutpostDB.RELAY.y, 3, 3).get_center()
 		var linked: bool = bool(info["linked"])
 		var col: Color = Color(Kit.GREEN, 0.8) if linked else Color(Kit.ENEMY, 0.8)
 		if linked:

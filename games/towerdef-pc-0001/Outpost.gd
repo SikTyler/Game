@@ -2,6 +2,9 @@ extends RefCounted
 ## The Outpost (REDESIGN_SPEC §3.2, SYSTEMS §5): a persistent base built
 ## outside runs. Pure static rules over save.outpost with an injected `now`
 ## (unix seconds) for every time-dependent call:
+## V2 P6: a 48x32 map of small cells, Core buildings (permanent Core stats
+## via core_bonus -> BaseMeta.run_mods), scavengers (gear tokens banked with
+## Loot.realize), signed AdjDB adjacency (layout_bonus), Relay-level unlocks.
 ##   outpost = {relay_lvl, plots: [k], next_uid, credit,
 ##     buildings: {"<uid>": {id, x, y, rot, lvl, stored, last_tick, built, spent}},
 ##     queue: [{uid, kind: "build"|"upgrade", ends_at}], (uid "relay" = Relay)
@@ -21,8 +24,10 @@ const Tiers := preload("res://Tiers.gd")
 const Missions := preload("res://Missions.gd")
 const Stats := preload("res://Stats.gd")
 const TuneRef := preload("res://Tune.gd")
+const AdjDB := preload("res://data/AdjDB.gd")
+const LootDB := preload("res://data/LootDB.gd")
 
-const HALL_POS: Vector2i = Vector2i(0, 2)
+const HALL_POS: Vector2i = Vector2i(4, 5)      # the 3x3 Research Hall, touching the Relay's top
 const DIRS: Array = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
 const BLUEPRINTS_MAX: int = 5
 
@@ -251,6 +256,8 @@ static func place_error(s: Dictionary, id: String, x: int, y: int, rot: int, ski
 			return "occupied"
 	if id == "gemmine" and not _on_vein(cells):
 		return "needs_vein"
+	if not is_decor and int(o["relay_lvl"]) < OutpostDB.relay_req(id):
+		return "relay"
 	if not is_decor and skip == "" and count_of(o, id) >= OutpostDB.limit(id, int(o["relay_lvl"])):
 		return "limit"
 	return ""
@@ -363,9 +370,10 @@ static func _decor_tag(o: Dictionary, who: String) -> String:
 	return String((OutpostDB.DECOR.get(String(d.get("id", "")), {}) as Dictionary).get("tag", ""))
 
 
-## Layout bonus of one building {total (capped), parts: {source: frac}}.
-## Adjacency + Warehouse + Beacon, summed, capped at pc_layout_cap (+60%);
-## decor-driven parts are capped at +20% per building.
+## Layout bonus of one building {total, parts: {key: frac}}: the signed
+## AdjDB rules from built, linked neighbours (touching or within reach) plus
+## decor (Smelter, lit Lamps, scholar / training pieces; decor capped at
+## +20%); the total is capped at +60% and floored at -40%.
 static func layout_bonus(o: Dictionary, uid: String, con: Dictionary = {}) -> Dictionary:
 	var b: Dictionary = o["buildings"][uid]
 	var id: String = String(b["id"])
@@ -373,39 +381,52 @@ static func layout_bonus(o: Dictionary, uid: String, con: Dictionary = {}) -> Di
 	if int(b["x"]) < 0:
 		return {"total": 0.0, "parts": parts}
 	var cn: Dictionary = con if not con.is_empty() else connected(o)
-	var mills: int = 0
+	var touching: Array = neighbours(o, uid)
+	var mine: Array = _cells_of(o, uid)
+	for rule in AdjDB.RULES:
+		var rd: Dictionary = rule
+		if not AdjDB.targets(rd, id) or (String(rd["dst"]) == "*" and String(rd["src"]) == id):
+			continue
+		var n: int = 0
+		for k in o["buildings"].keys():
+			var bb: Dictionary = o["buildings"][k]
+			if String(k) == uid or String(bb["id"]) != String(rd["src"]) or not bool(bb["built"]) or int(bb["x"]) < 0 or not bool(cn.get(String(k), false)):
+				continue
+			var near: bool = false
+			if int(rd["r"]) <= 1:
+				near = touching.has(String(k))
+			else:
+				var dd: int = _cheb(_cells_of(o, String(k)), mine)
+				near = dd <= int(rd["r"]) and dd >= int(rd.get("rmin", 1))
+			if near:
+				n += 1
+		if n <= 0:
+			continue
+		var v: float = float(rd["eff"]) * (1.0 if bool(rd.get("once", false)) else float(n))
+		if rd.has("max"):
+			v = clampf(v, -float(rd["max"]), float(rd["max"]))
+		var key: String = String(rd["key"])
+		if bool(rd.get("once", false)) and parts.has(key):
+			continue   # the same effect from two rule rows counts once
+		parts[key] = float(parts.get(key, 0.0)) + v
 	var decor: float = 0.0
 	var lamps: int = 0
 	var scholar: int = 0
 	var training: int = 0
-	for who in neighbours(o, uid):
+	for who in touching:
 		var w: String = String(who)
+		if not w.begins_with("d"):
+			continue
 		var tag: String = _decor_tag(o, w)
-		if w.begins_with("d"):
-			var dd: Dictionary = (o["decor"] as Dictionary)[w.substr(1)]
-			if tag == "industrial" and String(dd["id"]) == "dc_smelter" and id == "refinery":
-				decor += 0.20
-			if String(dd["id"]) == "dc_lamp" and id == "gemmine" and _decor_lit(o, dd, cn):
-				lamps += 1
-			if tag == "scholar":
-				scholar += 1
-			if tag == "training":
-				training += 1
-			continue
-		if w == "relay":
-			continue
-		var nid: String = String((o["buildings"][w] as Dictionary)["id"])
-		match id:
-			"mill":
-				if nid == "mill":
-					mills += 1
-				if nid == "warehouse":
-					parts["warehouse"] = 0.15
-			"refinery":
-				if nid == "mill":
-					parts["noise"] = -0.10
-	if mills > 0:
-		parts["mills"] = minf(0.30, 0.10 * float(mills))
+		var dd2: Dictionary = (o["decor"] as Dictionary)[w.substr(1)]
+		if tag == "industrial" and String(dd2["id"]) == "dc_smelter" and id == "refinery":
+			decor += 0.20
+		if String(dd2["id"]) == "dc_lamp" and id == "gemmine" and _decor_lit(o, dd2, cn):
+			lamps += 1
+		if tag == "scholar":
+			scholar += 1
+		if tag == "training":
+			training += 1
 	if id == "gemmine" and lamps > 0:
 		decor += 0.10 * float(lamps)
 	if id == "research" and scholar > 0:
@@ -414,17 +435,10 @@ static func layout_bonus(o: Dictionary, uid: String, con: Dictionary = {}) -> Di
 		decor += 0.05 * float(training)
 	if decor != 0.0:
 		parts["decor"] = minf(0.20, decor)
-	# Beacon: +5% to every building within radius 2 (no stacking).
-	if id != "beaconpost":
-		for k in o["buildings"].keys():
-			var bb: Dictionary = o["buildings"][k]
-			if String(bb["id"]) == "beaconpost" and bool(bb["built"]) and int(bb["x"]) >= 0 and bool(cn.get(String(k), false)) and _cheb(_cells_of(o, String(k)), _cells_of(o, uid)) <= 2:
-				parts["beacon"] = 0.05
-				break
 	var tot: float = 0.0
 	for k in parts.keys():
 		tot += float(parts[k])
-	return {"total": minf(TuneRef.num("pc_layout_cap", 0.60), tot), "parts": parts}
+	return {"total": clampf(tot, AdjDB.NERF_FLOOR, TuneRef.num("pc_layout_cap", AdjDB.BUFF_CAP)), "parts": parts}
 
 
 ## Warehouse storage bonus on a building: +25% (+5%/L) within radius 2.
@@ -476,6 +490,8 @@ static func nominal_rate(s: Dictionary, uid: String, con: Dictionary = {}) -> fl
 		return 0.0
 	var L: int = int(b["lvl"])
 	var lay: float = float(layout_bonus(o, uid, con)["total"])
+	if OutpostDB.SCAVENGERS.has(id):
+		return float(d["rate"]) * (1.0 + 0.25 * float(L - 1)) * (1.0 + lay) * global_mult(s)
 	match id:
 		"gemmine":
 			# Deep Mine (was the Gem Mine; gems are gone): a big coin generator
@@ -506,6 +522,8 @@ static func cap(s: Dictionary, uid: String, con: Dictionary = {}) -> float:
 	var d: Dictionary = OutpostDB.get_def(String(b["id"]))
 	if d.has("hard_cap"):
 		return float(d["hard_cap"])
+	if d.has("store"):
+		return float(int(d["store"]) + (int(b["lvl"]) - 1) / 3)   # token storage: +1 per 3 levels
 	var h: float = TuneRef.num("pc_storage_h", 8.0) if String(b["id"]) == "mill" else float(d["storage_h"])
 	return nominal_rate(s, uid, con) * h * (1.0 + warehouse_bonus(o, uid)) * (1.0 + 0.04 * float(_research_lvl(s, "offcap")))
 
@@ -579,7 +597,7 @@ static func pending(s: Dictionary, now: int) -> Dictionary:
 	for k in o["buildings"].keys():
 		var b: Dictionary = o["buildings"][k]
 		var res: String = String(OutpostDB.get_def(String(b["id"])).get("res", ""))
-		if res != "":
+		if out.has(res):
 			out[res] = float(out[res]) + float(b["stored"])
 	return out
 
@@ -591,7 +609,7 @@ static func production(s: Dictionary) -> Dictionary:
 	var out: Dictionary = {"coins": 0.0, "scrap": 0.0}
 	for k in o["buildings"].keys():
 		var res: String = String(OutpostDB.get_def(String((o["buildings"][k] as Dictionary)["id"])).get("res", ""))
-		if res != "":
+		if out.has(res):
 			out[res] = float(out[res]) + rate(s, String(k), con)
 	return out
 
@@ -620,11 +638,31 @@ static func collect(s: Dictionary, uid: String, now: int) -> Array:
 	if res == "" or n <= 0:
 		return ev
 	b["stored"] = float(b["stored"]) - float(n)
-	_pay_res(s, res, n)
+	if OutpostDB.SCAVENGERS.has(String(b["id"])):
+		ev.append_array(_scavenge(s, res, n))
+	else:
+		_pay_res(s, res, n)
 	if s.get("stats", null) is Dictionary:
 		(s["stats"] as Dictionary)["outpost_collects"] = int((s["stats"] as Dictionary).get("outpost_collects", 0)) + 1
 	ev.append({"t": "collect", "uid": uid, "id": String(b["id"]), "res": res, "n": n})
 	return ev
+
+
+## Scavenged tokens bank like run loot (Loot.realize: items on the meta RNG).
+static func _scavenge(s: Dictionary, res: String, n: int) -> Array:
+	var il: int = scav_ilvl(s)
+	var loot: Dictionary = {"scrap": 0, "items": [], "caches": [], "luck": 0, "tier": Tiers.highest(s)}
+	for k in n:
+		if res == "item":
+			(loot["items"] as Array).append({"src": "scavenger", "ilvl": il})
+		else:
+			(loot["caches"] as Array).append({"id": res, "ilvl": il})
+	return load("res://Loot.gd").realize(s, loot)
+
+
+## Item level of scavenged gear: 60% of the best wave, +15 per tier above 1.
+static func scav_ilvl(s: Dictionary) -> int:
+	return clampi(int(float(int(s.get("best_wave", 0))) * 0.6) + 15 * (Tiers.highest(s) - 1), 1, 200)
 
 
 ## "While you were away" (replaces Offline.gd): what the Outpost stored since
@@ -999,6 +1037,30 @@ static func hall_speed(s: Dictionary) -> float:
 	return 1.0
 
 
+## Permanent Core stats from the Core buildings: {key: value} summed over
+## built, linked ones = per-level value x level x (1 + layout) x power
+## efficiency. Keys: dmg rate core_hp dr crit range cash xp (run pfx),
+## loot_luck (bank), forge_disc (Forge).
+static func core_bonus(s: Dictionary) -> Dictionary:
+	var o: Dictionary = _o(s)
+	var con: Dictionary = connected(o)
+	var eff: float = efficiency(o, con)
+	var out: Dictionary = {}
+	for k in o["buildings"].keys():
+		var b: Dictionary = o["buildings"][k]
+		var d: Dictionary = OutpostDB.get_def(String(b["id"]))
+		if not d.has("core") or not bool(b["built"]) or int(b["x"]) < 0 or not bool(con.get(String(k), false)):
+			continue
+		var m: float = float(int(b["lvl"])) * (1.0 + float(layout_bonus(o, String(k), con)["total"])) * eff
+		for key in (d["core"] as Dictionary).keys():
+			out[key] = float(out.get(key, 0.0)) + float(d["core"][key]) * m
+	return out
+
+
+## The run's share of core_bonus (TowerState pfx keys).
+const RUN_KEYS: Array = ["dmg", "rate", "core_hp", "dr", "crit", "range", "cash", "xp"]
+
+
 ## Run-facing bundle: Barracks troop tier, Archive Insight cap / banish.
 static func run_mods(s: Dictionary) -> Dictionary:
 	var bar: int = level_of(s, "barracks")
@@ -1008,7 +1070,13 @@ static func run_mods(s: Dictionary) -> Dictionary:
 	for k in o["buildings"].keys():
 		if String((o["buildings"][k] as Dictionary)["id"]) == "barracks" and bool((o["buildings"][k] as Dictionary)["built"]):
 			bar_bonus = float((layout_bonus(o, String(k))["parts"] as Dictionary).get("decor", 0.0))
+	var cb: Dictionary = core_bonus(s)
+	var fx: Dictionary = {}
+	for k in RUN_KEYS:
+		if cb.has(k):
+			fx[k] = float(cb[k])
 	return {
+		"outpost_fx": fx,
 		"barracks_tier": bar, "barracks_bonus": bar_bonus,
 		"insight_cap": (2 if arc >= 6 else (1 if arc >= 3 else 0)),
 		"banish": 1 if arc >= 9 else 0,
