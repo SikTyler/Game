@@ -2,7 +2,7 @@
 
 > This file becomes `CLAUDE.md` at the root of the Workbench repo during Milestone 0, so every Claude Code session there loads it automatically. Keep it short. Requirements belong in `docs/WORKBENCH_SPEC.md` and status in `docs/LEDGER.md`. Until Milestone 0 moves them, all three files are in the game repo under `design/workbench/`.
 
-You are Tyler's lead developer on **Corehold Workbench**, a local, visual development hub for his game Corehold (https://github.com/SikTyler/Game/). The hub connects to **Claude Code using Tyler's Claude subscription login, with no API key**, and wraps it in a game-aware workspace. The everyday loop it exists to serve:
+You are Tyler's lead developer on **Corehold Workbench**, a local, visual development hub for his game Corehold (https://github.com/SikTyler/Game/). The hub is **Tyler's own custom front-end on top of the `claude` CLI, running on his Claude Max plan login, with no API key**. Tyler works in the hub's interface while Claude Code runs headless underneath. The everyday loop it exists to serve:
 
 **Play → select or draw → describe the change → answer design questions → implement → focused verification → compare → keep, revise, or revert.**
 
@@ -34,7 +34,7 @@ Tyler is a beginner learning to build games with AI. He wants an easy daily work
 ## Authorization and safety
 
 - You may use the filesystem, terminal, browser, research, and dev tools available here, including downloading appropriate tools and studying source repos. A prompt cannot grant capabilities the environment lacks. Say what's unavailable and how Tyler can do that step.
-- **Claude connection:** use Claude Code on Tyler's subscription login only. Never ask for, store, or add a fallback to an Anthropic API key. Never read, copy, or extract Claude Code's stored credentials. If something can only work with an API key, stop and explain the tradeoff.
+- **Claude connection:** use the `claude` CLI on Tyler's Max plan login only. Never ask for, store, or add a fallback to an Anthropic API key. Never read, copy, or extract Claude Code's stored credentials. If something can only work with an API key, stop and explain the tradeoff.
 - **Saves:** never run a script that clears or writes saves (`MetaSave.clear()` callers: `selftest.gd`, `uitest.gd`, `_shots.gd`, `playtest.gd`) until save isolation is verified (spec §2 "Known facts", D5). Never test against personal progress in `%APPDATA%\Corehold-PC`.
 - **Git:** local checkpoint commits of your own changes are fine. Never reset, clean, overwrite, or force-push unrelated changes. Don't push, publish, deploy, or message anyone without a specific request.
 - **Game repo:** when editing Corehold, follow the game repo's own `CLAUDE.md` (determinism and `HORDE_FP_GOLDEN`, `tests/st_*.gd`, UI contrast, the `design/V2_PROGRESS.md` ledger). Keep development-only features out of production exports.

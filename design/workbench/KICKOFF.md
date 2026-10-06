@@ -1,11 +1,11 @@
 # Corehold Workbench — kickoff
 
-**How to use:** open **Claude Code on your PC** (terminal, desktop app, or IDE; not a cloud session) in your local Corehold game folder. Make sure you're logged in with your Claude subscription: run `claude` and check `/status`. Then paste the prompt below. You only paste it once. After Milestone 0 the Workbench repo's own `CLAUDE.md` loads automatically, and "continue" is enough.
+**How to use:** open **Claude Code on your PC** (terminal, desktop app, or IDE; not a cloud session) in your local Corehold game folder. Make sure Claude Code is logged in with your Claude Max account (not an API key): run `claude` and check `/status`. Then paste the prompt below. You only paste it once. After Milestone 0 the Workbench repo's own `CLAUDE.md` loads automatically, and "continue" is enough.
 
 ---
 
 ```text
-We're starting Corehold Workbench, a local development hub for my game, connected to Claude Code on my subscription (no API key).
+We're starting Corehold Workbench, a local development hub for my game. It's my own custom front-end built on top of the claude CLI, running on my Claude Max plan (no API key).
 
 If design/workbench/ doesn't exist in this checkout, fetch it first: `git fetch origin claude/sleepy-hopper-p2hn8k` and bring the design/workbench/ folder in without touching my other files (ask me if anything would be overwritten).
 

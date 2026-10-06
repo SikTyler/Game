@@ -8,7 +8,7 @@ Status of every requirement in `WORKBENCH_SPEC.md`. Statuses: **verified** (demo
 
 | Date | # | Decision | Source |
 | --- | --- | --- | --- |
-| 2026-10-06 | D1 | Hub connects through Claude Code on Tyler's subscription login with no API key. It drives the `claude` CLI; the Agent SDK is excluded (its docs require an API key for third-party apps). | Tyler; spec §0, §13 |
+| 2026-10-06 | D1 | Hub is a custom front-end over the `claude` CLI on Tyler's Claude Max plan login, with no API key. It drives the `claude` CLI; the Agent SDK is excluded (its docs require an API key for third-party apps). | Tyler; spec §0, §13 |
 | 2026-10-06 | D2 | Build locally on Tyler's PC in Claude Code, not in a cloud session | spec §0 |
 | 2026-10-06 | D3 | Workbench lives in its own repo/folder outside the Godot project | spec §0, §2 |
 | 2026-10-06 | D4 | Corehold stays a native Godot 4.6.3 .NET game | spec §0, §4 |
@@ -20,7 +20,7 @@ Status of every requirement in `WORKBENCH_SPEC.md`. Statuses: **verified** (demo
 | # | Question | Recommendation | Status |
 | --- | --- | --- | --- |
 | Q1 | Local paths: game checkout, and where the Workbench repo goes | Keep the existing game checkout and put the Workbench in a sibling folder, e.g. `…\corehold-workbench` | open |
-| Q2 | Claude plan (Pro or Max)? Rate limits decide how many specialist sessions can run at once | Ask; default to one active session plus queued work | open |
+| Q2 | Claude plan (Pro or Max)? Rate limits decide how many specialist sessions can run at once | **Max.** Hub sessions share Max usage limits with Tyler's other Claude use, so default to one active session plus queued work and show limit status when Claude Code reports it | answered 2026-10-06 |
 | Q3 | Confirm the Claude Code route after Milestone A proves it | Hub drives `claude -p` stream-json, with a hub MCP server and a resumable `ask_user` (spec §13) | open, decide at the end of A |
 | Q4 | UI-design tool: Penpot self-hosted (Docker), Penpot hosted (cloud), or Excalidraw plus live Godot UI | Excalidraw plus live Godot UI unless Tyler accepts Docker | open, decide before E |
 | Q5 | GPU available for ComfyUI image generation? | Check hardware first. If it's weak, keep generation optional/off. | open, decide before E |

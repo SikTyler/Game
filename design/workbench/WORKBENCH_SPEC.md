@@ -8,7 +8,7 @@ The section numbers match the original master prompt (v2). §3 and the working r
 
 | # | Decision | Notes |
 | --- | --- | --- |
-| D1 | **The hub connects to Claude Code using Tyler's existing Claude subscription login. No Anthropic API key.** | The hub drives the `claude` CLI, which is documented as running on the subscription. The Agent SDK is excluded because its docs require an API key for third-party apps. See §13, "Claude Code connection". If a feature cannot work without an API key, stop and tell Tyler. Don't add a key path. |
+| D1 | **The hub is Tyler's own custom front-end on top of the `claude` CLI, running on his Claude Max plan login. No Anthropic API key.** | In normal use Tyler works only in the hub's interface; the CLI runs headless underneath and he never has to use the Claude Code terminal. The hub drives the `claude` CLI, which is documented as running on the subscription. The Agent SDK is excluded because its docs require an API key for third-party apps. See §13, "Claude Code connection". If a feature cannot work without an API key, stop and tell Tyler. Don't add a key path. |
 | D2 | The Workbench is built locally on Tyler's PC, in Claude Code (terminal, desktop app or IDE), not in a cloud session. | A cloud container has no display, no Windows and no access to the real game window. |
 | D3 | Workbench code lives in its own repo/folder outside the Godot project. Only a small dev bridge and config live in the game. | §2 |
 | D4 | Corehold stays a native Godot 4.6.3 .NET game. No JavaScript rewrite, no reliance on web export, no casual engine upgrade. | §4 |
@@ -214,7 +214,7 @@ Create an editable Corehold style guide covering palette, typography, icon conve
 
 ### Claude Code connection (D1)
 
-The hub talks to Claude **through Claude Code, signed in with Tyler's subscription**. It never asks for, stores, or falls back to an Anthropic API key. Tyler's existing Claude Code configuration (CLAUDE.md files, skills, hooks, MCP servers, subagents) is the agent engine. The hub adds a game-aware interface around it rather than a second agent framework.
+The hub is a **custom front-end over the `claude` CLI, signed in with Tyler's Claude Max plan**. The hub's own interface (game view, annotations, task and question cards, specialist chats) is what Tyler sees. Underneath, each task is a headless Claude Code session the hub starts and talks to over stream-json. It never asks for, stores, or falls back to an Anthropic API key. Tyler's existing Claude Code configuration (CLAUDE.md files, skills, hooks, MCP servers, subagents) is the agent engine. The hub adds a game-aware interface around it rather than a second agent framework.
 
 **What the docs said (checked 2026-10-06; re-verify with `claude --help` and https://code.claude.com/docs on the machine):**
 
@@ -270,8 +270,9 @@ Use a small representative agent benchmark for significant changes to instructio
 
 Investigate only candidates relevant to the current milestone, using official documentation and actual source. Pin the versions/commits you select. Repositories worth evaluating:
 
-- https://github.com/siteboon/claudecodeui: extensible dashboard candidate that wraps Claude Code.
-- https://github.com/winfunc/opcode: specialist/session UI alternative that wraps Claude Code.
+- https://github.com/siteboon/claudecodeui: extensible dashboard candidate; a custom web front-end over Claude Code.
+- https://github.com/winfunc/opcode: specialist/session UI alternative; a custom desktop front-end over Claude Code.
+- For both: confirm the current version still runs the `claude` CLI on a subscription login. A wrapper that has moved to the Agent SDK would need an API key and conflicts with D1.
 - https://github.com/anthropics/claude-agent-sdk-typescript: reference only. Its docs require API-key auth for third-party apps, which conflicts with D1 (§13). It's still useful for understanding the CLI's stream-json protocol.
 - https://github.com/anthropics/skills: workflow references; inspect individual licenses.
 - https://github.com/modelcontextprotocol/inspector: integration diagnostics.
