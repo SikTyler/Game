@@ -823,9 +823,10 @@ static func _draw_map(m, s: Dictionary, o: Dictionary, mr: Rect2) -> void:
 			Kit.bar(m, Rect2(r2.position.x + 6, r2.end.y - 12, r2.size.x - 12, 7), fr, bcol if fr < 0.999 else Kit.ENEMY)
 			if fr >= 0.999:
 				# V2 P9 audit: "full, production stopped" is a word, not only a red bar
+				# (centred on the full bar, so it never covers the building's art)
 				var fw: float = 40.0
-				m.draw_style_box(Kit.sb(Kit.ENEMY, Color(Kit.BG, 0.92), 1, 6), Rect2(r2.end.x - fw - 6, r2.end.y - 34, fw, 20))
-				Kit.th(m, "FULL", Vector2(r2.end.x - 6 - fw * 0.5, r2.end.y - 19), 14, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, fw)
+				m.draw_style_box(Kit.sb(Kit.ENEMY, Color(Kit.BG, 0.92), 1, 6), Rect2(r2.get_center().x - fw * 0.5, r2.end.y - 19, fw, 20))
+				Kit.th(m, "FULL", Vector2(r2.get_center().x, r2.end.y - 4), 14, Kit.TEXT, HORIZONTAL_ALIGNMENT_CENTER, fw)
 			if float(b["stored"]) >= 1.0:
 				var bounce: float = 3.0 * sin(m.t_anim * 4.0 + float(int(String(uid))))
 				# inside its own frame (it used to sit on the neighbour's bar)

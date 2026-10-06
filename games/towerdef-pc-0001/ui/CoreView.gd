@@ -294,7 +294,7 @@ static func _draw_loadout(m, s: Dictionary, c: Vector2, n: int) -> void:
 			var fl: Array = Gear.fx_lines(Gear.module_fx(it))
 			if not fl.is_empty():
 				sub += "  ·  " + String(fl[0])
-		Kit.t(m, sub, Vector2(r.position.x + 124.0, r.position.y + 48.0), 14, Kit.rarity_col(String(it["rar"])), HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 140.0)
+		Kit.t(m, sub, Vector2(r.position.x + 124.0, r.position.y + 48.0), 14, Kit.rarity_text(String(it["rar"])), HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 140.0)
 		if eq:
 			Kit.th(m, "EQUIPPED", Vector2(r.end.x - 12.0, r.position.y + 26.0), 14, Kit.GREEN, HORIZONTAL_ALIGNMENT_RIGHT, 120.0)
 
@@ -333,7 +333,7 @@ static func _draw_presets(m, s: Dictionary) -> void:
 		var w: Dictionary = Gear.item(s, int(pr.get("weapon", 0)))
 		if not w.is_empty():
 			GearVis.draw_weapon(m, w, Vector2(r.position.x + 70.0, r.position.y + 72.0), 96.0, 0.0, m.t_anim)
-			Kit.t(m, String(w["name"]), Vector2(r.position.x + 130, r.position.y + 62), 16, Kit.rarity_col(String(w["rar"])), HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 400.0)
+			Kit.t(m, String(w["name"]), Vector2(r.position.x + 130, r.position.y + 62), 16, Kit.rarity_text(String(w["rar"])), HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 400.0)
 		else:
 			Kit.t(m, "Weapon gone", Vector2(r.position.x + 130, r.position.y + 62), 16, Kit.ENEMY, HORIZONTAL_ALIGNMENT_LEFT, 200.0)
 		var mods: Array = (pr.get("sockets", []) as Array).filter(func(u: Variant) -> bool: return int(u) != 0)

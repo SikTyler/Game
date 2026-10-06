@@ -67,6 +67,8 @@ const HOT_H: float = 96.0
 const NAV_H: float = 60.0
 const FADE_TIME: float = 0.25
 const DMG_MERGE: float = 0.1
+## V2 P9 audit: hits this close (px) to a young number add to it (any body).
+const DMG_NEAR: float = 30.0
 ## World extent shown by the run field (spawn ring diameter + margin).
 const WORLD_SPAN: float = 2.0 * TowerState.SPAWN_R * 0.78   # was 0.84: larger run-grid cells (PM fix round)
 
@@ -736,6 +738,13 @@ func _dmg_num(eid: int, pos: Vector2, amt: float) -> void:
 		if float(d["t"]) > 0.0 and int(d.get("eid", -1)) == eid and float(d["life"]) - float(d["t"]) < DMG_MERGE:
 			d["amt"] = float(d["amt"]) + amt
 			d["pos"] = pos
+			d["size"] = dmg_size(float(d["amt"]))
+			return
+	# V2 P9 audit: a young number within DMG_NEAR px absorbs the hit too (splash
+	# and mass hits sum into one readable figure instead of a pile of overlaps)
+	for d in dmgnums.items:
+		if float(d["t"]) > 0.0 and float(d["life"]) - float(d["t"]) < DMG_MERGE and (d["pos"] as Vector2).distance_squared_to(pos) < DMG_NEAR * DMG_NEAR:
+			d["amt"] = float(d["amt"]) + amt
 			d["size"] = dmg_size(float(d["amt"]))
 			return
 	var n: Dictionary = dmgnums.take(0.6)

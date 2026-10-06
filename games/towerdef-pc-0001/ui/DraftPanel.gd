@@ -238,11 +238,14 @@ static func _draw_card(m, r: Rect2, cd: Dictionary, k: int) -> void:
 	m.draw_rect(Rect2(br.position, Vector2(6, br.size.y)), tcol)
 	Kit.icon(m, String(ct["icon"]), Rect2(br.position.x + 10, br.position.y + 2, 22, 22))
 	Kit.t(m, String(ct["type"]), Vector2(br.position.x + 38, br.position.y + 20), 16, tcol.lightened(0.25), HORIZONTAL_ALIGNMENT_LEFT, 110.0)
-	Kit.t(m, Kit.fit(m, String(ct["sub"]), 14, br.size.x - 160.0 - 74.0), Vector2(br.position.x + 38 + 110, br.position.y + 19), 14, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, br.size.x - 160.0 - 74.0)
-	# V2 P9 audit: the rarity word on a dark pill in a lifted tint (>= 4.5:1)
-	var rw: float = m.font.get_string_size(rar.capitalize(), HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x + 14.0
+	# V2 P9 audit: the rarity word on a dark pill in a lifted tint (>= 4.5:1);
+	# the pill is sized to the word and the subtitle gets what is left of the band
+	var rtw: float = m.font.get_string_size(rar.capitalize(), HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
+	var rw: float = rtw + 16.0
+	var sw: float = br.size.x - 148.0 - rw - 12.0
+	Kit.t(m, Kit.fit(m, String(ct["sub"]), 14, sw), Vector2(br.position.x + 38 + 110, br.position.y + 19), 14, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, sw)
 	m.draw_style_box(Kit.sb(Color(rc, 0.7), Color(Kit.BG, 0.92), 1, 9), Rect2(br.end.x - rw - 4, br.position.y + 3, rw, 20))
-	Kit.t(m, rar.capitalize(), Vector2(br.end.x - 11, br.position.y + 18), 14, Kit.rarity_text(rar), HORIZONTAL_ALIGNMENT_RIGHT, 70.0)
+	Kit.t(m, rar.capitalize(), Vector2(br.end.x - rw - 4 + 8.0, br.position.y + 18), 14, Kit.rarity_text(rar), HORIZONTAL_ALIGNMENT_LEFT, rtw + 4.0)
 	var tx: float = r.position.x + 22.0 + isz
 	var tw: float = r.end.x - tx - 10.0
 	Kit.t(m, String(d.get("name", id)), Vector2(tx, r.position.y + 58), 21, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, tw)

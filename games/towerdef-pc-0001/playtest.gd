@@ -828,16 +828,30 @@ static func _pick_mutation(S) -> int:
 
 
 ## Placement: weapons and auras as close to the Core as allowed (they face
-## away from it by default), eco / huts on the outer cells.
+## away from it by default), eco / huts on the outer cells. A directional
+## weapon takes the cell of its ring whose default facing is furthest from
+## the facings already covered (the lowest free index used to stack every
+## arc / lane on the north row and leave the other bearings open).
 static func _place_cell(S, id: String) -> int:
 	var best: int = -1
 	var best_k: float = INF
 	var inner: bool = _is_weapon(id) or (PickDB.fam_of(id) == "building" and not PickDB.is_eco(id))
+	var faces: Array = []
+	if _is_weapon(id) and WeaponDB.directional(id):
+		for a in TowerState.N:
+			if a != TowerState.CORE_SLOT and S.owner_at(a) == a and WeaponDB.directional(S.id_at(a)):
+				faces.append(WeaponDB.facing(S.rot_at(a)))
 	for i in S.free_slots():
 		if not S.can_place(int(i), id):
 			continue
 		var r: int = TowerState.ring_of(int(i))
 		var k: float = float(r) if inner else float(20 - r)
+		if not faces.is_empty():
+			var f: Vector2 = WeaponDB.facing(S.default_rot(int(i), id))
+			var ov: float = -1.0
+			for fc in faces:
+				ov = maxf(ov, f.dot(fc as Vector2))
+			k += 0.45 * (ov + 1.0)   # 0 (opposite) .. 0.9 (same bearing): stays within the ring
 		k += float(int(i)) * 0.001
 		if k < best_k:
 			best_k = k

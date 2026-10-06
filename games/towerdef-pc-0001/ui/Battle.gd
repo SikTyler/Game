@@ -203,7 +203,7 @@ static func cell_text(m, i: int) -> String:
 	var ring: int = TowerState.ring_of(i)
 	if i == TowerState.CORE_SLOT:
 		var cd: Dictionary = S.core_def if not (S.core_def as Dictionary).is_empty() else CoreDB.get_def(S.core_id)
-		return "The Core  Lv%d\n%s: %s" % [int(S.core_lvl), String(cd.get("attack_name", "")), String(cd.get("attack_desc", ""))]
+		return "The Core  Lv%d\n%s: %s\nAuto-fire hits an Elite or Boss on the Core first, and every other shot hunts a Spitter" % [int(S.core_lvl), String(cd.get("attack_name", "")), String(cd.get("attack_desc", ""))]
 	if not bool(S.unlocked[i]):
 		return "Outside your grid\nResearch Grid Expansion to build here"
 	var id: String = S.id_at(i)
@@ -699,7 +699,7 @@ static func _draw_fx(m) -> void:
 		var pp: Vector2 = fd3["pos"]
 		var lift: float = (1.0 - float(fd3["t"])) * 30.0
 		var pc: Color = fd3["color"]
-		Kit.t(m, String(fd3["text"]), pp - Vector2(0, lift), int(fd3["size"]), Color(pc, minf(1.0, float(fd3["t"]) * 2.5)), HORIZONTAL_ALIGNMENT_CENTER, 600.0)
+		Kit.t_outline(m, String(fd3["text"]), pp - Vector2(0, lift), int(fd3["size"]), Color(pc, minf(1.0, float(fd3["t"]) * 2.5)), HORIZONTAL_ALIGNMENT_CENTER, 600.0)
 
 
 ## Field banners: incoming wave, placement / aim prompts, Insight fanfare.
@@ -949,7 +949,7 @@ static func _draw_results(m) -> void:
 		var g: Array = groups[cid]
 		var d: Dictionary = LootDB.get_def(String(cid))
 		Kit.icon(m, "chest", Rect2(lx, ly, 36, 36))
-		Kit.t(m, "%s  x%d%s" % [String(d["name"]), int(g[0]), ("  ·  %d items" % int(g[1])) if int(g[1]) > 0 else ""], Vector2(lx + 44, ly + 25), 17, Kit.rarity_col(String(d["min"])) if String(d["min"]) != "" else Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w - 44)
+		Kit.t(m, "%s  x%d%s" % [String(d["name"]), int(g[0]), ("  ·  %d items" % int(g[1])) if int(g[1]) > 0 else ""], Vector2(lx + 44, ly + 25), 17, Kit.rarity_text(String(d["min"])) if String(d["min"]) != "" else Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w - 44)
 		ly += 42.0
 		any = true
 	for e in m.run_loot:

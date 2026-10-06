@@ -603,14 +603,32 @@ static func update_tip(m, delta: float) -> void:
 		var bound := Rect2(0, 0, m.vw, m.vh)
 		if m.screen == "run" and m.S != null and m.field_rect().has_point(m.mouse_pos):
 			bound = m.field_rect()
+		elif m.screen == "base" and m.overlay == "" and Hub.is_home(m.tab) and OutpostView.map_rect(m).has_point(m.mouse_pos):
+			bound = OutpostView.map_rect(m)   # map tips stay off the palette
 		var p: Vector2 = m.mouse_pos + Vector2(18, 22)
 		if p.x + sz.x > bound.end.x - 6.0:
 			p.x = m.mouse_pos.x - sz.x - 12.0
 		if p.y + sz.y > bound.end.y - 6.0:
 			p.y = m.mouse_pos.y - sz.y - 12.0
-		p.x = clampf(p.x, bound.position.x + 4.0, maxf(bound.position.x + 4.0, bound.end.x - sz.x - 4.0))
-		p.y = clampf(p.y, bound.position.y + 4.0, maxf(bound.position.y + 4.0, bound.end.y - sz.y - 4.0))
+		p = _clamp_tip(p, sz, bound)
+		# V2 P9 audit: over the run grid, the corner of the cursor that hides
+		# the fewest grid cells wins (the default corner covered the row above)
+		if bound != Rect2(0, 0, m.vw, m.vh) and m.screen == "run":
+			var gh: float = float(m.S.grid_n) * TowerState.CELL * 0.5
+			var g := Rect2(m.w2s(TowerState.CENTER - Vector2(gh, gh)), Vector2.ZERO).expand(m.w2s(TowerState.CENTER + Vector2(gh, gh)))
+			var best: float = Rect2(p, sz).intersection(g).get_area()
+			for o in [Vector2(-sz.x - 12.0, 22.0), Vector2(18.0, -sz.y - 12.0), Vector2(-sz.x - 12.0, -sz.y - 12.0)]:
+				var q: Vector2 = _clamp_tip(m.mouse_pos + o, sz, bound)
+				var a: float = Rect2(q, sz).intersection(g).get_area()
+				if a < best - 1.0 and not Rect2(q, sz).has_point(m.mouse_pos):
+					best = a
+					p = q
 		m.tipbox.position = p
+
+
+static func _clamp_tip(p: Vector2, sz: Vector2, bound: Rect2) -> Vector2:
+	return Vector2(clampf(p.x, bound.position.x + 4.0, maxf(bound.position.x + 4.0, bound.end.x - sz.x - 4.0)),
+		clampf(p.y, bound.position.y + 4.0, maxf(bound.position.y + 4.0, bound.end.y - sz.y - 4.0)))
 
 
 static func tip_at(m, p: Vector2) -> String:

@@ -843,7 +843,10 @@ func _mass_horde_world() -> void:
 ## V2 P7d2 (deliberate): 22 support buildings, 4 huts, 20 packs and 6
 ## specials join the draft pool and gold perk offers draw from 6 families, so
 ## the fingerprint run's picks differ again; re-recorded (was 8912cd95).
-const HORDE_FP_GOLDEN: String = "598342927ba0f4ca0b2378c543238bed0e1100b68cc241cb4d9efa6e0bbb88d1"
+## V2 P9 (deliberate): Core threat priority - auto-fire takes an Elite /
+## Boss on the Core first and every other volley a Spitter in range - so the
+## fingerprint run's Core targets differ; re-recorded (was 59834292).
+const HORDE_FP_GOLDEN: String = "57314d4fd25efe23f26d7da8b92da8aafa563ff3e595694de37e2a093581c75e"
 ## MASS_HORDE §Design content (designed mass waves, the shipping ruleset).
 func _mfresh(seed_value: int = 1234):
 	var S = TowerState.new()

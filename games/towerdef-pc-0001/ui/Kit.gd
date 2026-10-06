@@ -400,6 +400,8 @@ static func req_chip(m, rect: Rect2, kind: String, id: String, label: String, me
 	# its text is inset from the border.
 	var b: Button = btn(m, ("DONE  " if met else "") + label, rect, cb, tip if tip != "" else ("%s — done" % label if met else "%s — click to go there" % label), true, col, "req:%s:%s" % [kind, id], icon_id if icon_id != "" else ("" if met else "icon_lock"), 15)
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	if met:
+		b.add_theme_color_override("font_color", GREEN.lerp(TEXT, 0.35))
 	for st in ["normal", "hover", "pressed"]:
 		var sbx: StyleBoxFlat = (b.get_theme_stylebox(st) as StyleBoxFlat).duplicate()
 		sbx.content_margin_left = 10.0

@@ -201,7 +201,7 @@ static func _card(m, k: int, it: Dictionary) -> void:
 		GearVis.draw_weapon(m, it, art, r.size.x * 0.78, 0.0, m.t_anim)
 	else:
 		GearVis.draw_module(m, it, art, 84.0, m.t_anim)
-	Kit.th(m, String(RarityDB.get_def(rar)["name"]).to_upper(), Vector2(r.get_center().x, r.position.y + 150.0), 16, col, HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 16.0)
+	Kit.th(m, String(RarityDB.get_def(rar)["name"]).to_upper(), Vector2(r.get_center().x, r.position.y + 150.0), 16, Kit.rarity_text(rar), HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 16.0)
 	Kit.wrap(m, String(it["name"]), Vector2(r.position.x + 12.0, r.position.y + 158.0), 15, Kit.TEXT, r.size.x - 24.0, 2, HORIZONTAL_ALIGNMENT_CENTER)
 	var ps: Array = it["perks"]
 	for i in ps.size():

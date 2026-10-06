@@ -21,6 +21,7 @@ static func run(t) -> void:
 	_fx_weapon(t)
 	_fx_body(t)
 	_aim(t)
+	_threat(t)
 
 
 ## A run with `weapon` equipped (+ socketed modules), every cell open, no waves.
@@ -347,3 +348,38 @@ static func _aim(t) -> void:
 	for k in 31:
 		F._fire(0.05, [])
 	t._check("P4 aim: releasing drains focus within 1.5 s; auto-fire resumes", F.focus == 0.0 and not F.aim_on)
+
+
+# ------------------------------------------------------------------ threat priority (V2 P9)
+
+static func _threat(t) -> void:
+	var C = TowerState.CENTER
+	var S = _run(_w("autocannon"))
+	_ready(S)
+	var mite: int = _body(S, C + Vector2(0, -46))
+	var el: int = _body(S, C + Vector2(0, 52), 999.0, "elite")
+	S.en.flags[el] = S.en.flags[el] | 4   # EnemyStore.F_LEAK: it reached the Core
+	_fire(S)
+	t._check("P9 threat: auto-fire takes an Elite gnawing on the Core over a nearer body", _lost(S, el) > 0.0 and _lost(S, mite) == 0.0)
+	var A = _run(_w("autocannon"))
+	_ready(A)
+	var am: int = _body(A, C + Vector2(0, -46))
+	var ae: int = _body(A, C + Vector2(0, 120), 999.0, "elite")
+	_fire(A)
+	t._check("P9 threat: an Elite still walking in waits its turn (nearest first)", _lost(A, am) > 0.0 and _lost(A, ae) == 0.0)
+	var B = _run(_w("autocannon"))
+	_ready(B)
+	var bm: int = _body(B, C + Vector2(0, -60))
+	var sp: int = _body(B, C + Vector2(230, 0), 999.0, "ranged")
+	_fire(B)
+	var s1: float = _lost(B, sp)
+	_fire(B)
+	t._check("P9 threat: every other auto volley takes the Spitter at the stand-off ring", s1 > 0.0 and _lost(B, sp) == s1 and _lost(B, bm) > 0.0, "%.1f %.1f" % [s1, _lost(B, bm)])
+	var M = _run(_w("autocannon"))
+	_ready(M)
+	var mm: int = _body(M, C + Vector2(150, 0))
+	var me: int = _body(M, C + Vector2(0, 52), 999.0, "elite")
+	M.en.flags[me] = M.en.flags[me] | 4
+	M.set_aim(M.en.pos[mm], true)
+	_fire(M)
+	t._check("P9 threat: manual aim overrides the threat priority", _lost(M, mm) > 0.0 and _lost(M, me) == 0.0)

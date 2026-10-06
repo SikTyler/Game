@@ -331,6 +331,17 @@ var aim_on: bool = false
 var aim_pos: Vector2 = Vector2.ZERO
 var focus: float = 0.0
 var core_aim_dir: Vector2 = Vector2.UP   # view only: where the turret last fired (never hashed)
+## V2 P9 Core threat priority (auto fire, first volley): an Elite or Boss
+## gnawing on the Core comes first; else every other volley takes the nearest
+## Spitter in range. Spitters stand off at ranged_stop and outlast a Core that
+## only shoots the nearest melee body, and an Elite at the Core outlived a
+## wave of it (a fresh run died at wave 7). Threat eids are rescanned every
+## THREAT_SCAN volleys; manual aim overrides all of it.
+const THREAT_SCAN: int = 4
+var thr_flip: bool = false
+var thr_n: int = 0
+var thr_boss: Array = []
+var thr_spit: Array = []
 ## Gear on-hit fx of the Core's own hits (compute_stats): burn dps share,
 ## slow, execute threshold; _core_hook is false for a quirk-free loadout.
 var core_burn: float = 0.0
@@ -432,6 +443,10 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	aim_on = false
 	aim_pos = CENTER
 	focus = 0.0
+	thr_flip = false
+	thr_n = 0
+	thr_boss = []
+	thr_spit = []
 	mods["special_dmg"] = float(mods.get("special_dmg", 1.0)) * maxf(0.1, 1.0 + pf("special_dmg"))
 	mods["special_cd"] = float(mods.get("special_cd", 1.0)) * maxf(0.2, 1.0 + pf("special_cd"))
 	last_stand_used = false
@@ -2802,11 +2817,50 @@ func _core_target(rng_lim: float, mode_s: String, used: Dictionary, k: int) -> i
 		var a: int = _nearest(aim_pos, AIM_R, used)
 		if a >= 0 and CENTER.distance_to(en.pos[a]) <= rng_lim + en.size[a] * 0.5:
 			t = a
+	if t < 0 and not aim_on and k == 0 and used.is_empty():
+		t = _core_threat(rng_lim)
 	if t < 0:
 		t = pick_target(CENTER, rng_lim, mode_s) if k == 0 and used.is_empty() else _nearest(CENTER, rng_lim, used)
 	if t >= 0 and k == 0:
 		core_aim_dir = _dir_to(CENTER, en.pos[t])
 	return t
+
+
+## Threat priority target (see THREAT_SCAN), or -1 for the targeting mode.
+func _core_threat(rng_lim: float) -> int:
+	if thr_n % THREAT_SCAN == 0:
+		thr_boss.clear()
+		thr_spit.clear()
+		var lim2: float = rng_lim * rng_lim * 1.44   # in range, or about to be
+		for s in en.order:
+			if en.hp[s] <= 0.0:
+				continue
+			var kd: String = String(en.kind[s])
+			if (kd == "ranged" or kd == "elite" or kd == "boss") and CENTER.distance_squared_to(en.pos[s]) <= lim2:
+				(thr_spit if kd == "ranged" else thr_boss).append(en.eid[s])
+	thr_n += 1
+	thr_flip = not thr_flip
+	var b: int = _nearest_of(thr_boss, rng_lim, true)
+	if b >= 0:
+		return b
+	return _nearest_of(thr_spit, rng_lim, false) if thr_flip else -1
+
+
+## The living body of `eids` nearest the Core within rng_lim (only those in
+## contact with the Core when `contact`), or -1.
+func _nearest_of(eids: Array, rng_lim: float, contact: bool) -> int:
+	var lim2: float = rng_lim * rng_lim
+	var best: int = -1
+	var best_d: float = INF
+	for id in eids:
+		var s: int = en.slot_of(int(id))
+		if s < 0 or en.hp[s] <= 0.0 or (contact and (en.flags[s] & EnemyStore.F_LEAK) == 0):
+			continue
+		var d2: float = CENTER.distance_squared_to(en.pos[s])
+		if d2 <= lim2 and d2 < best_d:
+			best_d = d2
+			best = s
+	return best
 
 
 static func _dir_to(from: Vector2, to: Vector2) -> Vector2:
