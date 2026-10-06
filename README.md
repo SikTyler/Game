@@ -1,110 +1,48 @@
-# GameForge
+# Corehold
 
-An AI pipeline that turns a one-line prompt into a playable mobile game, built as Claude Agent Skills. A chain of eight skills — `concept → builder → validator → deepen → asset → visual-audit → audio → packager` — drives a manifest-based design "spine" from idea to a buildable Godot project. The real deliverable is **better skills**, not the games themselves.
+A mass-horde tower defense × roguelite × idle base-builder for PC, built in Godot. Defend the Core against waves of hundreds to tens of thousands of bodies, draft weapons and perks as you level, forge procedural gear, and grow your Outpost between runs.
 
-## Quick start
+## Play it
 
-The manifest tooling and the full test suite run with nothing but Node — no GPU, Godot, or ComfyUI needed:
+1. Install **Godot 4.6.3 — .NET edition** ([download](https://godotengine.org/download/archive/4.6.3-stable/), pick the ".NET" build). The crowd simulation is C#, so the standard build will not run it.
+2. Install the **.NET 8 SDK** ([download](https://dotnet.microsoft.com/download/dotnet/8.0)).
+3. Download this repo (Code → Download ZIP, or `git clone`).
+4. Open Godot → **Import** → select `project.godot` in the repo folder → **Import & Edit**.
+5. Press **F5** (or the ▶ button). The first open takes a minute while Godot imports assets and builds the C# project.
 
-```
-npm install
-npm test                                          # 196 tests, network/SDK mocked
-node tools/manifest.mjs create demo "My Demo"     # scaffold a manifest (status=concept)
-node tools/manifest.mjs validate demo             # schema-check it
-```
+Controls are in [`design/CONTROLS.md`](design/CONTROLS.md) and rebindable in Settings → Controls.
 
-The agent skills themselves (`.claude/skills/`) run inside [Claude Code](https://claude.com/claude-code). The asset/audio/build stages additionally require local **ComfyUI**, **Godot 4.6.3**, and the **Android SDK** — see the per-stage sections below and `CLAUDE.md` for the reference environment. Set `GODOT_BIN` to your Godot console executable and `COMFY_HOST` to your ComfyUI server if they aren't on PATH / at the defaults.
+Saves live in `%APPDATA%\Corehold-PC` on Windows (`~/.local/share/Corehold-PC` on Linux).
 
-## Pinned Godot version
+## Build an executable
 
-`4.6.3.stable` — **source of truth** for every manifest's `build.engine_version`. Both machines must match (§11). Update here and in existing manifests if you bump it.
+In the editor: Project → Export → "Windows Desktop" or "Linux" (install the 4.6.3 .NET export templates when prompted). Output goes to `build/`. The `.github/workflows/export.yml` workflow does the same in CI (run it by hand from the Actions tab).
 
 ## Layout
 
-- `.claude/skills/` — the `concept`, `builder`, `validator`, `deepen` (in-place iteration), `asset` (re-skin/art), `visual-audit` (composited-screen audit), `audio` (SFX+music), and `packager` skills.
-- `manifests/<id>.json` — one manifest per title (the spine; §5).
-- `games/<id>/` — generated Godot projects.
-- `tools/manifest.mjs` — the manifest CLI (`create` / `set-status` / `merge` / `validate`).
-- `schema/manifest.schema.json` — the manifest schema.
-
-## The loop
-
-prompt → `concept` → `builder` → `validator` → human playtest → `( deepen → validator → playtest )*` → `asset` → `visual-audit` → `audio` → `packager`
-
-The deliverable is **better skills**, not the games. `deepen` is the loop's first in-place ITERATION skill — it grows a `validated`/`playable` game along one depth axis (systemic / content / run-meta) without advancing status. A `playable` title's art re-skin runs the sub-chain `asset` → `visual-audit` → `validator`(re-run) → `[styled]`.
-
-## Manifest CLI
-
-```
-node tools/manifest.mjs create <id> "<name>"     # new skeleton, status=concept
-node tools/manifest.mjs merge  <id> '<json>'      # deep-merge a partial (e.g. the concept block)
-node tools/manifest.mjs set-status <id> <status>  # concept→generated→validated→playable | →failed
-node tools/manifest.mjs validate <id>             # schema-check; exit 1 if invalid
-```
-
-## Raster asset tool (M1.5)
-
-`tools/comfy.mjs` turns a recipe into a committed RGBA PNG via a **local ComfyUI** server (assumed installed and running by the owner, like the Godot binary — not managed here). Default host `http://127.0.0.1:8188`, override with `COMFY_HOST`.
-
-```
-node tools/comfy.mjs --check                          # ping ComfyUI; report reachable + checkpoints
-node tools/comfy.mjs gen <id> <asset-name> '<recipe>' # generate games/<id>/art/<name>.png
-```
-
-Stack: ComfyUI + SDXL (Juggernaut XL v9 fp16, **no offload on 16 GB**) + the **ComfyUI-layerdiffuse** node (RGBA at generation time, proven on an RTX 5080). Workflow-JSON templates with `%placeholder%` tokens live in `tools/comfy-templates/`. The `asset` skill's `raster` method owns the art judgment; `comfy.mjs gen` owns the deterministic HTTP plumbing (unit-tested with the network mocked — no GPU in CI).
-
-**Required local setup (not in this repo):**
-1. ComfyUI pinned to **v0.3.16** (commit `26c7baf`) — required for LoRA-patch compatibility.
-2. A **one-line join-patch** to `custom_nodes/ComfyUI-layerdiffuse/layered_diffusion.py` `LayeredDiffusionDecodeRGBA.decode`: build the RGBA tensor directly (`torch.cat([rgb, alpha], -1)`) AND use the parent `decode`'s alpha as-is — do NOT invert it.
-3. ComfyUI venv on **torch ≥2.7 / cu128** (we run 2.11.0+cu128) for any RTX 50-series/Blackwell GPU.
-
-These requirements were validated end-to-end at a local raster feasibility gate.
-
-## Audio asset tool (M1.6)
-
-`tools/comfy.mjs gen-audio` generates SFX and music clips via the same local ComfyUI server (`COMFY_HOST`).
-
-```
-node tools/comfy.mjs gen-audio <id> <clip-name> '<recipe>' # writes games/<id>/audio/<name>.wav
-```
-
-The `audio` skill (`.claude/skills/audio/SKILL.md`) owns the audio judgment — deriving the audio system, mapping core-loop events to SFX, and authoring recipes. `comfy.mjs genAudio` owns the deterministic HTTP plumbing (same unit-tested, network-mocked, no-GPU-in-CI pattern as `gen`).
-
-Template: `tools/comfy-templates/stable-audio.json`. Stable Audio Open uses a separate `CLIPLoader` loading `t5-base.safetensors` (`type:"stable_audio"`) that feeds both positive and negative `CLIPTextEncode`. KSampler uses `scheduler:"exponential"` (baked into the template). Clip duration comes from `EmptyLatentAudio` (minimum **1.0 s** — do not go below).
-
-Output format is **WAV** for this milestone (Godot-native, lossless, matches the schema `format` enum, zero extra deps). A 30 s music track is ~5 MB uncompressed; OGG is a future optimization.
-
-Proven recipe defaults:
-- **SFX:** `kind:"sfx"`, `format:"wav"`, `duration_s` 1.0–2.0, `steps` ~8, `cfg` ~5–6, `sampler:"dpmpp_3m_sde_gpu"`. Negative excludes "music, melody, voice, speech".
-- **Music:** `kind:"music"`, `format:"wav"`, `duration_s` 20–40, `steps` ~50, `cfg` ~7, `sampler:"dpmpp_3m_sde_gpu"`, `loop:true`.
-
-**Required local setup (not in this repo):**
-1. Two UNGATED model files: checkpoint `stable-audio-open-1.0.safetensors` from `Comfy-Org/stable-audio-open-1.0_repackaged` → `models/checkpoints/`; text encoder `t5-base.safetensors` from `ComfyUI-Wiki/t5-base` → `models/text_encoders/`.
-2. A **`save_audio` soundfile-WAV patch** to `comfy_extras/nodes_audio.py`: under torch ≥2.11/cu128, `torchaudio.save` routes through TorchCodec (not installed, needs system FFmpeg). Patch `save_audio` to write WAV via `soundfile` (bundled libsndfile, no torchcodec/FFmpeg). This is the audio analog of the M1.5 LayerDiffuse join-patch.
-3. Same ComfyUI v0.3.16 pin and torch 2.11.0+cu128 venv as the raster stack.
-
-These requirements were validated end-to-end at a local audio feasibility gate.
-
-## Android export (build/ship)
-
-`tools/package.mjs` carries a **toolchain-guarded** Godot Android export seam — the same pure-planner + impure-spawn + no-SDK-skip pattern as the raster/audio tools. The pure `buildArtifactPlan` and the preset emitters are unit-tested with no SDK; `buildArtifact()` spawns headless Godot and **skips cleanly when `ANDROID_HOME`/`ANDROID_SDK_ROOT` is unset** (CI posture).
-
-```
-node tools/package.mjs build <id>                  # debug APK  → games/<id>/build/<id>-debug.apk
-node tools/package.mjs build <id> --release --aab  # signed AAB → games/<id>/build/<id>-release.aab
-node tools/package.mjs verify-build <id>           # assert the built file is a well-formed APK/AAB (skips w/o SDK)
-```
-
-The `packager` skill runs `build` after generating store assets and records `store_pass.build_artifact` (format, build_type, path, bytes, package). `validator` Method 5 runs `verify-build` when the toolchain is present. Build outputs and keystores are **git-ignored** (`games/*/build/`, `*.apk`, `*.aab`, `*.keystore`).
-
-**One-time machine setup** (run `tools/android-setup.ps1`, then confirm the printed Godot editor-settings keys):
-1. **Android SDK** (Windows default `%LOCALAPPDATA%\Android\Sdk`); export `ANDROID_HOME`/`ANDROID_SDK_ROOT` and add `platform-tools`/`emulator` to PATH.
-2. **Debug keystore** at `~/.android/debug.keystore` via `keytool` (alias `androiddebugkey`, store/key pass `android`).
-3. **Godot editor settings** (`%APPDATA%\Godot\editor_settings-4.tres`): set `export/android/android_sdk_path` + the debug-keystore keys — headless CLI export reads these.
-4. **AVD** via `avdmanager` (verify a system-image boots in `emulator` before relying on it).
-
-**Release signing (Phase B):** the committed `export_presets.cfg` carries NO secrets. `buildArtifact()` for a release build sets Godot's `GODOT_ANDROID_KEYSTORE_RELEASE_PATH/USER/PASSWORD` env vars from `tools/android-signing.local.json` (git-ignored). AAB output requires Godot's **gradle build** enabled (`gradle_build/use_gradle_build=true` in the release preset) and an installed Android build template — this is the standard AAB path, not custom native gradle source. Play Console submission (developer account, listing, content rating, AAB upload) is the owner-gated final step.
+| Path | What's there |
+|---|---|
+| `project.godot`, `Main.tscn`, `Main.gd` | Project entry: the one scene and its controller (input, screens, juice). |
+| `TowerState.gd` | The run simulation (waves, weapons, drafts, economy) — the game's rules live here, the view never mutates them. |
+| `HordeWorld.cs`, `EnemyStore.gd`, `EnemyHash.gd` | The C# crowd sim (flow field, squeeze, contact) and its GDScript mirror / spatial hash. |
+| `BaseMeta.gd`, `Outpost.gd`, `Labs.gd`, `Gear*.gd`, `Loot.gd`, `Cores.gd`, `Reforge.gd`, … | Meta systems: save, Outpost, research, gear / Forge, loot, Core levels, prestige. |
+| `data/` | Content tables (weapons, buildings, perks, research, gear affixes, loot, enemies …). |
+| `ui/`, `vfx/` | Code-drawn screens and widgets (`ui/Kit.gd` is the neon UI kit) and effects. |
+| `art/`, `audio/`, `fonts/` | SVG art, WAV effects / music (`audio/recipes.json` = how they were made), bundled fonts. |
+| `tests/`, `selftest.gd`, `uitest.gd`, `smoke.gd`, `horde_fp.gd`, `playtest.gd` | Test suites, determinism fingerprint, and the balance playtest bot. |
+| `tools/` | `test_all.sh` (the full gate), `setup_godot.sh` (headless Godot + .NET install), `parse_all.gd`. |
+| `design/` | Design docs: `V2_VISION.md` (pillars), `V2_DESIGN.md` (systems + numbers), `V2_PROGRESS.md` (change log, gates, test ledger), `MASS_HORDE.md`, `CONTROLS.md`. Older docs are history. |
+| `steam/` | SteamPipe depot configs (manual upload). |
+| `third_party/` | Credits and license texts for everything borrowed. |
 
 ## Tests
 
-`npm test`
+```
+bash tools/test_all.sh          # import → C# build → parse → selftest → uitest → fingerprint ×2 → smoke
+```
+
+`tools/setup_godot.sh` installs a headless Godot 4.6.3 .NET + .NET 8 if `G` (path to the Godot binary) isn't set. The full balance playtest (`godot --headless --path . --script res://playtest.gd -- workers=4`) takes ~2.5 h and is not part of the gate.
+
+## License
+
+MIT — see `LICENSE`. Third-party credits in `third_party/`.

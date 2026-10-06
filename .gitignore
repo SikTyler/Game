@@ -1,44 +1,28 @@
-# Godot 4 editor cache / generated
+# Godot editor cache / import data (regenerated on open)
 .godot/
+*.translation
 
-# Build outputs
-/builds/
-*.apk
-*.aab
-*.ipa
+# Exports
+/build/
 
-# Secrets — never commit
-*.keystore
-*.p12
-*.mobileprovision
+# Steam: never commit the App ID file or SDK / GodotSteam redistributables.
+steam_appid.txt
+addons/godotsteam/**/*.dll
+addons/godotsteam/**/*.so
+addons/godotsteam/**/*.dylib
+*.dll
 
-# Per-game Android build outputs (APK/AAB already ignored by extension; this
-# also keeps the build dir itself out of git status)
-games/*/build/
+# .NET build output
+bin/
+obj/
 
-# Local-only Android signing config (paths + passwords for the release keystore).
-# The release keystore is referenced by buildArtifact() via env vars sourced from
-# this file; it MUST NOT be committed.
-tools/android-signing.local.json
-*-signing.local.json
+# Local scratch scripts (a leading underscore + dbg / probe = never committed)
+_dbg*.gd*
+_st_one.gd*
+
+# Local Claude Code settings
+.claude/settings.local.json
 
 # OS cruft
 .DS_Store
 Thumbs.db
-
-# Node
-node_modules/
-.gstack/
-
-# Claude Code runtime artifacts
-.claude/scheduled_tasks.lock
-
-# Throwaway calibration/probe artifacts (skill A/B rounds). Convention: a leading
-# underscore = scratch, never committed. Locked winners live in the SKILL.md /
-# probe-results docs, so these are reproducible — keep them out of `git status`.
-tools/_*.mjs
-**/_probe_*
-**/_aud_*
-
-# Godot Android build template (installed per-project via --install-android-build-template)
-games/*/android/
