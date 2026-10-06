@@ -80,7 +80,7 @@ func _run(n: int, fill: int) -> void:
 	var bd: Dictionary = board(fill)
 	S.grid_n = TS.SIDE
 	for i in bd.keys():
-		S.slots[int(i)] = {"id": String(bd[i]), "perm": 0, "run": 2}
+		S.slots[int(i)] = {"id": String(bd[i]), "tier": 2}
 		S.unlocked[int(i)] = true
 	S.recompute()
 	S.spawn_hold = true

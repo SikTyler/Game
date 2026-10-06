@@ -147,6 +147,7 @@ var run_opts: Dictionary = {"mode": "normal", "modifiers": []}
 var last_seed: int = 0
 var menu_msg: String = ""
 var drag_card: int = -1              # run: draft card being dragged onto the grid
+var bld_drag: int = -1               # run: placed building pressed (V2 P7a drag-merge)
 var drag_start: Vector2 = Vector2.ZERO
 var aim_special: int = -1            # run: targeted special waiting for a field click
 var banish_mode: bool = false        # run: next card click banishes
@@ -659,11 +660,24 @@ func rotate_weapon(d: int = 1) -> void:
 
 func place_at(i: int) -> void:
 	if S != null and S.pending_place != "" and i >= 0:
-		_handle(S.place(i))
+		# V2 P7a: a duplicate card dropped on its T1 twin merges into it
+		var tw: int = S.owner_at(i)
+		if tw >= 0 and S.card_merge_targets(S.pending_place).has(tw):
+			_handle(S.merge_card(tw))
+		else:
+			_handle(S.place(i))
 		_rebuild_ui()
-	elif S != null and S.pending_upgrade != "" and i >= 0:
-		_handle(S.apply_upgrade(i))
-		_rebuild_ui()
+
+
+## V2 P7a: fold building `a` into its twin `b` (drag-merge / Merge button).
+func merge_into(a: int, b: int) -> void:
+	if S == null or a < 0 or b < 0:
+		return
+	var ev: Array = S.merge(a, b)
+	if not ev.is_empty():
+		sel = b
+	_handle(ev)
+	_rebuild_ui()
 
 
 # ------------------------------------------------------------- fx helpers
@@ -1083,7 +1097,14 @@ func _handle(events: Array) -> void:
 			"sapper_blast":
 				_ring(ev["pos"], 56.0, 0.45, ENEMY)
 				juice.shake(1.0)
-			"upgrade_mode":
+			"merged":
+				slot_pop[int(ev["slot"])] = 0.45
+				level_burst = 0.5
+				juice.shake(0.6 + 0.3 * float(int(ev["tier"])))
+				sfx_play("click", 0.9 + 0.15 * float(int(ev["tier"])))
+				_pop(S.fp_pos(int(ev["slot"])) + Vector2(0, -40), "T%d!" % int(ev["tier"]), 1.2, GOLD, 34)
+				rebuild = true
+			"merge_offer", "mod_taken":
 				rebuild = true
 			"perk_taken":
 				_pop(TowerState.CENTER + Vector2(0, -230), String(ev["name"]), 1.4, GOLD, 30)
@@ -1091,7 +1112,7 @@ func _handle(events: Array) -> void:
 			"pick_applied":
 				level_burst = 0.35
 				rebuild = true
-			"levelup", "perk_offer", "draft_offer", "draft_reroll", "draft_banish", "speed", "mutation_offer", "mutation_taken", "track", "target_mode", "place_cancelled", "upgrade_cancelled":
+			"levelup", "perk_offer", "draft_offer", "draft_reroll", "draft_banish", "speed", "mutation_offer", "mutation_taken", "track", "target_mode", "place_cancelled":
 				rebuild = true
 			"rotated":
 				sfx_play("click", 1.15)
@@ -1156,6 +1177,8 @@ func _input(event: InputEvent) -> void:
 	if mb.button_index == MOUSE_BUTTON_LEFT and not mb.pressed:
 		if aim_down:
 			end_aim()
+		if bld_drag >= 0:
+			_end_bld_drag(mb.position)
 		if drag_card >= 0 or op_drag:
 			_end_drag(mb.position)
 			get_viewport().set_input_as_handled()
@@ -1175,8 +1198,6 @@ func _input(event: InputEvent) -> void:
 				aim_special = -1
 			elif S != null and S.pending_place != "":
 				_handle(S.cancel_place())
-			elif S != null and S.pending_upgrade != "":
-				_handle(S.cancel_upgrade())
 			else:
 				sel = pick_at(s2w(mb.position))
 			_rebuild_ui()
@@ -1236,16 +1257,18 @@ func tap_at(pos: Vector2) -> void:
 		return
 	var wp: Vector2 = s2w(pos)
 	if S.pending_place != "":
+		var u: int = pick_at(wp)
+		if u >= 0 and S.card_merge_targets(S.pending_place).has(u):
+			place_at(u)
+			return
 		var a: int = place_anchor(wp, S.pending_place)
 		if a >= 0:
 			place_at(a)
 		return
-	if S.pending_upgrade != "":
-		var u: int = pick_at(wp)
-		if u >= 0:
-			place_at(u)
-		return
 	sel = pick_at(wp)
+	if sel >= 0 and S.id_at(sel) != "":
+		bld_drag = sel   # V2 P7a: release over a twin merges (_end_bld_drag)
+		drag_start = pos
 	if sel < 0 or (S.id_at(sel) == "" and not TowerState.is_core_cell(sel)):
 		aim_down = true   # held >= AIM_HOLD_S off any building: manual aim (V2 P4)
 		aim_t = 0.0
@@ -1298,6 +1321,18 @@ func begin_drag_card(idx: int) -> void:
 
 ## Drag release: draft card -> grid cell (choose + place); Outpost palette ->
 ## map (place).
+## V2 P7a: a building pressed and released over its same-id, same-tier twin
+## merges into the twin.
+func _end_bld_drag(pos: Vector2) -> void:
+	var a: int = bld_drag
+	bld_drag = -1
+	if S == null or screen != "run" or pos.distance_to(drag_start) <= 12.0 or not field_rect().has_point(pos):
+		return
+	var b: int = pick_at(s2w(pos))
+	if b >= 0 and S.merge_targets(a).has(b):
+		merge_into(a, b)
+
+
 func _end_drag(pos: Vector2) -> void:
 	var card: int = drag_card
 	var opd: bool = op_drag
@@ -1307,18 +1342,19 @@ func _end_drag(pos: Vector2) -> void:
 	if card >= 0 and screen == "run" and S != null:
 		if moved and field_rect().has_point(pos) and card < S.draft.size():
 			var cd: Dictionary = S.draft[card]
+			# V2 P7a: a duplicate card dropped on its T1 twin merges into it
+			var tw: int = pick_at(s2w(pos))
+			if tw >= 0 and String(cd.get("kind", "")) == "new" and S.card_merge_targets(String(cd["id"])).has(tw):
+				_handle(S.choose_card(card))
+				if S.pending_place != "":
+					_handle(S.merge_card(tw))
+				_rebuild_ui()
+				return
 			var i: int = place_anchor(s2w(pos), String(cd["id"])) if String(cd.get("kind", "")) == "new" else pick_at(s2w(pos))
 			if i >= 0 and String(cd.get("kind", "")) == "new" and Battle.place_reason(self, i, String(cd["id"])) == "":
 				_handle(S.choose_card(card))
 				if S.pending_place != "":
 					_handle(S.place(i))
-				_rebuild_ui()
-				return
-			# drag an upgrade card onto the building it upgrades
-			if i >= 0 and String(cd.get("kind", "")) == "plus" and S.upgrade_targets(String(cd["id"])).has(i):
-				_handle(S.choose_card(card))
-				if S.pending_upgrade != "":
-					_handle(S.apply_upgrade(i))
 				_rebuild_ui()
 				return
 		elif not moved:

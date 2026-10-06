@@ -12,6 +12,7 @@ const TowerState := preload("res://TowerState.gd")
 const PickDB := preload("res://data/PickDB.gd")
 const PerkDB := preload("res://data/PerkDB.gd")
 const ModifierDB := preload("res://data/ModifierDB.gd")
+const MergeDB := preload("res://data/MergeDB.gd")
 const Kit := preload("res://ui/Kit.gd")
 
 const FAM_LABEL: Dictionary = {"building": "BUILDING", "hut": "TROOP HUT", "pack": "UPGRADE PACK", "special": "SPECIAL ATTACK", "insight": "INSIGHT"}
@@ -21,6 +22,8 @@ static func _offer(m) -> Dictionary:
 	var S = m.S
 	if S.mutation_offer.size() > 0:
 		return {"kind": "mutation", "ids": S.mutation_offer}
+	if not S.merge_offer.is_empty():
+		return {"kind": "mod", "ids": MergeDB.offer(String(S.merge_offer["id"]), int(S.merge_offer["tier"]))}
 	if S.perk_offer.size() > 0:
 		return {"kind": "perk", "ids": S.perk_offer}
 	if S.draft.size() > 0:
@@ -59,6 +62,9 @@ static func build(m) -> void:
 					var mid: String = String(ids[k])
 					var md: Dictionary = ModifierDB.MUTATIONS.get(mid, {})
 					Kit.hit(m, r, func() -> void: m._handle(S.choose_mutation(idx)); m._rebuild_ui(), "%s\n%s" % [String(md.get("name", mid)), String(md.get("desc", ""))], "DMUT " + String(md.get("name", mid)), true, Kit.MAG)
+				"mod":
+					var mo: Dictionary = ids[k]
+					Kit.hit(m, r, func() -> void: m._handle(S.choose_mod(idx)); m._rebuild_ui(), "%s\n%s\nClick to fit this mod" % [String(mo.get("name", "")), String(mo.get("desc", ""))], "DMOD %d" % k, true, Kit.CYAN)
 		if String(off["kind"]) == "draft":
 			var by: float = lr.end.y - 112.0
 			var bw: float = (lr.size.x - 40.0) * 0.5
@@ -84,13 +90,13 @@ static func card_type(m, cd: Dictionary) -> Dictionary:
 	var rw: String = String(cd.get("reward", ""))
 	if kind == "new":
 		var dup: bool = bool(cd.get("dup", false))
+		if bool(cd.get("merge", false)):
+			return {"type": "BUILDING", "col": Kit.GOLD, "icon": "icon_tier",
+				"sub": "Merge into your T1 %s (-> T2) or place another" % nm,
+				"how": "BUILDING: drop on your T1 %s to merge it into a T2, or on an empty cell" % nm}
 		return {"type": "BUILDING", "col": Kit.RARITY["rare"], "icon": "ui_blueprint",
 			"sub": "Place another %s on the grid" % nm if dup else "Place it on a grid cell",
 			"how": "BUILDING: drag onto an empty cell (or click, then click a cell)"}
-	if kind == "plus":
-		return {"type": "UPGRADE", "col": Kit.GREEN, "icon": "icon_tier",
-			"sub": "Drag onto your %s  ·  Lv%d -> %d" % [nm, int(cd.get("lvl", 1)), int(cd.get("to", 2))],
-			"how": "UPGRADE: drag onto your %s (or click, then click it)" % nm}
 	if rw == "ability" or kind == "special":
 		var have: bool = S != null and S.specials.any(func(s: Variant) -> bool: return String((s as Dictionary)["id"]) == id)
 		return {"type": "ABILITY", "col": Kit.GEM, "icon": "ui_cooldown",
@@ -124,9 +130,13 @@ static func draw(m) -> void:
 		var kind: String = String(off["kind"])
 		var title: String = "DRAFT — wave %d" % int(S.wave)
 		if kind == "perk":
-			title = "PERK — wave %d" % int(S.wave)
+			title = "GOLD PERK — level %d" % int(S.level)
 		elif kind == "mutation":
 			title = "ENDLESS MUTATION"
+		elif kind == "mod":
+			title = "MERGED: %s T%d" % [String(PickDB.get_def(String(S.merge_offer["id"])).get("name", "")).to_upper(), int(S.merge_offer["tier"])]
+		elif kind == "draft":
+			title = "DRAFT — level %d" % int(S.level)
 		Kit.t(m, title, Vector2(x, lr.position.y + 34), 22, Kit.GOLD if kind != "mutation" else Kit.MAG, HORIZONTAL_ALIGNMENT_LEFT, w)
 		if kind == "draft" and m.banish_mode:
 			Kit.t(m, "BANISH: pick a card", Vector2(x + w, lr.position.y + 34), 15, Kit.ENEMY, HORIZONTAL_ALIGNMENT_RIGHT, w * 0.5)
@@ -143,6 +153,10 @@ static func draw(m) -> void:
 				"mutation":
 					var md: Dictionary = ModifierDB.MUTATIONS.get(String(ids[k]), {})
 					_draw_simple(m, r, "icon_endless", "MUTATION", String(md.get("name", "")), String(md.get("desc", "")), Kit.MAG, k)
+				"mod":
+					var mo2: Dictionary = ids[k]
+					var t3: bool = int(S.merge_offer["tier"]) >= 3
+					_draw_simple(m, r, String(S.merge_offer["id"]), "T3 CAPSTONE" if t3 else "T2 MOD", String(mo2.get("name", "")), String(mo2.get("desc", "")), Kit.GOLD if t3 else Kit.CYAN, k)
 		if kind == "draft":
 			Kit.t(m, "The battle keeps running while you choose", Vector2(x, lr.end.y - 22), 14, Kit.DIM, HORIZONTAL_ALIGNMENT_LEFT, w)
 		return
@@ -153,16 +167,8 @@ static func draw(m) -> void:
 		Kit.icon(m, S.pending_place, Rect2(x + 14, lr.position.y + 70, 80, 80))
 		Kit.t(m, String(d2["name"]), Vector2(x + 108, lr.position.y + 100), 22, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w - 120)
 		Kit.wrap(m, String(d2["desc"]), Vector2(x + 14, lr.position.y + 176), 15, Kit.DIM, w - 28, 3)
-		Kit.wrap(m, "Click a glowing cell on the grid. Enemies never attack buildings: they flow around them, or squeeze slowly through a sealed wall.", Vector2(x, lr.position.y + 330), 15, Kit.DIM, w, 4)
-		return
-	if S.pending_upgrade != "":
-		var d3: Dictionary = PickDB.get_def(S.pending_upgrade)
-		Kit.t(m, "APPLY UPGRADE", Vector2(x, lr.position.y + 34), 22, Kit.GOLD, HORIZONTAL_ALIGNMENT_LEFT, w)
-		Kit.panel(m, Rect2(x, lr.position.y + 54, w, 180), Kit.rarity_col(String(d3["rarity"])), Kit.PANEL2)
-		Kit.icon(m, S.pending_upgrade, Rect2(x + 14, lr.position.y + 70, 80, 80))
-		Kit.t(m, String(d3["name"]) + "  +1 level", Vector2(x + 108, lr.position.y + 100), 22, Kit.TEXT, HORIZONTAL_ALIGNMENT_LEFT, w - 120)
-		Kit.wrap(m, String(d3["desc"]), Vector2(x + 14, lr.position.y + 176), 15, Kit.DIM, w - 28, 3)
-		Kit.wrap(m, "Click (or drag onto) a glowing %s on the grid to level it up." % String(d3["name"]), Vector2(x, lr.position.y + 330), 15, Kit.DIM, w, 4)
+		var merge_txt: String = "" if S.card_merge_targets(S.pending_place).is_empty() else " Or click your glowing T1 %s to MERGE it into a T2 (a mod pick follows)." % String(d2["name"])
+		Kit.wrap(m, "Click a glowing cell on the grid.%s Enemies never attack buildings: they flow around them, or squeeze slowly through a sealed wall." % merge_txt, Vector2(x, lr.position.y + 330), 15, Kit.DIM, w, 5)
 		return
 	_draw_info(m, lr, x, w)
 

@@ -59,7 +59,7 @@ static func _facing(t) -> void:
 	S.wave_t = S.wave_time - 0.001
 	S.tick(0.05)
 	t._check("P3c facing persists across recomputes and waves", S.rot_at(n) == 7)
-	S.slots[t._at(-3, 3)] = {"id": "mine", "perm": 0, "run": 1}
+	S.slots[t._at(-3, 3)] = {"id": "mine", "tier": 1}
 	S.recompute()
 	t._check("P3c radial / non-weapon buildings do not rotate", S.rotate(t._at(-3, 3), 1).is_empty())
 	S.pending_place = "flak"
@@ -88,7 +88,7 @@ static func _body(S, p: Vector2, hp: float = 999.0) -> int:
 static func _arc(t) -> void:
 	var S = _open(t)
 	var a: int = t._at(-3, 0)
-	S.slots[a] = {"id": "gun", "perm": 0, "run": 1, "rot": 6}   # faces north
+	S.slots[a] = {"id": "gun", "tier": 1, "rot": 6}   # faces north
 	S.recompute()
 	_clear_weapons(S, "gun")
 	var from: Vector2 = S.fp_pos(a)
@@ -113,7 +113,7 @@ static func _fixed(t) -> void:
 	# Railgun: a fixed 2x2 lane north; a body east is ignored, a body in the lane fires it.
 	var S = _open(t)
 	var r: int = t._at(-7, -1)
-	S.slots[r] = {"id": "railgun", "perm": 0, "run": 1, "rot": 6}
+	S.slots[r] = {"id": "railgun", "tier": 1, "rot": 6}
 	S.recompute()
 	_clear_weapons(S, "railgun")
 	var from: Vector2 = S.fp_pos(r)
@@ -132,7 +132,7 @@ static func _fixed(t) -> void:
 	# Flamer: a fixed 50 deg cone; a body 40 deg off the facing is outside it.
 	var F = _open(t)
 	var f: int = t._at(-3, 0)
-	F.slots[f] = {"id": "flak", "perm": 0, "run": 1, "rot": 6}
+	F.slots[f] = {"id": "flak", "tier": 1, "rot": 6}
 	F.recompute()
 	_clear_weapons(F, "flak")
 	var ff: Vector2 = F.fp_pos(f)

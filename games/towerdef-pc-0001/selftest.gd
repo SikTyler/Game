@@ -12,6 +12,7 @@ const StGearVis := preload("res://tests/st_gearvis.gd")
 const StLoot := preload("res://tests/st_loot.gd")
 const StOutpost := preload("res://tests/st_outpost.gd")
 const StCoreLevel := preload("res://tests/st_corelevel.gd")
+const StMerge := preload("res://tests/st_merge.gd")
 const FirePatterns := preload("res://FirePatterns.gd")
 const WeaponDB := preload("res://data/WeaponDB.gd")
 const TowerState := preload("res://TowerState.gd")
@@ -76,6 +77,7 @@ func _at(dr: int, dc: int) -> int:
 func _fresh(save: Dictionary = {}) -> RefCounted:
 	var S = TowerState.new()
 	S.setup(1234, BaseMeta.normalize(save))
+	S.draft_queue.clear()   # V2 P7a: stages isolate their own drafts (the opening draft has its own check)
 	return S
 
 
@@ -93,22 +95,22 @@ func _initialize() -> void:
 	# --- Stage 2: stats math + adjacency -------------------------------------
 	# REDESIGN (deliberate): building numbers follow REDESIGN_SYSTEMS §2.3
 	# (L1 sheet, +35% main stat per level); Armory is +15% to neighbours.
-	S.slots[_r(7)] = {"id": "gun", "perm": 0, "run": 1}
+	S.slots[_r(7)] = {"id": "gun", "tier": 1}
 	S.recompute()
 	var gun_dmg: float = float((S.stats["weapons"] as Array)[0]["dmg"])
 	_check("gatling L1 6 dmg x building scale (Steadfast-free)", is_equal_approx(gun_dmg, 6.0 * TowerState.bld_dmg() * _dm("gun")))
-	S.slots[_at(-2, -1)] = {"id": "armory", "perm": 0, "run": 1}   # touches the gun and the Core
+	S.slots[_at(-2, -1)] = {"id": "armory", "tier": 1}   # touches the gun and the Core
 	S.recompute()
 	var buffed: float = float((S.stats["weapons"] as Array)[0]["dmg"])
 	_check("armory buffs adjacent gun +15%", is_equal_approx(buffed, gun_dmg * 1.15) and _has_link(S, _at(-2, -1), _r(7), "ARM") and _has_link(S, _at(-2, -1), TowerState.CORE_SLOT, "ARM"))
-	S.slots[_r(0)] = {"id": "armory", "perm": 0, "run": 1}   # NOT adjacent to 7
+	S.slots[_r(0)] = {"id": "armory", "tier": 1}   # NOT adjacent to 7
 	S.recompute()
 	_check("armory does not buff non-adjacent", is_equal_approx(float((S.stats["weapons"] as Array)[0]["dmg"]), buffed))
 	S = _fresh()
-	S.slots[_r(16)] = {"id": "mine", "perm": 0, "run": 2}
-	S.slots[_r(18)] = {"id": "bulwark", "perm": 0, "run": 1}
+	S.slots[_r(16)] = {"id": "mine", "tier": 2}
+	S.slots[_r(18)] = {"id": "bulwark", "tier": 1}
 	S.recompute()
-	_check("mine L2 cash/s = Core 2.0 + 0.8x1.35 (V2: no Steadfast trait)", is_equal_approx(float(S.stats["cash_ps"]), 2.0 + 0.8 * 1.35))
+	_check("mine T2 cash/s = Core 2.0 + 0.8x1.8 (V2 P7a merge tiers)", is_equal_approx(float(S.stats["cash_ps"]), 2.0 + 0.8 * 1.8))
 	_check("bulwark raises max hp +40", is_equal_approx(float(S.stats["max_hp"]), 160.0))
 	_check("bulwark heals by its bonus", is_equal_approx(S.hp, 160.0))
 
@@ -149,17 +151,21 @@ func _initialize() -> void:
 			has_boss = true
 	_check("wave 10 spawns a boss", S.wave == 10 and has_boss)
 
-	# --- Stage 6: draft → place, plus-card, determinism -----------------------
-	# REDESIGN (deliberate): drafts follow the wave cadence (after w1/2/3, then
-	# every 2nd + boss), not XP; an XP level-up banks a free reroll instead.
-	S = _fresh()
+	# --- Stage 6: draft → place, merge, determinism ---------------------------
+	# V2 P7a (deliberate): drafts come from XP level-ups (+ one opening draft);
+	# cleared waves open none (a boss wave still guarantees an Epic+ hand).
+	S = TowerState.new()
+	S.setup(1234, BaseMeta.normalize({}))
 	S.spawn_hold = true
-	S.xp = S.xp_need()
 	ev = S.tick(0.05)
-	_check("XP level-up banks a reroll, opens no draft", S.level == 2 and S.draft.is_empty() and S.rerolls_left == 1 and _evts(ev, "levelup").size() == 1)
+	_check("V2 P7a the opening draft opens on the first tick", S.draft.size() == 3 and _evts(ev, "draft_offer").size() == 1)
+	S.draft = []
 	S.wave_t = S.wave_time - 0.001
 	ev = S.tick(0.05)
-	_check("wave 1 cleared opens a 3-card draft", S.wave == 2 and S.draft.size() == 3 and _evts(ev, "draft_offer").size() == 1)
+	_check("V2 P7a clearing a normal wave opens no draft", S.wave == 2 and S.draft.is_empty() and _evts(ev, "draft_offer").is_empty())
+	S.xp = S.xp_need()
+	ev = S.tick(0.05)
+	_check("V2 P7a an XP level-up opens a 3-card draft (no banked reroll)", S.level == 2 and S.draft.size() == 3 and _evts(ev, "levelup").size() == 1 and _evts(ev, "draft_offer").size() == 1 and S.rerolls_left == 0)
 	var eco_n: int = 0
 	for c in S.draft:
 		if (c["tags"] as Array).has("eco"):
@@ -177,20 +183,21 @@ func _initialize() -> void:
 	ev = S.place(_at(-3, -3))
 	_check("placed building in free slot (2x2 footprint)", S.id_at(_at(-3, -3)) == "mortar" and S.pending_place == "" and S.owner_at(_at(-2, -2)) == _at(-3, -3) and is_equal_approx(S.time_scale(), 1.0))
 	S.grant_draft()
-	# FEEDBACK-1 (deliberate): a duplicate WEAPON is a new individual building;
-	# a duplicate non-weapon is an upgrade applied onto the existing building.
+	# V2 P7a (deliberate): every duplicate is a building card; dropped on a T1
+	# twin it merges into a T2 (no plus / upgrade cards any more).
 	var dup: Dictionary = Draft.card_for("mortar", S._draft_ctx(""))
 	_check("FB1 duplicate weapon = new individual building", String(dup["kind"]) == "new" and bool(dup["dup"]) and String(dup["reward"]) == "building")
-	S.slots[_r(8)] = {"id": "mine", "perm": 0, "run": 1}
+	S.slots[_r(8)] = {"id": "mine", "tier": 1}
 	S.recompute()
-	var plus: Dictionary = Draft.card_for("mine", S._draft_ctx(""))
-	_check("owned non-weapon offers only a plus card (Lv1 -> 2)", String(plus["kind"]) == "plus" and int(plus["lvl"]) == 1 and int(plus["to"]) == 2 and String(plus["reward"]) == "upgrade")
-	S.draft = [plus]
+	var dupm: Dictionary = Draft.card_for("mine", S._draft_ctx(""))
+	_check("V2 P7a a duplicate card can merge into its T1 twin (no plus cards)", String(dupm["kind"]) == "new" and bool(dupm["dup"]) and bool(dupm["merge"]) and String(dupm["reward"]) == "building")
+	S.draft = [dupm]
 	ev = S.choose_card(0)
-	_check("FB1 an upgrade waits to be applied onto its building", S.lvl_at(_r(8)) == 1 and S.pending_upgrade == "mine" and _evts(ev, "upgrade_mode").size() == 1 and (_evts(ev, "upgrade_mode")[0]["slots"] as Array) == [_r(8)])
-	_check("FB1 apply_upgrade refuses another building", S.apply_upgrade(_r(6)).is_empty() and S.pending_upgrade == "mine")
-	ev = S.apply_upgrade(_r(8))
-	_check("plus card raises owned level (applied by click)", S.lvl_at(_r(8)) == 2 and S.pending_upgrade == "" and _evts(ev, "building_level").size() == 1)
+	_check("V2 P7a the card waits: place it, or drop it on the T1 twin", S.pending_place == "mine" and (_evts(ev, "place_mode")[0]["merge"] as Array) == [_r(8)])
+	_check("V2 P7a merge_card refuses a cell that is not a T1 twin", S.merge_card(_r(6)).is_empty() and S.pending_place == "mine")
+	ev = S.merge_card(_r(8))
+	_check("V2 P7a the card dropped on the T1 merges it into a T2 and opens its mod pick", S.tier_at(_r(8)) == 2 and S.pending_place == "" and _evts(ev, "merged").size() == 1 and _evts(ev, "merge_offer").size() == 1 and int(S.merge_offer["tier"]) == 2)
+	S.choose_mod(0)
 	# Every card names its reward type; perks land in the Perks list.
 	var typed: bool = true
 	var rr := RandomNumberGenerator.new()
@@ -218,12 +225,12 @@ func _initialize() -> void:
 	# REDESIGN (deliberate): cash buys the 5 Core tracks; buildings level only
 	# through duplicate picks; rings open by track total (no per-cell unlock).
 	S = _fresh()
-	S.slots[_r(7)] = {"id": "gun", "perm": 0, "run": 1}
+	S.slots[_r(7)] = {"id": "gun", "tier": 1}
 	S.recompute()
 	S.cash = 5.0
 	_check("track refused when broke", S.buy_track("dmg").is_empty() and S.core_run_lvl == 0)
 	S.cash = 1000.0
-	_check("cash cannot level a building", S.upgrade(_r(7)).is_empty() and S.lvl_at(_r(7)) == 1)
+	_check("cash cannot level a building", S.upgrade(_r(7)).is_empty() and S.tier_at(_r(7)) == 1)
 	S.upgrade(_r(12))
 	_check("Core cell upgrade = Damage track", S.core_run_lvl == 1 and int(S.tracks["dmg"]) == 1 and S.cash < 1000.0)
 	_check("no per-cell run unlocks", S.unlock_plot(_at(-4, -4)).is_empty() and not bool(S.unlocked[_at(-4, -4)]))
@@ -649,7 +656,7 @@ func _mass_horde_world() -> void:
 	var wall: Array = []
 	for c in range(-7, 8):   # V2 P3b: 15 small cells (390 px) five rows north of the Core
 		var wi: int = _at(-5, c)
-		W.slots[wi] = {"id": "barricade", "perm": 0, "run": 2}
+		W.slots[wi] = {"id": "barricade", "tier": 2}
 		wall.append(wi)
 	W.recompute()
 	W.stats["weapons"] = []
@@ -776,7 +783,7 @@ func _mass_horde_world() -> void:
 		G.stats["weapons"] = []
 		if sealed:
 			for rc in TowerState.CORE_RING:
-				G.slots[int(rc)] = {"id": "barricade", "perm": 0, "run": 3}
+				G.slots[int(rc)] = {"id": "barricade", "tier": 3}
 		G.recompute()
 		G.stats["weapons"] = []
 		_mh_field(G, "mite", 600, TowerState.slot_pos(_rc(2, 3)) + Vector2(0, -150), 0.0, 120.0)
@@ -820,7 +827,10 @@ func _mass_horde_world() -> void:
 ## deg arc, the Flamer / Railgun fire a fixed cone / lane along their facing
 ## (away from the Core by default), x1.2 / x1.4 / x1.6 direction damage, verbs
 ## moved to FirePatterns; re-recorded (was ebffce97).
-const HORDE_FP_GOLDEN: String = "f7c5cf7d36e4e34cad1d81b26ac73cc19a9080506dd3a8b49674bb5d2ece99d6"
+## V2 P7a (deliberate): run buildings use merge tiers (x1.8 per tier, pattern
+## extras at T2 = the old L3) and the fingerprint board's "level 2" buildings
+## are now T2 (was x1.35); re-recorded (was f7c5cf7d).
+const HORDE_FP_GOLDEN: String = "0048784eda10a8d8535e45882563830f3d927fb49e6f4471835ee16563f34d24"
 ## MASS_HORDE §Design content (designed mass waves, the shipping ruleset).
 func _mfresh(seed_value: int = 1234):
 	var S = TowerState.new()
@@ -905,7 +915,7 @@ func _mass_content_stages() -> void:
 		SS.unlocked[i] = i != TowerState.CORE_SLOT
 	SS.spawn_hold = true
 	var bi: int = _rc(1, 3)
-	SS.slots[bi] = {"id": "barricade", "perm": 0, "run": 1}
+	SS.slots[bi] = {"id": "barricade", "tier": 1}
 	SS.recompute()
 	SS.stats["weapons"] = []
 	SS.stats["armor"] = 0.0
@@ -1037,13 +1047,13 @@ func _horde_stages() -> void:
 	var SW = _fresh()
 	SW.spawn_hold = true
 	var wi: int = _rc(1, 2)
-	SW.slots[wi] = {"id": "barricade", "perm": 0, "run": 1}
+	SW.slots[wi] = {"id": "barricade", "tier": 1}
 	SW.unlocked[wi] = true
 	SW.recompute()
 	SW._spawn("drone", [], SW.slot_pos(wi) + Vector2(0, -20))
 	SW._spawn("drone", [], SW.slot_pos(wi) + Vector2(0, -900))
 	SW.eh.rebuild()
-	SW._wall_auras([])
+	SW._wall_auras(0.05, [])
 	_check("FB2 Wall aura slows bodies on any side, not far ones", SW.en.slow_t[SW.en.order[0]] > 0.0 and SW.en.slow_t[SW.en.order[1]] == 0.0)
 	var SC = _fresh()
 	_check("FB2 map: the horde spawn ring lies beyond the framed view ring", SC.spawn_r() > SC.view_r())
@@ -1176,7 +1186,7 @@ func _engine_b_stages() -> void:
 	gsv["gem_log"] = {"boss": 4}
 	var gn: Dictionary = BaseMeta.normalize(gsv)
 	_check("FB1 gem blocks dropped on load", not gn.has("gems") and not gn.has("gem_log") and not gn.has("boss_gems_today"))
-	S.slots[_r(7)] = {"id": "mine", "perm": 0, "run": 1}
+	S.slots[_r(7)] = {"id": "mine", "tier": 1}
 	S.wave = 11
 	S.recompute()
 	# REDESIGN: every cash amount scales with the run cash index 1.10^(w-1).
@@ -1225,7 +1235,7 @@ func _engine_b_stages() -> void:
 	_check("elite takes damage after shield breaks", float(el["hp"]) <= 0.0)
 	S = _fresh()
 	S.spawn_hold = true
-	S.slots[_r(7)] = {"id": "tesla", "perm": 0, "run": 3}
+	S.slots[_r(7)] = {"id": "tesla", "tier": 3}
 	S.recompute()
 	S.stats["weapons"] = [_weapon(S, "tesla")]
 	S._spawn("elite", [])
@@ -1252,32 +1262,32 @@ func _engine_b_stages() -> void:
 	# REDESIGN (deliberate): the S1-S11 adjacency web and the DR stack are
 	# replaced by the redesign building sheet; these checks cover it.
 	S = _open_run()
-	S.slots[_r(7)] = {"id": "gun", "perm": 0, "run": 1}
+	S.slots[_r(7)] = {"id": "gun", "tier": 1}
 	S.recompute()
 	var gr: float = float(_weapon(S, "gun")["rate"])
 	_check("gatling L1: 6 dmg, 2.0/s", is_equal_approx(float(_weapon(S, "gun")["dmg"]), 6.0 * TowerState.bld_dmg() * _dm("gun")) and is_equal_approx(gr, 2.0))
-	S.slots[_r(7)] = {"id": "gun", "perm": 0, "run": 5}
+	S.slots[_r(7)] = {"id": "gun", "tier": 3}
 	S.recompute()
-	_check("level-ups +35% main stat (L5 = 1.35^4)", is_equal_approx(float(_weapon(S, "gun")["dmg"]), 6.0 * TowerState.bld_dmg() * _dm("gun") * pow(1.35, 4.0)) and S.lvl_at(_r(7)) == 5)
-	S.slots[_r(7)] = {"id": "gun", "perm": 0, "run": 9}
-	_check("building level capped at 5", S.lvl_at(_r(7)) == 5 and TowerState.lvl_cap() == 5)
-	S.slots[_r(7)] = {"id": "gun", "perm": 0, "run": 1}
-	S.slots[_at(-2, 1)] = {"id": "oilmill", "perm": 0, "run": 1}   # touches the gun (and the Core)
+	_check("V2 P7a merge tiers x1.8 main stat (T3 = 1.8^2)", is_equal_approx(float(_weapon(S, "gun")["dmg"]), 6.0 * TowerState.bld_dmg() * _dm("gun") * pow(1.8, 2.0)) and S.tier_at(_r(7)) == 3)
+	S.slots[_r(7)] = {"id": "gun", "tier": 9}
+	_check("V2 P7a building tier capped at 3", S.tier_at(_r(7)) == 3 and TowerState.lvl_cap() == 3)
+	S.slots[_r(7)] = {"id": "gun", "tier": 1}
+	S.slots[_at(-2, 1)] = {"id": "oilmill", "tier": 1}   # touches the gun (and the Core)
 	S.recompute()
 	_check("oil mill: +2.0 cash/s, adjacent buildings -10% rate (never the Core)", is_equal_approx(float(_weapon(S, "gun")["rate"]), gr * 0.9) and _has_link(S, _at(-2, 1), _r(7), "OIL") and not _has_link(S, _at(-2, 1), TowerState.CORE_SLOT, "OIL"))
 	S.slots[_at(-2, 1)] = {}
-	S.slots[_rc(4, 1)] = {"id": "beacon", "perm": 0, "run": 1}
+	S.slots[_rc(4, 1)] = {"id": "beacon", "tier": 1}
 	S.recompute()
 	var gb: Dictionary = _weapon(S, "gun")
 	_check("beacon radius 4 cells: +10% rate, +0.3 range", is_equal_approx(float(gb["rate"]), gr * 1.1) and is_equal_approx(float(gb["range"]), 3.3 * TowerState.cpx()) and _has_link(S, _rc(4, 1), _r(7), "BEA"))
 	S.slots[_rc(4, 1)] = {}
-	S.slots[_at(-7, 0)] = {"id": "beacon", "perm": 0, "run": 1}
+	S.slots[_at(-7, 0)] = {"id": "beacon", "tier": 1}
 	S.recompute()
 	_check("beacon does not reach 5 cells away", is_equal_approx(float(_weapon(S, "gun")["rate"]), gr))
 	# Aegis: Core shield absorbs hits, regenerates after 4 s without damage.
 	S = _fresh()
 	S.spawn_hold = true
-	S.slots[_r(13)] = {"id": "aegis", "perm": 0, "run": 1}
+	S.slots[_r(13)] = {"id": "aegis", "tier": 1}
 	S.recompute()
 	S.shield = float(S.stats["shield_max"])
 	_check("aegis shield 60 pts", is_equal_approx(S.shield, 60.0))
@@ -1297,7 +1307,7 @@ func _engine_b_stages() -> void:
 	# Vault interest: Core 2% + Vault 2%, cap (50 + 100) x cash index.
 	S = _fresh()
 	S.spawn_hold = true
-	S.slots[_r(7)] = {"id": "vault", "perm": 0, "run": 1}
+	S.slots[_r(7)] = {"id": "vault", "tier": 1}
 	S.recompute()
 	S.cash = 100.0
 	S.wave_t = S.wave_time - 0.001
@@ -1310,7 +1320,7 @@ func _engine_b_stages() -> void:
 	# Bounty Post: +20% kill cash for kills within 3 cells.
 	S = _fresh()
 	S.spawn_hold = true
-	S.slots[_rc(2, 3)] = {"id": "bounty", "perm": 0, "run": 1}
+	S.slots[_rc(2, 3)] = {"id": "bounty", "tier": 1}
 	S.recompute()
 	S.add_enemy(_enemy("drone", TowerState.slot_pos(_rc(2, 3)) + Vector2(0, -100), 0.0))
 	S.cash = 0.0
@@ -1322,7 +1332,7 @@ func _engine_b_stages() -> void:
 	_check("bounty: +20% kill cash only in radius", is_equal_approx(near_c, 1.2) and is_equal_approx(S.cash, 1.0))
 	# Mortar min range, Cryo Spire slow aura, Obelisk lifesteal.
 	S = _open_run()
-	S.slots[_rc(2, 3)] = {"id": "mortar", "perm": 0, "run": 1}
+	S.slots[_rc(2, 3)] = {"id": "mortar", "tier": 1}
 	S.recompute()
 	S.stats["weapons"] = [_weapon(S, "mortar")]
 	var close_e: Dictionary = _enemy("hauler", TowerState.slot_pos(_rc(2, 3)) + Vector2(0, -50))
@@ -1336,7 +1346,7 @@ func _engine_b_stages() -> void:
 	_sync(S, [far_e])
 	_check("mortar hits 18 dmg beyond min range", is_equal_approx(999.0 - float(far_e["hp"]), 18.0 * TowerState.bld_dmg()))
 	S = _open_run()
-	S.slots[_rc(2, 3)] = {"id": "frost", "perm": 0, "run": 1}
+	S.slots[_rc(2, 3)] = {"id": "frost", "tier": 1}
 	S.recompute()
 	S.stats["weapons"] = [_weapon(S, "frost")]
 	var fe: Dictionary = _enemy("drone", TowerState.slot_pos(_rc(2, 3)) + Vector2(0, -150))
@@ -1346,7 +1356,7 @@ func _engine_b_stages() -> void:
 	# V2 P3d: the mass Cryo field slows 50% (mass_frost_slow) and chills for 10% of a pulse
 	_check("cryo spire: slows 50% + chills (1.5 x 0.1 per pulse, 2/s) + frost flag", is_equal_approx(float(fe["slow_m"]), 0.5) and float(fe["slow_t"]) > 0.0 and is_equal_approx(999.0 - float(fe["hp"]), 1.5 * TowerState.bld_dmg() * TuneRef.num("mass_frost_dmg", 0.1)))
 	S = _fresh()
-	S.slots[_r(7)] = {"id": "obelisk", "perm": 0, "run": 1}
+	S.slots[_r(7)] = {"id": "obelisk", "tier": 1}
 	S.recompute()
 	S.hp = 50.0
 	S._hit(S.add_enemy(_enemy("hauler", TowerState.CENTER + Vector2(0, 300))), 100.0, [])
@@ -1384,19 +1394,20 @@ func _engine_b_stages() -> void:
 		for k in int(PerkDB.DEFS[id]["stack"]):
 			full.append(id)
 	_check("no offer when every perk is maxed", Perks.offer(ra, full).is_empty())
+	# V2 P7a (deliberate): gold perks come every 5th XP level, not perk waves.
 	S = _fresh()
 	S.spawn_hold = true
-	S.wave = 4
-	S.wave_t = S.wave_time - 0.001
+	S.level = 4
+	S.xp = S.xp_need()
 	var pev: Array = S.tick(0.05)
 	var had_draft: bool = S.draft.size() == 3
 	S.draft = [Draft.card_for("pk_arsenal", S._draft_ctx(""))]
 	pev.append_array(S.choose_card(0))
-	_check("AC-23 perk_offer at wave 5 (right after the wave-4 draft)", had_draft and _evts(pev, "perk_offer").size() == 1 and S.perk_offer.size() == 3 and is_equal_approx(S.time_scale(), 1.0))   # FB1: sim stays live
+	_check("V2 P7a gold perk_offer at level 5 (right after its level draft)", had_draft and S.level == 5 and _evts(pev, "perk_offer").size() == 1 and S.perk_offer.size() == 3 and is_equal_approx(S.time_scale(), 1.0))   # FB1: sim stays live
 	S = _fresh()
 	S.spawn_hold = true
-	S.wave = 4
-	S.wave_t = S.wave_time - 0.001
+	S.level = 4
+	S.xp = S.xp_need()
 	pev = S.tick(0.05)
 	_check("AC-23 perk queues behind the draft", S.draft.size() == 3 and S.perk_offer.is_empty() and S.perk_pending == 1)
 	S.draft = [Draft.card_for("gun", S._draft_ctx(""))]
@@ -1466,7 +1477,6 @@ func _engine_b_stages() -> void:
 	wev = S.tick(0.05)
 	var sk: Array = _evts(wev, "wave_skip")
 	_check("AC-33 Wave Skip jumps 2 waves with 50% coins", S.wave == 5 and sk.size() == 1 and int(sk[0]["skipped"]) == 4 and is_equal_approx(S.coins_run, 4.0 * 0.5 + 5.0) and S.kills == kv)
-	_check("skip landing on a perk wave still queues a perk", S.perk_offer.size() == 3 or S.perk_pending > 0)
 
 
 ## Fix-round systems: Core Overcharge (in-run cash sink), Core Overdrive (late
@@ -1478,7 +1488,7 @@ func _fix_round_stages() -> void:
 	# track. FEEDBACK-1 (deliberate): fewer, bigger levels — x1.25 per level on
 	# the Core AND every building (drawback -8% Core rate), cost 60 x 2.1^n.
 	var S = _fresh()
-	S.slots[_r(7)] = {"id": "gun", "perm": 0, "run": 1}
+	S.slots[_r(7)] = {"id": "gun", "tier": 1}
 	S.recompute()
 	var g0: float = float(_weapon(S, "gun")["dmg"])
 	var c0: float = float(_weapon(S, "core")["dmg"])
@@ -1519,7 +1529,7 @@ func _juice_targeting_stages() -> void:
 	_check("target none in range", S.pick_target(from + Vector2(0, -5000), 50.0, "first") == -1)
 	# Per-slot modes: only weapon slots, cycle wraps, fire() uses the mode.
 	S = _fresh()
-	S.slots[_r(7)] = {"id": "gun", "perm": 0, "run": 1}
+	S.slots[_r(7)] = {"id": "gun", "tier": 1}
 	S.recompute()
 	_check("default target mode nearest", String(S.target_modes[_r(7)]) == "nearest")
 	_check("non-weapon slot rejects mode", S.set_target_mode(_r(3), "first").is_empty())
@@ -1633,7 +1643,7 @@ func _pc_board_stages() -> void:
 	var placed: int = 0
 	for i in TowerState.N:
 		if i != TowerState.CORE_SLOT and placed < 12:
-			S.slots[i] = {"id": "mine", "perm": 0, "run": 1}
+			S.slots[i] = {"id": "mine", "tier": 1}
 			placed += 1
 	S.recompute()
 	S.pending_place = "gun"
@@ -1645,8 +1655,8 @@ func _pc_board_stages() -> void:
 	var only_plus: bool = true
 	for k in 50:
 		for c in Draft.roll_hand(rng, S._draft_ctx("")):
-			only_plus = only_plus and String((c as Dictionary)["kind"]) != "new"
-	_check("PC-E2 draft offers no NEW cards at the cap", only_plus)
+			only_plus = only_plus and (String((c as Dictionary)["kind"]) != "new" or bool((c as Dictionary).get("merge", false)))
+	_check("PC-E2 at the cap a building card only comes as a merge into a T1 twin (V2 P7a)", only_plus)
 
 
 ## Strong run for long wave sims: huge core damage + HP so nothing dies.
@@ -1674,7 +1684,7 @@ func _sim_waves(S, waves: int, ev0: Array = []) -> Array:
 			out.append(d2)
 		S.draft.clear()
 		S.pending_place = ""
-		S.pending_upgrade = ""
+		S.merge_offer = {}
 		S.perk_offer.clear()
 	return out
 
@@ -1737,7 +1747,7 @@ func _pc_spawn_stages() -> void:
 				last_tele[int(d3["wave"])] = d3
 		S2.draft.clear()
 		S2.pending_place = ""
-		S2.pending_upgrade = ""
+		S2.merge_offer = {}
 		S2.perk_offer.clear()
 		var l2: Array = S2.enemy_list() if S2.enemy_count() > n0 else []
 		for k in range(n0, l2.size()):
@@ -1798,13 +1808,13 @@ func _pc_building_stages() -> void:
 	# REDESIGN (deliberate): S8-S11 synergies are gone; numbers follow the
 	# redesign sheet (Railgun 60 dmg, Flak air-only x2.5).
 	S = _open_run()
-	S.slots[r2] = {"id": "railgun", "perm": 0, "run": 1}
+	S.slots[r2] = {"id": "railgun", "tier": 1}
 	S.recompute()
 	var rd0: float = float(_weapon(S, "railgun")["dmg"])
 	_check("PC-E3 railgun base dmg 60, 0.25/s, range 7", is_equal_approx(rd0, 60.0 * TowerState.bld_dmg() * _dm("railgun")) and is_equal_approx(float(_weapon(S, "railgun")["rate"]), 0.25))
 	# Railgun pierces along its line.
 	S = _open_run()
-	S.slots[r2] = {"id": "railgun", "perm": 0, "run": 1}
+	S.slots[r2] = {"id": "railgun", "tier": 1}
 	S.recompute()
 	S.stats["weapons"] = [_weapon(S, "railgun")]
 	var rpos: Vector2 = TowerState.slot_pos(r2)
@@ -1818,10 +1828,10 @@ func _pc_building_stages() -> void:
 	_check("PC-E3 railgun pierces the line, misses off-line", float(on1["hp"]) < 999.0 and float(on2["hp"]) < 999.0 and is_equal_approx(float(off["hp"]), 999.0))
 	# V2 (deliberate): no air — the Flak / Flamer hits ground (no flyer prey bonus).
 	S = _open_run()
-	S.slots[r1] = {"id": "flak", "perm": 0, "run": 2}
+	S.slots[r1] = {"id": "flak", "tier": 2}
 	S.recompute()
 	var fl: Dictionary = _weapon(S, "flak")
-	_check("PC-E3 flak L2 dmg 8 x 1.35", is_equal_approx(float(fl["dmg"]), 8.0 * 1.35 * TowerState.bld_dmg() * _dm("flak")) and not fl.has("prey"))
+	_check("PC-E3 flak T2 dmg 8 x 1.8", is_equal_approx(float(fl["dmg"]), 8.0 * 1.8 * TowerState.bld_dmg() * _dm("flak")) and not fl.has("prey"))
 	S.stats["weapons"] = [fl]
 	var fpos: Vector2 = TowerState.slot_pos(r1) + Vector2(0, -120)
 	var heavy: Dictionary = _enemy("hauler", fpos + Vector2(0, 20))
@@ -1855,8 +1865,8 @@ func _pc_building_stages() -> void:
 	# (0.35x) - never attacked. The FB1 HP / attack / destroy / repair gates are
 	# retired (test ledger, P3a).
 	S = _open_run()
-	S.slots[r2] = {"id": "barricade", "perm": 0, "run": 2}
-	S.slots[_rc(3, 1)] = {"id": "mine", "perm": 0, "run": 1}
+	S.slots[r2] = {"id": "barricade", "tier": 2}
+	S.slots[_rc(3, 1)] = {"id": "mine", "tier": 1}
 	S.recompute()
 	S.stats["weapons"] = []
 	var wa: Dictionary = _enemy("drone", TowerState.slot_pos(r2) + Vector2(0, -60))
@@ -1869,7 +1879,7 @@ func _pc_building_stages() -> void:
 	S = _open_run()
 	var rn: int = _at(-2, 0)   # the Core's north neighbour
 	for rc in TowerState.CORE_RING:   # V2 P3b: the 16 cells touching the 3x3 Core
-		S.slots[int(rc)] = {"id": "barricade", "perm": 0, "run": 2}
+		S.slots[int(rc)] = {"id": "barricade", "tier": 2}
 	S.recompute()
 	S.stats["weapons"] = []
 	var wn: Dictionary = _enemy("drone", TowerState.slot_pos(rn) + Vector2(0, -60))
@@ -1906,8 +1916,8 @@ func _pc_building_stages() -> void:
 	_check("V2 P3a: once through, its attacks land on the Core", _evts(hit_ev, "core_hit").size() >= 1)
 	# Outer rings reach further (+8% per old 52 px ring past 1 = +4% per small ring).
 	S = _open_run()
-	S.slots[r1] = {"id": "gun", "perm": 0, "run": 1}
-	S.slots[_at(-6, 0)] = {"id": "gun", "perm": 0, "run": 1}   # ring 5 = 156 px out, the old ring 3
+	S.slots[r1] = {"id": "gun", "tier": 1}
+	S.slots[_at(-6, 0)] = {"id": "gun", "tier": 1}   # ring 5 = 156 px out, the old ring 3
 	S.recompute()
 	var rg1: float = 0.0
 	var rg3: float = 0.0
@@ -1931,12 +1941,12 @@ func _pc_move_stages() -> void:
 	var a: int = _rc(2, 3)
 	var b: int = _rc(2, 2)
 	var c: int = _rc(2, 4)
-	S.slots[a] = {"id": "gun", "perm": 0, "run": 3}
-	S.slots[c] = {"id": "mine", "perm": 0, "run": 1}
+	S.slots[a] = {"id": "gun", "tier": 3}
+	S.slots[c] = {"id": "mine", "tier": 1}
 	S.recompute()
 	S.cash = 100.0
 	var mev: Array = S.move_building(a, b)
-	_check("PC-E4 free move between waves + event", mev.size() == 1 and String(mev[0]["t"]) == "building_moved" and S.id_at(b) == "gun" and S.id_at(a) == "" and S.lvl_at(b) == 3 and is_equal_approx(S.cash, 100.0))
+	_check("PC-E4 free move between waves + event", mev.size() == 1 and String(mev[0]["t"]) == "building_moved" and S.id_at(b) == "gun" and S.id_at(a) == "" and S.tier_at(b) == 3 and is_equal_approx(S.cash, 100.0))
 	mev = S.move_building(b, c)
 	_check("PC-E4 move onto a building swaps", mev.size() == 1 and S.id_at(c) == "gun" and S.id_at(b) == "mine" and String(mev[0]["swapped"]) == "mine")
 	S.add_enemy(_enemy("drone", TowerState.CENTER + Vector2(0, -300)))
@@ -1952,7 +1962,7 @@ func _pc_move_stages() -> void:
 	S.cash = 0.0
 	_check("PC-E4 broke in-wave move refused", S.move_building(c, a).is_empty() and S.id_at(c) == "gun")
 	S.set_enemies([])
-	S.slots[_rc(1, 3)] = {"id": "railgun", "perm": 0, "run": 1}
+	S.slots[_rc(1, 3)] = {"id": "railgun", "tier": 1}
 	S.recompute()
 	_check("PC-E4 railgun cannot move inside ring 2", S.move_building(_rc(1, 3), _rc(3, 2)).is_empty() and S.move_building(_rc(1, 3), b).is_empty())
 	S.pending_place = "railgun"
@@ -2012,10 +2022,10 @@ func _pc_mode_stages() -> void:
 	_check("PC-E6 Encircled: +25% enemy count", is_equal_approx(S.count_mult, 1.25))
 	S = _mod_run(["noperks"])
 	S.spawn_hold = true
-	S.wave = 4
-	S.wave_t = S.wave_time - 0.001
+	S.level = 4
+	S.xp = S.xp_need()
 	var pev: Array = S.tick(0.05)
-	_check("PC-E6 Purist suppresses perk_offer", S.wave == 5 and _evts(pev, "perk_offer").is_empty() and S.perk_offer.is_empty() and S.perk_pending == 0)
+	_check("PC-E6 Purist suppresses perk_offer (no gold perk at level 5)", S.level == 5 and _evts(pev, "perk_offer").is_empty() and S.perk_offer.is_empty() and S.perk_pending == 0)
 	S = _mod_run(["elitist"])
 	# V2 P3d: mass waves carry elites from wave 5 on any tier; Elite Guard triples them.
 	var el: int = int(S._build_mass_plan(10, 0.0)["elites"])
@@ -2736,16 +2746,16 @@ func _draft_stages() -> void:
 	_check("DRAFT boss guarantee: slot 0 is Epic+", ep)
 	# Eligibility.
 	var ctx3: Dictionary = _ctx_empty()
-	ctx3["owned"] = {"gun": 5, "mortar": 2, "mine": 5, "vault": 2}
-	ctx3["copies"] = {"gun": 5, "mortar": 1, "mine": 1, "vault": 1}
-	# FEEDBACK-1: weapon duplicates are new buildings (up to max copies);
-	# non-weapon duplicates are upgrades applied onto the building.
-	_check("DRAFT owned L5 building never offered; owned L2 -> plus 2->3", Draft.card_for("gun", ctx3).is_empty() and Draft.card_for("mine", ctx3).is_empty() and String(Draft.card_for("vault", ctx3)["kind"]) == "plus" and int(Draft.card_for("vault", ctx3)["to"]) == 3)
+	ctx3["owned"] = {"gun": 3, "mortar": 1, "mine": 2, "vault": 1}
+	ctx3["copies"] = {"gun": 1, "mortar": 1, "mine": 1, "vault": 1}
+	ctx3["t1"] = {"mortar": true, "vault": true}
+	# V2 P7a: every duplicate is a building card (dup); with a T1 twin it can
+	# also merge; without a free cell only the mergeable ones are offered.
+	_check("V2 P7a duplicates with a free cell -> new building (dup), merge flag when a T1 twin stands", String(Draft.card_for("gun", ctx3)["kind"]) == "new" and bool(Draft.card_for("gun", ctx3)["dup"]) and not bool(Draft.card_for("gun", ctx3)["merge"]) and bool(Draft.card_for("vault", ctx3)["merge"]))
 	_check("FB1 weapon duplicate with a free cell -> new building (dup)", String(Draft.card_for("mortar", ctx3)["kind"]) == "new" and bool(Draft.card_for("mortar", ctx3)["dup"]))
 	ctx3["free"] = false
-	_check("FB1 weapon duplicate without a free cell -> plus", String(Draft.card_for("mortar", ctx3)["kind"]) == "plus" and int(Draft.card_for("mortar", ctx3)["to"]) == 3)
-	ctx3["free"] = false
-	_check("DRAFT no free cell -> no NEW building / hut; plus still ok", Draft.card_for("tesla", ctx3).is_empty() and Draft.card_for("hut_infantry", ctx3).is_empty() and not Draft.card_for("mortar", ctx3).is_empty())
+	_check("V2 P7a no free cell -> only cards that can merge into a T1 twin", String(Draft.card_for("mortar", ctx3)["kind"]) == "new" and bool(Draft.card_for("mortar", ctx3)["merge"]) and Draft.card_for("gun", ctx3).is_empty() and Draft.card_for("mine", ctx3).is_empty())
+	_check("DRAFT no free cell -> no NEW building / hut; merges still ok", Draft.card_for("tesla", ctx3).is_empty() and Draft.card_for("hut_infantry", ctx3).is_empty() and not Draft.card_for("mortar", ctx3).is_empty())
 	var ctx4: Dictionary = _ctx_empty()
 	ctx4["free_outer"] = false
 	_check("DRAFT railgun needs a free ring-2+ cell", Draft.card_for("railgun", ctx4).is_empty())
@@ -2805,7 +2815,9 @@ func _draft_stages() -> void:
 				opened.append(w)
 				if String(d["guarantee"]) == "epic":
 					guar[w] = true
-	_check("DRAFT cadence: w1,2,3, then even waves + extra Epic+ on boss w10 (%s)" % str(opened), opened == [1, 2, 3, 4, 6, 8, 10, 10, 12] and guar.has(10))
+	# V2 P7a (deliberate): cleared waves open no drafts (XP level-ups do);
+	# only the boss wave's Epic+ hand remains.
+	_check("V2 P7a DRAFT cadence: only boss w10's Epic+ hand comes from waves (%s)" % str(opened), opened == [10] and guar.has(10))
 	# Reroll pricing: 1 free per draft, then banked, then 10 doubling x1.10^(w-1).
 	S = _fresh()
 	S.spawn_hold = true
@@ -2961,7 +2973,7 @@ func _troop_stages() -> void:
 	var st: Dictionary = Troops.troop_stats("hut_infantry", 2, {"dmg_mult": 2.0, "hp_mult": 1.0, "respawn_minus": 2.0, "cell_px": 78.0})
 	_check("TROOP stats: +25% HP/dmg per hut level, respawn - Drill Sergeant", is_equal_approx(float(st["max_hp"]), 40.0 * 1.25) and is_equal_approx(float(st["dmg"]), 5.0 * 1.25 * 2.0) and is_equal_approx(float(st["respawn"]), 6.0) and is_equal_approx(float(st["range"]), 2.0 * 78.0))
 	var S = _open_run()
-	S.slots[_rc(2, 3)] = {"id": "hut_infantry", "perm": 0, "run": 1}
+	S.slots[_rc(2, 3)] = {"id": "hut_infantry", "tier": 1}
 	S.recompute()
 	var sev: Array = []
 	S._drain_troop_events(sev)
@@ -3037,8 +3049,8 @@ func _troop_stages() -> void:
 	for rep in 2:
 		var R = _fresh()
 		_godmode(R)
-		R.slots[_rc(2, 3)] = {"id": "hut_infantry", "perm": 0, "run": 2}
-		R.slots[_rc(3, 2)] = {"id": "hut_drone", "perm": 0, "run": 1}
+		R.slots[_rc(2, 3)] = {"id": "hut_infantry", "tier": 2}
+		R.slots[_rc(3, 2)] = {"id": "hut_drone", "tier": 1}
 		R.recompute()
 		var evs: Array = []
 		for k in 600:
@@ -3162,8 +3174,8 @@ func _snapshot_stages() -> void:
 	_check("SNAP keys: core dmg/rate/hp/regen, buildings, troops, specials, mult", snap.has("core_dmg") and snap.has("core_rate") and snap.has("core_hp") and snap.has("core_regen") and snap.has("buildings") and snap.has("troops") and snap.has("specials") and is_equal_approx(float(snap["mult"]), 1.0))
 	_check("SNAP Bastion L1 values", is_equal_approx(float(snap["core_dmg"]), 10.0) and is_equal_approx(float(snap["core_rate"]), 1.25) and is_equal_approx(float(snap["core_hp"]), 120.0))
 	var r0: float = PowerModel.power_ratio(snap, 1, 1)
-	S.slots[_rc(2, 3)] = {"id": "gun", "perm": 0, "run": 1}
-	S.slots[_rc(3, 2)] = {"id": "hut_infantry", "perm": 0, "run": 1}
+	S.slots[_rc(2, 3)] = {"id": "gun", "tier": 1}
+	S.slots[_rc(3, 2)] = {"id": "hut_infantry", "tier": 1}
 	S.specials = [{"id": "sp_orbital", "copies": 1, "cd": 0.0, "charges": 1}]
 	S.recompute()
 	var snap2: Dictionary = S.power_snapshot()
@@ -3178,6 +3190,7 @@ func _snapshot_stages() -> void:
 func _engine_meta_stages() -> void:
 	StOutpost.run(self)
 	StCoreLevel.run(self)
+	StMerge.run(self)
 	_reforge_stages()
 
 

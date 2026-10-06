@@ -483,7 +483,7 @@ static func _run_action(m, event: InputEvent) -> bool:
 			move_cursor(m, int(d[1]))
 			return true
 	if _pressed(m, event, "confirm"):
-		if (S.pending_place != "" or S.pending_upgrade != "") and m.sel >= 0:
+		if S.pending_place != "" and m.sel >= 0:
 			m.place_at(m.sel)
 		elif not S.draft.is_empty():
 			m.pick_card(0)
@@ -531,9 +531,6 @@ static func _cancel(m) -> void:
 			m._rebuild_ui()
 		elif m.S.pending_place != "":
 			m._handle(m.S.cancel_place())
-			m._rebuild_ui()
-		elif m.S.pending_upgrade != "":
-			m._handle(m.S.cancel_upgrade())
 			m._rebuild_ui()
 		elif m.sel >= 0:
 			m.sel = -1

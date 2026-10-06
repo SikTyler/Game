@@ -37,6 +37,7 @@ const PowerModel := preload("res://PowerModel.gd")
 const EnemyStore := preload("res://EnemyStore.gd")
 const EnemyHash := preload("res://EnemyHash.gd")
 const WeaponDB := preload("res://data/WeaponDB.gd")
+const MergeDB := preload("res://data/MergeDB.gd")
 const FirePatterns := preload("res://FirePatterns.gd")
 const Gear := preload("res://Gear.gd")
 
@@ -88,6 +89,8 @@ const TRACKS: Dictionary = {
 	"eco": {"name": "Eco", "base": 100.0, "growth": 2.9, "cap": 6, "desc": "+3 cash/s, interest cap +40", "minus": "-8% Core max HP"},
 	"armor": {"name": "Armor", "base": 120.0, "growth": 3.0, "cap": 6, "desc": "+30% HP, +1 regen, +2 armor", "minus": "-9% Core dmg"},
 }
+## V2 P7a: a gold perk offer every GOLD_EVERY XP levels.
+const GOLD_EVERY: int = 5
 ## Per-level track multipliers (gain / drawback).
 const DIFF_HP: float = 2.5
 const DIFF_DMG: float = 1.5
@@ -104,9 +107,9 @@ const TRACK_ARMOR_HP: float = 0.30
 const TRACK_ARMOR_DMG: float = 0.91
 
 
-## Building / hut level ceiling in a run (duplicate picks, L5).
+## Building / hut tier ceiling in a run (V2 P7a: merges, T3).
 static func lvl_cap() -> int:
-	return PickDB.BUILDING_MAX
+	return MergeDB.MAX_TIER
 
 
 ## Building damage scale over the PickDB L1 sheet (interim tune: picks must
@@ -163,7 +166,7 @@ const HORDE_LOOT_FUND := 0.35     # FB2: share of each horde body's kill coins m
 # Separate streams keep the wave sequence identical whatever the player picks
 # or shoots, so two policies on one seed face the same waves.
 var save: Dictionary = {}
-var slots: Array = []        # N × ({} | {id, perm, run}); perm is always 0 now
+var slots: Array = []        # N x ({} | {id, tier, rot, mods: [[tier, k]]}) (V2 P7a merge tiers)
 var unlocked: Array = []     # N × bool (rings open this run)
 var cooldowns: Array = []    # N × float (core uses CORE_SLOT)
 var target_modes: Array = []  # N × String (TARGET_MODES)
@@ -254,7 +257,8 @@ var build_cap: int = 48
 var count_mult: float = 1.0
 var draft: Array = []
 var pending_place: String = ""
-var pending_upgrade: String = ""  # a "plus" pick waiting to be applied onto a building
+var merges: int = 0                # merges this run (stats)
+var merge_offer: Dictionary = {}  # V2 P7a: {slot, tier, mods: [...]} the mod pick a merge opened
 var over: bool = false
 
 # Core (REDESIGN §2.1) + cash tracks (§2.2).
@@ -327,7 +331,7 @@ var xp_mod: float = 1.0
 var boss_every: int = 10
 var allow_new_bldg: bool = true
 var speed: float = 1.0            # game-speed multiplier (B2)
-var rerolls_left: int = 0         # banked free rerolls (labs, cards, XP level-ups)
+var rerolls_left: int = 0         # banked free rerolls (labs, cards)
 var wind_hp: float = 0.0
 var wind_used: bool = false
 var skip_chance: float = 0.0
@@ -352,7 +356,7 @@ var spawn_base: float = 1.8
 var spawn_decay: float = 0.93
 var min_spawn: float = 0.45
 var xp_base: float = 6.0
-var xp_growth: float = 1.3
+var xp_growth: float = 1.18
 
 
 ## opts (PC): {mode: "normal"|"endless", modifiers: [ModifierDB ids], core: id}.
@@ -432,7 +436,7 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	next_eid = 1
 	draft.clear()
 	pending_place = ""
-	pending_upgrade = ""
+	merge_offer = {}
 	wave = 1
 	wave_t = 0.0
 	spawn_t = 0.5
@@ -491,8 +495,9 @@ func setup(seed_value: int, save_data: Dictionary, now: int = 0, opts: Dictionar
 	banish_left = 1 + mini(2, _reforge_node("banish_plus")) + int(mods.get("banish", 0))
 	free_reroll = true
 	paid_rerolls = 0
-	draft_queue = []
+	draft_queue = [""]   # V2 P7a: the opening draft
 	draft_guarantee = ""
+	merges = 0
 	buffs = {"overdrive_t": 0.0, "magnet_t": 0.0, "repair_t": 0.0, "repair_rate": 0.0, "warp_t": 0.0}
 	orbitals = []
 	special_casts = 0
@@ -784,11 +789,30 @@ func adjacent(i: int) -> Array:
 	return out
 
 
-func lvl_at(i: int) -> int:
+## Merge tier of the building anchored at i (0 = empty).
+func tier_at(i: int) -> int:
 	var s: Dictionary = slots[i]
 	if s.is_empty():
 		return 0
-	return mini(lvl_cap(), int(s["perm"]) + int(s["run"]))
+	return clampi(int(s.get("tier", 1)), 1, lvl_cap())
+
+
+## Stat multiplier of a tier: x pc_tier_mult (1.8) per tier past T1.
+func tier_mult(i: int) -> float:
+	return MergeDB.tier_mult(tier_at(i))
+
+
+## Summed fx of the merge mods on the building at i.
+func mod_fx(i: int) -> Dictionary:
+	var s: Dictionary = slots[i]
+	if s.is_empty() or (s.get("mods", []) as Array).is_empty():
+		return {}
+	return MergeDB.fx_of(String(s["id"]), s["mods"])
+
+
+## Pattern level of a tier (the L1..L5 extras: T1 = 1, T2 = 3, T3 = 5).
+func pattern_lvl(i: int) -> int:
+	return 2 * tier_at(i) - 1
 
 
 func id_at(i: int) -> String:
@@ -824,6 +848,10 @@ func hut_count() -> int:
 	return n
 
 
+func hut_max() -> int:
+	return PickDB.HUT_MAX + int(pf("hut_max"))
+
+
 func at_cap() -> bool:
 	return building_count() >= build_cap
 
@@ -832,6 +860,8 @@ func at_cap() -> bool:
 ## covered cell free, under the build cap, ring rule)?
 func can_place(i: int, id: String) -> bool:
 	if at_cap() or not ring_ok(i, id):
+		return false
+	if PickDB.fam_of(id) == "hut" and hut_count() >= hut_max():
 		return false
 	var fp: Array = footprint(i, size_of(id))
 	if fp.is_empty():
@@ -909,31 +939,47 @@ func compute_stats() -> Dictionary:
 	var adj_dmg: Array = []
 	var adj_rate: Array = []
 	var adj_range: Array = []
+	var adj_crit: Array = []
 	for i in N:
 		adj_dmg.append(1.0)
 		adj_rate.append(1.0)
 		adj_range.append(0.0)
+		adj_crit.append(0.0)
+	# V2 P7a: tier x merge mods per building (bfx: slot -> mod fx)
+	var bfx: Dictionary = {}
+	for i in N:
+		if id_at(i) != "":
+			var fx0: Dictionary = mod_fx(i)
+			if not fx0.is_empty():
+				bfx[i] = fx0
+	st["bfx"] = bfx
 	for i in N:
 		var sid: String = id_at(i)
 		if sid == "":
 			continue
-		var m: float = pow(1.35, float(lvl_at(i) - 1))
+		var fx: Dictionary = bfx.get(i, {})
+		var m: float = tier_mult(i) * (1.0 + float(fx.get("power", 0.0)))
 		match sid:
 			"armory":
-				for n in adjacent(i):
+				var ar: int = int(fx.get("reach", 0.0))
+				for n in (adjacent(i) if ar <= 0 else _near_anchors(i, 1 + ar)):
 					adj_dmg[n] = float(adj_dmg[n]) + 0.15 * m
+					adj_crit[n] = float(adj_crit[n]) + float(fx.get("crit", 0.0))
 					links.append([i, n, "ARM"])
 			"beacon":
 				# V2 P3b: radius 4 small cells (the old 2 x 52 px)
+				var br: int = 4 + int(fx.get("reach", 0.0))
 				for n in N:
-					if n != i and (id_at(n) != "" or n == CORE_SLOT) and fp_dist(i, n) <= 4:
-						adj_rate[n] = float(adj_rate[n]) + 0.10 * m
+					if n != i and (id_at(n) != "" or n == CORE_SLOT) and fp_dist(i, n) <= br:
+						adj_rate[n] = float(adj_rate[n]) + 0.10 * m * (1.0 + float(fx.get("rate", 0.0)))
 						adj_range[n] = float(adj_range[n]) + 0.3 * m
 						links.append([i, n, "BEA"])
 			"oilmill":
 				for n in adjacent(i):
 					if n != CORE_SLOT:
-						adj_rate[n] = float(adj_rate[n]) - 0.10
+						if fx.get("quiet", 0.0) <= 0.0:
+							adj_rate[n] = float(adj_rate[n]) - 0.10
+						adj_dmg[n] = float(adj_dmg[n]) + float(fx.get("adj_dmg", 0.0))
 						links.append([i, n, "OIL"])
 	# Core attack range (cells).
 	var core_range_c: float = maxf(1.0, float(cd["range"]) + TRACK_RANGE * float(tracks["range"]) + range_add + float(adj_range[CORE_SLOT]) + pf("range"))
@@ -946,14 +992,18 @@ func compute_stats() -> Dictionary:
 		var id: String = id_at(i)
 		if id == "":
 			continue
-		var m2: float = pow(1.35, float(lvl_at(i) - 1))
+		var fx2: Dictionary = bfx.get(i, {})
+		var m2: float = tier_mult(i) * (1.0 + float(fx2.get("power", 0.0)))
 		# +pc_ring_range per old 52 px ring past the first (2 small rings each)
 		var ring_m: float = 1.0 + rr * 0.5 * float(maxi(0, ring_at(i) - 1))
 		var rate_m: float = rate_all * float(adj_rate[i]) * maxf(0.1, 1.0 + pf("bld_rate"))
 		var dm: float = dmg_all * float(adj_dmg[i]) * bld_dmg() * maxf(0.1, 1.0 + pf("bld_dmg"))
 		var rng_c: float = float(adj_range[i]) + range_add
 		if WeaponDB.has(id):
-			weapons.append(_weapon_sheet(i, id, m2, dm, rate_m, rng_c, ring_m, px))
+			var ws: Dictionary = _weapon_sheet(i, id, tier_mult(i), dm, rate_m, rng_c, ring_m, px)
+			_apply_merge_mods(ws, fx2, px)
+			ws["crit"] = float(ws.get("crit", 0.0)) + float(adj_crit[i])
+			weapons.append(ws)
 			continue
 		match id:
 			"bulwark":
@@ -969,19 +1019,21 @@ func compute_stats() -> Dictionary:
 			"oilmill":
 				cash_add += 2.0 * m2
 			"refinery":
-				cash_add += 0.5 * m2
+				cash_add += 0.5 * m2 * (1.0 + float(fx2.get("cash", 0.0)))
 				st["xp_mult"] = float(st["xp_mult"]) + 0.15 * m2
 			"bounty":
-				(st["bounties"] as Array).append({"slot": i, "pos": fp_pos(i), "r": 3.0 * px, "mult": 0.20 * m2})
+				(st["bounties"] as Array).append({"slot": i, "pos": fp_pos(i), "r": (3.0 + float(fx2.get("reach", 0.0))) * px, "mult": 0.20 * m2})
 			"vault":
 				st["interest_rate"] = float(st["interest_rate"]) + 0.02 * m2
-				st["interest_cap"] = float(st["interest_cap"]) + 100.0 * m2
+				st["interest_cap"] = float(st["interest_cap"]) + 100.0 * tier_mult(i) * (1.0 + float(fx2.get("cap", 0.0)))
 			"obelisk":
 				st["lifesteal"] = float(st["lifesteal"]) + 0.01 * m2
 			"hut_infantry", "hut_sapper":
 				var dir: Vector2 = (fp_pos(i) - CENTER).normalized()
 				var post: Vector2 = CENTER + dir * (grid_half_px() + 0.6 * px)
-				var hut: Dictionary = {"slot": i, "id": id, "lvl": lvl_at(i), "home": fp_pos(i), "anchor": post}
+				var hut: Dictionary = {"slot": i, "id": id, "lvl": pattern_lvl(i), "home": fp_pos(i), "anchor": post,
+					"dmg_m": (1.0 + float(fx2.get("power", 0.0))) * (1.0 + float(fx2.get("troop_dmg", 0.0))),
+					"hp_m": (1.0 + float(fx2.get("power", 0.0))) * (1.0 + float(fx2.get("troop_hp", 0.0)))}
 				if id == "hut_infantry" and crowd():
 					# FB2 Rifle Barracks (omnidirectional): riflemen guard the whole
 					# perimeter - seek/leash around the Core, idle at their post.
@@ -991,15 +1043,28 @@ func compute_stats() -> Dictionary:
 					hut["seek"] = gh + TuneRef.num("pc_rifle_seek", 3.0)
 					hut["leash"] = gh + TuneRef.num("pc_rifle_leash", 4.5)
 				(st["huts"] as Array).append(hut)
+	# V2 P7a: merge mods that feed the Core / economy (armor, regen, kill
+	# cash, XP, interest, flat cash/s on non-refinery buildings)
+	var mod_armor: float = 0.0
+	var mod_regen: float = 0.0
+	for k in bfx.keys():
+		var f3: Dictionary = bfx[k]
+		mod_armor += float(f3.get("armor", 0.0))
+		mod_regen += float(f3.get("regen", 0.0))
+		st["kill_cash_mod"] = float(st.get("kill_cash_mod", 0.0)) + float(f3.get("kill_cash", 0.0))
+		st["xp_mult"] = float(st["xp_mult"]) + float(f3.get("xp", 0.0))
+		st["interest_rate"] = float(st["interest_rate"]) + float(f3.get("interest", 0.0))
+		if id_at(int(k)) == "vault":
+			cash_add += float(f3.get("cash", 0.0))
 	# Core sheet with tracks, packs, legacy core levels, Insight.
 	var arm_n: int = tracks["armor"]
 	st["max_hp"] = (float(st["max_hp"]) + hp_add) * (1.0 + TRACK_ARMOR_HP * float(arm_n)) * pow(TRACK_ECO_HP, float(tracks["eco"])) * (1.0 + 0.20 * float(pack_n("pk_fort"))) * maxf(0.5, 1.0 - 0.05 * float(pack_n("pk_overclock"))) * max_hp_mult * (1.0 + float(ins.get("in_hp", 0.0))) * maxf(0.1, 1.0 + pf("core_hp"))
-	st["regen"] = (float(st["regen"]) + 1.0 * float(arm_n)) * maxf(0.0, 1.0 + pf("regen"))
-	st["armor"] = float(st["armor"]) + 2.0 * float(arm_n) + float(pack_n("pk_fort")) + pf("armor")
+	st["regen"] = (float(st["regen"]) + 1.0 * float(arm_n) + mod_regen) * maxf(0.0, 1.0 + pf("regen"))
+	st["armor"] = float(st["armor"]) + 2.0 * float(arm_n) + float(pack_n("pk_fort")) + pf("armor") + mod_armor
 	var eco_lv: int = tracks["eco"]
 	var cash_w1: float = maxf(0.0, float(st["cash_ps"]) + TRACK_ECO_CASH * float(eco_lv) + 0.6 * float(pack_n("pk_ledger")) + cash_add + pf("cash_flat"))
 	st["cash_ps"] = cash_w1 * e * cash_mult * (1.0 + float(ins.get("in_cash", 0.0))) * maxf(0.1, 1.0 + pf("cash"))
-	st["kill_cash"] = (1.0 + 0.05 * float(pack_n("pk_ledger"))) * (1.0 + float(ins.get("in_cash", 0.0))) * maxf(0.1, 1.0 + pf("kill_cash"))
+	st["kill_cash"] = (1.0 + 0.05 * float(pack_n("pk_ledger")) + float(st.get("kill_cash_mod", 0.0))) * (1.0 + float(ins.get("in_cash", 0.0))) * maxf(0.1, 1.0 + pf("kill_cash"))
 	st["interest_rate"] = float(st["interest_rate"]) + pf("interest")
 	var icap_w1: float = float(st["interest_cap"]) + TRACK_ECO_ICAP * float(eco_lv) + (50.0 if pf("interest") > 0.0 else 0.0)
 	st["interest_cap"] = icap_w1 * e
@@ -1093,7 +1158,7 @@ func compute_stats() -> Dictionary:
 func _weapon_sheet(i: int, id: String, m2: float, dm: float, rate_m: float, rng_c: float, ring_m: float, px: float) -> Dictionary:
 	var d: Dictionary = WeaponDB.get_def(id)
 	var p: Dictionary = d.get("p", {})
-	var w: Dictionary = {"slot": i, "lvl": lvl_at(i), "kind": id, "pattern": String(d["pattern"]), "aim": String(d["aim"]),
+	var w: Dictionary = {"slot": i, "lvl": pattern_lvl(i), "tier": tier_at(i), "kind": id, "pattern": String(d["pattern"]), "aim": String(d["aim"]),
 		"arc_cos": cos(deg_to_rad(float(d["arc"]) * 0.5)), "facing": WeaponDB.facing(rot_at(i)),
 		"dmg": float(d["dmg"]) * m2 * dm * float(d["dir_mult"]), "rate": float(d["rate"]) * rate_m, "range": (float(d["range"]) + rng_c) * px * ring_m}
 	match id:
@@ -1115,6 +1180,38 @@ func _weapon_sheet(i: int, id: String, m2: float, dm: float, rate_m: float, rng_
 			w["slow"] = float(p["slow"])
 			w["slow_t"] = float(p["slow_t"])
 	return w
+
+
+## V2 P7a: a weapon's merge mods onto its sheet (MergeDB fx vocabulary).
+func _apply_merge_mods(w: Dictionary, fx: Dictionary, px: float) -> void:
+	if fx.is_empty():
+		return
+	w["dmg"] = float(w["dmg"]) * (1.0 + float(fx.get("dmg", 0.0)))
+	w["rate"] = float(w["rate"]) * (1.0 + float(fx.get("rate", 0.0)))
+	w["range"] = float(w["range"]) + float(fx.get("range", 0.0)) * px
+	w["crit"] = float(w.get("crit", 0.0)) + float(fx.get("crit", 0.0))
+	if fx.has("arc"):
+		var d: Dictionary = WeaponDB.get_def(String(w["kind"]))
+		w["arc_cos"] = cos(deg_to_rad(minf(359.0, float(d["arc"]) + float(fx["arc"])) * 0.5))
+	for k in ["pierce", "chains", "arcs", "rounds", "boss"]:
+		if fx.has(k):
+			w[k + "_add"] = float(fx[k])
+	for k2 in ["splash", "knock", "cone", "burn"]:
+		if fx.has(k2):
+			w[k2 + "_m"] = 1.0 + float(fx[k2])
+	if fx.has("slow") and w.has("slow"):
+		w["slow"] = minf(0.85, float(w["slow"]) + float(fx["slow"]))
+	if w.has("pierce") and fx.has("pierce"):
+		w["pierce"] = float(w["pierce"]) + float(fx["pierce"])
+
+
+## Anchors whose footprints lie within `r` cells of the one at i.
+func _near_anchors(i: int, r: int) -> Array:
+	var out: Array = []
+	for n in N:
+		if n != i and (id_at(n) != "" or n == CORE_SLOT) and fp_dist(i, n) <= r:
+			out.append(n)
+	return out
 
 
 func recompute() -> void:
@@ -1347,7 +1444,7 @@ func _step(sub: float, ev: Array) -> void:
 	_fire(dt, ev)
 	_src = ""
 	_blockable = false
-	_wall_auras(ev)
+	_wall_auras(dt, ev)
 	_kb_k = 0.0
 	_burn_step(dt, ev)
 	_warlord_surge(dt)
@@ -1435,17 +1532,13 @@ func _wave_coins(w: int, frac: float) -> float:
 
 func _enter_wave(w: int) -> void:
 	wave = w
-	if not modifiers.has("noperks") and wave % maxi(1, TuneRef.int_of("perk_every", 5)) == 0 and not Perks.available(perks_taken).is_empty():
-		perk_pending += 1
 	if mode == "endless" and wave % ModifierDB.MUTATION_EVERY == 0:
 		mutation_pending += 1
 
 
-## Draft cadence (REDESIGN_SPEC §2.3): after waves 1, 2, 3, then every 2nd
-## wave, plus every boss wave (that one guarantees an Epic+).
+## V2 P7a: drafts come from XP level-ups (_check_level) and the opening
+## draft; a cleared boss wave still guarantees an Epic+ hand.
 func _queue_drafts(cleared: int) -> void:
-	if cleared <= 3 or cleared % maxi(1, TuneRef.int_of("pc_draft_every", 2)) == 0:
-		draft_queue.append("")
 	if cleared % boss_every == 0:
 		draft_queue.append("epic")
 
@@ -2288,15 +2381,28 @@ func set_aim(pos: Vector2, firing: bool) -> void:
 ## no lane to wall off, so each Wall drags every body within its radius (-30%
 ## speed) on top of being a blocker the horde must flow around or squeeze
 ## through. Wall of Flesh: one Wall slows 2,000 distinct bodies in a wave.
-func _wall_auras(ev: Array) -> void:
+func _wall_auras(dt: float, ev: Array) -> void:
 	wall_tick += 1
-	var r: float = TuneRef.num("pc_wall_aura", 1.5) * cpx()
-	var sm: float = 1.0 - TuneRef.num("pc_wall_slow", 0.30)
+	var r0: float = TuneRef.num("pc_wall_aura", 1.5)
+	var s0: float = TuneRef.num("pc_wall_slow", 0.30)
+	var bfx: Dictionary = stats.get("bfx", {})
 	for i in slots.size():
 		if id_at(i) != "barricade":
 			continue
+		# V2 P7a: tiers widen the aura (+0.25 cell) and deepen it (+5%); mods add
+		var fx: Dictionary = bfx.get(i, {})
+		var tn: float = float(tier_at(i) - 1)
+		var r: float = (r0 + 0.25 * tn + float(fx.get("range", 0.0))) * cpx()
+		var sm: float = 1.0 - minf(0.8, s0 + 0.05 * tn + float(fx.get("slow", 0.0)))
 		var c: Vector2 = fp_pos(i)
 		var hit: PackedInt32Array = en.slow_radius(c, r, 0.2, sm)   # one C# call per Wall (P3d perf)
+		var spike: float = float(fx.get("dmg", 0.0)) * float(stats.get("dmg_all", 1.0)) * bld_dmg() * dt
+		if spike > 0.0:
+			_src = "barricade"
+			for fe in hit:
+				if en.hp[fe] > 0.0:
+					_hit(fe, spike, ev)
+			_src = ""
 		# Wall of Flesh: distinct bodies, sampled every 4th substep (a body
 		# stays in the aura for many substeps, so no one is missed).
 		var seen: Dictionary = mass_wall_slowed.get(i, {})
@@ -3083,7 +3189,7 @@ func _check_queue(ev: Array) -> void:
 
 
 func _busy() -> bool:
-	return draft.size() > 0 or pending_place != "" or pending_upgrade != "" or perk_offer.size() > 0 or mutation_offer.size() > 0
+	return draft.size() > 0 or pending_place != "" or not merge_offer.is_empty() or perk_offer.size() > 0 or mutation_offer.size() > 0
 
 
 ## Endless mutation pick (every 25 waves): 3 distinct, non-maxed mutations.
@@ -3120,13 +3226,17 @@ func choose_mutation(idx: int) -> Array:
 	return ev
 
 
-## XP level-ups bank a free draft reroll (drafts follow the wave cadence).
+## V2 P7a: every XP level-up queues a draft; every GOLD_EVERY-th level also
+## a gold perk offer.
 func _check_level(ev: Array) -> void:
 	while xp >= xp_need():
 		xp -= xp_need()
 		level += 1
-		rerolls_left += 1
-		ev.append({"t": "levelup", "level": level, "rerolls": rerolls_left})
+		draft_queue.append("")
+		var gold: bool = level % GOLD_EVERY == 0 and not modifiers.has("noperks") and not Perks.available(perks_taken).is_empty()
+		if gold:
+			perk_pending += 1
+		ev.append({"t": "levelup", "level": level, "gold": gold})
 
 
 ## Draft context for Draft.roll_hand (what the run can use right now).
@@ -3138,7 +3248,7 @@ func _draft_ctx(guarantee: String) -> Dictionary:
 	for i in N:
 		var id: String = id_at(i)
 		if id != "":
-			owned[id] = mini(int(owned.get(id, 99)), lvl_at(i))
+			owned[id] = mini(int(owned.get(id, 99)), tier_at(i))
 			copies[id] = int(copies.get(id, 0)) + 1
 		elif is_free(i):
 			free = true
@@ -3154,7 +3264,7 @@ func _draft_ctx(guarantee: String) -> Dictionary:
 			blocked.append(id)
 	return {
 		"owned": owned, "copies": copies, "free": free and not at_cap(), "free_outer": free_outer and not at_cap(), "huts": hut_count(),
-		"hut_max": PickDB.HUT_MAX + int(pf("hut_max")),
+		"hut_max": hut_max(), "t1": _t1_ids(),
 		"packs": packs, "specials": sp, "banished": banished, "luck": luck,
 		"eco_mult": 1.0,
 		"choices": 3 + mini(1, _reforge_node("wide_draft")),
@@ -3162,6 +3272,15 @@ func _draft_ctx(guarantee: String) -> Dictionary:
 		"insight_ok": insight_found.size() < ins_cap, "insight_blocked": blocked,
 		"guarantee": guarantee, "weapons": _weapon_buildings(),
 	}
+
+
+## {id: true} for every id with a T1 on the grid (a duplicate card can merge).
+func _t1_ids() -> Dictionary:
+	var out: Dictionary = {}
+	for i in N:
+		if id_at(i) != "" and tier_at(i) == 1:
+			out[id_at(i)] = true
+	return out
 
 
 func _weapon_buildings() -> int:
@@ -3227,19 +3346,11 @@ func choose_card(idx: int, arg: int = -1) -> Array:
 	picks_taken.append(id)
 	match kind:
 		"new":
+			# V2 P7a: placed on a free cell, or dropped on a T1 twin to merge
 			pending_place = id
-			ev.append({"t": "place_mode", "id": id, "dup": bool(card.get("dup", false))})
+			ev.append({"t": "place_mode", "id": id, "dup": bool(card.get("dup", false)), "merge": card_merge_targets(id)})
 			ev.append({"t": "pick_applied", "id": id, "fam": String(card["fam"]), "kind": kind, "rarity": String(card["rarity"]), "reward": "building"})
 			return ev
-		"plus":
-			# Owner feedback #1: an upgrade is applied by clicking / dragging it
-			# onto the building (apply_upgrade), never silently.
-			var cand: Array = upgrade_targets(id)
-			if not cand.is_empty():
-				pending_upgrade = id
-				ev.append({"t": "upgrade_mode", "id": id, "slots": cand})
-				ev.append({"t": "pick_applied", "id": id, "fam": String(card["fam"]), "kind": kind, "rarity": String(card["rarity"]), "reward": "upgrade"})
-				return ev
 		"pack":
 			packs[id] = pack_n(id) + 1
 			recompute()
@@ -3334,7 +3445,7 @@ func place(i: int) -> Array:
 	if pending_place == "" or not can_place(i, pending_place):
 		return ev
 	var r: int = pending_rot if pending_rot >= 0 else default_rot(i, pending_place)
-	slots[i] = {"id": pending_place, "perm": 0, "run": 1, "rot": r}
+	slots[i] = {"id": pending_place, "tier": 1, "rot": r, "mods": []}
 	cooldowns[i] = 0.0
 	pending_place = ""
 	pending_rot = -1
@@ -3386,41 +3497,112 @@ func pending_rot_at(i: int) -> int:
 	return pending_rot if pending_rot >= 0 else default_rot(i, pending_place)
 
 
-## Cells holding `id` below the level cap (targets of a pending upgrade).
-func upgrade_targets(id: String) -> Array:
+# ------------------------------------------------------------ merges (V2 P7a)
+## Anchors the building at `a` can merge into (same id and tier, below T3).
+func merge_targets(a: int) -> Array:
 	var out: Array = []
-	for i in N:
-		if id_at(i) == id and lvl_at(i) < mini(lvl_cap(), PickDB.max_of(id)):
-			out.append(i)
+	if a < 0 or a >= N or id_at(a) == "" or tier_at(a) >= lvl_cap():
+		return out
+	for b in N:
+		if b != a and id_at(b) == id_at(a) and tier_at(b) == tier_at(a):
+			out.append(b)
 	return out
 
 
-## Apply the pending upgrade onto the building on cell i (click / drag-drop).
-func apply_upgrade(i: int) -> Array:
-	var ev: Array = []
-	if pending_upgrade == "" or i < 0 or i >= N or not upgrade_targets(pending_upgrade).has(i):
-		return ev
-	var id: String = pending_upgrade
-	pending_upgrade = ""
-	var s: Dictionary = slots[i]
-	s["run"] = mini(lvl_cap(), int(s["run"]) + 1)
+## T1 buildings of `id` a duplicate draft card can merge into (a card is a T1).
+func card_merge_targets(id: String) -> Array:
+	var out: Array = []
+	for b in N:
+		if id_at(b) == id and tier_at(b) == 1 and lvl_cap() > 1:
+			out.append(b)
+	return out
+
+
+## The nearest merge partner of the building at i (-1 = none): the panel's
+## Merge button folds it into i.
+func merge_partner(i: int) -> int:
+	var best: int = -1
+	var bd: int = 1 << 30
+	for b in merge_targets(i):
+		var d: int = fp_dist(i, int(b))
+		if d < bd:
+			bd = d
+			best = int(b)
+	return best
+
+
+## Merge the building at `a` into the one at `b` (same id + tier): b rises a
+## tier and keeps its cell and facing, with its mods plus a's; a leaves the
+## grid. Opens b's mod pick (MergeDB).
+func merge(a: int, b: int) -> Array:
+	if over or not merge_offer.is_empty() or not merge_targets(a).has(b):
+		return []
+	var sa: Dictionary = slots[a]
+	var sb: Dictionary = slots[b]
+	var mods: Array = (sb.get("mods", []) as Array).duplicate(true)
+	mods.append_array((sa.get("mods", []) as Array).duplicate(true))
+	slots[a] = {}
+	cooldowns[a] = 0.0
+	sb["tier"] = tier_at(b) + 1
+	sb["mods"] = mods
+	return _merged(b, String(sb["id"]), a)
+
+
+## Drop the pending duplicate card onto the T1 at b: it becomes a T2.
+func merge_card(b: int) -> Array:
+	if pending_place == "" or not card_merge_targets(pending_place).has(b):
+		return []
+	var id: String = pending_place
+	pending_place = ""
+	pending_rot = -1
+	(slots[b] as Dictionary)["tier"] = 2
+	return _merged(b, id, -1)
+
+
+func _merged(b: int, id: String, from: int) -> Array:
 	recompute()
-	ev.append({"t": "building_level", "slot": i, "id": id, "level": lvl_at(i)})
-	ev.append({"t": "upgraded", "slot": i, "level": lvl_at(i)})
+	var tr: int = tier_at(b)
+	merges += 1
+	var ev: Array = [{"t": "merged", "slot": b, "from": from, "id": id, "tier": tr}]
+	var offer: Array = MergeDB.offer(id, tr)
+	if not offer.is_empty():
+		merge_offer = {"slot": b, "tier": tr, "id": id, "n": offer.size()}
+		ev.append({"t": "merge_offer", "slot": b, "tier": tr, "id": id, "mods": offer.duplicate(true)})
 	_drain_troop_events(ev)
 	_check_queue(ev)
 	return ev
 
 
-## Drop a pending upgrade (Esc / its building was destroyed).
-func cancel_upgrade() -> Array:
-	if pending_upgrade == "":
+## Take mod k of the open merge offer.
+func choose_mod(k: int) -> Array:
+	if merge_offer.is_empty() or k < 0 or k >= int(merge_offer["n"]):
 		return []
-	var id: String = pending_upgrade
-	pending_upgrade = ""
-	var ev: Array = [{"t": "upgrade_cancelled", "id": id}]
+	var b: int = int(merge_offer["slot"])
+	var tr: int = int(merge_offer["tier"])
+	var id: String = String(merge_offer["id"])
+	merge_offer = {}
+	var ev: Array = []
+	if id_at(b) == id:
+		var sb: Dictionary = slots[b]
+		if not sb.has("mods"):
+			sb["mods"] = []
+		(sb["mods"] as Array).append([tr, k])
+		recompute()
+		var md: Dictionary = MergeDB.mod_of(id, tr, k)
+		ev.append({"t": "mod_taken", "slot": b, "id": id, "tier": tr, "k": k, "name": String(md.get("name", "")), "desc": String(md.get("desc", ""))})
+	_drain_troop_events(ev)
 	_check_queue(ev)
 	return ev
+
+
+## Merge mods on the building at i, as their MergeDB defs.
+func mods_at(i: int) -> Array:
+	var out: Array = []
+	if id_at(i) == "":
+		return out
+	for m in ((slots[i] as Dictionary).get("mods", []) as Array):
+		out.append(MergeDB.mod_of(id_at(i), int((m as Array)[0]), int((m as Array)[1])))
+	return out
 
 
 ## Everything that buffs the run without a building (owner feedback #1: the
@@ -3637,7 +3819,7 @@ func power_snapshot() -> Dictionary:
 func building_value(i: int) -> int:
 	if id_at(i) == "":
 		return 0
-	return int(20.0 * float(lvl_at(i)) * cash_index())
+	return int(20.0 * float(tier_at(i)) * cash_index())
 
 
 ## PC_SPEC §1.5 drag-move: move the building on `a` to `b` (empty unlocked

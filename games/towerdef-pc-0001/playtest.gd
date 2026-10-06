@@ -384,11 +384,11 @@ static func _weapon_kps(kinds_s: String, lv: int, seed0: int) -> float:
 	S.spawn_hold = true
 	var kinds: PackedStringArray = kinds_s.split("+")
 	var si: int = _north_anchor(kinds[0])
-	S.slots[si] = {"id": kinds[0], "perm": 0, "run": lv}
+	S.slots[si] = {"id": kinds[0], "tier": mini(lv, 3)}
 	S.unlocked[si] = true
 	if kinds.size() > 1:
 		var s2: int = si - TowerState.size_of(kinds[1])   # V2 P3b: just west of the first footprint
-		S.slots[s2] = {"id": kinds[1], "perm": 0, "run": lv}
+		S.slots[s2] = {"id": kinds[1], "tier": mini(lv, 3)}
 		S.unlocked[s2] = true
 	S.wave = 10
 	S.recompute()
@@ -448,7 +448,7 @@ static func _boss_dps_lv5(seed0: int) -> Dictionary:
 		for i in TowerState.N:
 			if i != TowerState.CORE_SLOT:
 				S.slots[i] = {}
-		S.slots[si] = {"id": wk, "perm": 0, "run": 5}
+		S.slots[si] = {"id": wk, "tier": 3}
 		S.unlocked[si] = true
 		S.recompute()
 		for w in S.stats["weapons"]:
@@ -682,9 +682,31 @@ static func _card_score(S, policy: String, c: Dictionary) -> float:
 				sc += 3.0 if ["sp_orbital", "sp_overdrive", "sp_timewarp", "sp_emp"].has(id) else 1.0
 			elif fam == "hut":
 				sc += 2.5
-	if kind == "plus":
-		sc += 1.5
+	if bool(c.get("merge", false)):
+		sc += 1.5   # V2 P7a: a duplicate that merges into a T2
 	return sc
+
+
+## V2 P7a bot merging: take mod 0 of an open offer, then fold any building
+## into its same-tier twin (lowest anchor first, deterministic).
+static func merge_step(S) -> Array:
+	var ev: Array = []
+	var guard: int = 0
+	while guard < 12:
+		guard += 1
+		if not S.merge_offer.is_empty():
+			ev.append_array(S.choose_mod(0))
+			continue
+		var done: bool = false
+		for a in TowerState.N:
+			var tg: Array = S.merge_targets(a)
+			if not tg.is_empty():
+				ev.append_array(S.merge(a, int(tg[0])))
+				done = true
+				break
+		if not done:
+			break
+	return ev
 
 
 static func _weapon_count(S) -> int:
@@ -820,19 +842,17 @@ static func bot_step(S, policy: String, perk_pref: String = "") -> Array:
 		else:
 			ev.append_array(S.choose_card(best))
 	if S.pending_place != "":
-		var cell: int = _place_cell(S, S.pending_place)
-		if cell >= 0:
-			ev.append_array(S.place(cell))
+		# V2 P7a: a duplicate merges into its T1 twin when it has one
+		var tw: Array = S.card_merge_targets(S.pending_place)
+		if not tw.is_empty():
+			ev.append_array(S.merge_card(int(tw[0])))
 		else:
-			ev.append_array(S.cancel_place())   # nowhere legal: skip the card
-	# FEEDBACK-1: an upgrade pick is applied onto the lowest-level copy.
-	if S.pending_upgrade != "":
-		var tg: Array = S.upgrade_targets(S.pending_upgrade)
-		var lo: int = -1
-		for c in tg:
-			if lo < 0 or S.lvl_at(int(c)) < S.lvl_at(lo):
-				lo = int(c)
-		ev.append_array(S.apply_upgrade(lo) if lo >= 0 else S.cancel_upgrade())
+			var cell: int = _place_cell(S, S.pending_place)
+			if cell >= 0:
+				ev.append_array(S.place(cell))
+			else:
+				ev.append_array(S.cancel_place())   # nowhere legal: skip the card
+	ev.append_array(merge_step(S))
 	if not policy.begins_with("mono:"):
 		ev.append_array(_use_specials(S))
 	# A competent player focuses fire on a boss once it is inside Core range.

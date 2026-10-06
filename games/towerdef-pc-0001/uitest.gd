@@ -935,6 +935,8 @@ func _run_screen() -> void:
 	# V2 (deliberate): one Core, no traits — the tooltip names the Core and the
 	# equipped Weapon (P4: whatever the Forge / Core tabs equipped above).
 	_check("RUN: hovering the Core shows its level + equipped Weapon", main.tipbox.visible and main.tip_label.text.contains("Core") and main.tip_label.text.contains(String(Gear.weapon(main.save)["name"])), main.tip_label.text)
+	# V2 P7a: every run opens with a draft (later drafts come from XP levels)
+	_check("P7a RUN: the run opens with a draft on the table", S.draft.size() >= 3 and S.wave == 1)
 	# draft: cards, reroll, banish, Q pick, place
 	S.grant_draft()
 	S.draft[0] = load("res://Draft.gd").card_for("gun", S._draft_ctx(""))
@@ -944,7 +946,7 @@ func _run_screen() -> void:
 	var DP = load("res://ui/DraftPanel.gd")
 	var Dr = load("res://Draft.gd")
 	_check("FB1: draft cards name their type (BUILDING vs PERK vs ABILITY)", String(DP.card_type(main, Dr.card_for("gun", S._draft_ctx("")))["type"]) == "BUILDING" and String(DP.card_type(main, Dr.card_for("pk_arsenal", S._draft_ctx("")))["type"]) == "PERK" and String(DP.card_type(main, Dr.card_for("sp_emp", S._draft_ctx("")))["type"]) == "ABILITY")
-	_check("FB1: a non-weapon duplicate says drag onto your <Building>", String(DP.card_type(main, {"id": "mine", "fam": "building", "kind": "plus", "reward": "upgrade", "lvl": 1, "to": 2})["sub"]).begins_with("Drag onto your Gold Mine"))
+	_check("P7a: a duplicate with a T1 twin says it merges into your <Building>", String(DP.card_type(main, {"id": "mine", "fam": "building", "kind": "new", "reward": "building", "dup": true, "merge": true})["sub"]).begins_with("Merge into your T1 Gold Mine"))
 	_check("FB1: no hotkey callouts on the draft buttons", _find("Reroll") != null and not _find("Reroll").text.contains("[") and not _find("Banish").text.contains("["))
 	_audit("draft")
 	var hand0: String = JSON.stringify(S.draft)
@@ -1000,6 +1002,7 @@ func _run_screen() -> void:
 	_check("sfx: place clip", main.sfx.played("place"))
 	# drag a NEW building card onto a cell
 	S.grant_draft()
+	S.draft_queue.clear()   # V2 P7a: the opening draft queued one more hand
 	S.draft[1] = load("res://Draft.gd").card_for("mortar", S._draft_ctx(""))
 	main._rebuild_ui()
 	await _frames()
@@ -1012,6 +1015,41 @@ func _run_screen() -> void:
 		await _drag(cb.get_global_rect().get_center(), main.w2s(corner))
 	var a2: int = TowerState.anchor_at(corner, 2)
 	_check("RUN: dragging a draft card onto a cell places it (2x2 footprint under the cursor)", S.id_at(a2) == "mortar" and S.owner_at(cell2) == a2 and S.draft.is_empty(), "a2 %d cell2 %d owner %d id '%s' draft %d pending '%s' reason '%s'" % [a2, cell2, S.owner_at(cell2), S.id_at(a2), S.draft.size(), S.pending_place, BattleUI.place_reason(main, a2, "mortar")])
+	# V2 P7a: drag a building onto its same-tier twin to merge, then pick a mod
+	var twins: Array = []
+	for fc in S.free_slots():
+		if S.can_place(int(fc), "frost") and twins.size() < 2 and (twins.is_empty() or S.cell_dist(int(twins[0]), int(fc)) >= 3):
+			twins.append(int(fc))
+	for tc in twins:
+		S.slots[int(tc)] = {"id": "frost", "tier": 1, "rot": 6, "mods": []}
+	S.recompute()
+	main.sel = -1
+	main._rebuild_ui()
+	await _frames()
+	if twins.size() == 2:
+		await _drag(_cell_scr(int(twins[0])), _cell_scr(int(twins[1])))
+	_check("P7a RUN: dragging a building onto its twin merges it (T2 on the target, the source cell freed)", twins.size() == 2 and S.tier_at(int(twins[1])) == 2 and S.id_at(int(twins[0])) == "" and not S.merge_offer.is_empty(), str(twins))
+	await _frames()
+	_check("P7a RUN: the merge opens the T2 mod pick in the left panel", _findp("DMOD 0") != null and _findp("DMOD 2") != null)
+	_audit("merge mods")
+	_press("DMOD 1")
+	await _frames()
+	_check("P7a RUN: picking a mod fits it on the building", S.merge_offer.is_empty() and (S.mods_at(int(twins[1])) as Array).size() == 1 and float(S.mod_fx(int(twins[1])).get("range", 0.0)) > 0.0)
+	S.slots[int(twins[0])] = {"id": "frost", "tier": 2, "rot": 6, "mods": []}
+	S.recompute()
+	main.sel = int(twins[1])
+	main._rebuild_ui()
+	await _frames()
+	_check("P7a RUN: a selected building with a twin shows Merge", _find("MERGE") != null)
+	_press("MERGE")
+	await _frames()
+	_check("P7a RUN: Merge folds the twin in (T3) and offers the 2 capstones", S.tier_at(int(twins[1])) == 3 and S.id_at(int(twins[0])) == "" and _findp("DMOD 1") != null and _findp("DMOD 2") == null)
+	_press("DMOD 0")
+	await _frames()
+	S.slots[int(twins[1])] = {}
+	S.recompute()
+	main.sel = -1
+	main._rebuild_ui()
 	# target mode on a selected weapon
 	_click(_cell_scr(cell))
 	await _frames()

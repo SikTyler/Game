@@ -248,7 +248,7 @@ func _initialize() -> void:
 		S.hp = float(S.stats["max_hp"])
 		if k % 4 == 0:
 			Bot.bot_step(S, "balanced")
-		if S.wave >= 22 and S.enemy_count() > 16 and S.draft.is_empty() and S.pending_place == "" and S.perk_offer.is_empty():
+		if S.wave >= 22 and S.enemy_count() > 16 and S.draft.is_empty() and S.pending_place == "" and S.perk_offer.is_empty() and S.merge_offer.is_empty():
 			break
 	main.sel = TowerState.CORE_SLOT
 	for i in TowerState.N:   # FEEDBACK-1: a selected building shows its range
@@ -259,6 +259,21 @@ func _initialize() -> void:
 	main._rebuild_ui()
 	await _wait(14)
 	await _shot("%s/16_battle_late.png" % outdir)
+	# V2 P7a: a merge (twin folded into the selected weapon) and its mod pick
+	if main.sel >= 0 and main.sel != TowerState.CORE_SLOT and S.tier_at(main.sel) < 3:
+		var mid: String = S.id_at(main.sel)
+		for fc in S.free_slots():
+			if S.can_place(int(fc), mid):
+				S.slots[int(fc)] = {"id": mid, "tier": S.tier_at(main.sel), "rot": 6, "mods": []}
+				S.recompute()
+				main._handle(S.merge(int(fc), main.sel))
+				break
+		_quiet()
+		main._rebuild_ui()
+		await _wait(4)
+		await _shot("%s/16d_merge_mods.png" % outdir, false)
+		if not S.merge_offer.is_empty():
+			main._handle(S.choose_mod(0))
 	main.sel = -1
 	var orb: int = -1
 	for k in S.specials.size():

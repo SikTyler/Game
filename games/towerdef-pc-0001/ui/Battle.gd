@@ -62,6 +62,15 @@ static func build(m) -> void:
 		var td: Dictionary = TowerState.TRACKS[tid]
 		var tip: String = "%s\nLevel %d / %d  ·  next $%d\n%s  ·  %s" % [String(TRACK_TIP[tid]), int(S.tracks[tid]), int(S.track_cap(tid)), maxi(0, c), String(td["desc"]), String(td.get("minus", ""))]
 		Kit.hit(m, Rect2(x, ty + k * (th + 6.0), w, th), func() -> void: m.buy_track(tid), tip, "TRACK " + String(td["name"]), c >= 0 and S.cash >= float(c), Kit.GREEN)
+	# V2 P7a: Merge (keyboard / pad path to drag-merge) under any selected
+	# building that has a same-id, same-tier twin
+	if m.sel >= 0 and m.sel != TowerState.CORE_SLOT and S.id_at(m.sel) != "" and S.merge_partner(m.sel) >= 0:
+		var mi: int = m.sel
+		var mcs: float = TowerState.CELL * float(S.size_at(mi)) * m.world_scale()
+		var mcp: Vector2 = m.w2s(S.fp_pos(mi)) + Vector2(0, mcs * 0.5 + 6.0 + (46.0 if S.is_weapon_slot(mi) else 0.0))
+		var fr1: Rect2 = m.field_rect()
+		var mr0 := Rect2(clampf(mcp.x - 110.0, fr1.position.x + 4.0, fr1.end.x - 224.0), clampf(mcp.y, fr1.position.y + 4.0, fr1.end.y - 104.0), 220, 40)
+		Kit.btn(m, "Merge -> T%d" % (S.tier_at(mi) + 1), mr0, func() -> void: m.merge_into(S.merge_partner(mi), mi), "Fold the nearest same-tier %s into this one (or drag one onto the other): T%d -> T%d, then pick a mod" % [pick_name(S.id_at(mi)), S.tier_at(mi), S.tier_at(mi) + 1], true, Kit.GOLD, "MERGE", "icon_tier", 16)
 	if m.sel >= 0 and S.is_weapon_slot(m.sel) and m.sel != TowerState.CORE_SLOT:
 		var i: int = m.sel
 		# floats on the field just under the selected weapon (left bar = Perks)
@@ -210,11 +219,17 @@ static func cell_text(m, i: int) -> String:
 	if id == "":
 		return "Empty cell (ring %d)\nDraft a building and drop it here" % ring
 	var d: Dictionary = PickDB.get_def(id)
-	var up: String = "\nClick to apply the %s upgrade here" % pick_name(S.pending_upgrade) if S.pending_upgrade == id and S.upgrade_targets(id).has(i) else ""
+	var up: String = ""
+	if S.pending_place == id and S.card_merge_targets(id).has(i):
+		up = "\nClick to merge your %s card into it (T1 -> T2)" % pick_name(id)
+	elif S.merge_partner(i) >= 0:
+		up = "\nDrag it onto another T%d %s to merge (T%d -> T%d)" % [S.tier_at(i), pick_name(id), S.tier_at(i), S.tier_at(i) + 1]
+	for md in S.mods_at(i):
+		up += "\n+ %s: %s" % [String((md as Dictionary).get("name", "")), String((md as Dictionary).get("desc", ""))]
 	var aim: String = ""
 	if WeaponDB.directional(id):
 		aim = "\n%s, facing %s  ·  [%s] or wheel turns it" % ["Arc %d deg" % int(WeaponDB.DEFS[id]["arc"]) if WeaponDB.aim_of(id) == "arc" else ("Fixed lane" if float(WeaponDB.DEFS[id]["arc"]) == 0.0 else "Fixed cone %d deg" % int(WeaponDB.DEFS[id]["arc"])), COMPASS[S.rot_at(i)], Kit.hint(m, "rotate")]
-	return "%s  Lv%d / %d  (%s)\n%s%s%s" % [String(d["name"]), S.lvl_at(i), PickDB.max_of(id), String(d["rarity"]).capitalize(), String(d["desc"]), aim, up]
+	return "%s  T%d / %d  (%s)\n%s%s%s" % [String(d["name"]), S.tier_at(i), TowerState.lvl_cap(), String(d["rarity"]).capitalize(), String(d["desc"]), aim, up]
 
 
 # ================================================================== ranges
@@ -424,13 +439,21 @@ static func _draw_grid(m) -> void:
 			m.draw_rect(br.grow(-4), rc)
 		if WeaponDB.directional(id):
 			draw_facing(m, br.get_center(), WeaponDB.facing(S.rot_at(i)), bh, Color(Kit.CYAN, 0.9))
-		var lv: int = S.lvl_at(i)
-		var pw: float = minf(4.0, (br.size.x - 4.0) / 5.0 - 1.0)
-		for k in lv:
-			m.draw_rect(Rect2(br.position + Vector2(2.0 + float(k) * (pw + 1.0), br.size.y - 4.0), Vector2(pw, 3)), Kit.GOLD)
-		# pending upgrade: glow the buildings it can be applied to
-		if S.pending_upgrade == id and S.upgrade_targets(id).has(i):
-			m.draw_rect(br.grow(3), Color(Kit.GOLD, 0.6 + 0.35 * sin(m.t_anim * 8.0)), false, 2.0)
+		# V2 P7a: tier chevrons (T2 cyan, T3 gold) along the bottom edge
+		var tr: int = S.tier_at(i)
+		if tr >= 2:
+			var tc: Color = Kit.GOLD if tr >= 3 else Kit.CYAN
+			var cw2: float = minf(8.0, br.size.x * 0.2)
+			for k in tr - 1:
+				var bx: float = br.position.x + 3.0 + float(k) * (cw2 + 2.0)
+				m.draw_colored_polygon(PackedVector2Array([Vector2(bx, br.end.y - 2.0), Vector2(bx + cw2 * 0.5, br.end.y - 2.0 - cw2 * 0.6), Vector2(bx + cw2, br.end.y - 2.0)]), tc)
+			m.draw_rect(br, Color(tc, 0.7), false, 1.5)
+		# merge targets glow: the card being placed / the building being dragged
+		var twin: bool = (S.pending_place == id and S.card_merge_targets(id).has(i))
+		twin = twin or (m.drag_card >= 0 and m.drag_card < S.draft.size() and String((S.draft[m.drag_card] as Dictionary)["id"]) == id and S.card_merge_targets(id).has(i))
+		twin = twin or (m.bld_drag >= 0 and m.bld_drag != i and S.merge_targets(m.bld_drag).has(i) and m.mouse_pos.distance_to(m.drag_start) > 12.0)
+		if twin:
+			m.draw_rect(br.grow(3), Color(Kit.GOLD, 0.6 + 0.35 * sin(m.t_anim * 8.0)), false, 2.5)
 		if i == m.sel:
 			m.draw_rect(br.grow(3), Color(1, 1, 1, 0.9), false, 2.0)
 	# Core
@@ -696,9 +719,12 @@ static func _draw_field_hud(m, fr: Rect2) -> void:
 			m.draw_arc(m.mouse_pos, rr, 0, TAU, 48, Kit.GOLD, 2.0)
 			m.draw_circle(m.mouse_pos, rr, Color(Kit.GOLD, 0.1))
 	elif S.pending_place != "":
-		prompt = "Place %s: click a glowing cell  ·  %s cancels" % [pick_name(S.pending_place), Kit.hint(m, "cancel")]
-	elif S.pending_upgrade != "":
-		prompt = "Upgrade %s: click (or drag onto) a glowing %s  ·  %s cancels" % [pick_name(S.pending_upgrade), pick_name(S.pending_upgrade), Kit.hint(m, "cancel")]
+		if S.card_merge_targets(S.pending_place).is_empty():
+			prompt = "Place %s: click a glowing cell  ·  %s cancels" % [pick_name(S.pending_place), Kit.hint(m, "cancel")]
+		else:
+			prompt = "Place %s on a free cell, or click your glowing T1 %s to merge it (T2)  ·  %s cancels" % [pick_name(S.pending_place), pick_name(S.pending_place), Kit.hint(m, "cancel")]
+	elif m.bld_drag >= 0 and m.mouse_pos.distance_to(m.drag_start) > 12.0 and not S.merge_targets(m.bld_drag).is_empty():
+		prompt = "Drop on a glowing %s to merge (T%d -> T%d)" % [pick_name(S.id_at(m.bld_drag)), S.tier_at(m.bld_drag), S.tier_at(m.bld_drag) + 1]
 	elif m.banish_mode:
 		prompt = "Banish: click a draft card to remove it from this run"
 	if prompt != "":
@@ -729,9 +755,6 @@ static func _draw_ghost(m) -> void:
 		is_new = String((S.draft[m.drag_card] as Dictionary).get("kind", "")) == "new"
 	elif S.pending_place != "" and m.field_rect().has_point(m.mouse_pos):
 		id = S.pending_place
-	elif S.pending_upgrade != "" and m.field_rect().has_point(m.mouse_pos):
-		id = S.pending_upgrade
-		is_new = false
 	if id == "":
 		m.set_meta("ghost_reason", "")
 		m.set_meta("ghost_id", "")
@@ -746,11 +769,22 @@ static func _draw_ghost(m) -> void:
 		# new picks snap their footprint under the cursor; upgrades target the
 		# building covering the cell
 		var i: int = TowerState.anchor_at(wp, sz) if is_new else m.pick_at(wp)
+		# V2 P7a: hovering a T1 twin with a duplicate card = merge
+		var tw: int = m.pick_at(wp)
+		if is_new and tw >= 0 and S.card_merge_targets(id).has(tw):
+			var ts: float = cs * float(S.size_at(tw))
+			var tat: Vector2 = m.w2s(TowerState.fp_center(tw, S.size_at(tw)))
+			var trr := Rect2(tat - Vector2(ts, ts) * 0.5, Vector2(ts, ts))
+			m.draw_rect(trr.grow(4), Color(Kit.GOLD, 0.25))
+			m.draw_rect(trr.grow(4), Kit.GOLD, false, 3.0)
+			Kit.panel(m, Rect2(tat + Vector2(-60, -ts * 0.5 - 40), Vector2(120, 30)), Kit.GOLD, Color(0.14, 0.12, 0.06, 0.94))
+			Kit.th(m, "MERGE -> T2", tat + Vector2(0, -ts * 0.5 - 19), 16, Kit.GOLD, HORIZONTAL_ALIGNMENT_CENTER, 120.0)
+			m.set_meta("ghost_reason", "merge")
+			m.set_meta("ghost_id", id)
+			return
 		if i >= 0:
 			if is_new:
 				reason = place_reason(m, i, id)
-			elif S.pending_upgrade != "" or (m.drag_card >= 0 and String((S.draft[m.drag_card] as Dictionary).get("kind", "")) == "plus"):
-				reason = "" if S.id_at(i) == id else "Drop on your %s" % pick_name(id)
 			else:
 				reason = "Release to take this pick"
 			ok = reason == "" or reason.begins_with("Release")

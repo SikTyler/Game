@@ -67,7 +67,7 @@ static func run_one(core: String) -> String:
 	S.setup(4242, save, 1_700_000_000)
 	var bd: Dictionary = board(SEALED.has(core))
 	for i in bd.keys():
-		S.slots[int(i)] = {"id": String(bd[i]), "perm": 0, "run": 2}
+		S.slots[int(i)] = {"id": String(bd[i]), "tier": 2}
 		S.unlocked[int(i)] = true
 	S.recompute()
 	S.wave = 14       # mid-game mix (elites, ranged, splitters, w15 boss)

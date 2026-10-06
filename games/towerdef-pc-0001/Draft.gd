@@ -3,14 +3,13 @@ extends RefCounted
 ## wide_draft) picks rolled from PickDB by rarity, filtered by what the run can
 ## use right now. Cards:
 ##   {kind, id, fam, rarity, tags, [lvl, to]}
-##   kind: "new" (place a building / hut on a free cell), "plus" (level up an
-##   owned building, Lv lvl -> to: the player applies it by clicking/dragging
-##   onto that building), "pack", "special", "insight".
+##   kind: "new" (a building / hut: place it on a free cell, or - V2 P7a,
+##   dup=true, merge=true - drop it on a T1 of the same id to merge it into a
+##   T2), "pack", "special", "insight". Buildings never level from cards any
+##   more: tiers come from merges (MergeDB).
 ##   reward (owner feedback #1, so the player always knows what a pick does):
-##   "building" (placed on the grid; a duplicate WEAPON is a new individual
-##   building, dup=true), "upgrade" (applied onto an existing building),
-##   "perk" (stat buff, applied instantly, listed under Perks), "ability"
-##   (a special on the ability bar).
+##   "building" (placed on the grid or merged), "perk" (stat buff, applied
+##   instantly, listed under Perks), "ability" (a special on the ability bar).
 ## Rarity weights C60/R28/E10/L2; each Luck point (max 10) moves 1 point of
 ## Common weight into Epic+ (split 10:2 between Epic and Legendary). Insight
 ## replaces a slot with p = insight_p per slot, at most one per hand, and is
@@ -18,9 +17,10 @@ extends RefCounted
 ## caller). Eco guarantee G1: a hand with no eco card, or no non-eco card,
 ## rerolls its last slot once from the missing pool. Never Array.shuffle.
 ## ctx keys (all optional):
-##   owned {id: lvl} buildings+huts on the grid (lowest level per id),
-##   copies {id: n}, free (bool), free_outer (bool),
-##   huts (int), packs {id: n}, specials {id: copies}, banished [ids], luck,
+##   owned {id: tier} buildings+huts on the grid (lowest tier per id),
+##   copies {id: n}, t1 {id: true} (a T1 to merge into), free (bool),
+##   free_outer (bool), huts (int), hut_max (int), packs {id: n},
+##   specials {id: copies}, banished [ids], luck,
 ##   eco_mult, choices, insight_p, insight_ok, insight_blocked [ids],
 ##   guarantee ("" | "rare" | "epic"), weapons (weapon buildings owned).
 ## G2 starter guarantee: below 2 weapon buildings (and with a free cell) a
@@ -30,7 +30,7 @@ const PickDB := preload("res://data/PickDB.gd")
 
 
 const WEAPONS: Array = ["gun", "mortar", "tesla", "flak", "railgun", "frost"]
-const REWARD: Dictionary = {"new": "building", "plus": "upgrade", "pack": "perk", "insight": "perk", "special": "ability"}
+const REWARD: Dictionary = {"new": "building", "pack": "perk", "insight": "perk", "special": "ability"}
 
 
 ## The reward type of a card kind (building / upgrade / perk / ability).
@@ -63,31 +63,17 @@ static func card_for(id: String, ctx: Dictionary) -> Dictionary:
 	var base: Dictionary = {"id": id, "fam": fam, "rarity": String(d["rarity"]), "tags": (d["tags"] as Array).duplicate()}
 	match fam:
 		"building", "hut":
-			var owned: Dictionary = ctx.get("owned", {})
-			if owned.has(id):
-				# Duplicate weapon: a new individual building while a cell is free.
-				var copies: int = int((ctx.get("copies", {}) as Dictionary).get(id, 1))
-				if WEAPONS.has(id) and bool(ctx.get("free", false)) and copies < PickDB.max_of(id) and (id != "railgun" or bool(ctx.get("free_outer", false))):
-					base["kind"] = "new"
-					base["dup"] = true
-					base["reward"] = "building"
-					return base
-				var lv: int = int(owned[id])
-				if lv >= PickDB.max_of(id):
-					return {}
-				base["kind"] = "plus"
-				base["reward"] = "upgrade"
-				base["lvl"] = lv
-				base["to"] = lv + 1
-				return base
-			if not bool(ctx.get("free", false)):
-				return {}
-			if id == "railgun" and not bool(ctx.get("free_outer", false)):
-				return {}
+			var t1: bool = (ctx.get("t1", {}) as Dictionary).has(id)
+			var free: bool = bool(ctx.get("free", false)) and (id != "railgun" or bool(ctx.get("free_outer", false)))
 			if fam == "hut" and int(ctx.get("huts", 0)) >= int(ctx.get("hut_max", PickDB.HUT_MAX)):
+				free = false   # at the hut cap a hut card can only merge
+			if not free and not t1:
 				return {}
 			base["kind"] = "new"
 			base["reward"] = "building"
+			if (ctx.get("owned", {}) as Dictionary).has(id):
+				base["dup"] = true
+				base["merge"] = t1
 			return base
 		"pack":
 			if int((ctx.get("packs", {}) as Dictionary).get(id, 0)) >= PickDB.max_of(id):

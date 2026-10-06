@@ -92,6 +92,8 @@ class Bot:
 					pick = k
 					break
 			S.choose_card(pick)
+		if S.pending_place != "" and not S.card_merge_targets(S.pending_place).is_empty():
+			S.merge_card(int(S.card_merge_targets(S.pending_place)[0]))
 		if S.pending_place != "":
 			var best: int = -1
 			var bd: int = 999
@@ -103,12 +105,22 @@ class Bot:
 				S.place(best)
 			else:
 				S.cancel_place()
-		if S.pending_upgrade != "":
-			var tg: Array = S.upgrade_targets(S.pending_upgrade)
-			if tg.is_empty():
-				S.cancel_upgrade()
-			else:
-				S.apply_upgrade(int(tg[0]))
+		# V2 P7a: fold twins together, take mod 0
+		var guard0: int = 0
+		while guard0 < 12:
+			guard0 += 1
+			if not S.merge_offer.is_empty():
+				S.choose_mod(0)
+				continue
+			var done: bool = false
+			for a in TowerState.N:
+				var tg: Array = S.merge_targets(a)
+				if not tg.is_empty():
+					S.merge(a, int(tg[0]))
+					done = true
+					break
+			if not done:
+				break
 		for k in S.specials.size():
 			if Specials.ready(S.specials, k):
 				S.cast_special(k, -1)

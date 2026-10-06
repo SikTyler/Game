@@ -12,6 +12,9 @@ extends RefCounted
 ##   te   target slot (-1 for a fixed weapon: it fires along `aim`)
 ## P7 adds the remaining verbs (proj, nova, bounce, homing, beam_ramp,
 ## mine_layer) with the weapons that use them.
+## V2 P7a merge mods arrive on wd as `<key>_add` (pierce, chains, arcs,
+## rounds, boss) and `<key>_m` (splash, knock, cone, burn); `lvl` is the
+## pattern level of the building's tier (T1 1, T2 3, T3 5).
 
 const TuneRef := preload("res://Tune.gd")
 const EnemyStore := preload("res://EnemyStore.gd")
@@ -47,7 +50,7 @@ static func shape_occupied(S, wd: Dictionary, from: Vector2) -> bool:
 
 ## Flamer reach: 1.4 cells (+10% per level), never past its range.
 static func cone_len(S, wd: Dictionary) -> float:
-	return minf(float(wd["range"]), TuneRef.num("mass_flame_len", 1.4) * S.cpx() * (1.0 + 0.1 * float(int(wd.get("lvl", 1)) - 1)))
+	return minf(float(wd["range"]), TuneRef.num("mass_flame_len", 1.4) * S.cpx() * (1.0 + 0.1 * float(int(wd.get("lvl", 1)) - 1)) * float(wd.get("cone_m", 1.0)))
 
 
 ## Railgun (fixed lane): infinite pierce along the facing, no falloff; x4 on
@@ -73,7 +76,7 @@ static func pierce_line(S, wd: Dictionary, from: Vector2, dir: Vector2, dmg: flo
 		var m: float = 1.0
 		if not boss_hit and (BOSSY.has(en.kind[ed2]) or en.is_marked(ed2)):
 			boss_hit = true
-			m = TuneRef.num("mass_rail_boss", 4.0)
+			m = TuneRef.num("mass_rail_boss", 4.0) + float(wd.get("boss_add", 0.0))
 		S._hit(ed2, dmg * m, ev, crit)
 	S._blockable = false
 	ev.append({"t": "shot", "kind": String(wd["kind"]), "from": from, "to": tip})
@@ -85,7 +88,7 @@ static func cone_dot(S, wd: Dictionary, from: Vector2, dir: Vector2, dmg: float,
 	var en = S.en
 	var cl: float = cone_len(S, wd)
 	var half: float = acos(clampf(float(wd["arc_cos"]), -1.0, 1.0))
-	var bdps: float = dmg * TuneRef.num("mass_flame_burn", 0.3)
+	var bdps: float = dmg * TuneRef.num("mass_flame_burn", 0.3) * float(wd.get("burn_m", 1.0))
 	for ed in S.eh.cone(from, dir, half, cl):
 		if en.hp[ed] <= 0.0:
 			continue
@@ -100,11 +103,11 @@ static func lob_aoe(S, wd: Dictionary, from: Vector2, te: int, dmg: float, crit:
 	var en = S.en
 	var tpos: Vector2 = en.pos[te]
 	var lvl: int = int(wd.get("lvl", 1))
-	var rad: float = TuneRef.num("mass_mortar_r", 0.75) * S.cpx() * (1.0 + 0.2 * float(lvl - 1))
+	var rad: float = TuneRef.num("mass_mortar_r", 0.75) * S.cpx() * (1.0 + 0.2 * float(lvl - 1)) * float(wd.get("splash_m", 1.0))
 	for ed in S.eh.candidates(tpos, rad):
 		if en.hp[ed] > 0.0 and en.pos[ed].distance_to(tpos) <= rad:
 			S._hit(ed, dmg, ev, crit)
-	var pushed: int = en.radial_knock(tpos, rad * 1.5, TuneRef.num("horde_knock", 60.0) * TuneRef.num("mass_mortar_knock", 2.0))
+	var pushed: int = en.radial_knock(tpos, rad * 1.5, TuneRef.num("horde_knock", 60.0) * TuneRef.num("mass_mortar_knock", 2.0) * float(wd.get("knock_m", 1.0)))
 	if pushed >= 500:
 		ev.append({"t": "part_sea", "n": pushed, "pos": tpos})
 	ev.append({"t": "shot", "kind": String(wd["kind"]), "from": from, "to": tpos, "radius": rad})
@@ -116,12 +119,14 @@ static func lob_aoe(S, wd: Dictionary, from: Vector2, te: int, dmg: float, crit:
 static func chain(S, wd: Dictionary, from: Vector2, te: int, dmg: float, crit: bool, ev: Array) -> void:
 	var en = S.en
 	var lvl: int = int(wd.get("lvl", 1))
-	var n: int = mini(TuneRef.int_of("mass_chain_cap", 20), TuneRef.int_of("mass_chain", 6) + 3 * (lvl - 1) + int(S.pf("chain")))
+	var ca: int = int(wd.get("chains_add", 0.0))
+	var n: int = mini(TuneRef.int_of("mass_chain_cap", 20) + ca, TuneRef.int_of("mass_chain", 6) + 3 * (lvl - 1) + int(S.pf("chain")) + ca)
+	var arcs: int = TuneRef.int_of("mass_tesla_arcs", 3) + int(wd.get("arcs_add", 0.0))
 	var jr: float = TuneRef.num("mass_chain_r", 70.0)
 	var hit: Dictionary = {}
 	var starts: Array = [te]
-	for st in S.eh.nearest_n(from, TuneRef.int_of("mass_tesla_arcs", 3) + 1, float(wd["range"])):
-		if starts.size() >= TuneRef.int_of("mass_tesla_arcs", 3):
+	for st in S.eh.nearest_n(from, arcs + 1, float(wd["range"])):
+		if starts.size() >= arcs:
 			break
 		if st != te:
 			starts.append(st)
@@ -152,13 +157,15 @@ static func chain(S, wd: Dictionary, from: Vector2, te: int, dmg: float, crit: b
 static func pierce_round(S, wd: Dictionary, from: Vector2, te: int, dmg: float, crit: bool, ev: Array) -> void:
 	var en = S.en
 	var lvl: int = int(wd.get("lvl", 1))
-	var pn: int = mini(12, 3 + 2 * (lvl - 1))
+	var pa: int = int(wd.get("pierce_add", 0.0))
+	var pn: int = mini(12 + pa, 3 + 2 * (lvl - 1) + pa)
+	var rounds: int = TuneRef.int_of("mass_gun_rounds", 2) + int(wd.get("rounds_add", 0.0))
 	var reach3: float = float(wd["range"])
 	var aims: Array = [te]
 	var face: Vector2 = wd.get("facing", Vector2.ZERO)
 	var arc_cos: float = float(wd.get("arc_cos", -1.0))
-	for t2 in S.eh.nearest_n(from, 3, reach3):
-		if aims.size() >= TuneRef.int_of("mass_gun_rounds", 2):
+	for t2 in S.eh.nearest_n(from, rounds + 1, reach3):
+		if aims.size() >= rounds:
 			break
 		if t2 == te:
 			continue

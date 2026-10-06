@@ -3,7 +3,8 @@ extends RefCounted
 ## walk out to a post just outside the wall (radially past their hut) and
 ## fight the horde coming from every side. Pure, static,
 ## deterministic (no RNG; fixed iteration order), stepped by TowerState's tick.
-##   huts   = [{slot, id, lvl, home: Vector2, anchor: Vector2}]
+##   huts   = [{slot, id, lvl, home: Vector2, anchor: Vector2, dmg_m, hp_m}]
+##            (lvl = the hut's pattern level: T1 1, T2 3, T3 5)
 ##   troops = [{tid, hut, kind, pos, hp, max_hp, dmg, rate, range, spd, aoe,
 ##              cd, state, respawn_t, tgt, anchor, home}]
 ##   state: seek | engage | retreat | dead
@@ -65,6 +66,9 @@ static func sync(troops: Array, huts: Array, mods: Dictionary, counter: Dictiona
 		var hid: String = String(hd["id"])
 		var want: int = count_for(hid, int(hd["lvl"]), int(mods.get("extra", 0)))
 		var st: Dictionary = troop_stats(hid, int(hd["lvl"]), mods)
+		# V2 P7a: the hut's merge mods
+		st["dmg"] = float(st["dmg"]) * float(hd.get("dmg_m", 1.0))
+		st["max_hp"] = float(st["max_hp"]) * float(hd.get("hp_m", 1.0))
 		var have: int = 0
 		for t in troops:
 			var td: Dictionary = t
