@@ -72,7 +72,7 @@ static func mults(taken: Array) -> Dictionary:
 	var fort: bool = taken.has("p_fort")
 	var hp: float = 1.0
 	if taken.has("p_hp"):
-		hp *= 1.25
+		hp *= 1.2   # V2 P9: was 1.25 (the defense family dominated)
 	if glass:
 		hp *= 0.75
 	if fort:

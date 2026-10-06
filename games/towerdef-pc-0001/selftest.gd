@@ -1471,7 +1471,7 @@ func _engine_b_stages() -> void:
 	S.hp = 10.0
 	S.perk_offer = ["p_hp"]
 	S.choose_perk(0)
-	_check("Reinforced Core heals to full", is_equal_approx(S.hp, 150.0))
+	_check("Reinforced Core heals to full (V2 P9: +20% max HP)", is_equal_approx(S.hp, 144.0))
 
 	# --- Stage 25: B8 revive / wave skip (AC-33) -----------------------------
 	# V2 (deliberate): cards are gone; Second Wind / Wave Skip stay engine

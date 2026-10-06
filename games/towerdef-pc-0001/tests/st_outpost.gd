@@ -276,16 +276,16 @@ static func _core(t) -> void:
 	sv["outpost"]["relay_lvl"] = 8
 	var ar: String = _b(sv, "arsenal", 7, 8)
 	sv["outpost"]["buildings"][ar]["lvl"] = 3
-	t._check("P6 core: a linked Arsenal L3 = +18% all damage (V2 P9: +6% a level)", is_equal_approx(float(Outpost.core_bonus(sv).get("dmg", 0.0)), 0.18))
+	t._check("P6 core: a linked Arsenal L3 = +21% all damage (V2 P9: +7% a level)", is_equal_approx(float(Outpost.core_bonus(sv).get("dmg", 0.0)), 0.21))
 	_b(sv, "reactor", 9, 8)
-	t._check("P6 core: a touching Reactor scales it +20% (and adds +4% rate)", is_equal_approx(float(Outpost.core_bonus(sv)["dmg"]), 0.216) and is_equal_approx(float(Outpost.core_bonus(sv)["rate"]), 0.04))
+	t._check("P6 core: a touching Reactor scales it +20% (and adds +5% rate)", is_equal_approx(float(Outpost.core_bonus(sv)["dmg"]), 0.252) and is_equal_approx(float(Outpost.core_bonus(sv)["rate"]), 0.05))
 	var rm: Dictionary = BaseMeta.run_mods(sv)
-	t._check("P6 core: the bonus rides BaseMeta.run_mods into the run", is_equal_approx(float((rm["outpost_fx"] as Dictionary)["dmg"]), 0.216))
+	t._check("P6 core: the bonus rides BaseMeta.run_mods into the run", is_equal_approx(float((rm["outpost_fx"] as Dictionary)["dmg"]), 0.252))
 	var S = TowerState.new()
 	S.setup(1, sv)
 	var base = TowerState.new()
 	base.setup(1, _save())
-	t._check("P6 core: ... and the run's Core damage / rate use it", is_equal_approx(float((S.stats["weapons"] as Array).back()["dmg"]), float((base.stats["weapons"] as Array).back()["dmg"]) * 1.216) and is_equal_approx(float((S.stats["weapons"] as Array).back()["rate"]), float((base.stats["weapons"] as Array).back()["rate"]) * 1.04))
+	t._check("P6 core: ... and the run's Core damage / rate use it", is_equal_approx(float((S.stats["weapons"] as Array).back()["dmg"]), float((base.stats["weapons"] as Array).back()["dmg"]) * 1.252) and is_equal_approx(float((S.stats["weapons"] as Array).back()["rate"]), float((base.stats["weapons"] as Array).back()["rate"]) * 1.05))
 	var un: Dictionary = _save()
 	un["outpost"]["relay_lvl"] = 8
 	_b(un, "arsenal", 1, 9)
@@ -350,7 +350,7 @@ static func _links(t) -> void:
 	var la: Dictionary = _lb(h, ha)
 	t._check("P6c links: layout_bonus names each part's sources (Reactor -> Arsenal, Reactor -> Mill)", la["srcs"].get("reactor", []) == [hr] and _lb(h, hm)["srcs"].get("heat", []) == [hr], str(la))
 	t._check("P6c links: a once-only part credits its source in full", is_equal_approx(float(OV._ins(la).get(hr, 0.0)), 0.20) and is_equal_approx(float(OV._ins(_lb(h, hm)).get(hr, 0.0)), -0.15))
-	t._check("P6c links: core_part is one building's share of core_bonus", is_equal_approx(float(Outpost.core_part(h["outpost"], ha).get("dmg", 0.0)), float(Outpost.core_bonus(h)["dmg"])) and is_equal_approx(float(Outpost.core_part(h["outpost"], ha)["dmg"]), 0.072))
+	t._check("P6c links: core_part is one building's share of core_bonus", is_equal_approx(float(Outpost.core_part(h["outpost"], ha).get("dmg", 0.0)), float(Outpost.core_bonus(h)["dmg"])) and is_equal_approx(float(Outpost.core_part(h["outpost"], ha)["dmg"]), 0.084))
 	var j: Dictionary = _save()
 	j["outpost"]["relay_lvl"] = 8
 	var ma: String = _b(j, "mill", 7, 9)
